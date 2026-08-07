@@ -1,0 +1,225 @@
+/* ── breadcrumbs ── */
+.agency-clients__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 18px;
+}
+.agency-clients__crumbs-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-style: italic;
+}
+.agency-clients__crumbs-link:hover {
+  color: var(--primary);
+}
+.agency-clients__crumbs-sep {
+  color: var(--border-strong);
+}
+.agency-clients__crumbs-cur {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* ── page heading ── */
+.agency-clients__page-title {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.agency-clients__page-sub {
+  font-size: 16px;
+  color: var(--muted-strong);
+  margin-top: 6px;
+  margin-bottom: 28px;
+}
+
+/* ── search ── */
+.agency-clients__search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  max-width: 360px;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+.agency-clients__search svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.agency-clients__search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.agency-clients__search input:focus {
+  box-shadow: none;
+}
+
+/* ── empty / error ── */
+.agency-clients__empty {
+  color: var(--muted-strong);
+  font-size: 14px;
+}
+
+/* ── card grid ── */
+.agency-clients__grid-wrap {
+  position: relative;
+}
+
+.agency-clients__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+/* ── client card — same visual as agency card ── */
+.client-card {
+  appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+  text-align: left;
+  width: 100%;
+  display: block;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: var(--lh);
+  color: var(--ink);
+}
+.client-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+.client-card__top {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 16px;
+}
+.client-card__logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  flex: 0 0 46px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 16px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  letter-spacing: .02em;
+}
+.client-card__title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.client-card__meta {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 3px;
+  min-height: 19px;
+}
+
+/* card is a button — reset browser defaults */
+.client-card {
+  cursor: pointer;
+}
+
+.client-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.client-card__tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: var(--pill);
+}
+.client-card__go {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* ── pagination ── */
+.agency-clients__pagination {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 28px;
+  justify-content: center;
+}
+.agency-clients__page-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.agency-clients__page-btn:hover:not(:disabled) {
+  background: var(--n-100);
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+.agency-clients__page-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.agency-clients__page-info {
+  font-size: 14px;
+  color: var(--muted-strong);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .agency-clients__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agency-clients__page-title {
+    font-size: 28px;
+  }
+}

@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oph-postgres
+    environment:
+      POSTGRES_DB: oph
+      POSTGRES_USER: oph
+      POSTGRES_PASSWORD: oph
+    ports:
+      - "5432:5432"
+    volumes:
+      - oph-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U oph -d oph" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  oph-pgdata:
+    name: oph-pgdata

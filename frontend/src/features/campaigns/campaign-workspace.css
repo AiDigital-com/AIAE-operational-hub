@@ -1,0 +1,123 @@
+/* ── breadcrumbs ── */
+.campaign-ws__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.campaign-ws__crumbs-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-style: italic;
+}
+.campaign-ws__crumbs-link:hover {
+  color: var(--primary);
+}
+.campaign-ws__crumbs-sep {
+  color: var(--border-strong);
+}
+.campaign-ws__crumbs-cur {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* ── hero ── */
+.campaign-ws__hero {
+  margin-bottom: 30px;
+}
+.campaign-ws__title {
+  margin: 0;
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.02;
+  color: var(--ink);
+}
+.campaign-ws__hero-sub {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 10px;
+}
+.campaign-ws__pills {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+.campaign-ws__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+.campaign-ws__pill--date {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.campaign-ws__pill-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ── tab bar ── */
+.campaign-ws__tabs {
+  display: flex;
+  gap: 30px;
+  border-bottom: 1px solid var(--border);
+  margin: 20px 0 24px;
+}
+.campaign-ws__tab {
+  padding: 0 2px 13px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color .15s;
+}
+.campaign-ws__tab:hover {
+  color: var(--ink);
+}
+.campaign-ws__tab--active {
+  color: var(--ink);
+  border-bottom-color: var(--primary);
+}
+
+.campaign-ws__note {
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.campaign-ws__note a {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .campaign-ws__title {
+    font-size: 36px;
+  }
+}

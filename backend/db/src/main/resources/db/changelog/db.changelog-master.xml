@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<include file="/db/changelog/schema/0001-hub-rbac.xml"/>
+	<include file="/db/changelog/schema/0002-team-agencies.xml"/>
+	<include file="/db/changelog/schema/0003-cache-management.xml"/>
+	<include file="/db/changelog/schema/0004-team-lead-and-grade.xml"/>
+	<include file="/db/changelog/schema/0005-user-email-lower-index.xml"/>
+	<include file="/db/changelog/schema/0006-sync-lock.xml"/>
+	<include file="/db/changelog/schema/0007-report-views.xml"/>
+	<include file="/db/changelog/schema/0008-report-view-filters.xml"/>
+	<include file="/db/changelog/schema/0009-conversion-adjustment-lock.xml"/>
+	<include file="/db/changelog/data/0001-rbac-dictionaries.xml"/>
+
+</databaseChangeLog>

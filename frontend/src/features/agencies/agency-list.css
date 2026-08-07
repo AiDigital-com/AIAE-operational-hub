@@ -1,0 +1,219 @@
+.agency-list {
+  /* width managed by app__content container */
+}
+
+/* ── breadcrumbs ── */
+.agency-list__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 18px;
+}
+.agency-list__crumbs-cur {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* ── page heading ── */
+.agency-list__page-title {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.agency-list__page-sub {
+  font-size: 16px;
+  color: var(--muted-strong);
+  margin-top: 6px;
+  margin-bottom: 28px;
+}
+
+/* ── search ── */
+.agency-list__search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  max-width: 360px;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+.agency-list__search svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.agency-list__search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.agency-list__search input:focus {
+  box-shadow: none;
+}
+
+/* ── states ── */
+.agency-list__empty {
+  color: var(--muted-strong);
+  font-size: 14px;
+}
+
+/* ── card grid ── */
+.agency-list__grid-wrap {
+  position: relative;
+}
+
+.agency-list__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+/* ── agency card — exact match to reference .card ── */
+.agency-card {
+  appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+  text-align: left;
+  width: 100%;
+  display: block;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: var(--lh);
+  color: var(--ink);
+}
+.agency-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+.agency-card:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-focus);
+}
+
+.agency-card__top {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 16px;
+}
+.agency-card__logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  flex: 0 0 46px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 16px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  letter-spacing: .02em;
+}
+.agency-card__title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.agency-card__meta {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 3px;
+  min-height: 19px;
+}
+
+.agency-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.agency-card__tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: var(--pill);
+}
+.agency-card__go {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* ── pagination ── */
+.agency-list__pagination {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 28px;
+  justify-content: center;
+}
+.agency-list__page-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.agency-list__page-btn:hover:not(:disabled) {
+  background: var(--n-100);
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+.agency-list__page-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.agency-list__page-info {
+  font-size: 14px;
+  color: var(--muted-strong);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .agency-list__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agency-list__page-title {
+    font-size: 28px;
+  }
+}

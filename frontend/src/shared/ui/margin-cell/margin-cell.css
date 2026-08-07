@@ -1,0 +1,6 @@
+.margin-cell { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.margin-cell--good { color: var(--good); }
+.margin-cell--warn { color: var(--attention-text); }
+.margin-cell--bad { color: var(--bad); }
+.margin-cell--na { color: var(--muted); }
+.margin-cell__target { color: var(--muted); font-weight: 600; }

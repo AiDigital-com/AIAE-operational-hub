@@ -1,0 +1,30 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:oph}
+    username: ${POSTGRES_USER:oph}
+    password: ${POSTGRES_PASSWORD:oph}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.xml
+
+springdoc:
+  swagger-ui:
+    persist-authorization: true
+
+app:
+  auth:
+    allowed-email-domain: ${AUTH_ALLOWED_EMAIL_DOMAIN:aidigital.com}
+    publishable-key: ${CLERK_PUBLISHABLE_KEY:pk_test_bGl2aW5nLWluc2VjdC02MC5jbGVyay5hY2NvdW50cy5kZXYk}
+    authorized-parties: ${AUTH_AUTHORIZED_PARTIES:http://localhost:5173,http://localhost:5000,http://localhost:8080}
+    sso:
+      issuer-uri: ${AUTH_ISSUER_URI:https://living-insect-60.clerk.accounts.dev}
+      jwk-set-uri: ${AUTH_JWKS_URI:https://living-insect-60.clerk.accounts.dev/.well-known/jwks.json}
+      audience: ${AUTH_AUDIENCE:}
+
+logging:
+  level:
+    com.aidigital.operationalhub.externalservices.bigquery.impl.BigQueryClientImpl: DEBUG

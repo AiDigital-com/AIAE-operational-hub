@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration packagingData="true">
+	<contextName>epicrisis</contextName>
+	<jmxConfigurator/>
+
+	<shutdownHook class="ch.qos.logback.core.hook.DelayingShutdownHook"/>
+
+	<conversionRule conversionWord="clr" converterClass="org.springframework.boot.logging.logback.ColorConverter"/>
+	<conversionRule conversionWord="wex"
+					converterClass="org.springframework.boot.logging.logback.WhitespaceThrowableProxyConverter"/>
+	<conversionRule conversionWord="wEx"
+					converterClass="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
+	<timestamp key="timestamp-by-second" datePattern="yyyyMMdd'T'HHmmss"/>
+
+	<springProfile name="!(local | replit)">
+		<appender name="fileAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_FILE}</file>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<FileNamePattern>${LOG_FILE}_%d{yyyy-MM-dd}_%i.log</FileNamePattern>
+				<maxFileSize>100MB</maxFileSize>
+				<maxHistory>20</maxHistory>
+				<totalSizeCap>1GB</totalSizeCap>
+			</rollingPolicy>
+			<encoder>
+				<Pattern>%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} %-40.40logger{39} [%.24t] %X{requestUUID}: %m%n
+				</Pattern>
+			</encoder>
+			<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+				<level>ALL</level>
+			</filter>
+		</appender>
+
+		<appender name="asyncFileAppender" class="ch.qos.logback.classic.AsyncAppender">
+			<queueSize>1024</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+			<appender-ref ref="fileAppender"/>
+		</appender>
+
+		<root level="INFO">
+			<appender-ref ref="asyncFileAppender"/>
+		</root>
+	</springProfile>
+
+	<springProfile name="local | replit">
+		<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+			<encoder>
+				<Pattern>${CONSOLE_LOG_PATTERN:-%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %X{requestUUID} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}}
+				</Pattern>
+			</encoder>
+			<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+				<level>ALL</level>
+			</filter>
+		</appender>
+
+		<logger name="org.hibernate.SQL" level="DEBUG"/>
+		<logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="TRACE"/>
+		<logger name="org.hibernate.orm.jdbc.bind" level="TRACE"/>
+
+		<root level="INFO">
+			<appender-ref ref="CONSOLE"/>
+		</root>
+	</springProfile>
+
+</configuration>

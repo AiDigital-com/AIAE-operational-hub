@@ -1,0 +1,6 @@
+.pacing-bar { display: flex; align-items: center; gap: 10px; justify-content: flex-start; }
+.pacing-bar__value { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12.5px; white-space: nowrap; min-width: 74px; }
+.pacing-bar__track { position: relative; width: 88px; height: 8px; background: var(--n-200); border-radius: 6px; flex: 0 0 88px; }
+.pacing-bar__center { position: absolute; left: 50%; top: -2px; width: 1px; height: 12px; background: var(--border-strong); }
+.pacing-bar__fill { position: absolute; top: 0; height: 100%; border-radius: 6px; opacity: .55; }
+.pacing-bar__marker { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); }

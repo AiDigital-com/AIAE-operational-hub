@@ -1,0 +1,20 @@
+spring:
+  liquibase:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+
+oph:
+  clerk:
+    allowed-email-domain: aidigital.com
+    publishable-key: ""
+    authorized-parties: http://localhost:5173
+    sso:
+      issuer-uri: https://test.clerk.accounts.dev
+      jwk-set-uri: https://test.clerk.accounts.dev/.well-known/jwks.json
+      audience: oph-test

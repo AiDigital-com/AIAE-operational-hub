@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<parent>
+		<groupId>com.aidigital.operational.hub</groupId>
+		<artifactId>AIAE-operational-hub-backend</artifactId>
+		<version>1.0.0</version>
+	</parent>
+
+	<artifactId>operational-hub-report-aggregate</artifactId>
+	<packaging>pom</packaging>
+
+	<!--
+		Aggregates JaCoCo coverage across all backend modules into a single merged report.
+		Build the whole reactor (e.g. `mvn verify`) so each module produces its jacoco.exec,
+		then open: report-aggregate/target/site/jacoco-aggregate/index.html
+	-->
+
+	<dependencies>
+		<dependency>
+			<groupId>com.aidigital.operational.hub</groupId>
+			<artifactId>operational-hub-domain</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.aidigital.operational.hub</groupId>
+			<artifactId>operational-hub-db</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.aidigital.operational.hub</groupId>
+			<artifactId>operational-hub-external-services</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.aidigital.operational.hub</groupId>
+			<artifactId>operational-hub-service</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.aidigital.operational.hub</groupId>
+			<artifactId>operational-hub-application</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco-plugins.version}</version>
+				<executions>
+					<!-- This module has no sources/tests of its own; disable the inherited per-module goals. -->
+					<execution>
+						<id>default</id>
+						<phase>none</phase>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>none</phase>
+					</execution>
+					<execution>
+						<id>check-coverage</id>
+						<phase>none</phase>
+					</execution>
+					<execution>
+						<id>report-aggregate</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report-aggregate</goal>
+						</goals>
+						<configuration>
+							<excludes>
+								<exclude>**/enums/**</exclude>
+								<exclude>**/exception/**</exclude>
+								<exclude>**/generated/**</exclude>
+								<exclude>**/config/**</exclude>
+								<exclude>**/dto/**</exclude>
+								<exclude>**/model/**</exclude>
+								<exclude>**/properties/**</exclude>
+								<exclude>**/*Application.class</exclude>
+								<exclude>**/entity/**</exclude>
+								<exclude>**/repository/**</exclude>
+							</excludes>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
+</project>
