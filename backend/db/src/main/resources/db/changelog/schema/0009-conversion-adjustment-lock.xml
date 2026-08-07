@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<!--
+		Seeds the lock row the conversions write path takes before it deletes and re-inserts a key.
+		The primitive is a conditional UPDATE on an existing row, so the row has to exist up front -
+		acquiring a name that was never seeded would update nothing and read as "already held".
+	-->
+	<changeSet id="insert-conversion-adjustment-lock" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<sqlCheck expectedResult="0">
+				SELECT COUNT(*) FROM hub_sync_lock WHERE lock_name = 'conversion_adjustments'
+			</sqlCheck>
+		</preConditions>
+		<insert tableName="hub_sync_lock">
+			<column name="lock_name" value="conversion_adjustments"/>
+			<column name="locked" valueBoolean="false"/>
+		</insert>
+	</changeSet>
+
+</databaseChangeLog>

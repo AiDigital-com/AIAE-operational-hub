@@ -1,0 +1,6 @@
+INSERT INTO hub_roles (id, role_code, display_name, status, is_future, created_at, updated_at)
+VALUES (1, 'MPO_MANAGER', 'MPO Manager', 'ACTIVE', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (2, 'TL', 'Team Lead', 'ACTIVE', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (3, 'DIRECTOR', 'Director', 'ACTIVE', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (4, 'ADMIN', 'Administrator', 'ACTIVE', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (5, 'CLIENT_SERVICES', 'Client Services', 'ACTIVE', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);

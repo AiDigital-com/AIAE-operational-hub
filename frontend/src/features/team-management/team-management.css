@@ -1,0 +1,472 @@
+/* ── page heading ── */
+.team-mgmt__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.team-mgmt__title {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.team-mgmt__subtitle {
+  font-size: 16px;
+  color: var(--muted-strong);
+  margin-top: 6px;
+  margin-bottom: 16px;
+}
+
+/* ── tabs ── */
+.team-mgmt__tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--border);
+}
+.team-mgmt__tab {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 2px 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color .15s;
+}
+.team-mgmt__tab:hover {
+  color: var(--ink);
+}
+.team-mgmt__tab--active {
+  color: var(--ink);
+  border-bottom-color: var(--primary);
+}
+.team-mgmt__tab-count {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 2px 9px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  color: var(--muted-strong);
+}
+.team-mgmt__tab--active .team-mgmt__tab-count {
+  background: var(--primary-fill);
+  color: var(--color-accent-contrast);
+}
+
+/* ── card + toolbar ── */
+.team-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-top: 24px;
+  /* visible so per-row action menus and the searchable team dropdown can overflow the card */
+  overflow: visible;
+}
+.team-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px 8px;
+}
+.team-toolbar__actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.team-mgmt__search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  min-width: 280px;
+  color: var(--muted);
+}
+.team-mgmt__search svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.team-mgmt__search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.team-mgmt__search input:focus {
+  box-shadow: none;
+}
+
+/* ── table ── */
+.users-tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.team-mgmt__table-wrap {
+  position: relative;
+}
+.users-tbl th {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.users-tbl td {
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  vertical-align: middle;
+}
+.users-tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+.users-tbl tbody tr:hover td {
+  background: var(--n-100);
+}
+.u-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.u-email {
+  color: var(--muted-strong);
+}
+.team-mgmt__source-tag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.team-mgmt__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.team-mgmt__empty-row td {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ── inline team form ── */
+.team-mgmt__input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+.team-mgmt__input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-focus);
+}
+
+/* ── pagination ── */
+.team-mgmt__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.team-mgmt__pagination-info {
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+.team-mgmt__pagination-controls {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── inline row selects (role / team) ── */
+.team-mgmt__cell-select {
+  display: block;
+  max-width: 210px;
+}
+.team-mgmt__cell-select select {
+  width: 100%;
+  min-height: 38px;
+  height: 38px;
+  font-size: 13px;
+}
+
+/* ── searchable team picker ── */
+.team-select {
+  position: relative;
+  max-width: 210px;
+}
+.team-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  max-width: 210px;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+}
+.team-select__trigger:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.team-select__trigger:disabled {
+  background: var(--n-100);
+  cursor: not-allowed;
+}
+.team-select__placeholder {
+  color: var(--muted);
+}
+/* selected label: one line, ellipsis on overflow so long "Dept: Team Lead" names keep the
+   trigger at a uniform 38px height instead of wrapping (full name shown via title + in the list) */
+.team-select__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.team-select__chev {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--muted);
+}
+.team-select__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.team-select__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.team-select__search svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+.team-select__search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.team-select__search input:focus {
+  box-shadow: none;
+}
+.team-select__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.team-select__option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.team-select__option:hover {
+  background: var(--n-100);
+}
+.team-select__option--selected {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 700;
+}
+.team-select__empty {
+  padding: 12px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ── filters popover ── */
+.team-mgmt__filters {
+  position: relative;
+}
+.team-mgmt__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.team-mgmt__filter-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.team-mgmt__filter-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 14px;
+}
+.team-mgmt__filter-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+/* ── kebab actions menu ── */
+.team-mgmt__kebab {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background .15s, color .15s;
+}
+.team-mgmt__kebab:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.team-mgmt__kebab svg {
+  width: 18px;
+  height: 18px;
+}
+.team-mgmt__menu-wrap {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+.team-mgmt__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+}
+.team-mgmt__menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.team-mgmt__menu button:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.team-mgmt__menu button.team-mgmt__menu-danger:hover {
+  background: var(--color-danger-bg);
+  color: var(--bad);
+}
+
+/* ── status indicator (LED + label, matching the reference) ── */
+.team-mgmt__status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.team-mgmt__status-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+  background: var(--border-strong);
+}
+.team-mgmt__status-badge--active .team-mgmt__status-led {
+  background: var(--good);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);
+}
+
+/* ── states ── */
+.team-mgmt__status {
+  margin-top: 16px;
+  color: var(--muted-strong);
+  font-size: 14px;
+}

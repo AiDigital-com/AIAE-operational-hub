@@ -1,0 +1,138 @@
+.conv-breakdown-modal {
+  max-width: 760px;
+  max-height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+}
+.conv-breakdown-modal--confirm {
+  max-width: 440px;
+}
+
+.conv-breakdown {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.conv-breakdown__totals {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+}
+.conv-breakdown__total-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.conv-breakdown__total {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink);
+}
+/* The sum is the number the report will show once this is saved, so it says when it stops matching
+   what is stored - the edit is otherwise invisible until the table refetches. */
+.conv-breakdown__total--changed {
+  color: var(--primary);
+}
+
+.conv-breakdown__list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: min(360px, calc(100vh - 330px));
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.conv-breakdown__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 110px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.conv-breakdown__action {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-breakdown__category {
+  font-size: 12px;
+  color: var(--muted);
+}
+.conv-breakdown__input {
+  width: 100%;
+  text-align: right;
+}
+.conv-breakdown__input--invalid {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.conv-breakdown__state {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Says the rows below are not this cell's rows, and what to do about it. Neutral rather than danger
+   colouring: nothing failed and the figures shown are real - they just belong to a different cut. */
+.conv-breakdown__mismatch {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-neutral-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.conv-breakdown__grain-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-subtle);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* A figure that cannot be edited reads as text, not as a disabled input: an input that refuses to
+   take a value still looks like an invitation. */
+.conv-breakdown__reading {
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.conv-breakdown__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+.conv-breakdown__hint {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.conv-breakdown__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

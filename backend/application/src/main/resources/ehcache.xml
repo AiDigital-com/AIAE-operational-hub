@@ -1,0 +1,133 @@
+<eh:config
+		xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
+		xmlns:eh='http://www.ehcache.org/v3'
+		xsi:schemaLocation="http://www.ehcache.org/v3 http://www.ehcache.org/schema/ehcache-core-3.0.xsd">
+
+	<eh:cache-template name="entityTemplate">
+		<eh:expiry>
+			<eh:ttl unit="hours">1</eh:ttl>
+		</eh:expiry>
+		<eh:heap>1000</eh:heap>
+	</eh:cache-template>
+
+	<eh:cache-template name="extendedEntityTemplate">
+		<eh:expiry>
+			<eh:ttl unit="days">1</eh:ttl>
+		</eh:expiry>
+		<eh:heap>1000</eh:heap>
+	</eh:cache-template>
+
+	<!--DEFAULT CACHES-->
+	<eh:cache alias="hibernate-cache.default-query-results-region" uses-template="entityTemplate">
+		<!-- We don't want to cache anything without explicit region: -->
+		<eh:heap>1</eh:heap>
+	</eh:cache>
+
+	<eh:cache alias="hibernate-cache.default-update-timestamps-region" uses-template="entityTemplate">
+		<!--If you configure your underlying cache implementation to use expiration,
+		 it’s very important that the timeout of the underlying cache region
+		 for the default-update-timestamps-region is set to a higher value
+		 than the timeout setting of the query caches.-->
+		<eh:expiry>
+			<eh:ttl unit="days">1</eh:ttl>
+		</eh:expiry>
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+
+	<!-- APP CACHES: -->
+	<eh:cache alias="hibernate-cache.findAllHubRoles" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findByRoleCode" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllHubRolesByStatusOrderByDisplayNameAsc"
+	          uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllHubScopeTypes" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findByScopeCode" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllHubScopesByStatusOrderByDisplayNameAsc"
+	          uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllHubTeams" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.existsHubTeamById" uses-template="extendedEntityTemplate">
+		<eh:heap>100</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findByClerkUserId" uses-template="extendedEntityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllByUserIdAndStatus" uses-template="extendedEntityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.findAllByUserIdInAndStatus" uses-template="extendedEntityTemplate">
+		<eh:heap>1000</eh:heap>
+	</eh:cache>
+
+	<!-- APPLICATION CACHES (Spring @Cacheable, not Hibernate second-level regions): -->
+	<!-- Per-user resolved agency visibility (see AgencyVisibilityServiceImpl); an immutable value evicted
+	     explicitly on the mutations that change it (role assign/revoke, the NetSuite/Rippling sync), with
+	     this TTL acting only as a backstop. -->
+	<eh:cache alias="agencyVisibilityByUserId" uses-template="extendedEntityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+	<!-- Agency/client/campaign BigQuery search results, keyed by rendered SQL (see
+	     CachedBigQuerySearchExecutor). Short TTL because the source is a nightly BigQuery snapshot, so
+	     some staleness is acceptable in exchange for skipping a repeated BigQuery job. -->
+	<!-- Reads of a nightly snapshot: the agency, client and campaign lists. No write in this application
+	     can make one stale, so they are never evicted - only expired. -->
+	<eh:cache alias="bigQuerySearchResults">
+		<eh:expiry>
+			<eh:ttl unit="minutes">10</eh:ttl>
+		</eh:expiry>
+		<eh:heap>2000</eh:heap>
+	</eh:cache>
+
+	<!-- Reads through the adjustments view, which merges the append-only write table: these go stale the
+	     moment an adjustment lands, and are cleared wholesale after a write. Kept apart from the region
+	     above so that clearing them does not take the snapshot reads with it. -->
+	<eh:cache alias="bigQueryWriteSensitiveResults">
+		<eh:expiry>
+			<eh:ttl unit="minutes">10</eh:ttl>
+		</eh:expiry>
+		<eh:heap>2000</eh:heap>
+	</eh:cache>
+
+	<!--ENTITY CACHE-->
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubRole"
+	          uses-template="entityTemplate">
+		<eh:heap>500</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubScopeType"
+	          uses-template="entityTemplate">
+		<eh:heap>500</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubUser"
+	          uses-template="entityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubTeam"
+	          uses-template="entityTemplate">
+		<eh:heap>1000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubRoleAssignment"
+	          uses-template="entityTemplate">
+		<eh:heap>20000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubReportView"
+	          uses-template="entityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+	<eh:cache alias="hibernate-cache.com.aidigital.operationalhub.domain.entity.HubDashboard"
+	          uses-template="entityTemplate">
+		<eh:heap>10000</eh:heap>
+	</eh:cache>
+
+</eh:config>

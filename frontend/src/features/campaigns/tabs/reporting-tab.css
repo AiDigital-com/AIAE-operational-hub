@@ -1,0 +1,1085 @@
+.reporting-tab__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.reporting-tab__title {
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0 0 2px;
+}
+.reporting-tab__sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.reporting-tab__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.reporting-tab__head-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+.reporting-tab__dropdown-btn::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  margin-left: 2px;
+}
+
+/* ── dropdowns / kebab menus (shared shape) ── */
+.reporting-tab__menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.reporting-tab__kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.reporting-tab__kebab:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.reporting-tab__kebab svg {
+  width: 16px;
+  height: 16px;
+}
+.reporting-tab__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 190px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.reporting-tab__menu--fixed {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 140;
+}
+.reporting-tab__menu--edit-data {
+  min-width: 260px;
+}
+.reporting-tab__menu button,
+.reporting-tab__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reporting-tab__menu button:hover:not(:disabled) {
+  background: var(--n-100);
+}
+/* A disabled item looked exactly like a live one - same ink, same pointer - so the only signal that it
+   was off was that clicking did nothing. */
+.reporting-tab__menu button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.reporting-tab__menu-item--disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+/* Why those items are off, said where the user is looking. The wrapper's tooltip could not do this job:
+   the open menu covers the button the tooltip hangs from. Wraps, unlike the labels above it. */
+.reporting-tab__menu-note {
+  margin: 2px 6px 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: normal;
+}
+.reporting-tab__menu-danger {
+  color: var(--bad);
+}
+.reporting-tab__soon {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── empty state ── */
+.reporting-tab__empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 56px 24px;
+  text-align: center;
+}
+.reporting-tab__empty h3 {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.reporting-tab__empty p {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.reporting-tab__create-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.reporting-tab__create-fields {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(260px, 420px);
+  gap: 12px;
+  flex: 1 1 auto;
+}
+.reporting-tab__create-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.reporting-tab__create-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.reporting-tab__create-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+/* ── reports list table ── */
+.reporting-tab__tbl-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  max-height: 322px;
+  overflow: auto;
+}
+.reporting-tab__tbl-wrap::-webkit-scrollbar {
+  width: 9px;
+}
+.reporting-tab__tbl-wrap::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+.reporting-tab__tbl {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.reporting-tab__tbl-col-name {
+  width: 31%;
+}
+.reporting-tab__tbl-col-type {
+  width: 14%;
+}
+.reporting-tab__tbl-col-status {
+  width: 14%;
+}
+.reporting-tab__tbl-col-date {
+  width: 17%;
+}
+.reporting-tab__tbl-col-actions {
+  width: 72px;
+}
+.reporting-tab__tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted-strong);
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.reporting-tab__tbl thead th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+.reporting-tab__tbl thead th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+.reporting-tab__tbl tbody td {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  vertical-align: middle;
+}
+.reporting-tab__tbl thead th:last-child,
+.reporting-tab__tbl tbody td:last-child {
+  text-align: right;
+  padding-right: 22px;
+}
+.reporting-tab__tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+.reporting-tab__tbl tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius-lg);
+}
+.reporting-tab__tbl tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius-lg);
+}
+.reporting-tab__row {
+  cursor: pointer;
+  transition: background .14s;
+}
+.reporting-tab__row:hover {
+  background: var(--primary-soft);
+}
+.reporting-tab__row--selected {
+  background: var(--primary-soft);
+}
+.reporting-tab__row--selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.reporting-tab__row--selected:hover {
+  background: var(--primary-soft);
+}
+.reporting-tab__view-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 15px;
+}
+.reporting-tab__row-note {
+  /* Block, so the truncation below actually happens: this rule promises an ellipsis, and on an inline
+     element - the Dashboards list puts a <code> here - max-width and overflow do nothing at all. */
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.reporting-tab__rename-input {
+  width: 100%;
+  max-width: 360px;
+}
+.reporting-tab__rename-form {
+  display: grid;
+  gap: 8px;
+  max-width: 420px;
+}
+.reporting-tab__rename-actions {
+  display: flex;
+  gap: 8px;
+}
+.reporting-tab__tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border: none;
+  padding: 3px 10px;
+  border-radius: var(--pill);
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.reporting-tab__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.reporting-tab__led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.reporting-tab__led--saved {
+  background: var(--good);
+}
+.reporting-tab__flight {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-strong);
+  font-weight: 600;
+}
+.reporting-tab__flight-text {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reporting-tab__report-load-more {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px !important;
+  height: 1px;
+}
+
+/* ── inline builder ── */
+.reporting-tab__builder {
+  margin-top: 24px;
+}
+.reporting-tab__builder-sep {
+  border-top: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.reporting-tab__name-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px -9px 20px;
+}
+.reporting-tab__name-input {
+  font-size: 26px;
+  font-weight: 800;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  min-height: 42px;
+  max-width: 560px;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+}
+.reporting-tab__name-input:hover {
+  border-color: var(--border);
+}
+.reporting-tab__name-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-focus);
+  background: var(--surface);
+}
+.reporting-tab__type-badge {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 5px 12px;
+  border-radius: var(--pill);
+}
+.reporting-tab__name-error {
+  margin: -8px 0 12px 9px;
+}
+
+.reporting-tab__controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  align-items: start;
+  max-width: 780px;
+  margin-bottom: 20px;
+}
+.reporting-tab__picker {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.reporting-tab__picker--disabled {
+  opacity: .5;
+  pointer-events: none;
+}
+.reporting-tab__picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.reporting-tab__picker-head h4 {
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.reporting-tab__pick-count {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: var(--pill);
+  min-width: 22px;
+  text-align: center;
+  padding: 2px 8px;
+}
+.reporting-tab__pick-actions {
+  display: flex;
+  gap: 4px;
+}
+.reporting-tab__pick-actions button {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 4px 9px;
+}
+.reporting-tab__pick-actions button:hover {
+  background: var(--n-100);
+  color: var(--primary);
+}
+.reporting-tab__pick-actions button:disabled {
+  cursor: not-allowed;
+}
+.reporting-tab__picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.reporting-tab__picker-search svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+.reporting-tab__picker-search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.reporting-tab__picker-search input:focus {
+  box-shadow: none;
+}
+.reporting-tab__picker-list {
+  max-height: 248px;
+  overflow-y: auto;
+  padding: 6px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.reporting-tab__picker-list::-webkit-scrollbar {
+  width: 8px;
+}
+.reporting-tab__picker-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+.reporting-tab__check {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 6px 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.reporting-tab__check:hover {
+  background: var(--n-100);
+}
+.reporting-tab__check--disabled {
+  cursor: not-allowed;
+}
+.reporting-tab__check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.reporting-tab__check-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reporting-tab__check-desc {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reporting-tab__check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  flex: 0 0 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.reporting-tab__agg-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: var(--pill);
+}
+.reporting-tab__pick-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 10px 4px;
+}
+
+.reporting-tab__ctrl-btns {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.reporting-tab__edit-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 7px 13px;
+  border-radius: var(--pill);
+  margin: 0 0 18px;
+}
+.reporting-tab__edit-banner svg {
+  width: 15px;
+  height: 15px;
+}
+.reporting-tab__actions-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 16px;
+  min-height: 42px;
+  /* Expanding and collapsing scroll this row to the top of the window (see reporting-tab.tsx), and
+     landing flush against the edge reads as clipped. */
+  scroll-margin-top: 16px;
+}
+
+/* ── data table ── */
+.reporting-tab__data-scroll-wrap {
+  position: relative;
+}
+
+.reporting-tab__data-scroll {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: auto;
+  min-height: 540px;
+  /* Leaves only enough room for the page chrome above the table - the taller this is, the more rows an
+     MPO manager sees without scrolling the page itself. */
+  max-height: calc(100vh - 180px);
+}
+.reporting-tab__data-scroll::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+.reporting-tab__data-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--surface);
+  border-radius: 8px;
+}
+.reporting-tab__data-tbl {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+}
+.reporting-tab__data-tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--n-100);
+  padding: 13px 18px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.reporting-tab__filter-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.reporting-tab__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.reporting-tab__filter-btn:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.reporting-tab__filter-btn:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.reporting-tab__filter-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.reporting-tab__filter-btn--active,
+.reporting-tab__filter-btn--active svg {
+  color: var(--primary);
+}
+
+
+
+/* Deliberately dense: an MPO manager reads this table by scanning many rows at once, so vertical
+   padding is kept tight to fit more of them per screen. Keep in sync with the virtualizer's
+   `estimateSize` in reporting-tab.tsx. The header's own padding is left alone - the totals row sticks
+   at a hard-coded `top` matching the header height. */
+.reporting-tab__data-tbl tbody td {
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* Lets a column be dragged narrower than its content: without this the cell's own text sets a floor
+     the width can never go below, so resizing only ever worked in one direction. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reporting-tab__data-tbl tbody tr:not(.reporting-tab__totals):hover td {
+  background: var(--n-100);
+}
+.reporting-tab__data-tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+.reporting-tab__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.reporting-tab__dim-col {
+  min-width: 180px;
+}
+.reporting-tab__dim-col--date {
+  min-width: 230px;
+}
+/* Sized for an eleven-digit id plus the header's own sort/filter controls, not for the constructed
+   name that used to sit beneath it. Draggable from here like any other column. */
+.reporting-tab__dim-col--line-item {
+  min-width: 190px;
+}
+.reporting-tab__metric-col {
+  min-width: 150px;
+}
+.reporting-tab__metric-col--money {
+  min-width: 165px;
+}
+.reporting-tab__li-id {
+  font-weight: 800;
+}
+
+/* ── edit data mode ── */
+.reporting-tab__edit-actions {
+  display: flex;
+  gap: 12px;
+}
+.reporting-tab__undo-btn {
+  min-width: 98px;
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+.reporting-tab__undo-btn:disabled {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+  opacity: .55;
+  cursor: not-allowed;
+}
+.reporting-tab__undo-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.reporting-tab__cell-input {
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 13.5px;
+  border-radius: var(--radius);
+}
+.reporting-tab__cell-input--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.reporting-tab__cell-input--error {
+  border-color: var(--bad);
+  outline-color: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 16%, transparent);
+}
+.reporting-tab__cell-error {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--bad);
+  text-align: right;
+}
+.reporting-tab__badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: var(--pill);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  vertical-align: middle;
+}
+.reporting-tab__badge--manual {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.reporting-tab__badge--modified {
+  background: var(--color-success-bg);
+  color: color-mix(in srgb, var(--good) 55%, var(--ink));
+}
+.reporting-tab__metric-cell--modified {
+  background: var(--color-success-bg);
+}
+.reporting-tab__confirm {
+  max-width: 440px;
+}
+.reporting-tab__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+.reporting-tab__bulk-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  background: var(--primary-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.reporting-tab__bulk-text {
+  flex: 1 1 420px;
+  max-width: 660px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.reporting-tab__bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+.reporting-tab__bulk-download {
+  min-width: 216px;
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--surface);
+}
+.reporting-tab__bulk-download:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary-hover);
+  background: var(--primary-soft);
+}
+.reporting-tab__bulk-file {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .reporting-tab__create-card,
+  .reporting-tab__create-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .reporting-tab__create-fields {
+    grid-template-columns: 1fr;
+  }
+  .reporting-tab__controls {
+    grid-template-columns: 1fr;
+  }
+  .reporting-tab__bulk-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+/* Constructed-levels help, anchored to the "?" beside Apply. Positioned rather than inline because
+   the table is far wider than the button row it hangs off. */
+.reporting-tab__levels-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.reporting-tab__levels-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reporting-tab__levels-btn:hover,
+.reporting-tab__levels-btn[aria-expanded="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Fills the 8px between the "?" and the table below it. The hint opens on hover and closes when the
+   pointer leaves it, so without this the pointer crosses a strip belonging to neither and the table
+   vanishes on the way to being read. */
+.reporting-tab__levels-pop::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.reporting-tab__levels-pop {
+  position: absolute;
+  z-index: 30;
+  /* Upward: the table starts immediately below, and a reference table is read while looking at the
+     data it explains - covering that data defeats the point. */
+  bottom: calc(100% + 8px);
+  /* Right-aligned: the control sits at the end of its row, so growing leftward keeps it on screen. */
+  right: 0;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgb(15 23 42 / 14%);
+}
+
+.reporting-tab__levels-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reporting-tab__levels-lead {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Numbered, because the reasons are a list to work down when a cell reads blank - not a ranking. */
+.reporting-tab__levels-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.reporting-tab__levels-item + .reporting-tab__levels-item {
+  margin-top: 6px;
+}
+
+/* The table is four columns of prose and can outgrow a narrow viewport; it scrolls inside the
+   popover rather than widening it. */
+.reporting-tab__levels-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.reporting-tab__levels-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.reporting-tab__levels-tbl th,
+.reporting-tab__levels-tbl td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reporting-tab__levels-tbl thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.reporting-tab__levels-tbl tbody th {
+  font-weight: 600;
+}
+
+/* A cell the view derives rather than stores: shown, but visibly not an input. */
+.reporting-tab__cell--derived {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── expanded table ── */
+/* Hides the page chrome so the data table owns the whole content column. Only the hiding is here - the
+   table's own expanded sizing belongs to the shared component - and nothing about the table itself
+   changes, so the virtualizer, sticky header and sticky totals keep working exactly as they do inline.
+   This cannot move into shared/ui: every selector below names a block of this page. */
+.reporting-tab--expanded .reporting-tab__head,
+.reporting-tab--expanded .reporting-tab__tbl-wrap,
+.reporting-tab--expanded .reporting-tab__create-card,
+.reporting-tab--expanded .reporting-tab__builder-sep,
+.reporting-tab--expanded .reporting-tab__name-row,
+.reporting-tab--expanded .reporting-tab__name-error,
+.reporting-tab--expanded .reporting-tab__controls,
+.reporting-tab--expanded .reporting-tab__ctrl-btns {
+  display: none;
+}
+
+/* How far the shared table's expanded modifier bleeds out of the content column: exactly
+   `.app__content`'s own side padding, so cancelling it puts the table's edges on the column's edges.
+   The table's expanded height and borders come from data-table.css. */
+.reporting-tab {
+  --data-table-bleed: 40px;
+}
+
+@media (max-width: 880px) {
+  .reporting-tab {
+    --data-table-bleed: 20px;
+  }
+}
+
+/* Expand leads the actions row, opposite the data actions at its right end - `margin-right: auto`
+   rather than a spacer, so the row keeps its flex-end alignment. */
+.reporting-tab__row-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reporting-tab__view-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: auto;
+}
+
+/* The Conversions figure doubles as the way into its per-action breakdown. Styled as the number it
+   already was, not as a button: the cell is read first and clicked second, and a button's chrome in
+   every row of a dense table would read as noise. */
+.reporting-tab__conv-open {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--muted);
+}
+.reporting-tab__conv-open:hover,
+.reporting-tab__conv-open:focus-visible {
+  color: var(--primary);
+  text-decoration-color: var(--primary);
+}

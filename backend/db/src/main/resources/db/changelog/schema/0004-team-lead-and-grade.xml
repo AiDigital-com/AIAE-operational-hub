@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<changeSet id="add-column-hub_users-grade" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_users" columnName="grade"/>
+			</not>
+		</preConditions>
+		<comment>
+			Seniority grade derived from the Rippling title (see domain.enums.Grade); NULL until synced.
+		</comment>
+		<addColumn tableName="hub_users">
+			<column name="grade" type="TEXT"/>
+		</addColumn>
+	</changeSet>
+
+	<changeSet id="add-column-hub_teams-team_lead_user_id" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_teams" columnName="team_lead_user_id"/>
+			</not>
+		</preConditions>
+		<comment>
+			Makes "team by Team Lead" first-class: the hub_users row of the employee who leads this team.
+		</comment>
+		<addColumn tableName="hub_teams">
+			<column name="team_lead_user_id" type="BIGINT"/>
+		</addColumn>
+	</changeSet>
+
+	<changeSet id="add-fk-hub_teams-team_lead_user_id" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<foreignKeyConstraintExists foreignKeyTableName="hub_teams" foreignKeyName="fk_hub_teams_team_lead_user"/>
+			</not>
+		</preConditions>
+		<addForeignKeyConstraint
+				baseTableName="hub_teams"
+				baseColumnNames="team_lead_user_id"
+				constraintName="fk_hub_teams_team_lead_user"
+				referencedTableName="hub_users"
+				referencedColumnNames="id"/>
+	</changeSet>
+
+	<changeSet id="add-index-hub_teams-team_lead_user_id" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<indexExists tableName="hub_teams" indexName="idx_hub_teams_team_lead_user_id"/>
+			</not>
+		</preConditions>
+		<createIndex tableName="hub_teams" indexName="idx_hub_teams_team_lead_user_id">
+			<column name="team_lead_user_id"/>
+		</createIndex>
+	</changeSet>
+
+</databaseChangeLog>

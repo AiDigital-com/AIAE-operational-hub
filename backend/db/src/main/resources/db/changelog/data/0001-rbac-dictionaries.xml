@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<changeSet id="add-hub_roles" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<sqlCheck expectedResult="0">
+				select count(*)
+				from hub_roles
+				where role_code IN ('MPO_MANAGER', 'TL', 'DIRECTOR', 'ADMIN', 'CLIENT_SERVICES')
+			</sqlCheck>
+		</preConditions>
+		<sqlFile path="sql/addHubRoles.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="rename-mpo-role-display-names" author="gmozhaiskii">
+		<update tableName="hub_roles">
+			<column name="display_name" value="MPO Team Lead"/>
+			<where>role_code = 'TL'</where>
+		</update>
+		<update tableName="hub_roles">
+			<column name="display_name" value="MPO Director"/>
+			<where>role_code = 'DIRECTOR'</where>
+		</update>
+	</changeSet>
+
+	<changeSet id="add-hub_scope_types" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<sqlCheck expectedResult="0">
+				select count(*)
+				from hub_scope_types
+				where scope_code IN ('OWN', 'TEAM', 'ALL', 'AGENCY', 'CLIENT')
+			</sqlCheck>
+		</preConditions>
+		<sqlFile path="sql/addHubScopeTypes.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+</databaseChangeLog>

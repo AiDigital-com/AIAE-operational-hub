@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<changeSet id="add-dashboard-filters-and-date-range" author="codex">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_dashboards" columnName="filters"/>
+			</not>
+		</preConditions>
+		<addColumn tableName="hub_dashboards">
+			<column name="filters" type="TEXT"/>
+			<column name="date_from" type="DATE"/>
+			<column name="date_to" type="DATE"/>
+		</addColumn>
+	</changeSet>
+
+</databaseChangeLog>

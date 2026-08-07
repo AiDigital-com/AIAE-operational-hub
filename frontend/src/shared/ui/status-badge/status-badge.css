@@ -1,0 +1,3 @@
+.status-badge { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+.status-badge__led { width: 8px; height: 8px; border-radius: 50%; }
+.status-badge--glow .status-badge__led { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }

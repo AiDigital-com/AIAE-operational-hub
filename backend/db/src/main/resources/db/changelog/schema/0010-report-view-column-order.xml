@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<!--
+		The order a report's columns are shown in, once someone has dragged them.
+
+		A column of its own rather than a reading of the existing `dimensions`/`metrics` order, because that
+		order is the order the checkboxes happened to be clicked in - honouring it would silently rearrange
+		every report saved before today. Null means nobody has expressed a preference, and the canonical
+		order applies; that is what every existing row holds, so none of them move.
+	-->
+	<changeSet id="add-column-hub_report_views-column_order" author="claude">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_report_views" columnName="column_order"/>
+			</not>
+		</preConditions>
+		<addColumn tableName="hub_report_views">
+			<column name="column_order" type="TEXT"/>
+		</addColumn>
+	</changeSet>
+
+</databaseChangeLog>

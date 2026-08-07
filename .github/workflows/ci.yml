@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  push:
+    branches:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend build, test, coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build, test, and enforce coverage
+        run: mvn -f backend/pom.xml verify -B
+
+      - name: Publish JaCoCo summary
+        if: always()
+        run: |
+          csv="backend/report-aggregate/target/site/jacoco-aggregate/jacoco.csv"
+          {
+            echo "## JaCoCo coverage"
+            echo
+            if [ -f "$csv" ]; then
+              awk -F, '
+                NR > 1 {
+                  instructionsMissed += $4; instructionsCovered += $5;
+                  branchesMissed += $6; branchesCovered += $7;
+                  linesMissed += $8; linesCovered += $9;
+                }
+                END {
+                  instructionsTotal = instructionsMissed + instructionsCovered;
+                  branchesTotal = branchesMissed + branchesCovered;
+                  linesTotal = linesMissed + linesCovered;
+                  instructionsPct = instructionsTotal ? instructionsCovered * 100 / instructionsTotal : 100;
+                  branchesPct = branchesTotal ? branchesCovered * 100 / branchesTotal : 100;
+                  linesPct = linesTotal ? linesCovered * 100 / linesTotal : 100;
+                  print "| Counter | Covered | Missed | Coverage |";
+                  print "| --- | ---: | ---: | ---: |";
+                  printf "| Instructions | %d | %d | %.2f%% |\n", instructionsCovered, instructionsMissed, instructionsPct;
+                  printf "| Branches | %d | %d | %.2f%% |\n", branchesCovered, branchesMissed, branchesPct;
+                  printf "| Lines | %d | %d | %.2f%% |\n", linesCovered, linesMissed, linesPct;
+                }
+              ' "$csv"
+              echo
+              echo "Full HTML report is attached as the \`jacoco-reports\` artifact."
+            else
+              echo "JaCoCo aggregate report was not generated."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload JaCoCo reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: |
+            backend/report-aggregate/target/site/jacoco-aggregate/
+            backend/*/target/site/jacoco/
+          retention-days: 14
+
+  frontend:
+    name: Frontend typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify generated OpenAPI client is up to date
+        working-directory: frontend
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/shared/api/generated || {
+            echo "::error::frontend/src/shared/api/generated is out of date with the OpenAPI spec. Run 'npm run generate:api' and commit the result.";
+            exit 1;
+          }
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: frontend
+        run: npm run test
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build

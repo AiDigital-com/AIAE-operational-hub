@@ -1,0 +1,153 @@
+server:
+  port: ${PORT:5000}
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:oph}
+    username: ${POSTGRES_USER:oph}
+    password: ${POSTGRES_PASSWORD:oph}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      idle-timeout: 60000
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:50}
+      connection-timeout: 2000
+      minimum-idle: 1
+      auto-commit: false
+  jta:
+    enabled: false
+  jpa:
+    open-in-view: false
+    database: postgresql
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        generate_statistics: false
+        jdbc:
+          time_zone: UTC
+          # Every touched entity uses a SEQUENCE id (not IDENTITY, which would disable insert batching).
+          # Lets the NetSuite sync's per-row save() calls batch into fewer round trips.
+          batch_size: 50
+          fetch_size: 100
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region_prefix: hibernate-cache
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+        javax:
+          cache:
+            uri: ehcache.xml
+            missing_cache_strategy: fail
+            provider: org.ehcache.jsr107.EhcacheCachingProvider
+        query:
+          in_clause_parameter_padding: true
+          mutation_strategy:
+            global_temporary:
+              create_tables: false
+              drop_tables: false
+          immutable_entity_update_query_handling_mode: exception
+        criteria:
+          literal_handling_mode: bind
+        default_batch_fetch_size: 300
+      jakarta:
+        persistence:
+          sharedCache:
+            mode: ENABLE_SELECTIVE
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.xml
+  task:
+    scheduling:
+      pool:
+        size: 4
+  servlet:
+    multipart:
+      # Boot's own default (1MB file / 10MB request) silently rejects a real bulk-adjustment workbook
+      # before the controller ever runs. Sized for the documented up-to-50k-row / 41-column upload.
+      max-file-size: 25MB
+      max-request-size: 30MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Operational endpoints only. Do NOT expose env/configprops/beans/etc.: combined with
+        # show-values they leak DB credentials and other config to any authenticated principal.
+        include: health,info,metrics,prometheus
+  endpoint:
+    env:
+      show-values: never
+    configprops:
+      show-values: never
+
+springdoc:
+  swagger-ui:
+    persist-authorization: true
+
+app:
+  auth:
+    allowed-email-domain: ${AUTH_ALLOWED_EMAIL_DOMAIN:aidigital.com}
+    publishable-key: ${CLERK_PUBLISHABLE_KEY:}
+    authorized-parties: ${AUTH_AUTHORIZED_PARTIES:}
+    sso:
+      issuer-uri: ${AUTH_ISSUER_URI:}
+      jwk-set-uri: ${AUTH_JWKS_URI:}
+      audience: ${AUTH_AUDIENCE:}
+  external:
+    bigquery:
+      enabled: ${BIGQUERY_ENABLED:false}
+      stub-enabled: ${BIGQUERY_STUB_ENABLED:false}
+      # Service-account key JSON supplied inline via the GOOGLE_SERVICE_ACCOUNT_JSON secret/env.
+      credentials-json: ${GOOGLE_SERVICE_ACCOUNT_JSON:}
+      project-id: ${BIGQUERY_PROJECT_ID:}
+      dataset: ${BIGQUERY_DATASET:}
+      location: ${BIGQUERY_LOCATION:US}
+      # Each table is a fully-qualified project.dataset.table name, used verbatim as the query source.
+      io-lines-table: ${BIGQUERY_IO_LINES_TABLE:silken-quasar-376417.netsuite.netsuite_campaigns_with_ids_fresh_data}
+      rippling-employees-table: ${BIGQUERY_RIPPLING_EMPLOYEES_TABLE:silken-quasar-376417.custom_task_data.rippling_employees}
+      adjustments-view: ${BIGQUERY_ADJUSTMENTS_VIEW:silken-quasar-376417.operational_hub.platform_mart_adjustments_view_op_hub}
+      write-table: ${BIGQUERY_ADJUSTMENTS_TABLE:silken-quasar-376417.operational_hub.platform_mart_operational_hub_adjustements}
+      # The conversions pair, on the same rails as the delivery pair above: read the view, write the table.
+      conversions-view: ${BIGQUERY_CONVERSIONS_VIEW:silken-quasar-376417.operational_hub.conversions_mart_adjustments_view_op_hub}
+      conversions-write-table: ${BIGQUERY_CONVERSIONS_TABLE:silken-quasar-376417.operational_hub.conversions_mart_operational_hub_adjustments}
+      # A dashboard's data source: campaign plans and benchmarks are read from the table the reporting
+      # spreadsheets write, and the built table lands in the dataset their ClicData templates read from.
+      plans-table: ${BIGQUERY_PLANS_TABLE:silken-quasar-376417.aidigital_database.elevate_plans_n_benches}
+      dashboard-dataset: ${BIGQUERY_DASHBOARD_DATASET:silken-quasar-376417.gs_templates}
+      # Rebuilding a whole table is minutes' work where a paged read is seconds'; see job-timeout-ms.
+      table-write-timeout-ms: ${BIGQUERY_TABLE_WRITE_TIMEOUT_MS:600000}
+      # Bytes one read may be billed before BigQuery refuses to run it; 0 means no limit. Off until the
+      # bigquery.query.bytes.billed distribution says what a legitimate report actually costs - a ceiling
+      # that rejects a real report is worse than an expensive one.
+      max-bytes-billed: ${BIGQUERY_MAX_BYTES_BILLED:0}
+  usage-logging:
+    # One usage_events row per meaningful user action (PDI_100), written off the request thread. Set to false
+    # to stop recording without a code change: the aspect leaves the context and the table keeps what it has.
+    enabled: ${USAGE_LOGGING_ENABLED:true}
+    service-name: ${USAGE_LOG_SERVICE_NAME:operational-hub}
+    environment: ${USAGE_LOG_ENVIRONMENT:dev}
+  logbook:
+    censored-replacement: XXX
+    headers-to-censor:
+      - Authorization
+      - Cookie
+      - Set-Cookie
+      - X-API-Key
+      - AccessKey
+      - Proxy-Authorization
+    # Case-insensitive so e.g. accessToken / X-Password / clientSecret are all masked.
+    json-fields-to-censor:
+      - (?i).*password.*
+      - (?i).*token.*
+      - (?i).*secret.*
+      - (?i).*key.*
+      - (?i).*credential.*
+      - (?i).*authorization.*
+      - (?i)privateKey
+      - (?i)clientSecret
+      - (?i)serviceAccount
+    # `excluded` (actuator/swagger/specs/health/OPTIONS) uses the compliant defaults in LogbookProperties.
+
+logging:
+  level:
+    org.zalando.logbook: ${LOGBOOK_LEVEL:TRACE}

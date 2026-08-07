@@ -1,0 +1,4336 @@
+openapi: 3.0.3
+info:
+  title: AIAE Operational Hub API
+  version: "1"
+  description: >
+    Backend API for AI Digital Operational Hub RBAC foundation. Authentication is Clerk SSO;
+    the backend validates Clerk-issued JWTs against Clerk JWKS. OpenAPI is the source of truth
+    for all exposed REST endpoints.
+servers:
+  - url: /
+    description: Endpoint paths are fully qualified under /api/v1.
+security:
+  - bearerAuth: [ ]
+tags:
+  - name: auth
+    description: Everything needed to resolve the authenticated user and effective access.
+  - name: rbac
+    description: Everything needed to manage RBAC role assignments.
+  - name: dictionary
+    description: Read-only reference dictionaries, including the RBAC role and scope-type catalogs.
+  - name: agencies
+    description: Read-only access to agencies sourced from BigQuery, filtered by RBAC scope.
+  - name: clients
+    description: Read-only access to clients sourced from BigQuery, filtered by RBAC scope.
+  - name: campaigns
+    description: Read-only access to campaigns sourced from BigQuery, optionally filtered by client or agency.
+  - name: teams
+    description: Admin-only management of Hub teams.
+paths:
+  /api/v1/auth/me:
+    get:
+      tags:
+        - auth
+      operationId: getCurrentUser
+      description: Returns the authenticated Hub user with active role assignments and effective RBAC access.
+      responses:
+        '200':
+          description: Authenticated Hub user was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserV1'
+              examples:
+                authenticatedUser:
+                  value:
+                    user_id: user_123
+                    email: demo-user@example.com
+                    full_name: Demo User
+                    hub_user_id: 42
+                    status: ACTIVE
+                    roles:
+                      - ADMIN
+                    assignments:
+                      - id: 7
+                        user_id: 42
+                        role_code: ADMIN
+                        scope_code: ALL
+                        scope_id: null
+                        status: ACTIVE
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while resolving current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/dictionary/rbac/roles:
+    get:
+      tags:
+        - dictionary
+      operationId: listRoles
+      description: Lists active RBAC role dictionary rows. Requires manage-roles permission.
+      responses:
+        '200':
+          description: Active role dictionary rows were found.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoleV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading role dictionary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/dictionary/rbac/scope-types:
+    get:
+      tags:
+        - dictionary
+      operationId: listScopeTypes
+      description: Lists active RBAC scope-type dictionary rows. Requires manage-roles permission.
+      responses:
+        '200':
+          description: Active scope-type dictionary rows were found.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScopeTypeV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading scope-type dictionary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/dictionary/statuses:
+    get:
+      tags:
+        - dictionary
+      operationId: listStatuses
+      description: Lists the lifecycle status dictionary used by the user-management filters. Requires manage-roles permission.
+      responses:
+        '200':
+          description: Status dictionary rows were returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatusV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading the status dictionary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/rbac/users/search:
+    post:
+      tags:
+        - rbac
+      operationId: searchUsers
+      description: >
+        Searches Hub users with their single active role, backing the user-management table.
+        Sorting and filtering are applied server-side; results are paginated. Requires manage-roles permission.
+      parameters:
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Filter and sort criteria for the user search.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubUserSearchRequestV1'
+      responses:
+        '200':
+          description: A page of Hub users was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubUserPageResponseV1'
+        '400':
+          description: The paging parameters or search criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while searching users.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/rbac/users/{userId}/role-assignments:
+    get:
+      tags:
+        - rbac
+      operationId: listRoleAssignments
+      description: Lists active role assignments for the specified Hub user. Requires manage-roles permission.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: The hub_users.id of the user whose active assignments should be returned.
+      responses:
+        '200':
+          description: Active role assignments were found for the specified user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoleAssignmentV1'
+        '400':
+          description: The specified userId parameter has invalid type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading role assignments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - rbac
+      operationId: assignRole
+      description: Assigns a role to the specified Hub user within the requested scope. Requires manage-roles permission.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: The hub_users.id of the target user receiving the role assignment.
+      requestBody:
+        description: Role assignment request body.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequestV1'
+      responses:
+        '201':
+          description: The role assignment was created, or an equivalent active assignment already existed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignmentV1'
+        '400':
+          description: Validation errors of incoming DTO or RBAC business-rule errors occurred.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+                  - $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: Target Hub user was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while assigning the role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/rbac/users/{userId}/role-assignments/{assignmentId}:
+    delete:
+      tags:
+        - rbac
+      operationId: revokeRole
+      description: Revokes an active role assignment for the specified Hub user. Requires manage-roles permission.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: The hub_users.id of the target user whose assignment should be revoked.
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: The hub_role_assignments.id of the assignment to revoke.
+      responses:
+        '204':
+          description: Assignment was revoked or was already absent.
+        '400':
+          description: The specified userId or assignmentId parameter has invalid type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while revoking the role assignment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/agencies/search:
+    post:
+      tags:
+        - agencies
+      operationId: searchAgencies
+      description: >
+        Searches the agencies visible to the authenticated user, sourced from BigQuery and filtered by RBAC scope.
+        Sorting and filtering are applied server-side; results are paginated.
+      parameters:
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Filter and sort criteria for the agency search.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgencySearchRequestV1'
+      responses:
+        '200':
+          description: A page of visible agencies was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgencyPageResponseV1'
+        '400':
+          description: The paging parameters or search criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading agencies from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/clients/search:
+    post:
+      tags:
+        - clients
+      operationId: searchClients
+      description: >
+        Searches the clients visible to the authenticated user, sourced from BigQuery and filtered by RBAC scope.
+        Sorting and filtering are applied server-side; results are paginated.
+      parameters:
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Filter and sort criteria for the client search.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientSearchRequestV1'
+      responses:
+        '200':
+          description: A page of visible clients was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientPageResponseV1'
+        '400':
+          description: The paging parameters or search criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading clients from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/search:
+    post:
+      tags:
+        - campaigns
+      operationId: searchCampaigns
+      description: >
+        Searches campaigns visible to the authenticated user, sourced from BigQuery.
+        Optionally filtered by client_id or agency_id. Sorting and paging are applied server-side.
+      parameters:
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Filter and sort criteria for the campaign search.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignSearchRequestV1'
+      responses:
+        '200':
+          description: A page of campaigns was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignPageResponseV1'
+        '400':
+          description: The paging parameters or search criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading campaigns from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}:
+    get:
+      tags:
+        - campaigns
+      operationId: getCampaign
+      description: >
+        Returns one campaign by id, sourced from the netsuite_campaigns_with_ids_fresh_data BigQuery
+        table, enforcing the current user's agency visibility (a campaign outside it resolves the same
+        as an unknown one). Lets the campaign workspace be opened directly - by a pasted link, a
+        bookmark, or a restored tab - instead of only from a list that carries the campaign along.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The campaign was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading the campaign from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows:
+    post:
+      tags:
+        - campaigns
+      operationId: listCampaignReportRows
+      description: >
+        Returns one page of per-day, per-line-item delivery/actuals rows for one campaign, sourced from
+        the platform_mart_adjustments_view_op_hub BigQuery view (merges base platform_mart delivery
+        data with manual op-hub adjustments; conflicts resolve by latest last_modified_at
+        server-side). Metric totals and the date range / distinct line item count are always computed
+        over every matching row that matches the requested filters, not just the returned page, so they
+        stay stable while more pages load. POST (not GET) because the filter set is a variable-length
+        list of multi-value dimension filters - the same shape /campaigns/search already uses.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Filter and sort criteria for the report rows.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowSearchRequestV1'
+      responses:
+        '200':
+          description: A page of the campaign's report rows was found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowsPageResponseV1'
+        '400':
+          description: The paging parameters or filter/sort criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading report rows from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/distinct-values:
+    get:
+      tags:
+        - campaigns
+      operationId: listReportRowDistinctValues
+      description: >
+        Returns the distinct, non-null values of one report-rows dimension for one campaign, sourced
+        from the same platform_mart_adjustments_view_op_hub rows the report-rows endpoint reads - used
+        to populate a column's filter picker. Capped at 500 values; metrics are not filterable (see
+        ReportRowFilterFieldEnumV1).
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: field
+          in: query
+          required: true
+          description: The dimension to list distinct values for.
+          schema:
+            $ref: '#/components/schemas/ReportRowFilterFieldEnumV1'
+      responses:
+        '200':
+          description: The dimension's distinct values were found.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '400':
+          description: The field parameter failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading distinct values from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/adjustments:
+    post:
+      tags:
+        - campaigns
+      operationId: saveReportRowAdjustments
+      description: >
+        Appends one or more report-row adjustments (inline metric edits and/or manually-added rows) for
+        one campaign - each is written as a new, append-only row to the adjustments write table, stamped
+        with the current user and a server-authoritative timestamp, so the report-rows read view merges
+        it over the base data (latest last-modified timestamp wins). A single inline cell edit is a
+        batch of one; a bulk adjustment is a batch of many - both use this same endpoint.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The adjustments to append.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowAdjustmentsRequestV1'
+      responses:
+        '204':
+          description: The adjustments were written.
+        '400':
+          description: The adjustments payload failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while writing adjustments to BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/export:
+    post:
+      tags:
+        - campaigns
+      operationId: exportReportRows
+      description: >
+        Returns every report row matching the requested sort/filters for one campaign as an .xlsx
+        spreadsheet, capped at a fixed row count (no pagination) - for a "Download report" action. POST
+        (not GET) because it carries the same variable-length filter body as the report-rows listing.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: Filter and sort criteria for the exported rows.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowSearchRequestV1'
+      responses:
+        '200':
+          description: The .xlsx export was generated.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The filter/sort criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading report rows from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/adjustments/template:
+    post:
+      tags:
+        - campaigns
+      operationId: downloadBulkAdjustmentTemplate
+      description: >
+        Returns the campaign's current-view report rows as an editable .xlsx spreadsheet for the
+        "Bulk manual adjustment" round-trip: 26 identity columns + 15 editable metrics, excluding the
+        derived cpm/ctr/avcr ratios and server-owned audit stamps. The user edits values offline and
+        re-uploads via POST .../adjustments/upload. POST (not GET) carries the same variable-length
+        filter body as the .xlsx export.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: Filter and sort criteria for the templated rows (reflects the current view).
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowSearchRequestV1'
+      responses:
+        '200':
+          description: The .xlsx template was generated.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The filter/sort criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading report rows from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/adjustments/upload:
+    post:
+      tags:
+        - campaigns
+      operationId: uploadBulkAdjustments
+      description: >
+        Applies an uploaded, edited bulk-adjustment .xlsx (from .../adjustments/template): each row is
+        matched to an existing report row by (date, line_item_id), its editable metric cells are diffed
+        against the current value, and every changed cell is written as an append-only override through
+        the same path as POST .../adjustments. Edit-only - a row matching no existing report row is
+        rejected, never added. All-or-nothing - any malformed cell, missing required column, or
+        unmatched key fails the whole upload.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '200':
+          description: The upload was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowBulkAdjustmentResultV1'
+        '400':
+          description: The uploaded file was unreadable, or a row was invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while writing adjustments to BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/conversions/adjustments/template:
+    post:
+      tags:
+        - campaigns
+      operationId: downloadConversionAdjustmentTemplate
+      description: >
+        Returns the campaign's conversions as an editable .xlsx spreadsheet, at the conversions mart's
+        own grain: one row per day, line item and conversion action. A file of its own rather than
+        columns on the delivery template, because a delivery row has no conversion action for an edited
+        figure to belong to. Identity columns plus one editable `conversions` column; the user edits
+        values offline and re-uploads via POST .../conversions/adjustments/upload. POST (not GET) to
+        carry the optional date window in a body, matching the delivery template's shape.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The optional conversion-date window for the templated rows.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionRowSearchRequestV1'
+      responses:
+        '200':
+          description: The .xlsx template was generated.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The date window failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading conversions from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/conversions/adjustments/upload:
+    post:
+      tags:
+        - campaigns
+      operationId: uploadConversionAdjustments
+      description: >
+        Applies an uploaded, edited conversions .xlsx (from .../conversions/adjustments/template): each
+        row is matched to a current conversions row by date, the three level ids, the conversion action
+        and its category, and a row whose `conversions` figure differs is written as an adjustment.
+        Written by replacement, not by append - the conversions view merges adjustments without
+        resolving duplicates, so the previous adjustment for a row is deleted before the new one is
+        inserted. Edit-only: a row matching no current conversions row is rejected, never added, since
+        there would be no conversion action for the figure to belong to. All-or-nothing - any
+        unreadable value or unmatched row fails the whole upload.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '200':
+          description: The upload was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowBulkAdjustmentResultV1'
+        '400':
+          description: The uploaded file was unreadable, or a row was invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while writing conversion adjustments to BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/conversions/breakdown:
+    post:
+      tags:
+        - campaigns
+      operationId: listConversionBreakdown
+      description: >
+        Returns the conversions rows behind one report row's Conversions cell, one per conversion
+        action. The report sums the actions away to show a single figure per delivery row; this reopens
+        that sum so the figure can be edited where it is displayed, without the spreadsheet round trip.
+        Selected by the report's own join - the same normalized name comparison, an absent level 3
+        compared as a value of its own, and no level-3 match at all on channels that report conversions
+        against the campaign - so the rows returned sum to the cell they were asked about. POST to carry
+        the row's names in a body: constructed names run long and are not URL material.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The report row whose conversions are being opened.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionBreakdownRequestV1'
+      responses:
+        '200':
+          description: The breakdown was read. Empty when the cell is blank because nothing matched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionBreakdownV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading conversions from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/conversions/adjustments:
+    post:
+      tags:
+        - campaigns
+      operationId: applyConversionAdjustments
+      description: >
+        Applies conversion adjustments edited in place, from the breakdown returned by
+        POST .../conversions/breakdown. Identical in every other respect to the spreadsheet upload and
+        served by the same code: each row is matched to a current conversions row by date, the three
+        level ids, the conversion action and its category; a row whose figure differs is written by
+        replacement, not append; a row matching nothing is rejected rather than added; and any invalid
+        row fails the whole request. Only the way the rows were typed differs.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The edited conversions rows.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionAdjustmentRequestV1'
+      responses:
+        '200':
+          description: The adjustments were applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowBulkAdjustmentResultV1'
+        '400':
+          description: A row was invalid, or matched no current conversions row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while writing conversion adjustments to BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/insertion-orders:
+    get:
+      tags:
+        - campaigns
+      operationId: listCampaignInsertionOrders
+      description: >
+        Returns one campaign's insertion orders (US-009…011), each with its real NetSuite line items,
+        sourced from the netsuite_campaigns_with_ids_fresh_data IO Lines table. One insertion order per
+        order_id; one line item per row of that table. Order-level values (budget/status/dates) are
+        read once per order, never summed or repeated across its line items. The source has no
+        per-line-item status - a line item's status is its order's. Not paginated: a campaign's IO/LI
+        tree is small and rendered whole.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The campaign's insertion orders were returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InsertionOrderV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading insertion orders from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-views:
+    get:
+      tags:
+        - campaigns
+      operationId: listReportViews
+      description: Lists saved report views for one campaign (US-022), paginated. Requires access to the campaign.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: A page of the campaign's report views was returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportViewPageResponseV1'
+        '400':
+          description: The paging parameters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading report views.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - campaigns
+      operationId: createReportView
+      description: >
+        Creates a report view in one campaign (US-024). The name must be non-empty and unique within
+        the campaign.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The report view to create.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportViewUpsertV1'
+      responses:
+        '201':
+          description: The report view was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportViewV1'
+        '400':
+          description: The request body failed validation (blank or duplicate name).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while creating the report view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-views/{viewId}:
+    put:
+      tags:
+        - campaigns
+      operationId: updateReportView
+      description: >
+        Fully replaces a report view's name, status, note, and dimension/metric selection (US-023
+        rename, US-029 save, US-030 rename). The new name must be non-empty and unique within the
+        campaign.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: viewId
+          in: path
+          required: true
+          description: The report view id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The replacement report view data.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportViewUpsertV1'
+      responses:
+        '200':
+          description: The report view was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportViewV1'
+        '400':
+          description: The request body failed validation (blank or duplicate name).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or report view was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while updating the report view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - campaigns
+      operationId: deleteReportView
+      description: Permanently deletes a report view from a campaign (US-025).
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: viewId
+          in: path
+          required: true
+          description: The report view id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: The report view was deleted.
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or report view was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while deleting the report view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-views/{viewId}/duplicate:
+    post:
+      tags:
+        - campaigns
+      operationId: duplicateReportView
+      description: Duplicates a report view as "<name> (copy)" in the same campaign (Reports-list kebab action).
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: viewId
+          in: path
+          required: true
+          description: The report view id to duplicate.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '201':
+          description: The duplicate report view was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportViewV1'
+        '400':
+          description: The duplicate name collided with an existing report in the campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or source report view was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while duplicating the report view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards:
+    get:
+      tags:
+        - campaigns
+      operationId: listDashboards
+      description: Lists a campaign's dashboards (US-017), paginated. Requires access to the campaign.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: A page of the campaign's dashboards was returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardPageResponseV1'
+        '400':
+          description: The paging parameters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading dashboards.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - campaigns
+      operationId: createDashboard
+      description: >
+        Creates a dashboard in one campaign (US-017). The name must be non-empty and unique within the
+        campaign, and the type must be one the Hub can write a data source for. A new dashboard is always
+        a draft: it has no BigQuery table until one is created for it.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The dashboard to create.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardCreateV1'
+      responses:
+        '201':
+          description: The dashboard was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardV1'
+        '400':
+          description: The request body failed validation (blank or duplicate name, or a type with no schema).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while creating the dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}:
+    put:
+      tags:
+        - campaigns
+      operationId: updateDashboard
+      description: >
+        Replaces a dashboard's name, optional-column selection, and displayed campaign name (US-017,
+        US-019, US-020). The type is absent on purpose: it is the schema of a table ClicData may already
+        be reading, so it is fixed when the dashboard is created.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The replacement dashboard data.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardUpdateV1'
+      responses:
+        '200':
+          description: The dashboard was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardV1'
+        '400':
+          description: The request body failed validation (blank or duplicate name).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while updating the dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - campaigns
+      operationId: deleteDashboard
+      description: >
+        Deletes a dashboard from a campaign (US-017). Its BigQuery table is left in place - the Hub row is
+        a pointer to it, and a dashboard ClicData is still reading should not lose its data because
+        someone tidied the list.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: The dashboard was deleted.
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while deleting the dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/duplicate:
+    post:
+      tags:
+        - campaigns
+      operationId: duplicateDashboard
+      description: >
+        Duplicates a dashboard as a new draft in the same campaign. Source fields are not copied: the
+        duplicate has not written its own BigQuery table yet.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '201':
+          description: The dashboard was duplicated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardV1'
+        '400':
+          description: The generated copy name collided with an existing dashboard name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while duplicating the dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/preview:
+    get:
+      tags:
+        - campaigns
+      operationId: previewDashboardDataset
+      description: >
+        Counts the rows the dashboard's data source would contain if it were created now, under the column
+        selection it currently carries (US-019). Runs a BigQuery count, so it is not free.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The dataset preview was returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardPreviewV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while counting the dataset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/dataset-rows:
+    post:
+      tags:
+        - campaigns
+      operationId: listDashboardDatasetRows
+      description: >
+        Returns one filtered page of the rows the dashboard's Basic data source would contain if it were
+        created now. POST matches the Reporting table shape: filters are a variable-length list of selected
+        values, applied server-side before paging so the preview table does not filter only the current page.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Optional dataset preview filters.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardDatasetRowsSearchRequestV1'
+      responses:
+        '200':
+          description: A page of dashboard dataset rows was returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardDatasetRowsPageResponseV1'
+        '400':
+          description: The paging parameters or filters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading the dataset preview rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/dataset-rows/distinct-values:
+    get:
+      tags:
+        - campaigns
+      operationId: listDashboardDatasetDistinctValues
+      description: >
+        Returns the distinct, non-null values of one dashboard dataset output column, capped at 500 values,
+        for the preview table's filter picker.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+        - name: field
+          in: query
+          required: true
+          description: Dashboard output column alias to inspect.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Distinct values were returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '400':
+          description: The field is not part of the dashboard dataset schema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading distinct dataset values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/data-source:
+    post:
+      tags:
+        - campaigns
+      operationId: createDashboardDataSource
+      description: >
+        Writes the dashboard's BigQuery table and turns the dashboard live (US-020). The table is replaced
+        rather than appended to, so running this again refreshes the data source instead of doubling it. The
+        response carries the table name to paste into ClicData.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The confirmation, carrying the campaign name to show on the dashboard.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardDataSourceRequestV1'
+      responses:
+        '200':
+          description: The data source was written and recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardV1'
+        '400':
+          description: The BigQuery write failed; the message carries BigQuery's own reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while creating the data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - campaigns
+      operationId: removeDashboardDataSource
+      description: >
+        Forgets the dashboard's data source and returns it to draft (US-021). The BigQuery table is left in
+        place: a ClicData dashboard still reading it should not go blank because someone tidied the Hub.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The data source was forgotten.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while removing the data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/teams:
+    get:
+      tags:
+        - teams
+      operationId: listTeams
+      description: Lists all Hub teams. Requires manage-roles permission.
+      responses:
+        '200':
+          description: The list of Hub teams was returned successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while loading Hub teams.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - teams
+      operationId: createTeam
+      description: Creates a new Hub team. Requires manage-roles permission.
+      requestBody:
+        description: Team data to create.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTeamRequestV1'
+      responses:
+        '201':
+          description: The team was created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamV1'
+        '400':
+          description: The request body failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while creating the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/teams/search:
+    post:
+      tags:
+        - teams
+      operationId: searchTeams
+      description: >
+        Searches Hub teams by name, paginated. Backs the teams-management table. Requires manage-roles
+        permission.
+      parameters:
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      requestBody:
+        description: Optional name filter for the team search.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamSearchRequestV1'
+      responses:
+        '200':
+          description: A page of Hub teams was resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPageResponseV1'
+        '400':
+          description: The paging parameters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while searching Hub teams.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/teams/{teamId}:
+    put:
+      tags:
+        - teams
+      operationId: updateTeam
+      description: Updates an existing Hub team. Requires manage-roles permission.
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: The Hub team id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: Updated team data.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTeamRequestV1'
+      responses:
+        '200':
+          description: The team was updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamV1'
+        '400':
+          description: The request body failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The team was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while updating the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/sync:
+    post:
+      tags:
+        - sync
+      operationId: syncNetSuite
+      description: >
+        Eagerly synchronizes users, teams, and team role assignments from the NetSuite/Rippling
+        BigQuery sources. Requires manage-roles permission.
+      responses:
+        '200':
+          description: The sync completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncSummaryV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while syncing from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Clerk-issued JWT bearer token validated against Clerk JWKS.
+  parameters:
+    PageNumberParam:
+      name: pageNumber
+      in: query
+      required: false
+      description: One-based page number to return.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        default: 1
+    PageSizeParam:
+      name: pageSize
+      in: query
+      required: false
+      description: Number of items per page.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+  schemas:
+    SyncSummaryV1:
+      type: object
+      description: Summary of a NetSuite/Rippling sync run.
+      properties:
+        teams:
+          type: integer
+          format: int32
+          description: Number of distinct teams (departments) ensured.
+        users:
+          type: integer
+          format: int32
+          description: Number of users upserted from active employees.
+        assignmentsUpdated:
+          type: integer
+          format: int32
+          description: Number of team role assignments created or changed.
+        agenciesMapped:
+          type: integer
+          format: int32
+          description: Number of agencies mapped to a team via their MPO team lead.
+      required:
+        - teams
+        - users
+        - assignmentsUpdated
+        - agenciesMapped
+    UserV1:
+      type: object
+      description: Representation of the authenticated Hub user and effective access.
+      properties:
+        user_id:
+          type: string
+          description: Stable Clerk user id from the JWT subject claim.
+        email:
+          type: string
+          format: email
+          description: Authenticated user's primary email address.
+        full_name:
+          type: string
+          description: Authenticated user's display name from Clerk claims.
+        hub_user_id:
+          type: integer
+          format: int64
+          description: Internal hub_users.id mapped to the Clerk user.
+        status:
+          type: string
+          description: Current Hub user status.
+        roles:
+          type: array
+          description: Distinct active role codes held by the user.
+          items:
+            type: string
+        assignments:
+          type: array
+          description: Active role assignment views backing the effective access result.
+          items:
+            $ref: '#/components/schemas/RoleAssignmentV1'
+      required:
+        - user_id
+        - email
+    AgencyV1:
+      type: object
+      description: Representation of an agency sourced from BigQuery.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: BigQuery agency id from the IO Lines source.
+        name:
+          type: string
+          description: Agency company name.
+        email:
+          type: string
+          description: Agency primary email (not available from BigQuery).
+        status:
+          type: string
+          description: Agency lifecycle status.
+        clientsCount:
+          type: integer
+          format: int64
+          description: Number of distinct clients (advertisers) belonging to this agency in the IO Lines source.
+        clients:
+          type: array
+          description: >
+            The agency's clients (id and name only), populated only when the search request set
+            includeClients=true. Null/absent for list/grid views that only need clientsCount.
+          items:
+            $ref: '#/components/schemas/AgencyClientV1'
+      required:
+        - id
+        - name
+    AgencyClientV1:
+      type: object
+      description: Lightweight client reference (id and name) embedded in an agency for sidebar navigation.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: BigQuery client/advertiser id from the IO Lines source.
+        name:
+          type: string
+          description: Client company name, may be null when the source row has no advertiser name.
+      required:
+        - id
+    ClientV1:
+      type: object
+      description: Representation of a client sourced from BigQuery.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: BigQuery client/advertiser id from the IO Lines source.
+        name:
+          type: string
+          description: Client company name.
+        agency_id:
+          type: integer
+          format: int64
+          description: BigQuery agency id of the owning agency, or null when unparented.
+        email:
+          type: string
+          description: Client primary email (not available from BigQuery).
+        status:
+          type: string
+          description: Client lifecycle status.
+      required:
+        - id
+        - name
+    RoleV1:
+      type: object
+      description: Representation of an RBAC role dictionary row.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Internal hub_roles.id.
+        role_code:
+          type: string
+          description: Stable role code used by backend authorization logic.
+        display_name:
+          type: string
+          description: Human-readable role name.
+        description:
+          type: string
+          description: Human-readable role description.
+        future:
+          type: boolean
+          description: Indicates that the role is seeded for future use and is not yet generally assignable.
+        status:
+          type: string
+          description: Current role dictionary status.
+      required:
+        - id
+        - role_code
+        - display_name
+        - status
+    ScopeTypeV1:
+      type: object
+      description: Representation of an RBAC scope-type dictionary row.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Internal hub_scope_types.id.
+        scope_code:
+          type: string
+          description: Stable scope code defining how role assignment scope_id is interpreted.
+        display_name:
+          type: string
+          description: Human-readable scope type name.
+        description:
+          type: string
+          description: Human-readable scope type description.
+        status:
+          type: string
+          description: Current scope-type dictionary status.
+      required:
+        - id
+        - scope_code
+        - display_name
+        - status
+    StatusV1:
+      type: object
+      description: A lifecycle status dictionary row.
+      properties:
+        code:
+          type: string
+          description: Stable status code stored on the entity (e.g. ACTIVE).
+        display_name:
+          type: string
+          description: Human-readable status label.
+      required:
+        - code
+        - display_name
+    HubUserSummaryV1:
+      type: object
+      description: Hub user row for the user-management table, including the single active role.
+      properties:
+        hub_user_id:
+          type: integer
+          format: int64
+          description: Internal hub_users.id.
+        full_name:
+          type: string
+          description: User display name.
+        email:
+          type: string
+          description: User email address.
+        status:
+          type: string
+          description: User lifecycle status.
+        role_code:
+          type: string
+          description: The user's current active role code, or null when no role is assigned.
+        team_id:
+          type: integer
+          format: int64
+          description: The team id scoped by the user's active role, or null when not TEAM-scoped.
+      required:
+        - hub_user_id
+        - email
+    RoleAssignmentV1:
+      type: object
+      description: Representation of a user's role assignment within a scope.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Internal hub_role_assignments.id.
+        user_id:
+          type: integer
+          format: int64
+          description: Internal hub_users.id receiving the role assignment.
+        role_code:
+          type: string
+          description: Assigned role code.
+        scope_code:
+          type: string
+          description: Scope code controlling how scope_id is interpreted.
+        scope_id:
+          type: integer
+          format: int64
+          description: Scoped entity id, or null for unscoped assignments such as ALL.
+        status:
+          type: string
+          description: Current assignment status.
+      required:
+        - id
+        - user_id
+        - role_code
+        - scope_code
+        - status
+    AssignRoleRequestV1:
+      type: object
+      description: Request body used to assign a role to a Hub user.
+      properties:
+        role_code:
+          type: string
+          description: Role code to assign.
+        scope_code:
+          type: string
+          description: Scope code for the assignment.
+        scope_id:
+          type: integer
+          format: int64
+          description: Scoped entity id, or absent for unscoped assignments.
+      required:
+        - role_code
+        - scope_code
+    OperationalHubValidationExceptionResponseV1:
+      type: object
+      description: Representation of validation exception occurred in REST API format.
+      properties:
+        errors:
+          description: The list of validation errors occurred.
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldToErrorResponseV1'
+        timestamp:
+          type: string
+          format: date-time
+          description: The timestamp exception occurred.
+        correlationId:
+          type: string
+          description: The log stream UUID.
+      required:
+        - errors
+        - timestamp
+        - correlationId
+    FieldToErrorResponseV1:
+      type: object
+      description: Representation of validation error bound to a field or semantic request part.
+      properties:
+        code:
+          type: string
+          description: The code of validation error occurred.
+        field:
+          type: string
+          description: The field or semantic request part not passed validation.
+        error:
+          type: string
+          description: The validation error occurred.
+      required:
+        - code
+        - field
+        - error
+    OperationalHubApiExceptionResponseV1:
+      type: object
+      description: Representation of exception occurred in REST API format.
+      properties:
+        code:
+          type: string
+          description: The code of exception occurred.
+        message:
+          type: string
+          description: The message of exception occurred.
+        timestamp:
+          type: string
+          format: date-time
+          description: The timestamp exception occurred.
+        correlationId:
+          type: string
+          description: The log stream UUID.
+      required:
+        - code
+        - message
+        - timestamp
+        - correlationId
+    DirectionEnumV1:
+      type: string
+      description: Sort direction applied to a single sortable field.
+      enum:
+        - ASC
+        - DESC
+      default: ASC
+    FilterOperationEnumV1:
+      type: string
+      description: >
+        Operation used to match a filter value against a field. CONTAINS performs a substring
+        match (used for free-text columns); EQUALS performs an exact match (used for code or
+        enumerated columns).
+      enum:
+        - CONTAINS
+        - EQUALS
+    PageResponseV1:
+      type: object
+      description: Base pagination metadata shared by all paged responses.
+      properties:
+        pageNumber:
+          type: integer
+          format: int32
+          description: One-based number of the returned page.
+        pageSize:
+          type: integer
+          format: int32
+          description: Maximum number of items per page.
+        totalElements:
+          type: integer
+          format: int64
+          description: Total number of items matching the query across all pages.
+        totalPages:
+          type: integer
+          format: int32
+          description: Total number of pages available for the query.
+      required:
+        - pageNumber
+        - pageSize
+        - totalElements
+        - totalPages
+    HubUserSortFieldEnumV1:
+      type: string
+      description: >
+        Sortable fields of the user-management table. The active role code is filterable but not
+        sortable, as it is resolved through a separate role-assignment lookup.
+      enum:
+        - HUB_USER_ID
+        - FULL_NAME
+        - EMAIL
+        - STATUS
+    HubUserFilterFieldEnumV1:
+      type: string
+      description: Filterable fields of the user-management table.
+      enum:
+        - HUB_USER_ID
+        - FULL_NAME
+        - EMAIL
+        - STATUS
+        - ROLE_CODE
+    HubUserSortFieldV1:
+      type: object
+      description: Single-field sort directive for the user search.
+      properties:
+        field:
+          $ref: '#/components/schemas/HubUserSortFieldEnumV1'
+        direction:
+          $ref: '#/components/schemas/DirectionEnumV1'
+      required:
+        - field
+    HubUserFilterFieldV1:
+      type: object
+      description: Single-field filter directive for the user search.
+      properties:
+        field:
+          $ref: '#/components/schemas/HubUserFilterFieldEnumV1'
+        value:
+          type: string
+          description: The value matched against the field using the given operation.
+        operation:
+          $ref: '#/components/schemas/FilterOperationEnumV1'
+        caseSensitive:
+          type: boolean
+          description: Whether the match is case-sensitive.
+          default: false
+      required:
+        - field
+        - value
+        - operation
+    HubUserSearchRequestV1:
+      type: object
+      description: Filter and sort criteria for searching Hub users.
+      properties:
+        filters:
+          type: array
+          description: Filters applied additively (AND) to the user search.
+          items:
+            $ref: '#/components/schemas/HubUserFilterFieldV1'
+        sorting:
+          $ref: '#/components/schemas/HubUserSortFieldV1'
+    HubUserPageResponseV1:
+      description: A page of Hub user rows for the user-management table.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The Hub user rows on this page.
+              items:
+                $ref: '#/components/schemas/HubUserSummaryV1'
+          required:
+            - content
+    AgencySortFieldEnumV1:
+      type: string
+      description: Sortable fields of the agency list.
+      enum:
+        - ID
+        - NAME
+        - EMAIL
+        - STATUS
+        - CLIENTS_COUNT
+    AgencyFilterFieldEnumV1:
+      type: string
+      description: Filterable fields of the agency list.
+      enum:
+        - NAME
+        - EMAIL
+        - STATUS
+    AgencySortFieldV1:
+      type: object
+      description: Single-field sort directive for the agency search.
+      properties:
+        field:
+          $ref: '#/components/schemas/AgencySortFieldEnumV1'
+        direction:
+          $ref: '#/components/schemas/DirectionEnumV1'
+      required:
+        - field
+    AgencyFilterFieldV1:
+      type: object
+      description: Single-field filter directive for the agency search.
+      properties:
+        field:
+          $ref: '#/components/schemas/AgencyFilterFieldEnumV1'
+        value:
+          type: string
+          description: The value matched against the field using the given operation.
+        operation:
+          $ref: '#/components/schemas/FilterOperationEnumV1'
+        caseSensitive:
+          type: boolean
+          description: Whether the match is case-sensitive.
+          default: false
+      required:
+        - field
+        - value
+        - operation
+    AgencySearchRequestV1:
+      type: object
+      description: Filter and sort criteria for searching agencies.
+      properties:
+        filters:
+          type: array
+          description: Filters applied additively (AND) to the agency search.
+          items:
+            $ref: '#/components/schemas/AgencyFilterFieldV1'
+        sorting:
+          $ref: '#/components/schemas/AgencySortFieldV1'
+        search:
+          type: string
+          description: >
+            Optional global search term. The server matches agencies whose name contains the term
+            (case-insensitive) OR that have at least one client (advertiser) whose name contains
+            the term. Blank or omitted values disable global search and behave as before.
+            Combined additively (AND) with any explicit `filters` and with the caller's RBAC scope.
+          maxLength: 200
+        includeClients:
+          type: boolean
+          description: >
+            When true, each returned agency is populated with its clients (id and name) so the
+            navigation sidebar can render client sub-rows without a follow-up request. Omitted or
+            false for list/grid views that only need the client count. When `search` matches a
+            client name only (the agency name does not match), the embedded client list contains
+            only the clients whose names match the term; otherwise the first page of clients is
+            embedded as usual.
+    AgencyPageResponseV1:
+      description: A page of agencies sourced from BigQuery.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The agencies on this page.
+              items:
+                $ref: '#/components/schemas/AgencyV1'
+          required:
+            - content
+    ClientSortFieldEnumV1:
+      type: string
+      description: Sortable fields of the client list.
+      enum:
+        - ID
+        - NAME
+        - AGENCY_ID
+        - EMAIL
+        - STATUS
+    ClientFilterFieldEnumV1:
+      type: string
+      description: Filterable fields of the client list.
+      enum:
+        - NAME
+        - EMAIL
+        - STATUS
+        - AGENCY_ID
+    ClientSortFieldV1:
+      type: object
+      description: Single-field sort directive for the client search.
+      properties:
+        field:
+          $ref: '#/components/schemas/ClientSortFieldEnumV1'
+        direction:
+          $ref: '#/components/schemas/DirectionEnumV1'
+      required:
+        - field
+    ClientFilterFieldV1:
+      type: object
+      description: Single-field filter directive for the client search.
+      properties:
+        field:
+          $ref: '#/components/schemas/ClientFilterFieldEnumV1'
+        value:
+          type: string
+          description: The value matched against the field using the given operation.
+        operation:
+          $ref: '#/components/schemas/FilterOperationEnumV1'
+        caseSensitive:
+          type: boolean
+          description: Whether the match is case-sensitive.
+          default: false
+      required:
+        - field
+        - value
+        - operation
+    ClientSearchRequestV1:
+      type: object
+      description: Filter and sort criteria for searching clients.
+      properties:
+        filters:
+          type: array
+          description: Filters applied additively (AND) to the client search.
+          items:
+            $ref: '#/components/schemas/ClientFilterFieldV1'
+        sorting:
+          $ref: '#/components/schemas/ClientSortFieldV1'
+    ClientPageResponseV1:
+      description: A page of clients sourced from BigQuery.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The clients on this page.
+              items:
+                $ref: '#/components/schemas/ClientV1'
+          required:
+            - content
+    CampaignV1:
+      type: object
+      description: Representation of a campaign sourced from BigQuery.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: BigQuery campaign id.
+        name:
+          type: string
+          description: Campaign name.
+        client_id:
+          type: integer
+          format: int64
+          description: BigQuery advertiser/client id, or null.
+        client_name:
+          type: string
+          description: Advertiser/client name, or null.
+        agency_id:
+          type: integer
+          format: int64
+          description: BigQuery agency id, or null.
+        agency_name:
+          type: string
+          description: Agency name, or null.
+        status:
+          type: string
+          description: Campaign status (e.g. Finished, To Be Launched).
+        start_date:
+          type: string
+          description: Campaign flight start date (ISO format), or null.
+        end_date:
+          type: string
+          description: Campaign flight end date (ISO format), or null.
+        budget:
+          type: number
+          format: double
+          description: Total campaign budget, or null.
+        channels:
+          type: array
+          description: Distinct media tactics / channels.
+          items:
+            type: string
+        industry_vertical:
+          type: string
+          description: The client's industry / vertical (e.g. Automotive), or null.
+        line_item_count:
+          type: integer
+          format: int64
+          description: The campaign's distinct line-item count, or null.
+      required:
+        - id
+        - name
+    InsertionOrderV1:
+      type: object
+      description: >
+        One real NetSuite insertion order and its line items, sourced from the IO Lines table
+        (US-009…011).
+      properties:
+        order_id:
+          type: integer
+          format: int64
+          description: BigQuery order id - the insertion order's identity.
+        order_number:
+          type: string
+          description: The order's human-readable number, or null.
+        status:
+          type: string
+          description: The order's real NetSuite status (e.g. Live, Finished), or null.
+        start_date:
+          type: string
+          description: The order's flight start date (ISO format), or null.
+        end_date:
+          type: string
+          description: The order's flight end date (ISO format), or null.
+        budget:
+          type: number
+          format: double
+          description: The order's own budget, read once per order - never a per-row sum, or null.
+        media_tactics:
+          type: array
+          description: The order's line items' distinct media tactics, in first-seen order.
+          items:
+            type: string
+        line_items:
+          type: array
+          description: The order's real line items, in line_item_id order.
+          items:
+            $ref: '#/components/schemas/InsertionOrderLineItemV1'
+      required:
+        - order_id
+    InsertionOrderLineItemV1:
+      type: object
+      description: >
+        One real NetSuite line item within an insertion order. There is no per-line-item status in the
+        source - a line item's status is its parent order's.
+      properties:
+        line_item_id:
+          type: integer
+          format: int64
+          description: BigQuery line item id - the line item's identity.
+        description:
+          type: string
+          description: The line item's free-form description, or null.
+        media_tactic:
+          type: string
+          description: The line item's media tactic / channel, or null.
+        rate_type:
+          type: string
+          description: The line item's rate type, or null.
+        budget:
+          type: number
+          format: double
+          description: The line item's own tactic budget, or null.
+        start_date:
+          type: string
+          description: The line item's flight start date (ISO format), or null.
+        end_date:
+          type: string
+          description: The line item's flight end date (ISO format), or null.
+      required:
+        - line_item_id
+    ReportRowFilterFieldEnumV1:
+      type: string
+      description: >
+        The report-rows table's dimension vocabulary - the columns a row can be filtered by and grouped
+        by (see ReportRowSearchRequestV1's `filters` and `groupBy`). Metrics are absent: they are
+        aggregated rather than grouped, and are only sortable (see ReportRowSortFieldEnumV1).
+      enum:
+        - DATE
+        - PLATFORM
+        - ACCOUNT
+        - ACCOUNT_ID
+        - LINE_ITEM_NAME
+        - LINE_ITEM_ID
+        - INSERTION_ORDER_NAME
+        - INSERTION_ORDER_ID
+        - CAMPAIGN_CONSTRUCTED_NAME
+        - CAMPAIGN_CONSTRUCTED_ID
+        - AGENCY_ID
+        - CLIENT
+        - INDUSTRY_CODE
+        - CAMPAIGN_NAME
+        - CHANNEL
+        - TACTIC
+        - BUYING_MODEL
+        - AUDIENCE
+        - UNIQUE_LINE_ITEM_ID
+        - OTHER
+        - GEO
+        - CREATIVE_TAG
+        - MESSAGE
+        - KEYWORD_GROUP
+        - FLIGHT_IDENTIFIER
+        - LANGUAGE
+        - ADJUSTED_METRICS
+        - RATE_TYPE
+        - LINE_ITEM_DESCRIPTION
+        - CREATED_AT
+        - CREATED_BY
+        - LAST_MODIFIED_AT
+        - LAST_MODIFIED_BY
+    ReportRowFilterV1:
+      type: object
+      description: >
+        Multi-value filter directive for one report-rows dimension - a row matches when its value for
+        `field` is any of `values` (IN). Distinct from the other entities' single-value filter shape
+        since the report-rows filter picker lets a user select several values for the same dimension at
+        once (see the mockup's checkbox-list filter popovers).
+      properties:
+        field:
+          $ref: '#/components/schemas/ReportRowFilterFieldEnumV1'
+        values:
+          type: array
+          items:
+            type: string
+          description: The dimension's values to match - a row matches when its value is any of these.
+      required:
+        - field
+        - values
+    ConversionRowSearchRequestV1:
+      type: object
+      description: >
+        The conversion-date window for the conversions template. A window and nothing else: the
+        conversions read is scoped by campaign and date only, deliberately. The report's dimension
+        filters describe delivery rows, and the two marts are filled by different pipelines, so a
+        channel or audience filter could exclude the conversions row belonging to a delivery row the
+        same filter keeps.
+      properties:
+        dateFrom:
+          type: string
+          format: date
+          description: Inclusive first conversion date to include, as yyyy-MM-dd. Omit for open-ended.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last conversion date to include, as yyyy-MM-dd. Omit for open-ended.
+    ConversionBreakdownRequestV1:
+      type: object
+      description: >
+        Names the report row whose Conversions cell is being opened. These are the columns the report
+        joins conversions on, which is why they and not the row's other columns identify it. `channel`
+        is not a filter: it decides whether level 3 narrows the match at all, since the report drops
+        level 3 for channels that report conversions against the campaign.
+      properties:
+        date:
+          type: string
+          format: date
+          description: The report row's date, as yyyy-MM-dd.
+        levelOneName:
+          type: string
+          description: The report row's level-1 constructed name.
+        levelThreeName:
+          type: string
+          description: The report row's level-3 constructed name; omit when the row has none.
+        channel:
+          type: string
+          description: The report row's channel.
+      required:
+        - date
+        - levelOneName
+    ConversionBreakdownV1:
+      type: object
+      description: The conversions rows behind one report row's Conversions cell.
+      properties:
+        rows:
+          type: array
+          description: One row per conversion action, ordered by action. Their figures sum to the cell.
+          items:
+            $ref: '#/components/schemas/ConversionBreakdownRowV1'
+      required:
+        - rows
+    ConversionBreakdownRowV1:
+      type: object
+      description: >
+        One conversions row: what identifies it, what it is called, and the figure. The first six
+        properties are its identity - the same key an edited row is matched back by - and the names are
+        there to be read, never to match on.
+      properties:
+        date:
+          type: string
+          description: The conversion date, as the mart stores it.
+        lineItemId:
+          type: string
+          description: The level-1 constructed id.
+        insertionOrderId:
+          type: string
+          description: The level-2 constructed id.
+        creativeId:
+          type: string
+          description: The level-3 constructed id.
+        conversionAction:
+          type: string
+          description: The advertiser's own name for what was counted.
+        conversionCategory:
+          type: string
+          description: The platform's classification of that action.
+        lineItemName:
+          type: string
+          description: The level-1 constructed name.
+        creativeName:
+          type: string
+          description: The level-3 constructed name.
+        platform:
+          type: string
+          description: The platform the conversions were reported by.
+        conversions:
+          type: number
+          format: double
+          description: The conversions counted for this action.
+      required:
+        - date
+    ConversionAdjustmentRequestV1:
+      type: object
+      description: >
+        Conversions rows edited in place. Each carries the identity it was read with and the figure the
+        user wants; rows whose figure is unchanged may be sent and are skipped rather than rewritten.
+      properties:
+        rows:
+          type: array
+          description: The edited rows.
+          items:
+            $ref: '#/components/schemas/ConversionAdjustmentRowV1'
+      required:
+        - rows
+    ConversionAdjustmentRowV1:
+      type: object
+      description: >
+        One edited conversions row: the key it is matched by, and the new figure. Only the key is sent
+        back, not the names - the names follow from the ids, and the values actually stored are taken
+        from the matched mart row, never from the request.
+      properties:
+        date:
+          type: string
+          description: The conversion date, as returned by the breakdown.
+        lineItemId:
+          type: string
+          description: The level-1 constructed id.
+        insertionOrderId:
+          type: string
+          description: The level-2 constructed id.
+        creativeId:
+          type: string
+          description: The level-3 constructed id.
+        conversionAction:
+          type: string
+          description: The advertiser's own name for what was counted.
+        conversionCategory:
+          type: string
+          description: The platform's classification of that action.
+        conversions:
+          type: number
+          format: double
+          description: The figure to store for this row.
+      required:
+        - date
+        - conversions
+    ReportRowSearchRequestV1:
+      type: object
+      description: Filter and sort criteria for the report-rows table.
+      properties:
+        filters:
+          type: array
+          description: >
+            Multi-value dimension filters applied additively (AND); within one filter, values match by
+            OR (IN).
+          items:
+            $ref: '#/components/schemas/ReportRowFilterV1'
+        sortField:
+          $ref: '#/components/schemas/ReportRowSortFieldEnumV1'
+        sortDirection:
+          $ref: '#/components/schemas/DirectionEnumV1'
+        groupBy:
+          type: array
+          description: >
+            Dimensions to group the rows by, in display order - one row per distinct combination, with
+            every metric aggregated over it (counts and money summed, stored rates averaged). Empty or
+            omitted returns the raw, ungrouped rows. Dimensions outside this list are not selected and
+            come back null. Honored by the export too, so a current-view download matches the table
+            row for row; ignored only by the bulk-adjustment template, whose rows must stay raw to be
+            matched back on upload. Distinct from `dimensions` below, which only narrows an export's
+            columns.
+          items:
+            $ref: '#/components/schemas/ReportRowFilterFieldEnumV1'
+        dateFrom:
+          type: string
+          format: date
+          description: >
+            Inclusive first delivery date to include, as yyyy-MM-dd. Omit for open-ended. A window
+            rather than a `filters` entry because dates do not suit naming every value to keep: a
+            quarter would be ninety of them, and the distinct-value list a picker draws from is capped,
+            so a long flight could not offer them all.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last delivery date to include, as yyyy-MM-dd. Omit for open-ended.
+        dimensions:
+          type: array
+          description: Optional dimension column ids to include in a current-view .xlsx export.
+          items:
+            type: string
+        metrics:
+          type: array
+          description: Optional metric column ids to include in a current-view .xlsx export.
+          items:
+            type: string
+    ReportRowSortFieldEnumV1:
+      type: string
+      description: >
+        Sortable dimensions and metrics of the report-rows table. CPM/CTR/AVCR sort by the same
+        derived ratio the response's per-row metric values are computed from, not a stored column.
+      enum:
+        - DATE
+        - PLATFORM
+        - ACCOUNT
+        - ACCOUNT_ID
+        - LINE_ITEM_NAME
+        - LINE_ITEM_ID
+        - INSERTION_ORDER_NAME
+        - INSERTION_ORDER_ID
+        - CAMPAIGN_CONSTRUCTED_NAME
+        - CAMPAIGN_CONSTRUCTED_ID
+        - AGENCY_ID
+        - CLIENT
+        - INDUSTRY_CODE
+        - CAMPAIGN_NAME
+        - CHANNEL
+        - TACTIC
+        - BUYING_MODEL
+        - AUDIENCE
+        - UNIQUE_LINE_ITEM_ID
+        - OTHER
+        - GEO
+        - CREATIVE_TAG
+        - MESSAGE
+        - KEYWORD_GROUP
+        - FLIGHT_IDENTIFIER
+        - LANGUAGE
+        - ADJUSTED_METRICS
+        - RATE_TYPE
+        - LINE_ITEM_DESCRIPTION
+        - CREATED_AT
+        - CREATED_BY
+        - LAST_MODIFIED_AT
+        - LAST_MODIFIED_BY
+        - IMPRESSIONS
+        - CLICKS
+        - SPEND
+        - STARTS
+        - FIRST_QUARTILES
+        - MIDPOINTS
+        - THIRD_QUARTILES
+        - COMPLETES
+        - CONVERSIONS
+        - POST_CLICK_CONVERSIONS
+        - POST_VIEW_CONVERSIONS
+        - DYNAMIC_COST
+        - LINK_CLICKS
+        - DYNAMIC_RATE
+        - AVG_DYNAMIC_RATE_BY_DATE_TACTIC
+        - CPM
+        - CPC
+        - CPV
+        - IVT
+        - CTR
+        - AVCR
+    ReportRowV1:
+      type: object
+      description: >
+        One per-day, per-line-item delivery/actuals row sourced from the
+        platform_mart_adjustments_view_op_hub BigQuery view.
+      properties:
+        date:
+          type: string
+          description: Delivery date (ISO format), or null.
+        platform:
+          type: string
+          description: DSP/ad-server platform, or null.
+        account:
+          type: string
+          description: Platform account name, or null.
+        account_id:
+          type: string
+          description: Platform account id, or null.
+        line_item_name:
+          type: string
+          description: Line-item-level constructed name, or null.
+        line_item_id:
+          type: string
+          description: Line-item-level constructed id, or null.
+        insertion_order_name:
+          type: string
+          description: Insertion-order-level constructed name, or null.
+        insertion_order_id:
+          type: string
+          description: Insertion-order-level constructed id, or null.
+        campaign_constructed_name:
+          type: string
+          description: Campaign-level constructed name, or null.
+        campaign_constructed_id:
+          type: string
+          description: Campaign-level constructed id, or null.
+        agency_id:
+          type: string
+          description: Naming-convention agency id, or null.
+        client:
+          type: string
+          description: Naming-convention client name, or null.
+        industry_code:
+          type: string
+          description: Naming-convention industry code, or null.
+        campaign_name:
+          type: string
+          description: Naming-convention campaign name, or null.
+        channel:
+          type: string
+          description: Naming-convention channel, or null.
+        tactic:
+          type: string
+          description: Naming-convention tactic, or null.
+        buying_model:
+          type: string
+          description: Naming-convention buying model, or null.
+        audience:
+          type: string
+          description: Naming-convention audience, or null.
+        unique_line_item_id:
+          type: string
+          description: Naming-convention unique line item id, or null.
+        other:
+          type: string
+          description: Naming-convention "other" free-form segment, or null.
+        geo:
+          type: string
+          description: Naming-convention geo, or null.
+        creative_tag:
+          type: string
+          description: Naming-convention creative tag, or null.
+        message:
+          type: string
+          description: Naming-convention message, or null.
+        keyword_group:
+          type: string
+          description: Naming-convention keyword group, or null.
+        flight_identifier:
+          type: string
+          description: Naming-convention flight identifier, or null.
+        language:
+          type: string
+          description: Naming-convention language, or null.
+        impressions:
+          type: integer
+          format: int64
+          description: Delivered impressions, or null.
+        clicks:
+          type: integer
+          format: int64
+          description: Delivered clicks, or null.
+        spend:
+          type: number
+          format: double
+          description: Delivered spend, or null.
+        starts:
+          type: integer
+          format: int64
+          description: Video starts, or null.
+        first_quartiles:
+          type: integer
+          format: int64
+          description: Video first-quartile completions, or null.
+        midpoints:
+          type: integer
+          format: int64
+          description: Video midpoint completions, or null.
+        third_quartiles:
+          type: integer
+          format: int64
+          description: Video third-quartile completions, or null.
+        completes:
+          type: integer
+          format: int64
+          description: Video completions, or null.
+        conversions:
+          type: number
+          format: double
+          description: Conversions, or null.
+        post_click_conversions:
+          type: number
+          format: double
+          description: Post-click conversions, or null.
+        post_view_conversions:
+          type: number
+          format: double
+          description: Post-view conversions, or null.
+        dynamic_cost:
+          type: number
+          format: double
+          description: Rate-card (dynamic) cost, or null.
+        link_clicks:
+          type: integer
+          format: int64
+          description: Link clicks, or null.
+        adjusted_metrics:
+          type: string
+          description: Marker of which metrics were manually adjusted, or null.
+        created_at:
+          type: string
+          description: Row creation timestamp, or null.
+        created_by:
+          type: string
+          description: Row creator, or null.
+        last_modified_at:
+          type: string
+          description: Row last-modified timestamp, or null.
+        last_modified_by:
+          type: string
+          description: Row last modifier, or null.
+        rate_type:
+          type: string
+          description: Rate type (e.g. CPM), or null.
+        dynamic_rate:
+          type: number
+          format: double
+          description: Rate-card (dynamic) rate, or null.
+        avg_dynamic_rate_by_date_tactic:
+          type: number
+          format: double
+          description: Average dynamic rate by date and tactic, or null.
+        line_item_description:
+          type: string
+          description: Free-form line item description, or null.
+        ivt:
+          type: number
+          format: double
+          description: >
+            Modelled invalid traffic, as a count of impressions - not measured, and null on channels that report their own (Meta, TikTok, the search channels) or have no click to reason from (CTV, DOOH, Live Sports). Derived from a ~5% benchmark spread deterministically across ten coefficients, so the same row always yields the same figure.
+        cpm:
+          type: number
+          format: double
+          description: >
+            Client cost per thousand impressions, computed server-side so one definition serves the table, the export and the totals. Cost here is dynamic_cost with Added Value delivery free, matching the client-facing reporting tool. Null where the row's channel and buying model do not price impressions - a CPM on a search line is arithmetic, not information - and such a row contributes to no grouped CPM either.
+        cpc:
+          type: number
+          format: double
+          description: Client cost per click, on the same cost basis as cpm. Null off a clickable channel (CTV, DOOH, Live Sports).
+        cpv:
+          type: number
+          format: double
+          description: >
+            Client cost per completed view, on the same cost basis as cpm. Completions, not starts - the rate card's own CPV prices a start, this prices a view that finished. Null off a viewable channel.
+        ctr:
+          type: number
+          format: double
+          description: Click-through rate as a percentage of impressions. Null off a clickable channel.
+        avcr:
+          type: number
+          format: double
+          description: Completion rate as a percentage of impressions. Null off a viewable channel.
+    ReportRowAdjustmentV1:
+      type: object
+      description: >
+        One report-row adjustment - an override of an existing row (added=false, changing at least one
+        editable metric) or a manually-added row (added=true). Derived ratios (cpm/ctr/avcr) are not
+        stored anywhere and so have no field here, and neither are rate_type/dynamic_rate/
+        avg_dynamic_rate_by_date_tactic/line_item_description - the write table has no columns for them
+        (only the read view does); client/campaign identity is copied from the report row being edited
+        so mart naming mismatches do not get overwritten. The created/last-modified stamps are set by the
+        server, never the client.
+      properties:
+        added:
+          type: boolean
+          description: True for a manually-added row, false for an override of an existing row.
+        date:
+          type: string
+          description: Delivery date (ISO format), or null.
+        platform:
+          type: string
+          description: DSP/ad-server platform, or null.
+        account:
+          type: string
+          description: Platform account name, or null.
+        account_id:
+          type: string
+          description: Platform account id, or null.
+        line_item_name:
+          type: string
+          description: Line-item-level constructed name, or null.
+        line_item_id:
+          type: string
+          description: Line-item-level constructed id, or null.
+        insertion_order_name:
+          type: string
+          description: Insertion-order-level constructed name, or null.
+        insertion_order_id:
+          type: string
+          description: Insertion-order-level constructed id, or null.
+        campaign_constructed_name:
+          type: string
+          description: Campaign-level constructed name, or null.
+        campaign_constructed_id:
+          type: string
+          description: Campaign-level constructed id, or null.
+        agency_id:
+          type: string
+          description: Naming-convention agency id, or null.
+        client:
+          type: string
+          description: Naming-convention client name from the report row, or null.
+        industry_code:
+          type: string
+          description: Naming-convention industry code, or null.
+        campaign_name:
+          type: string
+          description: Naming-convention campaign name from the report row, or null.
+        channel:
+          type: string
+          description: Naming-convention channel, or null.
+        tactic:
+          type: string
+          description: Naming-convention tactic, or null.
+        buying_model:
+          type: string
+          description: Naming-convention buying model, or null.
+        audience:
+          type: string
+          description: Naming-convention audience, or null.
+        unique_line_item_id:
+          type: string
+          description: Naming-convention unique line item id, or null.
+        other:
+          type: string
+          description: Naming-convention "other" free-form segment, or null.
+        geo:
+          type: string
+          description: Naming-convention geo, or null.
+        creative_tag:
+          type: string
+          description: Naming-convention creative tag, or null.
+        message:
+          type: string
+          description: Naming-convention message, or null.
+        keyword_group:
+          type: string
+          description: Naming-convention keyword group, or null.
+        flight_identifier:
+          type: string
+          description: Naming-convention flight identifier, or null.
+        language:
+          type: string
+          description: Naming-convention language, or null.
+        impressions:
+          type: integer
+          format: int64
+          description: Delivered impressions, or null when not adjusted.
+        clicks:
+          type: integer
+          format: int64
+          description: Delivered clicks, or null when not adjusted.
+        spend:
+          type: number
+          format: double
+          description: Delivered spend, or null when not adjusted.
+        starts:
+          type: integer
+          format: int64
+          description: Video starts, or null when not adjusted.
+        first_quartiles:
+          type: integer
+          format: int64
+          description: Video first-quartile completions, or null when not adjusted.
+        midpoints:
+          type: integer
+          format: int64
+          description: Video midpoint completions, or null when not adjusted.
+        third_quartiles:
+          type: integer
+          format: int64
+          description: Video third-quartile completions, or null when not adjusted.
+        completes:
+          type: integer
+          format: int64
+          description: Video completions, or null when not adjusted.
+        dynamic_cost:
+          type: number
+          format: double
+          description: Rate-card (dynamic) cost, or null when not adjusted.
+        link_clicks:
+          type: integer
+          format: int64
+          description: Link clicks, or null when not adjusted.
+        adjusted_metrics:
+          type: string
+          description: Marker of which metric names were changed (comma-joined), or null.
+      required:
+        - added
+    ReportRowAdjustmentsRequestV1:
+      type: object
+      description: A batch of report-row adjustments to append - a single inline edit is a batch of one.
+      properties:
+        adjustments:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ReportRowAdjustmentV1'
+      required:
+        - adjustments
+    ReportRowBulkAdjustmentResultV1:
+      type: object
+      description: The outcome of applying an uploaded bulk-adjustment spreadsheet.
+      properties:
+        applied:
+          type: integer
+          format: int32
+          description: The number of override rows written (0 when the upload changed nothing).
+      required:
+        - applied
+    ReportRowTotalsV1:
+      type: object
+      description: >
+        Metric totals across every report row matching the query - always computed over the full
+        filtered dataset, not just the current page.
+      properties:
+        impressions:
+          type: integer
+          format: int64
+          description: Summed delivered impressions, or null.
+        clicks:
+          type: integer
+          format: int64
+          description: Summed delivered clicks, or null.
+        spend:
+          type: number
+          format: double
+          description: Summed delivered spend, or null.
+        starts:
+          type: integer
+          format: int64
+          description: Summed video starts, or null.
+        first_quartiles:
+          type: integer
+          format: int64
+          description: Summed video first-quartile completions, or null.
+        midpoints:
+          type: integer
+          format: int64
+          description: Summed video midpoint completions, or null.
+        third_quartiles:
+          type: integer
+          format: int64
+          description: Summed video third-quartile completions, or null.
+        completes:
+          type: integer
+          format: int64
+          description: Summed video completions, or null.
+        conversions:
+          type: number
+          format: double
+          description: Summed conversions, or null.
+        post_click_conversions:
+          type: number
+          format: double
+          description: Summed post-click conversions, or null.
+        post_view_conversions:
+          type: number
+          format: double
+          description: Summed post-view conversions, or null.
+        dynamic_cost:
+          type: number
+          format: double
+          description: Summed rate-card (dynamic) cost, or null.
+        link_clicks:
+          type: integer
+          format: int64
+          description: Summed link clicks, or null.
+        dynamic_rate:
+          type: number
+          format: double
+          description: >
+            Rate-card (dynamic) rate over the whole set: summed dynamic cost per summed billable unit
+            (thousands of impressions on CPM, clicks on CPC, starts on CPV), not an average of the
+            rows' own rates. Null when the set has no billable units.
+        avg_dynamic_rate_by_date_tactic:
+          type: number
+          format: double
+          description: >
+            "Average dynamic rate by date/tactic", weighted by each row's billable units, or null.
+        cpm:
+          type: number
+          format: double
+          description: Derived spend / impressions * 1000, or null when impressions is zero.
+        ivt:
+          type: number
+          format: double
+          description: >
+            Summed modelled invalid traffic, as a count of impressions - not measured, and null on channels that report their own (Meta, TikTok, the search channels) or have no click to reason from (CTV, DOOH, Live Sports). Derived from a ~5% benchmark spread deterministically across ten coefficients, so the same row always yields the same figure.
+        cpc:
+          type: number
+          format: double
+          description: Derived spend / clicks, or null when clicks is zero.
+        cpv:
+          type: number
+          format: double
+          description: >
+            Derived spend / starts, or null when starts is zero. A view is counted as a start, the
+            same denominator the source view's own CPV rate uses.
+        ctr:
+          type: number
+          format: double
+          description: Derived clicks / impressions * 100, or null when impressions is zero.
+        avcr:
+          type: number
+          format: double
+          description: Derived completes / impressions * 100, or null when impressions is zero.
+    ReportRowsPageResponseV1:
+      type: object
+      description: >
+        A page of report rows plus full-dataset aggregates (totals, date range, row count, distinct
+        line item count) that stay stable while more pages load. Carries no total *page* count - unlike
+        PageResponseV1-based pages, hasNext is derived from fetching one row past the page size, so
+        paging further is cheap regardless of how large the result set is. total_rows is reported
+        alongside it as a label, from a window function on the page's own query.
+      properties:
+        pageNumber:
+          type: integer
+          format: int32
+          description: One-based number of the returned page.
+        pageSize:
+          type: integer
+          format: int32
+          description: Maximum number of items per page.
+        hasNext:
+          type: boolean
+          description: Whether at least one more row exists past this page.
+        content:
+          type: array
+          description: The report rows on this page.
+          items:
+            $ref: '#/components/schemas/ReportRowV1'
+        totals:
+          $ref: '#/components/schemas/ReportRowTotalsV1'
+        min_date:
+          type: string
+          description: Earliest date across every matching row (ISO format), or null.
+        max_date:
+          type: string
+          description: Latest date across every matching row (ISO format), or null.
+        total_rows:
+          type: integer
+          format: int64
+          description: >
+            How many rows the query matches in total - the number of groups when the request groups by
+            dimensions. An aggregate for the table to label itself with, not a paging mechanism: paging
+            stays driven by hasNext, and this rides on the data query as a window function rather than
+            costing a count job of its own.
+        distinct_line_item_count:
+          type: integer
+          format: int64
+          description: Number of distinct line items across every matching row.
+      required:
+        - pageNumber
+        - pageSize
+        - hasNext
+        - content
+        - totals
+        - distinct_line_item_count
+    ReportViewTypeEnumV1:
+      type: string
+      description: The report type. Only "basic" is supported today.
+      enum:
+        - basic
+    ReportViewStatusEnumV1:
+      type: string
+      description: Whether the report is an unsaved draft or a saved report.
+      enum:
+        - draft
+        - saved
+    ReportViewV1:
+      type: object
+      description: A saved (or draft) report definition scoped to one campaign (US-022/023).
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The report view id.
+        campaignId:
+          type: integer
+          format: int64
+          description: The id of the campaign this report belongs to.
+        name:
+          type: string
+          maxLength: 50
+          description: The report name, unique within the campaign.
+        type:
+          $ref: '#/components/schemas/ReportViewTypeEnumV1'
+        status:
+          $ref: '#/components/schemas/ReportViewStatusEnumV1'
+        note:
+          type: string
+          description: An optional free-text note.
+        created:
+          type: string
+          description: ISO-8601 timestamp when the report was created.
+        edited:
+          type: string
+          description: ISO-8601 timestamp when the report was last edited, or null if never edited since creation.
+        dimensions:
+          type: array
+          description: The selected dimension ids, in display order.
+          items:
+            type: string
+        metrics:
+          type: array
+          description: The selected metric ids, in display order.
+          items:
+            type: string
+        filters:
+          type: array
+          description: The saved per-dimension multi-value filters (US-029); empty when none.
+          items:
+            $ref: '#/components/schemas/ReportRowFilterV1'
+        columnOrder:
+          type: array
+          description: >
+            Column ids in the order they should be shown, once someone has dragged them. Absent means no
+            preference was expressed and the product's canonical order applies - which is not the same as
+            the order of `dimensions`/`metrics`, since those carry the order the columns were selected in.
+            Ids not listed here fall in behind the ones that are, in canonical order.
+          items:
+            type: string
+      required:
+        - id
+        - campaignId
+        - name
+        - type
+        - status
+        - created
+        - dimensions
+        - metrics
+    ReportViewUpsertV1:
+      type: object
+      description: >
+        Data to create or fully replace a report view. The campaign comes from the path; id and
+        created/edited timestamps are server-owned.
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          description: The report name; validated non-empty, at most 50 characters, and unique within the campaign.
+        type:
+          $ref: '#/components/schemas/ReportViewTypeEnumV1'
+        status:
+          $ref: '#/components/schemas/ReportViewStatusEnumV1'
+        note:
+          type: string
+          description: An optional free-text note.
+        dimensions:
+          type: array
+          items:
+            type: string
+        metrics:
+          type: array
+          items:
+            type: string
+        filters:
+          type: array
+          description: The saved per-dimension multi-value filters (US-029); empty when none.
+          items:
+            $ref: '#/components/schemas/ReportRowFilterV1'
+        columnOrder:
+          type: array
+          description: >
+            Column ids in the order they should be shown, once someone has dragged them. Absent means no
+            preference was expressed and the product's canonical order applies - which is not the same as
+            the order of `dimensions`/`metrics`, since those carry the order the columns were selected in.
+            Ids not listed here fall in behind the ones that are, in canonical order.
+          items:
+            type: string
+      required:
+        - name
+        - type
+        - status
+        - dimensions
+        - metrics
+    ReportViewPageResponseV1:
+      description: A page of saved report views.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The report views on this page.
+              items:
+                $ref: '#/components/schemas/ReportViewV1'
+          required:
+            - content
+    DashboardTypeEnumV1:
+      type: string
+      description: >
+        The dashboard type, which is also the schema of its data source: it decides which dimensions and
+        metrics the BigQuery table carries. The other types the product plans - Conversions, Geo, Keywords,
+        Business outcomes, Live Sports, Device, Genre, Demographics - are listed in the UI as coming soon
+        (US-016) and deliberately absent here: a type with no schema behind it would let a dashboard be
+        created that nothing can write.
+      enum:
+        - basic
+    DashboardStatusEnumV1:
+      type: string
+      description: >
+        Whether a data source exists for the dashboard. A dashboard is a draft until its BigQuery table has
+        been written and live once it has; this is a reading of `sourceTable`, not an independent state.
+      enum:
+        - draft
+        - live
+    DashboardV1:
+      type: object
+      description: A dashboard definition scoped to one campaign, and the BigQuery data source it points at (US-017).
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The dashboard id.
+        campaignId:
+          type: integer
+          format: int64
+          description: The id of the campaign this dashboard belongs to.
+        name:
+          type: string
+          maxLength: 50
+          description: The dashboard name, unique within the campaign.
+        type:
+          $ref: '#/components/schemas/DashboardTypeEnumV1'
+        status:
+          $ref: '#/components/schemas/DashboardStatusEnumV1'
+        optionalColumns:
+          type: array
+          description: >
+            Ids of the type's optional columns the user kept - exactly those, so an empty list means none of
+            them. Only the optional ones appear: the mandatory columns are the type's own contract, so
+            listing them would let a response disagree with the schema the data source is written with.
+          items:
+            type: string
+        columnOrder:
+          type: array
+          description: >
+            Column ids in the order the user arranged the preview, or absent while they have not
+            rearranged it. This is how the preview is read, not what the data source contains: the written
+            table always carries the type's own column order, because that is what the ClicData template
+            binds to. Absent rather than a full default list, so a column the order does not mention can
+            fall in behind the ones it does.
+          items:
+            type: string
+        filters:
+          type: array
+          description: Filters saved with the dashboard and applied to preview rows and ClicData source writes.
+          items:
+            $ref: '#/components/schemas/DashboardDatasetFilterV1'
+        dateFrom:
+          type: string
+          format: date
+          description: Inclusive first dataset date saved with the dashboard; absent means open-ended.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last dataset date saved with the dashboard; absent means open-ended.
+        sourceTable:
+          type: string
+          description: >
+            The fully-qualified BigQuery table holding the data source, exactly as it must be typed into
+            ClicData; absent while the dashboard is a draft.
+        sourceRowCount:
+          type: integer
+          format: int64
+          description: How many rows the last write put in `sourceTable`; absent while the dashboard is a draft.
+        sourceCreated:
+          type: string
+          description: ISO-8601 timestamp of the last data-source write; absent while the dashboard is a draft.
+        displayCampaignName:
+          type: string
+          description: >
+            The campaign name as the dashboard should display it (US-020). Absent means nobody changed it,
+            so the campaign's own name applies - it is kept separate because the Hub's name carries internal
+            conventions a client-facing dashboard usually does not want.
+        created:
+          type: string
+          description: ISO-8601 timestamp when the dashboard was created.
+        edited:
+          type: string
+          description: ISO-8601 timestamp when the dashboard was last edited, or null if never edited since creation.
+      required:
+        - id
+        - campaignId
+        - name
+        - type
+        - status
+        - optionalColumns
+        - filters
+        - created
+    DashboardCreateV1:
+      type: object
+      description: >
+        Data to create a dashboard. The campaign comes from the path; the id, status, and source fields are
+        server-owned - a new dashboard is always a draft with no data source.
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          description: The dashboard name; validated non-empty, at most 50 characters, and unique within the campaign.
+        type:
+          $ref: '#/components/schemas/DashboardTypeEnumV1'
+        optionalColumns:
+          type: array
+          description: >
+            Ids of the type's optional columns to keep - exactly those, so an empty list means none of them.
+            Required rather than defaulted: "kept nothing" and "did not say" would otherwise be the same
+            request, and they produce different tables.
+          items:
+            type: string
+        filters:
+          type: array
+          description: Filters to save with the dashboard and apply to preview rows and ClicData source writes.
+          items:
+            $ref: '#/components/schemas/DashboardDatasetFilterV1'
+        dateFrom:
+          type: string
+          format: date
+          description: Inclusive first dataset date to save with the dashboard; omit for open-ended.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last dataset date to save with the dashboard; omit for open-ended.
+        displayCampaignName:
+          type: string
+          description: The campaign name to display on the dashboard; omit to use the campaign's own name.
+      required:
+        - name
+        - type
+        - optionalColumns
+    DashboardUpdateV1:
+      type: object
+      description: >
+        Data to replace a dashboard's editable fields. The type is absent because it is the schema of a
+        table ClicData may already be reading; the status and source fields are absent because they move
+        only when a data source is created or removed.
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          description: The dashboard name; validated non-empty, at most 50 characters, and unique within the campaign.
+        optionalColumns:
+          type: array
+          description: >
+            Ids of the type's optional columns to keep - exactly those, so an empty list means none of them.
+          items:
+            type: string
+        columnOrder:
+          type: array
+          description: >
+            Column ids in the order to read the preview in. Saved on the drag itself rather than behind
+            Apply: rearranging is a way of reading the dataset, not a change to what it contains.
+          items:
+            type: string
+        filters:
+          type: array
+          description: Filters to save with the dashboard and apply to preview rows and ClicData source writes.
+          items:
+            $ref: '#/components/schemas/DashboardDatasetFilterV1'
+        dateFrom:
+          type: string
+          format: date
+          description: Inclusive first dataset date to save with the dashboard; omit for open-ended.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last dataset date to save with the dashboard; omit for open-ended.
+        displayCampaignName:
+          type: string
+          description: The campaign name to display on the dashboard; omit to use the campaign's own name.
+      required:
+        - name
+        - optionalColumns
+    DashboardPreviewV1:
+      type: object
+      description: What a dashboard's data source would contain if it were created now (US-019).
+      properties:
+        rowCount:
+          type: integer
+          format: int64
+          description: How many rows the query returns today.
+        optionalColumns:
+          type: array
+          description: >
+            The optional columns the count was taken under, echoed back so the panel cannot show a figure
+            beside a different column selection than the one it was measured with.
+          items:
+            type: string
+        sourceTable:
+          type: string
+          description: The fully-qualified BigQuery table name the create-source action will replace.
+      required:
+        - rowCount
+        - optionalColumns
+        - sourceTable
+    DashboardDatasetFilterV1:
+      type: object
+      description: Multi-value filter directive for one dashboard dataset output column.
+      properties:
+        field:
+          type: string
+          description: Dashboard output column alias, for example Date, Channel, Impressions, or line_item_description.
+        values:
+          type: array
+          description: Values accepted for that column.
+          items:
+            type: string
+      required:
+        - field
+        - values
+    DashboardDatasetRowsSearchRequestV1:
+      type: object
+      description: Filter criteria for the dashboard dataset preview table.
+      properties:
+        filters:
+          type: array
+          description: Filters applied additively (AND) to the dataset preview query.
+          items:
+            $ref: '#/components/schemas/DashboardDatasetFilterV1'
+        dateFrom:
+          type: string
+          format: date
+          description: Inclusive first dataset date for the preview query; omit for open-ended.
+        dateTo:
+          type: string
+          format: date
+          description: Inclusive last dataset date for the preview query; omit for open-ended.
+    DashboardDatasetRowV1:
+      type: object
+      description: One dashboard dataset preview row, keyed by output column alias.
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+          description: Output column alias to value, in dashboard schema order.
+      required:
+        - values
+    DashboardDatasetRowsPageResponseV1:
+      description: A page of dashboard dataset preview rows.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The dataset rows on this page.
+              items:
+                $ref: '#/components/schemas/DashboardDatasetRowV1'
+          required:
+            - content
+    DashboardDataSourceRequestV1:
+      type: object
+      description: Confirmation of a data-source write, as the dialog in US-020 collects it.
+      properties:
+        displayCampaignName:
+          type: string
+          description: >
+            The campaign name to show on the dashboard. Omit or leave blank to keep whatever the dashboard
+            already carries - blank means "unchanged", not "clear it", because the dialog pre-fills the field
+            and an empty dashboard title is never what someone meant.
+    DashboardPageResponseV1:
+      description: A page of a campaign's dashboards.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The dashboards on this page.
+              items:
+                $ref: '#/components/schemas/DashboardV1'
+          required:
+            - content
+    CampaignSortFieldEnumV1:
+      type: string
+      description: >
+        Sortable fields of the campaign list. START_DATE and END_DATE are the campaign's flight, which it
+        has no column for - a campaign is a group of insertion-order lines, so its start is the earliest
+        among them and its end the latest. Omitting the sort entirely is not the same as sorting by either:
+        the default orders by what is happening to each campaign - live, then upcoming, then finished.
+      enum:
+        - ID
+        - NAME
+        - CLIENT_ID
+        - AGENCY_ID
+        - STATUS
+        - START_DATE
+        - END_DATE
+    CampaignFilterFieldEnumV1:
+      type: string
+      description: >
+        Filterable fields of the campaign list. SEARCH is not a field but a free-text term matched
+        against the campaign, client and agency name at once, so one search box finds a campaign by
+        whichever of the three the user happens to know; CLIENT_NAME scopes by the effective reporting
+        mart client name when an IO client id is not enough; SEARCH always matches as a
+        case-insensitive substring, whatever operation and caseSensitive say.
+      enum:
+        - NAME
+        - STATUS
+        - CLIENT_ID
+        - AGENCY_ID
+        - CLIENT_NAME
+        - SEARCH
+    CampaignSortFieldV1:
+      type: object
+      description: Single-field sort directive for the campaign search.
+      properties:
+        field:
+          $ref: '#/components/schemas/CampaignSortFieldEnumV1'
+        direction:
+          $ref: '#/components/schemas/DirectionEnumV1'
+      required:
+        - field
+    CampaignFilterFieldV1:
+      type: object
+      description: Single-field filter directive for the campaign search.
+      properties:
+        field:
+          $ref: '#/components/schemas/CampaignFilterFieldEnumV1'
+        value:
+          type: string
+          description: The value matched against the field using the given operation.
+        operation:
+          $ref: '#/components/schemas/FilterOperationEnumV1'
+        caseSensitive:
+          type: boolean
+          description: Whether the match is case-sensitive.
+          default: false
+      required:
+        - field
+        - value
+        - operation
+    CampaignSearchRequestV1:
+      type: object
+      description: Filter and sort criteria for searching campaigns.
+      properties:
+        filters:
+          type: array
+          description: >
+            Filters applied additively (AND) to the campaign search, with one exception: several
+            AGENCY_ID filters are OR-ed into a single IN, so a caller can filter by a set of agencies
+            at once. (ANDing equality on the same id column would match nothing, so OR is the only
+            sensible reading.) This never widens visibility - the resulting predicate still ANDs with
+            the caller's own agency visibility, so the effective set is the intersection of the two.
+          items:
+            $ref: '#/components/schemas/CampaignFilterFieldV1'
+        sorting:
+          $ref: '#/components/schemas/CampaignSortFieldV1'
+    CampaignPageResponseV1:
+      description: A page of campaigns sourced from BigQuery.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The campaigns on this page.
+              items:
+                $ref: '#/components/schemas/CampaignV1'
+          required:
+            - content
+    TeamSearchRequestV1:
+      type: object
+      description: Criteria for the paginated team search.
+      properties:
+        name:
+          type: string
+          description: Case-insensitive substring matched against the team name.
+    TeamPageResponseV1:
+      description: A page of Hub teams.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The teams on this page.
+              items:
+                $ref: '#/components/schemas/TeamV1'
+          required:
+            - content
+    TeamV1:
+      type: object
+      description: A Hub team record.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The Hub team id.
+        team_name:
+          type: string
+          description: The team name.
+        pod_key:
+          type: string
+          description: The team pod key.
+        status:
+          type: string
+          description: The team status.
+        fromNetSuite:
+          type: boolean
+          description: Whether the team was synced from NetSuite. Such teams are read-only.
+      required:
+        - id
+        - team_name
+        - status
+        - fromNetSuite
+    CreateTeamRequestV1:
+      type: object
+      description: Data required to create a Hub team.
+      properties:
+        team_name:
+          type: string
+          description: The team name.
+        pod_key:
+          type: string
+          description: The team pod key.
+        status:
+          type: string
+          description: The team status.
+      required:
+        - team_name
+        - status
+    UpdateTeamRequestV1:
+      type: object
+      description: Data required to update a Hub team.
+      properties:
+        team_name:
+          type: string
+          description: The team name.
+        pod_key:
+          type: string
+          description: The team pod key.
+        status:
+          type: string
+          description: The team status.
+      required:
+        - team_name
+        - status

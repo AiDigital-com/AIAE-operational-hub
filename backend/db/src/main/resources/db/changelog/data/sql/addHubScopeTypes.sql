@@ -1,0 +1,6 @@
+INSERT INTO hub_scope_types (id, scope_code, display_name, status, created_at, updated_at)
+VALUES (1, 'OWN', 'Own', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (2, 'TEAM', 'Team', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (3, 'ALL', 'All', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (4, 'AGENCY', 'Agency', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (5, 'CLIENT', 'Client', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<changeSet id="create-table-hub_users" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_users"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubUsers.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="create-table-hub_teams" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_teams"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubTeams.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="create-table-hub_roles" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_roles"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubRoles.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="create-table-hub_scope_types" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_scope_types"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubScopeTypes.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="create-table-hub_role_assignments" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_role_assignments"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubRoleAssignments.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+	<changeSet id="add-column-hub_teams-from_netsuite" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_teams" columnName="from_netsuite"/>
+			</not>
+		</preConditions>
+		<addColumn tableName="hub_teams">
+			<column name="from_netsuite" type="BOOLEAN" defaultValueBoolean="false">
+				<constraints nullable="false"/>
+			</column>
+		</addColumn>
+	</changeSet>
+
+	<changeSet id="drop-not-null-hub_users-clerk_user_id" author="gmozhaiskii">
+		<preConditions onFail="MARK_RAN">
+			<columnExists tableName="hub_users" columnName="clerk_user_id"/>
+		</preConditions>
+		<comment>
+			Employees synced from NetSuite/Rippling are created without a Clerk id; the id is stamped on
+			first login. Make clerk_user_id nullable (the unique constraint still permits multiple NULLs).
+		</comment>
+		<dropNotNullConstraint tableName="hub_users" columnName="clerk_user_id" columnDataType="TEXT"/>
+	</changeSet>
+
+</databaseChangeLog>

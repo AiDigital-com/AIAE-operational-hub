@@ -1,0 +1,197 @@
+/* ============================================================
+   DESIGN TOKENS — AI Digital Elevate UI Library (Nova)
+   ============================================================ */
+:root {
+  color-scheme: light;
+
+  /* brand */
+  --primary: #0009dc;
+  --primary-hover: #1b24ea;
+  --primary-active: #0006a3;
+  --primary-disabled: #b6b9f4;
+  --primary-soft: #e7e8fc;
+  --primary-focus: rgba(0, 9, 220, .28);
+  /* The brand blue as a *fill*, split from --primary so the two can part company in dark mode. As text on
+     a dark page #0009dc is barely legible, and as a button under white text a blue light enough to read
+     is worse. One token cannot be both, so --primary is the ink and this is the paint. Identical here. */
+  --primary-fill: var(--primary);
+
+  /* neutrals */
+  --white: #ffffff;
+  --n-100: #f6f7fb;
+  --n-200: #eef0f6;
+  --border: #d8dce6;
+  --border-strong: #c5cbd9;
+  --muted: #8a90a3;
+  --muted-strong: #6b7185;
+  --ink: #2d3040;
+
+  /* alerts */
+  --bad: #ff4d4f;
+  --good: #73d13d;
+  --attention: #ffc53d;
+  /* Darker, text-contrast-safe amber for small readable text (e.g. a margin below target but not yet
+     bad) — --attention itself is a badge/fill color, too light for body text on --surface. */
+  --attention-text: #b3860b;
+
+  /* surfaces */
+  --bg: #f7f8fc;
+  --surface: var(--white);
+  --sidebar-bg: #ffffff;
+
+  /* shape */
+  --radius: 5px;
+  --radius-lg: 10px;
+  --pill: 999px;
+
+  /* type */
+  --font: 'Inter', 'SF Pro Text', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --lh: 1.5;
+
+  /* layout */
+  --sidebar-w: 286px;
+  --topbar-h: 72px;
+  --shadow-sm: 0 1px 2px rgba(45, 48, 64, .06);
+  --shadow: 0 6px 24px rgba(45, 48, 64, .08);
+  --shadow-lg: 0 18px 50px rgba(45, 48, 64, .14);
+
+  /* ── backward-compatible aliases (existing component CSS) ── */
+  --color-accent: var(--primary);
+  --color-accent-hover: var(--primary-hover);
+  --color-accent-contrast: #ffffff;
+  --color-accent-soft: var(--primary-soft);
+  --color-surface-muted: var(--n-100);
+  --color-bg: var(--bg);
+  --color-panel: var(--surface);
+  --color-text: var(--ink);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-lime: var(--primary-fill);
+  --color-lime-hover: var(--primary-hover);
+  --color-lime-text: #ffffff;
+  --color-nav-active-bg: var(--primary-soft);
+  --color-nav-active-text: var(--primary);
+  --color-cta-bg: var(--primary-fill);
+  --color-cta-hover: var(--primary-hover);
+  --color-cta-text: #ffffff;
+  --color-success-bg: color-mix(in srgb, var(--good) 14%, var(--surface));
+  --color-success-text: color-mix(in srgb, var(--good) 70%, var(--ink));
+  --color-danger: var(--bad);
+  --color-danger-border: color-mix(in srgb, var(--bad) 42%, transparent);
+  --color-danger-bg: color-mix(in srgb, var(--bad) 8%, var(--surface));
+  --color-neutral-bg: var(--n-100);
+  --color-neutral-text: var(--muted-strong);
+  --surface-default: var(--surface);
+  --surface-muted: var(--bg);
+  --surface-elevated: var(--surface);
+  --surface-accent: var(--n-100);
+  --text-default: var(--ink);
+  --text-muted: var(--muted-strong);
+  --text-label: var(--muted);
+  --text-heading: var(--ink);
+  --text-on-accent: var(--color-accent-contrast);
+  --accent-primary: var(--primary);
+  --accent-primary-hover: var(--primary-hover);
+  --accent-danger: var(--bad);
+  --border-default: var(--border);
+  --focus-ring: var(--primary-focus);
+  --shadow-soft: var(--shadow-sm);
+  --chart-cyan: 190 65% 54%;
+  --chart-lime: 76 75% 60%;
+  --chart-purple: 263 47% 58%;
+  --chart-pink: 319 75% 77%;
+  --chart-grey: 0 0% 72%;
+  --chart-sky: 219 74% 52%;
+  --chart-magenta: 346 69% 52%;
+  --radius-card: var(--radius-lg);
+  --radius-control: var(--radius);
+  --sidebar-width: var(--sidebar-w);
+  --shadow-card: var(--shadow-sm);
+  --shadow-pop: var(--shadow-lg);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* GoHealth dark palette, kept as raw HSL triplets. The project-level legacy tokens below resolve these
+     to real CSS colors because existing component CSS consumes values like var(--primary) directly. */
+  --gh-background: 230 18% 12%;
+  --gh-foreground: 210 17% 92%;
+  --gh-primary: 235 100% 71%;
+  --gh-primary-hover: 235 100% 78%;
+  --gh-primary-foreground: 230 35% 10%;
+  --gh-secondary: 230 20% 9%;
+  --gh-accent: 234 26% 20%;
+  --gh-muted-foreground: 220 12% 63%;
+  --gh-label-muted: 224 13% 58%;
+  --gh-header-text: 210 22% 96%;
+  --gh-border: 230 14% 22%;
+  --gh-ring: 235 100% 71%;
+  --gh-status-success: 141 60% 55%;
+  --gh-status-info: 234 100% 74%;
+  --gh-status-warning: 45 95% 58%;
+  --gh-status-draft: 220 10% 66%;
+  --gh-status-error: 0 82% 67%;
+  --chart-cyan: 190 65% 54%;
+  --chart-lime: 76 75% 60%;
+  --chart-purple: 263 47% 58%;
+  --chart-pink: 319 75% 77%;
+  --chart-grey: 0 0% 72%;
+  --chart-sky: 219 74% 52%;
+  --chart-magenta: 346 69% 52%;
+
+  --surface-default: hsl(var(--gh-background));
+  --surface-muted: hsl(var(--gh-secondary));
+  --surface-elevated: hsl(var(--gh-background));
+  --surface-accent: hsl(var(--gh-accent));
+  --text-default: hsl(var(--gh-foreground));
+  --text-muted: hsl(var(--gh-muted-foreground));
+  --text-label: hsl(var(--gh-label-muted));
+  --text-heading: hsl(var(--gh-header-text));
+  --text-on-accent: hsl(var(--gh-primary-foreground));
+  --accent-primary: hsl(var(--gh-primary));
+  --accent-primary-hover: hsl(var(--gh-primary-hover));
+  --accent-danger: hsl(var(--gh-status-error));
+  --border-default: hsl(var(--gh-border));
+  --focus-ring: hsl(var(--gh-ring) / 40%);
+  --shadow-soft: 0 2px 10px hsl(0 0% 0% / 45%);
+
+  --white: var(--surface-default);
+  --n-100: var(--surface-accent);
+  --n-200: color-mix(in srgb, var(--surface-accent) 76%, var(--border-default));
+  --border: var(--border-default);
+  --border-strong: color-mix(in srgb, var(--border-default) 74%, var(--text-default));
+  --muted: var(--text-label);
+  --muted-strong: var(--text-muted);
+  --ink: var(--text-default);
+  --bg: var(--surface-muted);
+  --surface: var(--surface-default);
+  --sidebar-bg: var(--surface-muted);
+  --primary: var(--accent-primary);
+  --primary-fill: var(--accent-primary);
+  --primary-hover: var(--accent-primary-hover);
+  --primary-active: color-mix(in srgb, var(--accent-primary) 80%, black);
+  --primary-disabled: color-mix(in srgb, var(--accent-primary) 35%, var(--surface-accent));
+  --primary-soft: var(--surface-accent);
+  --primary-focus: var(--focus-ring);
+  --bad: var(--accent-danger);
+  --good: hsl(var(--gh-status-success));
+  --attention: hsl(var(--gh-status-warning));
+  --attention-text: hsl(var(--gh-status-warning));
+  --shadow-sm: var(--shadow-soft);
+  --shadow: 0 6px 24px hsl(0 0% 0% / 40%);
+  --shadow-lg: 0 18px 50px hsl(0 0% 0% / 55%);
+  --color-accent-contrast: var(--text-on-accent);
+  --color-lime-text: var(--text-on-accent);
+  --color-cta-text: var(--text-on-accent);
+  --color-neutral-bg: var(--surface-accent);
+  --color-neutral-text: var(--text-muted);
+
+  /* Re-declared so the color-mix() reads this scope's --surface/--good/--bad/--ink - a custom property
+     referencing others is computed where it's declared, not where it's consumed, so leaving these out
+     of this block would silently freeze them at the light-mode mix. */
+  --color-success-bg: color-mix(in srgb, var(--good) 14%, var(--surface));
+  --color-success-text: color-mix(in srgb, var(--good) 70%, var(--ink));
+  --color-danger-border: color-mix(in srgb, var(--bad) 42%, transparent);
+  --color-danger-bg: color-mix(in srgb, var(--bad) 8%, var(--surface));
+}

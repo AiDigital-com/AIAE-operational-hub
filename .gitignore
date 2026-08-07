@@ -1,0 +1,26 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Java
+**/target/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/src/shared/api/generated/schema.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Replit build outputs
+backend/application/src/main/resources/static/
+
+.claude
+.codex
+.agents

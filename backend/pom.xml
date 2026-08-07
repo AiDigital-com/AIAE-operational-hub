@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.aidigital.operational.hub</groupId>
+	<artifactId>AIAE-operational-hub-backend</artifactId>
+	<version>1.0.0</version>
+	<packaging>pom</packaging>
+
+	<modules>
+		<module>db</module>
+		<module>domain</module>
+		<module>cache-management</module>
+		<module>event-logging-to-db-feature</module>
+		<module>service</module>
+		<module>application</module>
+		<module>external-services</module>
+		<module>report-aggregate</module>
+	</modules>
+
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.5.6</version>
+	</parent>
+
+	<properties>
+		<java.version>21</java.version>
+		<maven.compiler.release>21</maven.compiler.release>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+		<!-- Spring: -->
+		<spring.boot.version>3.5.6</spring.boot.version>
+
+		<!-- Different: -->
+		<mapstruct.version>1.6.3</mapstruct.version>
+		<nimbus-jose-jwt.version>9.37.4</nimbus-jose-jwt.version>
+		<google-cloud-bigquery.version>2.42.3</google-cloud-bigquery.version>
+		<logbook.version>3.10.0</logbook.version>
+		<poi.version>5.4.1</poi.version>
+
+		<!-- Unit-tests: -->
+		<instancio.version>5.5.1</instancio.version>
+		<embedded-postgres.version>2.2.2</embedded-postgres.version>
+
+		<!-- OpenApi: -->
+		<openapi-generator.version>7.10.0</openapi-generator.version>
+
+		<!-- Plugins -->
+		<checkstyle.version>10.18.2</checkstyle.version>
+		<maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+		<maven-checkstyle-plugin.version>3.5.0</maven-checkstyle-plugin.version>
+		<jaxb2-maven-plugin.version>3.2.0</jaxb2-maven-plugin.version>
+		<jaxb-plugins.version>4.0.8</jaxb-plugins.version>
+		<jacoco-plugins.version>0.8.14</jacoco-plugins.version>
+
+		<!-- Tests-profiles: -->
+		<skipTests>false</skipTests>
+		<skipUTs>${skipTests}</skipUTs>
+	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-dependencies</artifactId>
+				<version>${spring.boot.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+
+			<!--Mapping-->
+			<dependency>
+				<groupId>org.mapstruct</groupId>
+				<artifactId>mapstruct</artifactId>
+				<version>${mapstruct.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.projectlombok</groupId>
+				<artifactId>lombok</artifactId>
+				<version>${lombok.version}</version>
+			</dependency>
+
+			<!-- External data: -->
+			<dependency>
+				<groupId>com.google.cloud</groupId>
+				<artifactId>google-cloud-bigquery</artifactId>
+				<version>${google-cloud-bigquery.version}</version>
+			</dependency>
+
+			<!-- Spreadsheet (.xlsx) read/write for the bulk manual adjustment round-trip -->
+			<dependency>
+				<groupId>org.apache.poi</groupId>
+				<artifactId>poi-ooxml</artifactId>
+				<version>${poi.version}</version>
+			</dependency>
+
+			<!-- Observability: inbound/outbound HTTP logging -->
+			<dependency>
+				<groupId>org.zalando</groupId>
+				<artifactId>logbook-spring-boot-starter</artifactId>
+				<version>${logbook.version}</version>
+			</dependency>
+
+			<!-- Unit-tests -->
+			<dependency>
+				<groupId>org.junit.jupiter</groupId>
+				<artifactId>junit-jupiter-api</artifactId>
+				<version>${junit-jupiter.version}</version>
+				<scope>test</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.instancio</groupId>
+				<artifactId>instancio-junit</artifactId>
+				<version>${instancio.version}</version>
+				<scope>test</scope>
+			</dependency>
+
+			<!-- Integration-tests -->
+			<dependency>
+				<groupId>io.zonky.test</groupId>
+				<artifactId>embedded-postgres</artifactId>
+				<version>${embedded-postgres.version}</version>
+			</dependency>
+
+
+		</dependencies>
+	</dependencyManagement>
+
+	<build>
+		<pluginManagement>
+			<plugins>
+				<plugin>
+					<groupId>org.openapitools</groupId>
+					<artifactId>openapi-generator-maven-plugin</artifactId>
+					<version>${openapi-generator.version}</version>
+				</plugin>
+
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-compiler-plugin</artifactId>
+					<version>${maven.compiler.plugin.version}</version>
+					<configuration>
+						<annotationProcessorPaths>
+							<path>
+								<groupId>org.projectlombok</groupId>
+								<artifactId>lombok</artifactId>
+								<version>${lombok.version}</version>
+							</path>
+							<path>
+								<groupId>org.mapstruct</groupId>
+								<artifactId>mapstruct-processor</artifactId>
+								<version>${mapstruct.version}</version>
+							</path>
+							<path>
+								<groupId>org.hibernate.orm</groupId>
+								<artifactId>hibernate-jpamodelgen</artifactId>
+								<version>${hibernate.version}</version>
+							</path>
+							<path>
+								<groupId>org.springframework.boot</groupId>
+								<artifactId>spring-boot-configuration-processor</artifactId>
+								<version>${spring.boot.version}</version>
+							</path>
+						</annotationProcessorPaths>
+					</configuration>
+				</plugin>
+			</plugins>
+		</pluginManagement>
+
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-checkstyle-plugin</artifactId>
+				<version>${maven-checkstyle-plugin.version}</version>
+				<dependencies>
+					<dependency>
+						<groupId>com.puppycrawl.tools</groupId>
+						<artifactId>checkstyle</artifactId>
+						<version>${checkstyle.version}</version>
+					</dependency>
+				</dependencies>
+				<configuration>
+					<configLocation>/config/check_style_config.xml</configLocation>
+					<suppressionsLocation>/config/check_style_suppressions.xml</suppressionsLocation>
+					<inputEncoding>UTF-8</inputEncoding>
+					<consoleOutput>true</consoleOutput>
+					<failsOnError>true</failsOnError>
+					<linkXRef>false</linkXRef>
+				</configuration>
+				<executions>
+					<execution>
+						<id>validate</id>
+						<phase>validate</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>${maven-surefire-plugin.version}</version>
+				<configuration>
+					<skipTests>${skipUTs}</skipTests>
+					<argLine>-Dfile.encoding=UTF-8</argLine>
+					<properties>
+						<configurationParameters>
+							junit.jupiter.execution.parallel.enabled = true
+						</configurationParameters>
+					</properties>
+					<argLine>${surefireArgLine}</argLine>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>run-integration-tests</id>
+						<phase>integration-test</phase>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<includes>
+						<include>**/*IT.java</include>
+					</includes>
+				</configuration>
+			</plugin>
+			<!--            <plugin>-->
+			<!--                <groupId>io.github.git-commit-id</groupId>-->
+			<!--                <artifactId>git-commit-id-maven-plugin</artifactId>-->
+			<!--                <executions>-->
+			<!--                    <execution>-->
+			<!--                        <id>git-commit-id</id>-->
+			<!--                        <goals>-->
+			<!--                            <goal>revision</goal>-->
+			<!--                        </goals>-->
+			<!--                        <phase>validate</phase>-->
+			<!--                        <configuration>-->
+			<!--                            <prefix>git-commit-id</prefix>-->
+			<!--                            <skipPoms>false</skipPoms>-->
+			<!--                            <gitDescribe>-->
+			<!--                                <skip>false</skip>-->
+			<!--                            </gitDescribe>-->
+			<!--                            <offline>true</offline>-->
+			<!--                        </configuration>-->
+			<!--                    </execution>-->
+			<!--                </executions>-->
+			<!--            </plugin>-->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco-plugins.version}</version>
+				<executions>
+					<execution>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>test</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>check-coverage</id>
+						<phase>test</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+						<configuration>
+							<rules>
+								<rule>
+									<element>CLASS</element>
+									<limits>
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.8</minimum>
+										</limit>
+									</limits>
+								</rule>
+							</rules>
+						</configuration>
+					</execution>
+				</executions>
+				<configuration>
+					<append>true</append>
+					<propertyName>surefireArgLine</propertyName>
+					<excludes>
+						<exclude>**/enums/**</exclude>
+						<exclude>**/exception/**</exclude>
+						<exclude>**/generated/**</exclude>
+						<exclude>**/config/**</exclude>
+						<exclude>**/dto/**</exclude>
+						<exclude>**/model/**</exclude>
+						<exclude>**/properties/**</exclude>
+						<exclude>**/*Application.class</exclude>
+						<exclude>**/entity/**</exclude>
+						<exclude>**/entities/**</exclude>
+						<exclude>**/repository/**</exclude>
+						<exclude>**/repositories/**</exclude>
+						<!-- Hibernate's generated JPA static metamodel (Entity_ classes) - no source to test. -->
+						<exclude>**/*_.class</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+		</plugins>
+
+	</build>
+</project>

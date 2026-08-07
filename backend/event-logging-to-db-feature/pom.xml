@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Self-contained event-logging-to-db-feature module. Owns the full usage-
+  logging Java surface: @LogUsage, UsageAttributes, UsageEvent, UsageLogger,
+  the aspect, configs, JPA entity + repository. `service` depends on this
+  module so *ServiceImpl classes can carry @LogUsage; `application` picks
+  it up transitively through the service edge.
+
+  Copied from the AIAE-replit-llm-aux template (templates/generated-project/
+  scaffold/backend/event-logging-to-db-feature) so the feature stays recognisable
+  and removable. Only the package root, this pom's parent, and one pointcut line
+  in UsageLoggingAspect differ from the template - see that class for why.
+
+  Database migrations live in the `db` module - NOT here. This repo's `db` module
+  plays the role the template calls `migrations`: it is the ONE place Liquibase
+  changelogs sit, regardless of which module owns the corresponding @Entity.
+  Splitting changelogs across modules hides the table-creation contract from the
+  migration owner and makes cross-module Liquibase classpath includes a long-term
+  footgun.
+
+  Removal flow (in order):
+    - Lightweight kill (no recompile): set `app.usage-logging.enabled=false`
+      → aspect + PostgresUsageLogger drop out, NoOpUsageLogger binds, table
+      stays.
+    - Full removal: drop <module>event-logging-to-db-feature</module> from
+      backend/pom.xml, drop the dependency line from service/pom.xml, delete
+      every @LogUsage import + usage from the annotated methods, drop the
+      usagelogging packages from @EntityScan/@EnableJpaRepositories in
+      OperationalHubApplication, and remove the
+      <include file="/db/changelog/schema/0014-usage-events.xml"/> line from
+      db/src/main/resources/db/changelog/db.changelog-master.xml.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.aidigital.operational.hub</groupId>
+        <artifactId>AIAE-operational-hub-backend</artifactId>
+        <version>1.0.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>operational-hub-event-logging-to-db-feature</artifactId>
+    <name>Operational Hub - event-logging-to-db-feature</name>
+
+    <!-- Self-contained, removable feature. Must NOT depend on any other internal
+         module (domain/service/application). ID semantics live in this module. -->
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+
+        <!-- Direct compile dependencies: this removable module owns JPA,
+             AOP, web-request extraction, configuration, and security types.
+             Keep framework starters in application/, not this library module. -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-beans</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+
+        <!-- Test-only direct dependencies. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-resource-server</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
