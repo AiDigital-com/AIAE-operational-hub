@@ -162,7 +162,7 @@ public class CampaignController implements CampaignsApi {
 				currentUser, campaignId, search.groupBy(), search.sort(), search.filters(), search.dateRange());
 		return xlsxDownloadResponder.respond(export.campaignName(), "report", export.truncated(),
 				out -> reportRowXlsxExportAssembler.writeWorkbook(
-						out, export.rows(), search.columns(), export.totals()));
+						out, export.rows(), search.columns(), search.columnOrder(), export.totals()));
 	}
 
 	@Override

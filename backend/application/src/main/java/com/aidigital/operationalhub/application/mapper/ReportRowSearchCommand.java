@@ -10,17 +10,20 @@ import java.util.List;
 /**
  * Application-layer representation of one report-row search/export request after contract mapping.
  *
- * @param groupBy   dimensions to group by, in display order
- * @param sort      sort directive, or {@code null} for the service default
- * @param filters   value-list dimension filters
- * @param dateRange delivery-date window
- * @param columns   current-view export columns, dimensions followed by metrics
+ * @param groupBy     dimensions to group by, in display order
+ * @param sort        sort directive, or {@code null} for the service default
+ * @param filters     value-list dimension filters
+ * @param dateRange   delivery-date window
+ * @param columns     current-view export columns, dimensions followed by metrics
+ * @param columnOrder the requested export column arrangement, or {@code null}/empty for the default
+ *                    dimensions-then-metrics order
  */
 public record ReportRowSearchCommand(
 		List<ReportRowSortField> groupBy,
 		SortCriterion<ReportRowSortField> sort,
 		List<ReportRowFilterModel> filters,
 		ReportRowDateRangeModel dateRange,
-		List<String> columns) {
+		List<String> columns,
+		List<String> columnOrder) {
 
 }

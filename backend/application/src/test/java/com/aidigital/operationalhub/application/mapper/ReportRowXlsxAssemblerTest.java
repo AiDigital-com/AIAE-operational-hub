@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ReportRowXlsxAssemblerTest {
 
 	private final ReportRowXlsxAssembler assembler =
-			new ReportRowXlsxAssembler(new WorkbookRowParser(), new ReportRowXlsxExportAssembler());
+			new ReportRowXlsxAssembler(new WorkbookRowParser(), new ReportRowXlsxExportAssembler(new ColumnOrderArranger()));
 
 	private ReportRowModel row(String date, String lineItemId, Long impressions, Long clicks, Double spend) {
 		return new ReportRowModel(

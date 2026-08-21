@@ -46,7 +46,8 @@ public class ReportRowContractMapper {
 				toDateRange(
 						request == null ? null : request.getDateFrom(),
 						request == null ? null : request.getDateTo()),
-				toExportColumns(request));
+				toExportColumns(request),
+				request == null ? null : request.getColumnOrder());
 	}
 
 	/**

@@ -201,6 +201,50 @@ function renderReportingTab(campaign: CampaignV1 = aCampaign(), sidebar?: Sideba
   );
 }
 
+/** Stubs every visible header cell's bounding rect as a uniform `width`-px column, left to right - so a
+ *  drag's geometry resolves against real x positions instead of jsdom's all-zero layout. The real widths
+ *  don't matter here, only that each column occupies its own known span. */
+function stubHeaderRects(width = 150) {
+  let left = 0;
+  for (const cell of screen.getAllByRole("columnheader")) {
+    const right = left + width;
+    vi.spyOn(cell, "getBoundingClientRect").mockReturnValue({
+      left, right, top: 0, bottom: 30, width, height: 30, x: left, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    left = right;
+  }
+}
+
+/** Stubs `requestAnimationFrame` so a test can run the drag's geometry effect exactly once, on demand -
+ *  jsdom never paints, so nothing would ever call the real one. */
+function stubAnimationFrame(): () => void {
+  let pending: (() => void) | null = null;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+    pending = () => callback(0);
+    return 1;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  return () => {
+    const run = pending;
+    pending = null;
+    if (run) act(run);
+  };
+}
+
+/** Drags the header at `fromIndex` and releases it just past the left edge of the header at `toIndex` -
+ *  uniform 150px columns (see `stubHeaderRects`), so the drop always lands immediately before `toIndex`
+ *  regardless of which side of it `fromIndex` started on. Stubs the geometry and drives the one animation
+ *  frame the drop needs to resolve a boundary. */
+function dragHeaderBefore(fromIndex: number, toIndex: number) {
+  const runFrame = stubAnimationFrame();
+  stubHeaderRects();
+  const headers = screen.getAllByRole("columnheader");
+  fireEvent.pointerDown(headers[fromIndex], { clientX: fromIndex * 150 + 10, clientY: 10 });
+  fireEvent.pointerMove(window, { clientX: toIndex * 150 + 10, clientY: 10 });
+  runFrame();
+  fireEvent.pointerUp(window);
+}
+
 describe("ReportingTab reports list", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2610,13 +2654,11 @@ describe("ReportingTab column order", () => {
     renderReportingTab();
     await screen.findByText("Mar 10, 2026");
 
-    // When: that column is dragged in front of one the order does mention
+    // When: that column is dragged in front of one the order does mention (Date, Impressions, Clicks)
     const headers = screen.getAllByRole("columnheader");
-    const clicks = headers.find((c) => (c.textContent ?? "").includes("Clicks")) as HTMLElement;
-    const impressions = headers.find((c) => (c.textContent ?? "").includes("Impressions")) as HTMLElement;
-    fireEvent.dragStart(clicks);
-    fireEvent.dragOver(impressions);
-    fireEvent.drop(impressions);
+    const clicksAt = headers.findIndex((c) => (c.textContent ?? "").includes("Clicks"));
+    const impressionsAt = headers.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
+    dragHeaderBefore(clicksAt, impressionsAt);
 
     // Then: it moves, and the saved arrangement now mentions every column on screen. It used to sit still:
     // a move looked its column up in the saved order, found nothing, and returned the order unchanged.
@@ -2656,27 +2698,70 @@ describe("ReportingTab column order", () => {
       .toEqual(["date", "clicks", "impressions"]);
   });
 
-  it("should move a dimension onto a metric no further than its own group", async () => {
-    // Given: a report with both groups shown
+  it("should let a metric land between two dimensions, since a report no longer keeps them in two groups", async () => {
+    // Given: a report with a metric and two dimensions, in canonical order
     mockReportViews([aReportView({ dimensions: ["date", "line_item_id"], metrics: ["impressions"] })]);
     vi.mocked(updateReportView).mockResolvedValue(aReportView());
     renderReportingTab();
     await screen.findByText("Mar 10, 2026");
+    // Indices into the unfiltered header list - the same one `dragHeaderBefore` reads - not
+    // `headerOrder()`, whose own filtering would otherwise disagree with it on where each column sits.
+    const before = screen.getAllByRole("columnheader");
+    const dateAt = before.findIndex((c) => (c.textContent ?? "").includes("Date"));
+    const idAt = before.findIndex((c) => (c.textContent ?? "").includes("Constructed id L1"));
+    const impressionsAt = before.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
+    expect(dateAt).toBeLessThan(idAt);
+    expect(idAt).toBeLessThan(impressionsAt);
 
-    // When: a dimension is dropped on a metric
-    const headers = screen.getAllByRole("columnheader");
-    const date = headers.find((c) => (c.textContent ?? "").includes("Date")) as HTMLElement;
-    const impressions = headers.find((c) => (c.textContent ?? "").includes("Impressions")) as HTMLElement;
-    fireEvent.dragStart(date);
-    fireEvent.dragOver(impressions);
-    fireEvent.drop(impressions);
+    // When: the metric is dropped between the two dimensions
+    dragHeaderBefore(impressionsAt, idAt);
 
-    // Then: nothing moves and nothing is saved - dimensions stay left of metrics, as every report in this
-    // product reads, so this refusal is the intended answer rather than the bug above
-    const after = headerOrder();
-    expect(after.findIndex((x) => x.includes("Date")))
-      .toBeLessThan(after.findIndex((x) => x.includes("Impressions")));
-    expect(updateReportView).not.toHaveBeenCalled();
+    // Then: it lands there rather than being refused - the whole point of the interleaved arrangement
+    await waitFor(() => {
+      const after = headerOrder();
+      expect(after.findIndex((x) => x.includes("Date")))
+        .toBeLessThan(after.findIndex((x) => x.includes("Impressions")));
+      expect(after.findIndex((x) => x.includes("Impressions")))
+        .toBeLessThan(after.findIndex((x) => x.includes("Constructed id L1")));
+    });
+    await waitFor(() => expect(updateReportView).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(updateReportView).mock.calls[0][2].columnOrder)
+      .toEqual(["date", "impressions", "line_item_id"]);
+  });
+
+  it("should follow the header into the interleaved order in the body and totals rows too", async () => {
+    // Given: the same report, so a body row and the totals row both carry real values to check the
+    // order of rather than just labels
+    mockReportViews([aReportView({ dimensions: ["date", "line_item_id"], metrics: ["impressions"] })]);
+    vi.mocked(updateReportView).mockResolvedValue(aReportView());
+    renderReportingTab();
+    await screen.findByText("Mar 10, 2026");
+    // Indices into the unfiltered header list - see the note in the test above.
+    const before = screen.getAllByRole("columnheader");
+    const idAt = before.findIndex((c) => (c.textContent ?? "").includes("Constructed id L1"));
+    const impressionsAt = before.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
+
+    // When: Impressions is dropped between Date and Constructed id L1
+    dragHeaderBefore(impressionsAt, idAt);
+    await waitFor(() => {
+      const after = headerOrder();
+      expect(after.findIndex((x) => x.includes("Date")))
+        .toBeLessThan(after.findIndex((x) => x.includes("Impressions")));
+      expect(after.findIndex((x) => x.includes("Impressions")))
+        .toBeLessThan(after.findIndex((x) => x.includes("Constructed id L1")));
+    });
+
+    // Then: the body row's own cells read Date, Impressions, then the line item id - not just the header
+    const bodyRow = document.querySelector("tbody tr[data-index]") as HTMLElement;
+    const bodyCells = Array.from(bodyRow.querySelectorAll("td")).map((cell) => cell.textContent ?? "");
+    expect(bodyCells[0]).toContain("Mar 10, 2026");
+    expect(bodyCells[2]).toContain("LI-1");
+
+    // And: so does the pinned totals row
+    const totalsRow = document.querySelector(".data-table__totals") as HTMLElement;
+    const totalsCells = Array.from(totalsRow.querySelectorAll("td")).map((cell) => cell.textContent ?? "");
+    expect(totalsCells[0]).toContain("Mar");
+    expect(totalsCells[2]).toContain("value");
   });
 
   it("should reorder on a drop and save the arrangement at once", async () => {
@@ -2685,18 +2770,15 @@ describe("ReportingTab column order", () => {
     vi.mocked(updateReportView).mockResolvedValue(aReportView());
     renderReportingTab();
     await screen.findByText("Mar 10, 2026");
-    const before = headerOrder();
-    expect(before.findIndex((t) => t.includes("Impressions")))
-      .toBeLessThan(before.findIndex((t) => t.includes("Cost")));
+    expect(headerOrder().findIndex((t) => t.includes("Impressions")))
+      .toBeLessThan(headerOrder().findIndex((t) => t.includes("Cost")));
+    // Indices into the unfiltered header list - see the note further up this describe block.
+    const before = screen.getAllByRole("columnheader");
+    const costAt = before.findIndex((c) => (c.textContent ?? "").includes("Cost"));
+    const impressionsAt = before.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
 
     // When: Cost is dragged onto Impressions
-    const cost = screen.getAllByRole("columnheader").find((c) => (c.textContent ?? "").includes("Cost"));
-    const impressions = screen
-      .getAllByRole("columnheader")
-      .find((c) => (c.textContent ?? "").includes("Impressions"));
-    fireEvent.dragStart(cost as HTMLElement);
-    fireEvent.dragOver(impressions as HTMLElement);
-    fireEvent.drop(impressions as HTMLElement);
+    dragHeaderBefore(costAt, impressionsAt);
 
     // Then: it moves at once - a drag rearranges what you are looking at, so waiting for Apply would be
     // asking the user to confirm something they already did
@@ -2724,11 +2806,9 @@ describe("ReportingTab column order", () => {
 
     // When: a column is dragged
     const headers = screen.getAllByRole("columnheader");
-    const cost = headers.find((c) => (c.textContent ?? "").includes("Cost")) as HTMLElement;
-    const impressions = headers.find((c) => (c.textContent ?? "").includes("Impressions")) as HTMLElement;
-    fireEvent.dragStart(cost);
-    fireEvent.dragOver(impressions);
-    fireEvent.drop(impressions);
+    const costAt = headers.findIndex((c) => (c.textContent ?? "").includes("Cost"));
+    const impressionsAt = headers.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
+    dragHeaderBefore(costAt, impressionsAt);
 
     // Then: the write carries the stored selection, not the staged one, and leaves the status alone - a
     // drag must not commit the columns behind the Apply the user has not pressed
@@ -2770,15 +2850,18 @@ describe("ReportingTab column order", () => {
 
     // When:
     const headers = screen.getAllByRole("columnheader");
-    const cost = headers.find((c) => (c.textContent ?? "").includes("Cost")) as HTMLElement;
-    const impressions = headers.find((c) => (c.textContent ?? "").includes("Impressions")) as HTMLElement;
-    fireEvent.dragStart(cost);
-    fireEvent.dragOver(impressions);
-    fireEvent.drop(impressions);
+    const costAt = headers.findIndex((c) => (c.textContent ?? "").includes("Cost"));
+    const impressionsAt = headers.findIndex((c) => (c.textContent ?? "").includes("Impressions"));
+    dragHeaderBefore(costAt, impressionsAt);
 
     // Then: the rows are the same rows in a different order of columns - the grouping the server was asked
     // for has not changed, so re-reading a multi-second BigQuery query would buy nothing
-    await waitFor(() => expect(screen.getAllByRole("columnheader").length).toBe(headers.length));
+    await waitFor(() => {
+      const after = headerOrder();
+      expect(after.findIndex((t) => t.includes("Cost")))
+        .toBeLessThan(after.findIndex((t) => t.includes("Impressions")));
+    });
+    expect(screen.getAllByRole("columnheader")).toHaveLength(headers.length);
     expect(listCampaignReportRows).not.toHaveBeenCalled();
   });
 });
@@ -3049,6 +3132,9 @@ describe("ReportingTab download", () => {
         sortDirection: undefined,
         dimensions: ["date", "line_item_id"],
         metrics: ["impressions", "spend"],
+        // The fully resolved on-screen order, not the (absent) saved one - the workbook has to match
+        // the screen even before anyone has ever dragged a column.
+        columnOrder: ["date", "line_item_id", "impressions", "spend"],
       })
     );
     expect(createObjectURL).toHaveBeenCalledWith(blob);

@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ReportRowXlsxExportAssemblerTest {
 
-	private final ReportRowXlsxExportAssembler assembler = new ReportRowXlsxExportAssembler();
+	private final ReportRowXlsxExportAssembler assembler = new ReportRowXlsxExportAssembler(new ColumnOrderArranger());
 
 	private ReportRowModel row(String account, String message, Long impressions, Long clicks, Double spend) {
 		return new ReportRowModel(
@@ -300,6 +300,131 @@ class ReportRowXlsxExportAssemblerTest {
 		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
 			assertThat(workbook.getNumberOfSheets()).isEqualTo(1);
 			assertThat(workbook.getSheet("Totals")).isNull();
+		}
+	}
+
+	@Test
+	void shouldArrangeANarrowedExportByAnInterleavedColumnOrderTest() throws IOException {
+		// Given: a current-view export, selected dimensions-then-metrics, but the requested order sits
+		// the "impressions" metric between the two dimensions
+		ReportRowModel model = row("Ourisman Main", null, 5000L, 12L, 92.5);
+		List<String> columns = List.of("date", "line_item_id", "impressions");
+		List<String> columnOrder = List.of("date", "impressions", "line_item_id");
+
+		// Execution:
+		byte[] bytes = assembler.toWorkbook(List.of(model), columns, columnOrder, null);
+
+		// Verification:
+		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+			Row header = workbook.getSheetAt(0).getRow(0);
+			List<String> headerNames = StreamSupport.stream(header.spliterator(), false)
+					.map(Cell::getStringCellValue)
+					.collect(Collectors.toList());
+			assertThat(headerNames).containsExactly("Date", "Impressions", "Line item id");
+			Row data = workbook.getSheetAt(0).getRow(1);
+			assertThat(data.getCell(0).getStringCellValue()).isEqualTo("2026-03-10");
+			assertThat(data.getCell(1).getNumericCellValue()).isEqualTo(5000.0);
+			assertThat(data.getCell(2).getStringCellValue()).isEqualTo("LI-1");
+		}
+	}
+
+	@Test
+	void shouldArrangeTheFullSchemaExportWithUnnamedColumnsTrailingInCanonicalOrderTest() throws IOException {
+		// Given: the canonical, unarranged full-schema header list to compare against, and a requested
+		// order naming only a metric between two dimensions - everything else must trail, keeping its own
+		// canonical relative order
+		List<String> canonicalHeaders;
+		try (XSSFWorkbook canonicalWorkbook = new XSSFWorkbook(
+				new ByteArrayInputStream(assembler.toWorkbook(List.of())))) {
+			canonicalHeaders = StreamSupport.stream(canonicalWorkbook.getSheetAt(0).getRow(0).spliterator(), false)
+					.map(Cell::getStringCellValue)
+					.collect(Collectors.toList());
+		}
+		List<String> columnOrder = List.of("impressions", "date", "platform");
+
+		// Execution:
+		byte[] bytes = assembler.toWorkbook(List.of(), List.of(), columnOrder, null);
+
+		// Verification:
+		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+			Row header = workbook.getSheetAt(0).getRow(0);
+			List<String> headerNames = StreamSupport.stream(header.spliterator(), false)
+					.map(Cell::getStringCellValue)
+					.collect(Collectors.toList());
+			assertThat(headerNames).hasSameSizeAs(canonicalHeaders);
+			assertThat(headerNames).startsWith("Impressions", "Date", "Platform");
+			// The trailing, unnamed columns keep the canonical list's own relative order, minus the three
+			// named ones.
+			List<String> expectedTrailing = canonicalHeaders.stream()
+					.filter(name -> !List.of("Impressions", "Date", "Platform").contains(name))
+					.toList();
+			assertThat(headerNames.subList(3, headerNames.size())).containsExactlyElementsOf(expectedTrailing);
+		}
+	}
+
+	@Test
+	void shouldLeaveTheNarrowedExportUnchangedWhenColumnOrderIsAbsentTest() throws IOException {
+		// Given: the same call the pre-existing narrowed-export test makes, now through the columnOrder
+		// overload with a null order - the compatibility guarantee this feature must not break
+		ReportRowModel model = row("Ourisman Main", null, 5000L, 12L, 92.5);
+		List<String> columns = List.of("date", "line_item_id", "impressions");
+
+		// Execution:
+		byte[] withoutOrderOverload = assembler.toWorkbook(List.of(model), columns, null);
+		byte[] withNullOrder = assembler.toWorkbook(List.of(model), columns, null, null);
+
+		// Verification: byte-identical to the pre-existing 3-arg call
+		assertThat(withNullOrder).isEqualTo(withoutOrderOverload);
+		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(withNullOrder))) {
+			Row header = workbook.getSheetAt(0).getRow(0);
+			List<String> headerNames = StreamSupport.stream(header.spliterator(), false)
+					.map(Cell::getStringCellValue)
+					.collect(Collectors.toList());
+			assertThat(headerNames).containsExactly("Date", "Line item id", "Impressions");
+		}
+	}
+
+	@Test
+	void shouldLeaveTheFullSchemaExportUnchangedWhenColumnOrderIsEmptyTest() throws IOException {
+		// Given: the full-schema export, once through the pre-existing no-arg convenience and once
+		// through the columnOrder overload with an empty order - both must be byte-identical
+		ReportRowModel model = row("Ourisman Main", null, 5000L, 12L, 92.5);
+
+		// Execution:
+		byte[] preExisting = assembler.toWorkbook(List.of(model));
+		byte[] withEmptyOrder = assembler.toWorkbook(List.of(model), List.of(), List.of(), null);
+
+		// Verification:
+		assertThat(withEmptyOrder).isEqualTo(preExisting);
+	}
+
+	@Test
+	void shouldArrangeTheTotalsSheetByTheSameColumnOrderAsTheDataSheetTest() throws IOException {
+		// Given: totals for impressions/spend/cpm, requested in an order that sits "spend" before
+		// "impressions"
+		ReportRowModel model = row("Ourisman Main", null, 5000L, 12L, 92.5);
+		ReportRowTotalsModel totals = new ReportRowTotalsModel(
+				3_000_000L, 900L, 4_350.0, null, null, null, null, null, null, null, null, null, null,
+				null, null, null, 1.45, 4.83, null, 0.03, null);
+		List<String> columns = List.of("date", "impressions", "spend", "cpm");
+		List<String> columnOrder = List.of("spend", "cpm", "impressions", "date");
+
+		// Execution:
+		byte[] bytes = assembler.toWorkbook(List.of(model), columns, columnOrder, totals);
+
+		// Verification: the Totals sheet lists its rows in the same requested order as the data columns
+		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+			Sheet sheetTotals = workbook.getSheet("Totals");
+			assertThat(sheetTotals.getRow(1).getCell(0).getStringCellValue()).isEqualTo("DSP Cost");
+			assertThat(sheetTotals.getRow(2).getCell(0).getStringCellValue()).isEqualTo("CPM");
+			assertThat(sheetTotals.getRow(3).getCell(0).getStringCellValue()).isEqualTo("Impressions");
+			assertThat(sheetTotals.getLastRowNum()).isEqualTo(3);
+
+			Row header = workbook.getSheetAt(0).getRow(0);
+			List<String> headerNames = StreamSupport.stream(header.spliterator(), false)
+					.map(Cell::getStringCellValue)
+					.collect(Collectors.toList());
+			assertThat(headerNames).containsExactly("DSP Cost", "CPM", "Impressions", "Date");
 		}
 	}
 

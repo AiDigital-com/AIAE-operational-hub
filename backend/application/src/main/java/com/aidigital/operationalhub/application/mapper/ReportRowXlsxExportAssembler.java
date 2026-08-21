@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.application.mapper;
 
 import com.aidigital.operationalhub.service.agency.model.ReportRowModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowTotalsModel;
+import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -31,7 +32,10 @@ import java.util.stream.Collectors;
  * shows them.
  */
 @Component
+@RequiredArgsConstructor
 public class ReportRowXlsxExportAssembler {
+
+	private final ColumnOrderArranger columnOrderArranger;
 
 	// SXSSF keeps only this many rows in memory per sheet, flushing older rows to a temp file as new
 	// ones are created - the fix for the whole-workbook-DOM memory cost of the plain XSSF writer.
@@ -93,7 +97,8 @@ public class ReportRowXlsxExportAssembler {
 			"avg_dynamic_rate_by_date_tactic", "line_item_description", "cpm", "cpc", "cpv", "ctr", "avcr", "ivt");
 
 	/**
-	 * Renders the rows as an .xlsx workbook, restricted to the requested columns when present.
+	 * Renders the rows as an .xlsx workbook, restricted to the requested columns when present, in the
+	 * default dimensions-then-metrics/full-schema column order.
 	 *
 	 * @param rows    the rows to render, in the order given
 	 * @param columns selected column ids; empty means the full raw export schema
@@ -101,8 +106,23 @@ public class ReportRowXlsxExportAssembler {
 	 * @return the workbook's bytes
 	 */
 	public byte[] toWorkbook(List<ReportRowModel> rows, List<String> columns, ReportRowTotalsModel totals) {
+		return toWorkbook(rows, columns, List.of(), totals);
+	}
+
+	/**
+	 * Renders the rows as an .xlsx workbook, restricted to the requested columns when present and
+	 * arranged by the requested column order when one is given.
+	 *
+	 * @param rows        the rows to render, in the order given
+	 * @param columns     selected column ids; empty means the full raw export schema
+	 * @param columnOrder the requested column arrangement, or {@code null}/empty for the default order
+	 * @param totals      the report's full-dataset totals, or {@code null} for no Totals sheet
+	 * @return the workbook's bytes
+	 */
+	public byte[] toWorkbook(
+			List<ReportRowModel> rows, List<String> columns, List<String> columnOrder, ReportRowTotalsModel totals) {
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		writeWorkbook(out, rows, columns, totals);
+		writeWorkbook(out, rows, columns, columnOrder, totals);
 		return out.toByteArray();
 	}
 
@@ -113,14 +133,12 @@ public class ReportRowXlsxExportAssembler {
 	 * @return the workbook's bytes
 	 */
 	public byte[] toWorkbook(List<ReportRowModel> rows) {
-		return toWorkbook(rows, List.of(), null);
+		return toWorkbook(rows, List.of(), List.of(), null);
 	}
 
 	/**
 	 * Streams the rows as an .xlsx workbook directly into {@code out}, restricted to the requested
-	 * columns when present. Uses a windowed {@link SXSSFWorkbook} so memory use stays bounded by
-	 * {@link #ROW_ACCESS_WINDOW_SIZE} rows regardless of how many rows are rendered, rather than holding
-	 * the whole workbook's cell graph in memory at once.
+	 * columns when present, in the default dimensions-then-metrics/full-schema column order.
 	 *
 	 * @param out     the stream to write the workbook into; not closed by this method
 	 * @param rows    the rows to render, in the order given
@@ -129,7 +147,30 @@ public class ReportRowXlsxExportAssembler {
 	 */
 	public void writeWorkbook(
 			OutputStream out, List<ReportRowModel> rows, List<String> columns, ReportRowTotalsModel totals) {
-		List<String> headers = selectedHeaders(columns);
+		writeWorkbook(out, rows, columns, List.of(), totals);
+	}
+
+	/**
+	 * Streams the rows as an .xlsx workbook directly into {@code out}, restricted to the requested
+	 * columns when present and arranged by the requested column order when one is given. Uses a windowed
+	 * {@link SXSSFWorkbook} so memory use stays bounded by {@link #ROW_ACCESS_WINDOW_SIZE} rows regardless
+	 * of how many rows are rendered, rather than holding the whole workbook's cell graph in memory at
+	 * once.
+	 *
+	 * <p>The requested order is applied here, after {@link #selectedHeaders} resolves membership - this is
+	 * the one place both the narrowed current-view export and the full-schema export (where {@code
+	 * columns} arrives empty and {@link #selectedHeaders} expands it to every raw header) get arranged.
+	 *
+	 * @param out         the stream to write the workbook into; not closed by this method
+	 * @param rows        the rows to render, in the order given
+	 * @param columns     selected column ids; empty means the full raw export schema
+	 * @param columnOrder the requested column arrangement, or {@code null}/empty for the default order
+	 * @param totals      the report's full-dataset totals, or {@code null} for no Totals sheet
+	 */
+	public void writeWorkbook(
+			OutputStream out, List<ReportRowModel> rows, List<String> columns, List<String> columnOrder,
+			ReportRowTotalsModel totals) {
+		List<String> headers = columnOrderArranger.arrange(selectedHeaders(columns), columnOrder);
 		List<String> levelTerms = resolveLevelTerms(rows);
 		try (SXSSFWorkbook workbook = new SXSSFWorkbook(ROW_ACCESS_WINDOW_SIZE)) {
 			Sheet sheet = workbook.createSheet(DATA_SHEET);
