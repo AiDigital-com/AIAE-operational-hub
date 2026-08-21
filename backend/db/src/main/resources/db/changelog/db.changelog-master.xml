@@ -14,6 +14,7 @@
 	<include file="/db/changelog/schema/0007-report-views.xml"/>
 	<include file="/db/changelog/schema/0008-report-view-filters.xml"/>
 	<include file="/db/changelog/schema/0009-conversion-adjustment-lock.xml"/>
+	<include file="/db/changelog/schema/0010-report-view-column-order.xml"/>
 	<include file="/db/changelog/data/0001-rbac-dictionaries.xml"/>
 
 </databaseChangeLog>

@@ -72,6 +72,13 @@ public class HubReportView extends AuditAwareEntity {
 	@Column(name = "filters")
 	private String filters;
 
+	/**
+	 * Comma-joined on-screen column arrangement (dimension and metric ids interleaved); null or empty
+	 * when the report uses the default arrangement (every dimension, then every metric).
+	 */
+	@Column(name = "column_order")
+	private String columnOrder;
+
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) {

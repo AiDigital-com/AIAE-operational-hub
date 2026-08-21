@@ -17,10 +17,8 @@ import com.aidigital.operationalhub.service.agency.model.ReportRowTotalsModel;
 import com.aidigital.operationalhub.service.agency.search.ReportRowSortField;
 import com.aidigital.operationalhub.service.common.search.SortDirection;
 import org.instancio.Instancio;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -30,11 +28,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Unit tests for {@link ReportRowContractMapper}.
  */
-@ExtendWith(MockitoExtension.class)
 class ReportRowContractMapperTest {
 
-	@InjectMocks
 	private ReportRowContractMapper mapper;
+
+	@BeforeEach
+	void setUp() {
+		mapper = new ReportRowContractMapper(new ColumnOrderArranger());
+	}
 
 	@Test
 	void shouldMapEveryFieldTest() {
@@ -132,6 +133,80 @@ class ReportRowContractMapperTest {
 		assertThat(command.dateRange().from()).isEqualTo("2026-03-10");
 		assertThat(command.dateRange().to()).isEqualTo("2026-03-20");
 		assertThat(command.columns()).containsExactly("date", "line_item_id", "impressions", "spend");
+	}
+
+	@Test
+	void shouldArrangeExportColumnsByColumnOrderTest() {
+		// Given: a metric interleaved between two dimensions on screen
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions", "spend"));
+		request.setColumnOrder(List.of("line_item_id", "impressions", "date", "spend"));
+
+		// When:
+		List<String> columns = mapper.toExportColumns(request);
+
+		// Then:
+		assertThat(columns).containsExactly("line_item_id", "impressions", "date", "spend");
+	}
+
+	@Test
+	void shouldKeepSelectedColumnAtItsDefaultPlaceWhenAbsentFromColumnOrderTest() {
+		// Given: "spend" is selected but never mentioned in columnOrder
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions", "spend"));
+		request.setColumnOrder(List.of("line_item_id", "date", "impressions"));
+
+		// When:
+		List<String> columns = mapper.toExportColumns(request);
+
+		// Then: "spend" keeps its default relative place, at the end
+		assertThat(columns).containsExactly("line_item_id", "date", "impressions", "spend");
+	}
+
+	@Test
+	void shouldIgnoreUnselectedIdPresentInColumnOrderTest() {
+		// Given: columnOrder mentions "clicks", which is not a selected dimension/metric
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		request.setDimensions(List.of("date"));
+		request.setMetrics(List.of("impressions"));
+		request.setColumnOrder(List.of("clicks", "impressions", "date"));
+
+		// When:
+		List<String> columns = mapper.toExportColumns(request);
+
+		// Then: "clicks" never resurfaces as an export column
+		assertThat(columns).containsExactly("impressions", "date");
+	}
+
+	@Test
+	void shouldExportDimensionsThenMetricsWhenColumnOrderIsAbsentTest() {
+		// Given: the pre-existing behaviour - no columnOrder saved at all
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions", "spend"));
+
+		// When:
+		List<String> columns = mapper.toExportColumns(request);
+
+		// Then:
+		assertThat(columns).containsExactly("date", "line_item_id", "impressions", "spend");
+	}
+
+	@Test
+	void shouldExportDimensionsThenMetricsWhenColumnOrderIsEmptyTest() {
+		// Given: an explicitly empty columnOrder behaves exactly like an absent one
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions", "spend"));
+		request.setColumnOrder(List.of());
+
+		// When:
+		List<String> columns = mapper.toExportColumns(request);
+
+		// Then:
+		assertThat(columns).containsExactly("date", "line_item_id", "impressions", "spend");
 	}
 
 	@Test

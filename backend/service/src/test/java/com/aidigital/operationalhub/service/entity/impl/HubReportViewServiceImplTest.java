@@ -4,6 +4,7 @@ import com.aidigital.operationalhub.cachemanagement.event.CacheInvalidationEvent
 import com.aidigital.operationalhub.domain.entity.HubReportView;
 import com.aidigital.operationalhub.domain.repository.HubReportViewRepository;
 import com.aidigital.operationalhub.service.exception.BusinessException;
+import org.instancio.Instancio;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +20,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.instancio.Select.field;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -171,6 +173,7 @@ class HubReportViewServiceImplTest {
 		changes.setNote("a note");
 		changes.setDimensions("date,line_item_id");
 		changes.setMetrics("spend,clicks");
+		changes.setColumnOrder("line_item_id,spend,date,clicks");
 		changes.setFilters("[{\"field\":\"DATE\",\"values\":[\"2026-03-10\"]}]");
 		when(reportViewRepository.findByIdAndCampaignId(VIEW_ID, CAMPAIGN_ID)).thenReturn(Optional.of(existing));
 		when(reportViewRepository.existsByCampaignIdAndNameIgnoreCaseAndIdNot(CAMPAIGN_ID, "New name", existing.getId()))
@@ -185,8 +188,37 @@ class HubReportViewServiceImplTest {
 		assertThat(result.getNote()).isEqualTo("a note");
 		assertThat(result.getDimensions()).isEqualTo("date,line_item_id");
 		assertThat(result.getMetrics()).isEqualTo("spend,clicks");
+		assertThat(result.getColumnOrder()).isEqualTo("line_item_id,spend,date,clicks");
 		assertThat(result.getFilters()).isEqualTo("[{\"field\":\"DATE\",\"values\":[\"2026-03-10\"]}]");
 		verify(cacheInvalidationEventService).publishUpdateEvent(HubReportView.class);
+	}
+
+	@Test
+	void shouldCarryEveryPersistedColumnFieldOntoTheExistingViewOnUpdateTest() {
+		// Given: update copies the changed view field by field onto the loaded row, so a field added to
+		// the entity and not added here is written by the mapper, accepted by the endpoint, and then
+		// silently dropped - the report saves, reports success, and comes back in its old shape. That is
+		// exactly how `columnOrder` shipped broken: its mapper round-tripped, so every mapper test
+		// passed, and this copy was the one place nobody had a test for.
+		HubReportView existing = Instancio.create(HubReportView.class);
+		existing.setId(VIEW_ID);
+		HubReportView changes = Instancio.of(HubReportView.class).set(field(HubReportView::getName), "New name").create();
+		when(reportViewRepository.findByIdAndCampaignId(VIEW_ID, CAMPAIGN_ID)).thenReturn(Optional.of(existing));
+		when(reportViewRepository.existsByCampaignIdAndNameIgnoreCaseAndIdNot(CAMPAIGN_ID, "New name", existing.getId()))
+				.thenReturn(false);
+
+		// When:
+		HubReportView result = service.update(CAMPAIGN_ID, VIEW_ID, changes);
+
+		// Then: every user-owned column carries over; id, campaign and audit stamps are server-owned and
+		// deliberately left on the existing row
+		assertThat(result.getName()).isEqualTo(changes.getName());
+		assertThat(result.getStatus()).isEqualTo(changes.getStatus());
+		assertThat(result.getNote()).isEqualTo(changes.getNote());
+		assertThat(result.getDimensions()).isEqualTo(changes.getDimensions());
+		assertThat(result.getMetrics()).isEqualTo(changes.getMetrics());
+		assertThat(result.getColumnOrder()).isEqualTo(changes.getColumnOrder());
+		assertThat(result.getFilters()).isEqualTo(changes.getFilters());
 	}
 
 	@Test
@@ -247,6 +279,7 @@ class HubReportViewServiceImplTest {
 		// Given:
 		HubReportView source = view("Weekly reporting");
 		source.setStatus("saved");
+		source.setColumnOrder("line_item_id,spend,date");
 		source.setFilters("[{\"field\":\"LINE_ITEM_ID\",\"values\":[\"LI-1\"]}]");
 		when(reportViewRepository.findByIdAndCampaignId(VIEW_ID, CAMPAIGN_ID)).thenReturn(Optional.of(source));
 		when(reportViewRepository.existsByCampaignIdAndNameIgnoreCase(CAMPAIGN_ID, "Weekly reporting (copy)")).thenReturn(false);
@@ -261,6 +294,9 @@ class HubReportViewServiceImplTest {
 		assertThat(result.getStatus()).isEqualTo("draft");
 		assertThat(result.getDimensions()).isEqualTo(source.getDimensions());
 		assertThat(result.getMetrics()).isEqualTo(source.getMetrics());
+		// The copy is the same report under a new name, so it opens arranged the way the source was -
+		// a duplicate that reverted to the default layout would look like the drag had been lost.
+		assertThat(result.getColumnOrder()).isEqualTo("line_item_id,spend,date");
 		assertThat(result.getFilters()).isEqualTo(source.getFilters());
 	}
 

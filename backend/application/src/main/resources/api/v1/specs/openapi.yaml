@@ -2630,6 +2630,20 @@ components:
           description: Optional metric column ids to include in a current-view .xlsx export.
           items:
             type: string
+        columnOrder:
+          type: array
+          description: >
+            The arrangement the export's columns should be written in, as dimension and metric ids in
+            one interleaved list. Narrows nothing - `dimensions` and `metrics` above still decide which
+            columns are included; this only decides the order they are written in. Ids here that are not
+            selected are ignored. Omit to write the default arrangement (dimensions first, then metrics).
+
+            Send a fully resolved order - every selected id, in the order they are to be written. A
+            selected id left out of this list is appended after the ones named here, which is a fallback
+            for a partial list rather than a placement rule: a caller matching a screen resolves its own
+            gaps first, because only the caller knows where an unplaced column sits there.
+          items:
+            type: string
     ReportRowSortFieldEnumV1:
       type: string
       description: >
@@ -3232,6 +3246,25 @@ components:
           description: The selected metric ids, in display order.
           items:
             type: string
+        columnOrder:
+          type: array
+          description: >
+            How the selected columns are arranged on screen, as dimension and metric ids in one
+            interleaved list - the report's own column layout, saved so it survives a reload and reads
+            the same for everyone who opens the report.
+
+            Deliberately separate from `dimensions`/`metrics`, which decide *which* columns a report has
+            (and, for dimensions, the aggregation grain): this decides only *where* they sit. An id here
+            that is no longer selected is ignored rather than resurrecting a column. Absent or empty
+            means the default arrangement - every dimension in `dimensions` order, then every metric in
+            `metrics` order - which is what every report saved before this field existed gets.
+
+            May legitimately cover only part of the selection: ticking a column on adds it to
+            `dimensions`/`metrics` without giving it a place here, so adding a column never invalidates a
+            saved arrangement. The server stores and returns this list verbatim and never resolves those
+            gaps - where an unplaced column ends up on screen is the client's own decision.
+          items:
+            type: string
         filters:
           type: array
           description: The saved per-dimension multi-value filters (US-029); empty when none.
@@ -3269,6 +3302,13 @@ components:
             type: string
         metrics:
           type: array
+          items:
+            type: string
+        columnOrder:
+          type: array
+          description: >
+            The report's column arrangement, as dimension and metric ids in one interleaved list. See
+            `ReportViewV1.columnOrder`; omit to leave the report on the default arrangement.
           items:
             type: string
         filters:

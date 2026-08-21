@@ -201,6 +201,102 @@ function renderReportingTab(campaign: CampaignV1 = aCampaign(), sidebar?: Sideba
   );
 }
 
+/** The data table's header cells, by role - excludes the unrelated saved-reports list table, which also
+ *  has `columnheader` cells on the same page. */
+function dataTableHeaderCells() {
+  const dataTable = document.querySelector(".reporting-tab__data-tbl") as HTMLElement;
+  return within(dataTable).getAllByRole("columnheader");
+}
+
+/** One header cell, found by the label it starts with (a metric header trails its agg badge). */
+function dataTableHeaderCell(label: string) {
+  return dataTableHeaderCells().find((header) => header.textContent?.startsWith(label)) as HTMLElement;
+}
+
+/** The data table's header cells' text, in DOM order. A metric header trails its agg badge, hence e.g.
+ *  "ImpressionsSUM". */
+function dataTableColumnNames() {
+  return dataTableHeaderCells().map((header) => header.textContent);
+}
+
+/** The move handle on one column's header, by the label the header shows. */
+function columnGrip(label: string) {
+  return screen.getByRole("button", { name: `Move ${label}` });
+}
+
+/**
+ * Replaces `requestAnimationFrame`/`cancelAnimationFrame` with a manually-driven queue for one test.
+ * The reordering drag's own geometry effect (reporting-tab.tsx) schedules exactly one frame at a time -
+ * it calls `requestAnimationFrame` again itself at the end of every frame it runs - so capturing and
+ * firing the single pending callback by hand drives it exactly that effect would, one frame at a time,
+ * without waiting on the real 60Hz clock jsdom doesn't run anyway.
+ */
+function controlledRaf() {
+  let pending: FrameRequestCallback | null = null;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+    pending = cb;
+    return 1;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {
+    pending = null;
+  });
+  return {
+    /** Runs the pending frame, if there is one - wrapped in `act` because the effect's own callback
+     *  updates React state (the resolved drop boundary, the label position) outside of any event
+     *  handler React itself is already batching. */
+    flush() {
+      const cb = pending;
+      pending = null;
+      if (cb) act(() => cb(0));
+    },
+  };
+}
+
+/**
+ * Stubs the data table's header cells' bounding rects for the duration of one test - jsdom never lays
+ * anything out, so the drag's own geometry (resolveDropBoundary in reporting-tab.tsx) has nothing real
+ * to read without this. Columns are laid out left to right in the given order, each `width` wide,
+ * starting at viewport x 0.
+ */
+function stubHeaderRects(order: string[], width = 160) {
+  order.forEach((label, index) => {
+    const left = index * width;
+    const rect = {
+      left,
+      right: left + width,
+      width,
+      top: 0,
+      bottom: 40,
+      height: 40,
+      x: left,
+      y: 0,
+      toJSON() {
+        return this;
+      },
+    };
+    vi.spyOn(dataTableHeaderCell(label), "getBoundingClientRect").mockReturnValue(rect as DOMRect);
+  });
+}
+
+/**
+ * Drives one full pointer drag: press the grip, stub the header geometry, move the cursor to `atX`
+ * (optionally at a given `clientY`, to prove the vertical position never matters), let the drag's own
+ * animation-frame effect resolve a boundary against it, then release.
+ */
+function dragColumnTo(
+  from: string,
+  atX: number,
+  order: string[],
+  raf: ReturnType<typeof controlledRaf>,
+  clientY = 0
+) {
+  fireEvent.pointerDown(columnGrip(from), { clientX: 0, clientY: 0 });
+  stubHeaderRects(order);
+  fireEvent.pointerMove(window, { clientX: atX, clientY });
+  raf.flush();
+  fireEvent.pointerUp(window);
+}
+
 describe("ReportingTab reports list", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -361,6 +457,7 @@ describe("ReportingTab reports list", () => {
       dimensions: DEFAULT_DIMS,
       metrics: DEFAULT_METRICS,
       filters: [],
+      columnOrder: [],
     });
     // ...and the new view becomes selected once the list refetches to include it
     await waitFor(() =>
@@ -453,6 +550,7 @@ describe("ReportingTab reports list", () => {
       dimensions: ["date", "line_item_id"],
       metrics: ["impressions", "spend"],
       filters: [],
+      columnOrder: [],
     });
     expect(await screen.findByText("Report updated.")).toBeInTheDocument();
   });
@@ -537,6 +635,7 @@ describe("ReportingTab reports list", () => {
       dimensions: ["date", "line_item_id"],
       metrics: ["impressions", "spend"],
       filters: [],
+      columnOrder: [],
     });
     expect(await screen.findByText("Report saved.")).toBeInTheDocument();
   });
@@ -2654,11 +2753,50 @@ describe("ReportingTab download", () => {
         sortDirection: undefined,
         dimensions: ["date", "line_item_id"],
         metrics: ["impressions", "spend"],
+        // The columns as rendered, not the report's stored (here empty) arrangement - the workbook has
+        // to be written in the order the screen was in, and resolving that here leaves the server
+        // nothing to guess at.
+        columnOrder: ["date", "line_item_id", "impressions", "spend"],
       })
     );
     expect(createObjectURL).toHaveBeenCalledWith(blob);
     expect(createdLink?.download).toBe("Ourisman Ford 2026 - All data.xlsx");
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url"));
+  });
+
+  it("should export a partly-arranged report in the order the screen resolved, not the stored one", async () => {
+    // Given: a report whose saved arrangement covers only some of its columns - what a report looks like
+    // the moment a column is ticked on after the last drag. The screen and the server resolve the
+    // remainder by different rules (the screen puts an unlisted dimension back among the dimensions, the
+    // server puts every unlisted id at the end), so sending the stored arrangement would hand back a
+    // workbook whose columns are in a different order than the table it was downloaded from.
+    mockReportViews([
+      aReportView({
+        dimensions: ["date", "channel"],
+        metrics: ["impressions", "spend"],
+        columnOrder: ["date", "spend"],
+      }),
+    ]);
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportReportRows).mockResolvedValue({ blob, truncated: false });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderReportingTab();
+    await waitFor(() => expect(document.querySelector(".reporting-tab__data-tbl")).toBeTruthy());
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then: the fully resolved on-screen order, with Channel back among the dimensions - not the stored
+    // ["date", "spend"], and not the server's own fallback of ["date", "spend", "channel", "impressions"]
+    await waitFor(() =>
+      expect(exportReportRows).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ columnOrder: ["date", "channel", "spend", "impressions"] })
+      )
+    );
   });
 
   it("should download the full unfiltered dataset when All data is chosen", async () => {
@@ -2729,5 +2867,668 @@ describe("ReportingTab download", () => {
 
     // Then: the button re-enables once the failed download settles
     await waitFor(() => expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled());
+  });
+
+  it("should carry the on-screen column order in the export payload", async () => {
+    // Given: a table whose columns have been dragged out of their default arrangement
+    const raf = controlledRaf();
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportReportRows).mockResolvedValue({ blob, truncated: false });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Date is dragged past Constructed id L1's midpoint - landing just after it - then the
+    // current view is downloaded
+    dragColumnTo("Date", 300, ["Date", "Constructed id L1", "Impressions", "Client Cost"], raf);
+    expect(dataTableColumnNames()[0]).toBe("Constructed id L1");
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then: the export payload's columnOrder matches what the user is actually looking at, not the
+    // dimensions-then-metrics order the backend would otherwise concatenate them in
+    await waitFor(() =>
+      expect(exportReportRows).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ columnOrder: ["line_item_id", "date", "impressions", "spend"] })
+      )
+    );
+  });
+});
+
+describe("ReportingTab column order", () => {
+  /** The Dimensions picker, scoped so its checkboxes/actions can't be confused with the Metrics one. */
+  function dimensionPicker() {
+    return within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+  }
+
+  /** The Metrics picker, scoped the same way. */
+  function metricPicker() {
+    return within(screen.getByText("Metrics").closest(".reporting-tab__picker") as HTMLElement);
+  }
+
+  /**
+   * The rendered data-table header cells' text, in DOM order - excludes the unrelated saved-reports
+   * list table, which also has `columnheader` cells on the same page. The assertions below compare the
+   * whole ordered array, so unlike a per-header presence check they fail on a wrong position, which is
+   * the entire defect. A metric header carries its agg badge, hence "ImpressionsSUM"; the resize handle
+   * contributes nothing, being an empty `<span>` labelled only by `aria-label`.
+   */
+  function dataTableColumnNames() {
+    const dataTable = document.querySelector(".reporting-tab__data-tbl") as HTMLElement;
+    return within(dataTable).getAllByRole("columnheader").map((header) => header.textContent);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intersectionCallbacks = [];
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    vi.mocked(listCampaignReportRows).mockResolvedValue(aPage());
+  });
+
+  it("should render dimension columns in the user's selection order, not DIM_DEFS order", async () => {
+    // Given: the default view's dimensions cleared, so only picker clicks decide the order
+    mockReportViews();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    const dims = dimensionPicker();
+    await userEvent.click(dims.getByRole("checkbox", { name: "Date" }));
+    await userEvent.click(dims.getByRole("checkbox", { name: /Constructed id L1/ }));
+
+    // When: Channel is checked before Date - the reverse of DIM_DEFS, which lists Date first
+    await userEvent.click(dims.getByRole("checkbox", { name: "Channel" }));
+    await userEvent.click(dims.getByRole("checkbox", { name: "Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the table honors the click order, Channel before Date - the unchanged default metrics
+    // (Impressions, Client Cost) still trail them
+    await waitFor(() =>
+      expect(dataTableColumnNames()).toEqual([
+        "Channel",
+        "Date",
+        "ImpressionsSUM",
+        "Client CostSUM",
+      ])
+    );
+  });
+
+  it("should render metric columns in the user's selection order, after every dimension column", async () => {
+    // Given: a single dimension selected and the default metrics cleared
+    mockReportViews();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    const dims = dimensionPicker();
+    await userEvent.click(dims.getByRole("checkbox", { name: /Constructed id L1/ }));
+    const mets = metricPicker();
+    await userEvent.click(mets.getByRole("checkbox", { name: /^Impressions/ }));
+    await userEvent.click(mets.getByRole("checkbox", { name: /^Client Cost/ }));
+
+    // When: Clicks is checked before Impressions - the reverse of METRIC_DEFS, which lists Impressions first
+    await userEvent.click(mets.getByRole("checkbox", { name: /^Clicks/ }));
+    await userEvent.click(mets.getByRole("checkbox", { name: /^Impressions/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the one dimension column comes first, then the metrics in click order
+    await waitFor(() =>
+      expect(dataTableColumnNames()).toEqual([
+        "Date",
+        "ClicksSUM",
+        "ImpressionsSUM",
+      ])
+    );
+  });
+
+  it("should render a saved view's stored column order on load, even when it is not DIM_DEFS/METRIC_DEFS order", async () => {
+    // Given: a saved view whose stored arrays are not in canonical definition order
+    mockReportViews([aReportView({ dimensions: ["channel", "date"], metrics: ["spend", "impressions"] })]);
+
+    // When:
+    renderReportingTab();
+    await waitFor(() => expect(document.querySelector(".reporting-tab__data-tbl")).toBeTruthy());
+
+    // Then: the stored order renders as-is, with no Apply click needed
+    expect(dataTableColumnNames()).toEqual([
+      "Channel",
+      "Date",
+      "Client CostSUM",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should skip an unknown stored column id and de-duplicate a repeated one, without throwing", async () => {
+    // Given: a saved view whose stored arrays contain an id absent from DIM_DEFS/METRIC_DEFS and a
+    // dimension id repeated
+    mockReportViews([
+      aReportView({
+        dimensions: ["channel", "unknown_dim", "channel", "date"],
+        metrics: ["unknown_metric", "spend"],
+      }),
+    ]);
+
+    // When:
+    renderReportingTab();
+    await waitFor(() => expect(document.querySelector(".reporting-tab__data-tbl")).toBeTruthy());
+
+    // Then: the unknown ids render no column and the repeated dimension renders once, at its first
+    // occurrence's position - three columns, not five, none of them blank
+    expect(dataTableColumnNames()).toEqual([
+      "Channel",
+      "Date",
+      "Client CostSUM",
+    ]);
+  });
+
+  it("should render exactly the default arrangement when no columnOrder is saved", async () => {
+    // Given: a report saved before columnOrder existed - dimensions first, then metrics, both in
+    // their own selection order
+    mockReportViews([aReportView()]);
+
+    // When:
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // Then:
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+  });
+
+  it("should render a saved columnOrder that interleaves a metric between two dimensions", async () => {
+    // Given: a stored columnOrder that positions a metric ahead of both dimensions
+    mockReportViews([
+      aReportView({
+        dimensions: ["date", "line_item_id"],
+        metrics: ["impressions", "spend"],
+        columnOrder: ["spend", "date", "line_item_id", "impressions"],
+      }),
+    ]);
+
+    // When:
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // Then: the table renders exactly the stored arrangement, no Apply needed
+    expect(dataTableColumnNames()).toEqual([
+      "Client CostSUM",
+      "Date",
+      "Constructed id L1",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should place a selected column columnOrder doesn't mention at the end", async () => {
+    // Given: Clicks is selected but the stored columnOrder was saved before it was added to the report
+    mockReportViews([
+      aReportView({
+        dimensions: ["date", "line_item_id"],
+        metrics: ["impressions", "spend", "clicks"],
+        columnOrder: ["date", "line_item_id", "spend", "impressions"],
+      }),
+    ]);
+
+    // When:
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // Then: Clicks keeps its default place - after every column columnOrder does name
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "Client CostSUM",
+      "ImpressionsSUM",
+      "ClicksSUM",
+    ]);
+  });
+
+  it("should render nothing for a columnOrder id that isn't selected", async () => {
+    // Given: Clicks sits in the stored columnOrder but was never added to dimensions/metrics
+    mockReportViews([
+      aReportView({
+        dimensions: ["date", "line_item_id"],
+        metrics: ["impressions", "spend"],
+        columnOrder: ["date", "clicks", "line_item_id", "impressions", "spend"],
+      }),
+    ]);
+
+    // When:
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // Then: exactly the two selected dimensions and two selected metrics render - Clicks renders no
+    // column of its own
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+  });
+});
+
+describe("ReportingTab column reordering", () => {
+  // The default view's four columns, left to right - the order every `stubHeaderRects` call below lays
+  // out geometry for, at 160px each: Date [0,160), Constructed id L1 [160,320), Impressions [320,480),
+  // Client Cost [480,640).
+  const DEFAULT_ORDER = ["Date", "Constructed id L1", "Impressions", "Client Cost"];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intersectionCallbacks = [];
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    mockReportViews();
+    vi.mocked(listCampaignReportRows).mockResolvedValue(aPage());
+  });
+
+  it("should move a dimension column to the boundary it is dropped on", async () => {
+    // Given: the default view's Date, Constructed id L1, Impressions, Client Cost
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Date is dragged to a cursor position past Constructed id L1's own midpoint (x=300, inside
+    // its [160,320) header cell but right of its 240 midpoint) - landing it just after that column
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf);
+
+    // Then: Date lands right after Constructed id L1, which shifts left to take its old place
+    expect(dataTableColumnNames()).toEqual([
+      "Constructed id L1",
+      "Date",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+  });
+
+  it("should move a metric column to the boundary it is dropped on", async () => {
+    // Given:
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Client Cost is dragged to x=350 - inside Impressions' [320,480) header cell, left of its
+    // 400 midpoint - landing it just before Impressions
+    dragColumnTo("Client Cost", 350, DEFAULT_ORDER, raf);
+
+    // Then: the dimensions are untouched and the two metrics have swapped
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "Client CostSUM",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should move the body and totals cells with the header, not just the header", async () => {
+    // Given: three places render the column order independently - header, totals row, data rows - and a
+    // reorder that only reached one of them would put every value under the wrong heading
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf);
+
+    // Then: every row agrees with the header's new order
+    expect(dataTableColumnNames()[0]).toBe("Constructed id L1");
+    const dataTable = document.querySelector(".reporting-tab__data-tbl") as HTMLElement;
+    const bodyRows = within(dataTable).getAllByRole("row").slice(1);
+    for (const row of bodyRows) {
+      const cells = within(row).queryAllByRole("cell");
+      if (cells.length < 2) continue;
+      expect(cells[0].className).toContain("reporting-tab__dim-col--line-item");
+      expect(cells[1].className).toContain("reporting-tab__dim-col--date");
+    }
+  });
+
+  it("should not re-read the rows when a column only changes position", async () => {
+    // Given: the applied dimensions are the server-side aggregation key, but their ORDER is not - a
+    // reorder that re-keyed the query would pay for a multi-second BigQuery read to move a column
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    const readsBefore = vi.mocked(listCampaignReportRows).mock.calls.length;
+
+    // When:
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf);
+    expect(dataTableColumnNames()[0]).toBe("Constructed id L1");
+
+    // Then:
+    expect(vi.mocked(listCampaignReportRows).mock.calls.length).toBe(readsBefore);
+  });
+
+  it("should drop a metric between two dimensions", async () => {
+    // Given: the table now renders one interleaved column list, not a dimension list followed by a
+    // metric list - so a metric dragged to a boundary inside the dimensions lands between the two
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Client Cost is dragged to x=200 - inside Constructed id L1's [160,320) header cell, left of
+    // its 240 midpoint - landing it just before that column, between the two dimensions
+    dragColumnTo("Client Cost", 200, DEFAULT_ORDER, raf);
+
+    // Then: Client Cost now sits between the two dimensions
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Client CostSUM",
+      "Constructed id L1",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should move the body and totals cells into an interleaved order along with the header", async () => {
+    // Given: a metric dragged between two dimensions has to carry its whole column - header, totals,
+    // and every data row - or the table would show values under the wrong heading
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Client Cost lands between the two dimensions
+    dragColumnTo("Client Cost", 200, DEFAULT_ORDER, raf);
+    expect(dataTableColumnNames()[1]).toBe("Client CostSUM");
+
+    // Then: the totals row and every data row agree with the header's new, interleaved order
+    const dataTable = document.querySelector(".reporting-tab__data-tbl") as HTMLElement;
+    const bodyRows = within(dataTable).getAllByRole("row").slice(1);
+    for (const row of bodyRows) {
+      const cells = within(row).queryAllByRole("cell");
+      if (cells.length < 3) continue;
+      expect(cells[0].className).toContain("reporting-tab__dim-col--date");
+      expect(cells[1].className).toContain("reporting-tab__metric-col");
+      expect(cells[2].className).toContain("reporting-tab__dim-col--line-item");
+    }
+  });
+
+  it("should land before a column when the cursor sits left of its midpoint", async () => {
+    // Given: Client Cost dragged to x=200, inside Constructed id L1's [160,320) header cell and left of
+    // its 240 midpoint
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    dragColumnTo("Client Cost", 200, DEFAULT_ORDER, raf);
+
+    // Then: it lands BEFORE Constructed id L1, not after it
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Client CostSUM",
+      "Constructed id L1",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should land after a column when the cursor sits right of its midpoint", async () => {
+    // Given: Client Cost dragged to x=300 - the same header cell as above, but right of its 240
+    // midpoint instead of left
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    dragColumnTo("Client Cost", 300, DEFAULT_ORDER, raf);
+
+    // Then: it lands AFTER Constructed id L1 instead
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "Client CostSUM",
+      "ImpressionsSUM",
+    ]);
+  });
+
+  it("should resolve a drop position even when the cursor is tracked over a body row, not the header", async () => {
+    // Given: the drag no longer registers only over the header row - only the cursor's x is meant to
+    // matter, so tracking it at a y far below the header (well into the body rows) has to resolve the
+    // same boundary a header-row y would
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: same x as the dimension-drag test above, but at a y over the data rows
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf, 400);
+
+    // Then: the same move resolves regardless
+    expect(dataTableColumnNames()).toEqual([
+      "Constructed id L1",
+      "Date",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+  });
+
+  it("should reflect the current drag in the dragged column's and drop boundary's own cell classes", async () => {
+    // Given: the dimming and the insertion line are driven from BEM classes applied to each affected
+    // cell (see reporting-tab.css), not from a data attribute on the <table> read with `nth-child()`
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Date (1st column) is picked up and tracked to x=300, resolving the boundary just after
+    // Constructed id L1 (2nd column) - before release
+    fireEvent.pointerDown(columnGrip("Date"), { clientX: 0, clientY: 0 });
+    stubHeaderRects(DEFAULT_ORDER);
+    fireEvent.pointerMove(window, { clientX: 300, clientY: 0 });
+    raf.flush();
+
+    // Then: Date's own header cell dims, Impressions' (the column the boundary lands before) carries
+    // the insertion line, and no header cell carries the "past every column" variant of that line
+    expect(dataTableHeaderCell("Date").className).toContain("reporting-tab__cell--dragging");
+    expect(dataTableHeaderCell("Impressions").className).toContain("reporting-tab__cell--drop-before");
+    expect(dataTableHeaderCell("Constructed id L1").className).not.toContain("reporting-tab__cell--dragging");
+    expect(dataTableHeaderCell("Constructed id L1").className).not.toContain("reporting-tab__cell--drop-before");
+    for (const header of dataTableHeaderCells()) {
+      expect(header.className).not.toContain("reporting-tab__cell--drop-after");
+    }
+
+    // Cleanup: abandon rather than commit, so this test's assertions are about the in-progress state
+    fireEvent.keyDown(window, { key: "Escape" });
+  });
+
+  it("should abandon a drag on Escape instead of committing it", async () => {
+    // Given: a drag picked up and tracked to a boundary that would move the column
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    fireEvent.pointerDown(columnGrip("Date"), { clientX: 0, clientY: 0 });
+    stubHeaderRects(DEFAULT_ORDER);
+    fireEvent.pointerMove(window, { clientX: 300, clientY: 0 });
+    raf.flush();
+
+    // When: released after Escape
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(window);
+
+    // Then: the order is the one the drag started from
+    expect(dataTableColumnNames()[0]).toBe("Date");
+  });
+
+  it("should leave the order alone when a grip is pressed and released without moving", async () => {
+    // Given: a click that never travels never resolves a boundary, so there is nothing to commit
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    fireEvent.pointerDown(columnGrip("Date"));
+    fireEvent.pointerUp(window);
+
+    // Then:
+    expect(dataTableColumnNames()[0]).toBe("Date");
+  });
+
+  it("should move a column one place per arrow-key press", async () => {
+    // Given: a pointer drag is the only gesture a mouse can make, so the grip answers the arrow keys
+    // too - otherwise a keyboard user is stuck with whatever order the report was saved in
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    columnGrip("Client Cost").focus();
+    await userEvent.keyboard("{ArrowLeft}");
+
+    // Then:
+    await waitFor(() => expect(dataTableColumnNames()[2]).toBe("Client CostSUM"));
+
+    // When: moved back
+    await userEvent.keyboard("{ArrowRight}");
+
+    // Then:
+    await waitFor(() => expect(dataTableColumnNames()[2]).toBe("ImpressionsSUM"));
+  });
+
+  it("should stop at the ends of its own list rather than crossing into the other one", async () => {
+    // Given: the first dimension pressed left, which would otherwise walk out of the dimension list
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    columnGrip("Date").focus();
+    await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+
+    // Then:
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+
+    // When: the last metric pressed right
+    columnGrip("Client Cost").focus();
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}");
+
+    // Then:
+    expect(dataTableColumnNames()).toEqual([
+      "Date",
+      "Constructed id L1",
+      "ImpressionsSUM",
+      "Client CostSUM",
+    ]);
+  });
+
+  it("should persist the dragged order on Save report", async () => {
+    // Given: the reorder has to reach the draft the pickers hold, not only the applied view - saving
+    // the old order back while showing the new one is the one failure the user cannot see coming
+    const raf = controlledRaf();
+    vi.mocked(updateReportView).mockResolvedValue({ ...SAVED_VIEW_DTO, status: "saved" });
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf);
+    expect(dataTableColumnNames()[0]).toBe("Constructed id L1");
+    await userEvent.click(screen.getByRole("button", { name: "Save report" }));
+
+    // Then: the arrangement is saved as columnOrder - dimensions/metrics still only decide membership
+    await waitFor(() => expect(updateReportView).toHaveBeenCalledTimes(1));
+    expect(updateReportView).toHaveBeenCalledWith(
+      42,
+      1,
+      expect.objectContaining({
+        dimensions: ["date", "line_item_id"],
+        metrics: ["impressions", "spend"],
+        columnOrder: ["line_item_id", "date", "impressions", "spend"],
+      })
+    );
+  });
+
+  it("should keep the dragged order through a later Apply", async () => {
+    // Given: Apply copies the draft over the applied view, so a drag that never reached the draft
+    // would be silently undone by the next picker change
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    dragColumnTo("Date", 300, DEFAULT_ORDER, raf);
+    expect(dataTableColumnNames()[0]).toBe("Constructed id L1");
+
+    // When: a dimension is added and applied
+    const dims = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+    await userEvent.click(dims.getByRole("checkbox", { name: "Channel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the dragged order survives, with the new column appended
+    await waitFor(() =>
+      expect(dataTableColumnNames()).toEqual([
+        "Constructed id L1",
+        "Date",
+        "Channel",
+        "ImpressionsSUM",
+        "Client CostSUM",
+      ])
+    );
+  });
+
+  it("should append a column at the end when it is dropped past every rendered column", async () => {
+    // Given: a cursor beyond the last header's own right edge - past Client Cost's [480,640) - resolves
+    // the one boundary with no column of its own to sit before (the "drop-after" variant of the
+    // insertion line - see dropCellClass in reporting-tab.tsx/.css)
+    const raf = controlledRaf();
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Date is dragged from the front of the list to past the very end
+    dragColumnTo("Date", 700, DEFAULT_ORDER, raf);
+
+    // Then: Date lands last instead of shifting by one place
+    expect(dataTableColumnNames()).toEqual([
+      "Constructed id L1",
+      "ImpressionsSUM",
+      "Client CostSUM",
+      "Date",
+    ]);
+  });
+
+  it("should place the drag classes by each column's rendered position, not a list bounded to the default column count", async () => {
+    // Given: a report with two more columns than the default view's four - the generated selector list
+    // this replaced was hard-coded to the largest report DIM_DEFS + METRIC_DEFS could ever build, so a
+    // test at the default column count alone could not tell "derived from position" apart from "found in
+    // a hard-coded list that happens to be big enough". Six columns is proof enough that it is the former.
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    const dims = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+    await userEvent.click(dims.getByRole("checkbox", { name: "Channel" }));
+    await userEvent.click(dims.getByRole("checkbox", { name: "Tactic" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(dataTableColumnNames()).toEqual([
+        "Date",
+        "Constructed id L1",
+        "Channel",
+        "Tactic",
+        "ImpressionsSUM",
+        "Client CostSUM",
+      ])
+    );
+    const order = ["Date", "Constructed id L1", "Channel", "Tactic", "Impressions", "Client Cost"];
+
+    // When: Date (index 0) is picked up and tracked to x=600 - inside Tactic's [480,640) header cell,
+    // right of its 560 midpoint - resolving the boundary just before Impressions (index 4)
+    const raf = controlledRaf();
+    fireEvent.pointerDown(columnGrip("Date"), { clientX: 0, clientY: 0 });
+    stubHeaderRects(order);
+    fireEvent.pointerMove(window, { clientX: 600, clientY: 0 });
+    raf.flush();
+
+    // Then: the header, the totals row and a data row all carry the same two classes at the same two
+    // positions - column 0 (Date) dims, column 4 (Impressions) carries the insertion line
+    expect(dataTableHeaderCell("Date").className).toContain("reporting-tab__cell--dragging");
+    expect(dataTableHeaderCell("Impressions").className).toContain("reporting-tab__cell--drop-before");
+
+    const dataTable = document.querySelector(".reporting-tab__data-tbl") as HTMLElement;
+    const rowsAfterHeader = within(dataTable).getAllByRole("row").slice(1);
+    const totalsCells = within(rowsAfterHeader[0]).getAllByRole("cell");
+    expect(totalsCells[0].className).toContain("reporting-tab__cell--dragging");
+    expect(totalsCells[4].className).toContain("reporting-tab__cell--drop-before");
+
+    const firstDataRowCells = within(rowsAfterHeader[1]).getAllByRole("cell");
+    expect(firstDataRowCells[0].className).toContain("reporting-tab__cell--dragging");
+    expect(firstDataRowCells[4].className).toContain("reporting-tab__cell--drop-before");
+
+    // Cleanup: abandon rather than commit
+    fireEvent.keyDown(window, { key: "Escape" });
   });
 });

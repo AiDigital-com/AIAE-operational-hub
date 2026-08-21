@@ -234,6 +234,7 @@ const DEFAULT_REPORT_CONFIG: ReportConfig = {
   dimensions: [...DEFAULT_DIMS],
   metrics: [...DEFAULT_METRICS],
   filters: [],
+  columnOrder: [],
 };
 
 function createUpsert(name: string, note?: string): ReportViewUpsertV1 {
@@ -245,6 +246,7 @@ function createUpsert(name: string, note?: string): ReportViewUpsertV1 {
     dimensions: [...DEFAULT_REPORT_CONFIG.dimensions],
     metrics: [...DEFAULT_REPORT_CONFIG.metrics],
     filters: [],
+    columnOrder: [...DEFAULT_REPORT_CONFIG.columnOrder],
   };
 }
 
@@ -257,7 +259,14 @@ function toReportView(dto: ReportViewV1): ReportView {
     note: dto.note ?? undefined,
     created: dto.created,
     edited: dto.edited ?? null,
-    config: { dimensions: dto.dimensions ?? [], metrics: dto.metrics ?? [], filters: dto.filters ?? [] },
+    config: {
+      dimensions: dto.dimensions ?? [],
+      metrics: dto.metrics ?? [],
+      filters: dto.filters ?? [],
+      // Absent/empty means the default arrangement - the same thing a report saved before this field
+      // existed gets, so it must read exactly the same as an explicit [].
+      columnOrder: dto.columnOrder ?? [],
+    },
   };
 }
 
@@ -270,6 +279,7 @@ function toUpsert(view: Pick<ReportView, "name" | "type" | "status" | "note" | "
     dimensions: view.config.dimensions,
     metrics: view.config.metrics,
     filters: view.config.filters,
+    columnOrder: view.config.columnOrder,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   EditIcon,
   ExpandIcon,
   FilterIcon,
+  GripIcon,
   MoreVerticalIcon,
   PlusIcon,
   SearchIcon,
@@ -156,6 +157,26 @@ function metricColClass(id: string): string {
   );
 }
 
+/** Whether the column at `colIndex` - its position in the rendered order, not a bounded list of ids - is
+ *  the one currently being dragged, so its cell should dim. Applied to a column's header cell, its
+ *  totals cell and every visible body cell (see ReportRow) so the eye can find it wherever it renders, not
+ *  only in the header it was picked up from. `dragColIndex` is `-1` while no drag is in progress, which
+ *  this can never equal a real `colIndex`. */
+function dragCellClass(colIndex: number, dragColIndex: number): string | false {
+  return colIndex === dragColIndex && "reporting-tab__cell--dragging";
+}
+
+/** Whether the column at `colIndex` carries the insertion line marking where the dragged column would
+ *  land if released now - drawn before the column the boundary sits at, except for the one boundary with
+ *  no column of its own to sit before (past every rendered column), which draws after the last column
+ *  instead. `dropBoundaryIndex` is `-1` while no drag is in progress. Derived from `colIndex`/`columnCount`
+ *  rather than any fixed ceiling, so it holds for however many columns a report actually renders. */
+function dropCellClass(colIndex: number, dropBoundaryIndex: number, columnCount: number): string | false {
+  if (dropBoundaryIndex === -1) return false;
+  if (dropBoundaryIndex === columnCount) return colIndex === columnCount - 1 && "reporting-tab__cell--drop-after";
+  return colIndex === dropBoundaryIndex && "reporting-tab__cell--drop-before";
+}
+
 function dimCell(id: string, row: ReportRowV1): ReactNode {
   const value = row[id as keyof ReportRowV1];
   if (id === "date" && value) return fmtDate(String(value));
@@ -272,13 +293,169 @@ function fmtStamp(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}/.test(iso) ? fmtDate(iso.slice(0, 10)) : iso;
 }
 
-const EMPTY_CONFIG: ReportConfig = { dimensions: [], metrics: [], filters: [] };
+const EMPTY_CONFIG: ReportConfig = { dimensions: [], metrics: [], filters: [], columnOrder: [] };
 const PICKER_SEARCH_DEBOUNCE_MS = 300;
 const REPORT_NAME_MAX_LENGTH = 50;
 /** Floor for a dragged column, so one can be narrowed out of the way but never out of existence. */
 const MIN_COLUMN_WIDTH = 72;
 /** How far one arrow-key press moves a column edge - the keyboard equivalent of a drag. */
 const COLUMN_RESIZE_STEP = 12;
+/** How near the data scroll container's left/right edge a column drag has to get before the table
+ *  starts autoscrolling under it - wide enough to find without hunting for a hairline, narrow enough
+ *  that most of a wide report stays free to actually drop into. */
+const COLUMN_DRAG_AUTOSCROLL_ZONE_PX = 48;
+/** The fastest the table autoscrolls during a column drag, reached only right at the scroll container's
+ *  own edge - scaled down elsewhere in the zone above so the scroll doesn't lurch the moment it starts. */
+const COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME = 16;
+
+/**
+ * The full column order a report actually renders, as one interleaved list of ids.
+ *
+ * `columnOrder` may only cover part of the current selection - a freshly selected column has no place
+ * in it yet - so this resolves it into a complete list before anything renders or a drag reorders it:
+ * every id `columnOrder` names, in that order (dropping any id that isn't currently selected, per
+ * contract); then every dimension `columnOrder` doesn't mention, inserted right after the last dimension
+ * it does (or at the very start when it names none), so an unlisted dimension still lands among the
+ * dimensions rather than at the tail of the whole table; then every metric it doesn't mention, appended
+ * at the very end. Absent/empty `columnOrder` reduces to the historic default: every dimension in
+ * selection order, then every metric in selection order.
+ *
+ * @param dimensionIds the currently selected dimension ids, in selection order
+ * @param metricIds    the currently selected metric ids, in selection order
+ * @param columnOrder  the report's saved/dragged arrangement, or `undefined` for a report saved before
+ *                      this field existed
+ * @returns every selected id exactly once, in the order its column renders
+ */
+function resolveColumnOrder(dimensionIds: string[], metricIds: string[], columnOrder: string[] | undefined): string[] {
+  const selectedDims = new Set(dimensionIds);
+  const selectedMets = new Set(metricIds);
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const id of columnOrder ?? []) {
+    if ((selectedDims.has(id) || selectedMets.has(id)) && !seen.has(id)) {
+      ordered.push(id);
+      seen.add(id);
+    }
+  }
+  let dimInsertAt = ordered.reduce((last, id, index) => (selectedDims.has(id) ? index + 1 : last), 0);
+  for (const id of dimensionIds) {
+    if (seen.has(id)) continue;
+    ordered.splice(dimInsertAt, 0, id);
+    seen.add(id);
+    dimInsertAt += 1;
+  }
+  for (const id of metricIds) {
+    if (seen.has(id)) continue;
+    ordered.push(id);
+    seen.add(id);
+  }
+  return ordered;
+}
+
+/**
+ * Inserts one id at a boundary drawn against the ids that remain once it is removed - the way a drop (or
+ * an arrow-key nudge) actually asks for a move to read: "land right here", rather than "take this
+ * column's slot and shift it aside" (the pointer-hover design this replaced actually did the latter -
+ * see 01-MIGRATION-PLAN.md/the git history for the earlier `reorderIds`). `boundaryIndex` is a position
+ * in that *reduced* list: `0` lands before its first remaining id, `without.length` lands after its
+ * last. Removing `id` shifts every index to its right left by one, so a caller converting a screen
+ * position (or a neighbouring id) into this index has to account for that shift itself - this function
+ * only ever sees the already-adjusted number.
+ *
+ * <p>Returns the same array reference when the landing boundary reproduces the current order, so a drop
+ * that lands where it started cannot churn the config state (and through it every memo keyed on the
+ * applied dimensions).
+ *
+ * @param ids           the current display order, including `id`
+ * @param id            the column being moved
+ * @param boundaryIndex where it lands, against `ids` with `id` removed
+ * @returns the reordered ids, or {@code ids} unchanged when `id` is absent or the move is a no-op
+ */
+function insertAtBoundary(ids: string[], id: string, boundaryIndex: number): string[] {
+  const without = ids.filter((existing) => existing !== id);
+  if (without.length === ids.length) return ids;
+  const at = Math.max(0, Math.min(boundaryIndex, without.length));
+  const next = [...without.slice(0, at), id, ...without.slice(at)];
+  return next.every((value, index) => value === ids[index]) ? ids : next;
+}
+
+/** Where a dragged column should land, named by one of the OTHER columns rather than by a raw position -
+ *  so applying it to the applied config and the draft separately (their own resolved orders can briefly
+ *  differ, e.g. mid-picker-edit before Apply) still means the same thing to both, the way naming a drop
+ *  target by column id rather than index always has here. */
+interface ColumnDropTarget {
+  neighborId: string;
+  side: "before" | "after";
+}
+
+/**
+ * Converts a cursor-resolved boundary - against the full rendered order, the dragged column's own header
+ * still counted at `draggedIndex` - into a {@link ColumnDropTarget}. A boundary sitting on either side of
+ * the dragged column's own current slot resolves to naming itself as the neighbour, which {@link
+ * moveColumnTo} then reads back as a no-op (its own id can never be found among "the columns other than
+ * it").
+ *
+ * @param columns      every rendered column, in on-screen order - the same order `fullOrderBoundary` was
+ *                      resolved against
+ * @param draggedIndex the dragged column's own index within `columns`
+ * @param fullOrderBoundary the boundary from {@link resolveDropBoundary}, against that same order
+ */
+function columnDropTarget(columns: Column[], draggedIndex: number, fullOrderBoundary: number): ColumnDropTarget {
+  const before = fullOrderBoundary <= draggedIndex;
+  const neighborIndex = before ? fullOrderBoundary : fullOrderBoundary - 1;
+  return { neighborId: idOf(columns[neighborIndex]), side: before ? "before" : "after" };
+}
+
+/**
+ * Which boundary between rendered columns a cursor at viewport x `x` is nearest, given each column's
+ * current header rect in on-screen (left-to-right) order.
+ *
+ * The candidate column is whichever one's own horizontal span the cursor sits inside - clamped to the
+ * last one once the cursor has scrolled past the table's own right edge - and the cursor's side of THAT
+ * column's own midpoint decides whether the boundary lands before or after it, exactly the way the
+ * insertion line reads it. Only `x` matters: the header cells span the same horizontal range the body
+ * cells beneath them do, so a cursor tracked over a data row rather than the header resolves exactly the
+ * same boundary.
+ *
+ * @param rects the header cells' current bounding rects, in render order - the dragged column's own
+ *              header still counted, so the boundary this returns is against that order, not it removed
+ * @param x     the cursor's current viewport x
+ * @returns a boundary in `[0, rects.length]`
+ */
+function resolveDropBoundary(rects: readonly { left: number; right: number }[], x: number): number {
+  if (rects.length === 0) return 0;
+  let candidate = rects.length - 1;
+  for (let i = 0; i < rects.length; i += 1) {
+    if (x < rects[i].right) {
+      candidate = i;
+      break;
+    }
+  }
+  const midpoint = (rects[candidate].left + rects[candidate].right) / 2;
+  return x < midpoint ? candidate : candidate + 1;
+}
+
+/** How fast to autoscroll for a given depth into the edge zone - proportional, capped at
+ *  {@link COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME} right at the scroll container's own edge. */
+function columnDragAutoscrollSpeed(depthIntoZone: number): number {
+  const depth = Math.min(depthIntoZone, COLUMN_DRAG_AUTOSCROLL_ZONE_PX);
+  return (depth / COLUMN_DRAG_AUTOSCROLL_ZONE_PX) * COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME;
+}
+
+/** Scrolls the data table horizontally when the cursor sits inside {@link COLUMN_DRAG_AUTOSCROLL_ZONE_PX}
+ *  of either edge during a column drag, faster the closer to the edge - so a column can be dragged all
+ *  the way from one end of a wide report to the other without letting go and starting over partway. */
+function runColumnDragAutoscroll(container: HTMLElement, x: number): void {
+  const rect = container.getBoundingClientRect();
+  const fromLeft = x - rect.left;
+  const fromRight = rect.right - x;
+  if (fromLeft >= 0 && fromLeft < COLUMN_DRAG_AUTOSCROLL_ZONE_PX) {
+    container.scrollLeft -= columnDragAutoscrollSpeed(COLUMN_DRAG_AUTOSCROLL_ZONE_PX - fromLeft);
+  } else if (fromRight >= 0 && fromRight < COLUMN_DRAG_AUTOSCROLL_ZONE_PX) {
+    container.scrollLeft += columnDragAutoscrollSpeed(COLUMN_DRAG_AUTOSCROLL_ZONE_PX - fromRight);
+  }
+}
+
 /** The Date dimension, whose filter is a window rather than a value list and so is held separately. */
 const DATE_DIM_ID = "date";
 const CONVERSION_BREAKDOWN_BASE_DIM_IDS = ["date", "line_item_name", "channel"] as const;
@@ -454,6 +631,27 @@ function dateWindowSummary(window: DateWindow): string {
  * plus a conversion action, so a conversions figure on a delivery row would have no action to belong to.
  */
 type EditMode = "lines" | "bulk" | "conversions";
+
+/**
+ * One rendered column, tagged by the selection it was resolved from (`kind`). The table renders one
+ * interleaved list now - a drag can drop either kind anywhere in it - but a dimension header still
+ * carries a filter funnel and a metric header still carries an aggregation badge, so each render site
+ * still needs to know which one it has.
+ */
+type Column =
+  | { kind: "dimension"; dim: DimDef & { label: string } }
+  | { kind: "metric"; met: MetricDef };
+
+/** The id a column renders under, regardless of which kind it is. */
+function idOf(column: Column): string {
+  return column.kind === "dimension" ? column.dim.id : column.met.id;
+}
+
+/** The label a column's header renders, regardless of which kind it is - what the drag label beside the
+ * cursor names the column by (see the drag-label render in ReportingTab). */
+function labelOf(column: Column): string {
+  return column.kind === "dimension" ? column.dim.label : column.met.label;
+}
 
 export function ReportingTab() {
   const { campaign } = useOutletContext<CampaignTabContext>();
@@ -749,6 +947,161 @@ export function ReportingTab() {
     setColumnWidths((current) => ({ ...current, [columnId]: Math.max(MIN_COLUMN_WIDTH, Math.round(width)) }));
   }, []);
 
+  // The column the pointer is carrying, and where it would land. `dragColumn` alone is null when no
+  // drag is in progress. `dropBoundary` is resolved from cursor geometry each animation frame (see the
+  // effect below), against the full rendered order - the dragged column's own header still counted -
+  // rather than from whichever header the pointer happens to be vertically over: that is the whole fix
+  // for a drag only registering over the header row and never over the body underneath it.
+  const [dragColumn, setDragColumn] = useState<string | null>(null);
+  const [dropBoundary, setDropBoundary] = useState<number | null>(null);
+  // Where the drag label renders, in viewport coordinates - updated from the same once-per-frame effect
+  // as `dropBoundary`, not on every pointermove, so a fast mouse doesn't force a render more often than
+  // the screen can show one.
+  const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
+  // "Latest value" refs, so the pointerup listener and the geometry effect below can each bind once per
+  // drag instead of re-binding (or re-running their setup) on every frame or every pointer event.
+  const dragColumnRef = useRef<string | null>(null);
+  dragColumnRef.current = dragColumn;
+  const dropBoundaryRef = useRef<number | null>(null);
+  dropBoundaryRef.current = dropBoundary;
+  // The raw cursor position, written on every pointermove without touching React state at all - the
+  // geometry effect below is what turns this into a render, once per animation frame rather than once
+  // per event (pointermove fires far more often than the screen repaints).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  // The unified column list a drag reorders against, mirrored into a ref for the same reason
+  // `dragColumnRef` is - assigned once `orderedColumns` itself is resolved, further down.
+  const orderedColumnsRef = useRef<Column[]>([]);
+
+  /**
+   * Moves one column to a target expressed relative to one of the others, in both the applied view and
+   * the draft the pickers hold.
+   *
+   * <p>Both, because they are two different questions: the applied config is what the table renders, so
+   * the drag has to land there to be visible at all, and the draft is what Save persists - reordering
+   * only the applied one would show the new order and then save the old one. Writing to the draft also
+   * keeps a later Apply from silently undoing the drag by copying a stale order back over it.
+   *
+   * <p>Reorders the full resolved arrangement (see {@link resolveColumnOrder}), not the config's own
+   * possibly-partial `columnOrder` - the id or the neighbour being dropped against might be exactly the
+   * column that has no place in it yet - and writes the result back as an explicit `columnOrder`.
+   * `dimensions`/`metrics` are never touched: they still decide membership (and, for dimensions, the
+   * aggregation grain), which a column's on-screen position never changes. `target.neighborId` is
+   * resolved fresh against each config's own order (rather than passed as a shared index) so a moment
+   * where the draft and the applied view briefly disagree can never land the two configs on different
+   * arrangements.
+   *
+   * <p>Costs no read: the row query groups by {@code DIM_DEFS} order regardless of how the columns are
+   * arranged (see {@code appliedGroupBy}), so this is a pure re-render of rows already loaded.
+   */
+  const moveColumnTo = useCallback((id: string, target: ColumnDropTarget) => {
+    const reorder = (config: ReportConfig): ReportConfig => {
+      const current = resolveColumnOrder(config.dimensions, config.metrics, config.columnOrder);
+      const without = current.filter((existing) => existing !== id);
+      const neighborIndex = without.indexOf(target.neighborId);
+      // The neighbour is the dragged column's own id (dropped back onto itself) or isn't part of this
+      // particular config's own selection - either way, nothing to move.
+      if (neighborIndex === -1) return config;
+      const boundary = target.side === "before" ? neighborIndex : neighborIndex + 1;
+      const next = insertAtBoundary(current, id, boundary);
+      return next === current ? config : { ...config, columnOrder: next };
+    };
+    setAppliedConfig(reorder);
+    setDraftConfig(reorder);
+  }, []);
+
+  /** Moves a column one place left or right - the keyboard equivalent of a drag. Resolves its own
+   *  landing boundary from the id's position in each config's own resolved order (via {@link
+   *  insertAtBoundary}) rather than sharing one computed against a single list, for the same reason
+   *  {@link moveColumnTo} resolves `target.neighborId` fresh per config. */
+  const moveColumnStep = useCallback((id: string, direction: "left" | "right") => {
+    const reorder = (config: ReportConfig): ReportConfig => {
+      const current = resolveColumnOrder(config.dimensions, config.metrics, config.columnOrder);
+      const idx = current.indexOf(id);
+      if (idx === -1) return config;
+      const next = insertAtBoundary(current, id, direction === "left" ? idx - 1 : idx + 1);
+      return next === current ? config : { ...config, columnOrder: next };
+    };
+    setAppliedConfig(reorder);
+    setDraftConfig(reorder);
+  }, []);
+
+  /** Picks a column up, seeded with the press's own position so the drag label has somewhere to render
+   *  even before the first `pointermove`. The drop boundary starts empty, so a press with no movement -
+   *  no animation frame ever resolving one - changes nothing. */
+  const startColumnDrag = useCallback((id: string, x: number, y: number) => {
+    pointerRef.current = { x, y };
+    setDragColumn(id);
+    setDropBoundary(null);
+    setDragPointer({ x, y });
+  }, []);
+
+  // Tracks the drag for as long as one is in progress: `pointermove` only ever updates the plain ref
+  // above (see the geometry effect below for why), release commits whatever boundary that effect last
+  // resolved, and Escape abandons the move instead of committing it - the same way it leaves the
+  // expanded table. Bound on `window`, not the table, because a pointerup or a released Escape the
+  // window never hears would leave a column stuck to the cursor - the pointer is regularly outside the
+  // table by the time it lets go.
+  useEffect(() => {
+    if (dragColumn == null) return undefined;
+    const move = (event: PointerEvent) => {
+      pointerRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const clear = () => {
+      setDragColumn(null);
+      setDropBoundary(null);
+      setDragPointer(null);
+      pointerRef.current = null;
+    };
+    const commit = () => {
+      const boundary = dropBoundaryRef.current;
+      if (boundary != null) {
+        const columns = orderedColumnsRef.current;
+        const draggedIndex = columns.findIndex((col) => idOf(col) === dragColumn);
+        if (draggedIndex !== -1) moveColumnTo(dragColumn, columnDropTarget(columns, draggedIndex, boundary));
+      }
+      clear();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clear();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", clear);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", clear);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dragColumn, moveColumnTo]);
+
+  // The drag's own geometry, resolved once per animation frame rather than once per `pointermove` -
+  // pointermove fires far more often than the screen repaints, and each resolution reads every header
+  // cell's current bounding rect, which forces layout. Running from a frame rather than the event also
+  // means the boundary keeps resolving while `runColumnDragAutoscroll` scrolls the table underneath an
+  // otherwise-stationary cursor, which a purely event-driven read never would.
+  useEffect(() => {
+    if (dragColumn == null) return undefined;
+    let frame = requestAnimationFrame(tick);
+    function tick() {
+      const container = dataScrollRef.current;
+      const thead = dataTheadRef.current;
+      const pointer = pointerRef.current;
+      if (container && thead && pointer) {
+        const rects = Array.from(thead.querySelectorAll<HTMLElement>("th")).map((cell) =>
+          cell.getBoundingClientRect()
+        );
+        const boundary = resolveDropBoundary(rects, pointer.x);
+        if (boundary !== dropBoundaryRef.current) setDropBoundary(boundary);
+        runColumnDragAutoscroll(container, pointer.x);
+      }
+      setDragPointer((current) => (current?.x === pointer?.x && current?.y === pointer?.y ? current : pointer));
+      frame = requestAnimationFrame(tick);
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [dragColumn]);
+
   /** Toggles a dimension or metric column's sort: a new column starts ascending; the active column flips direction. */
   function toggleSort(columnId: string) {
     const field = columnId.toUpperCase() as ReportRowSortFieldEnumV1;
@@ -949,18 +1302,67 @@ export function ReportingTab() {
   // to the memoized ReportRow below never busts its memo on its own. The level labels are resolved
   // here rather than at each render site, so the column header and the added-row inputs' accessible
   // names can never disagree about what a level is called.
-  const dims = useMemo(
-    () =>
-      DIM_DEFS.filter((d) => appliedConfig.dimensions.includes(d.id)).map((d) => ({
-        ...d,
-        label: levelDimLabel(d.id, d.label, levelTerms),
-      })),
-    [appliedConfig.dimensions, levelTerms]
-  );
-  const mets = useMemo(
-    () => METRIC_DEFS.filter((m) => appliedConfig.metrics.includes(m.id)),
-    [appliedConfig.metrics]
-  );
+  const dims = useMemo(() => {
+    const seen = new Set<string>();
+    const resolved: (DimDef & { label: string })[] = [];
+    for (const id of appliedConfig.dimensions) {
+      if (seen.has(id)) continue;
+      const d = DIM_DEFS.find((def) => def.id === id);
+      if (!d) continue;
+      seen.add(id);
+      resolved.push({ ...d, label: levelDimLabel(d.id, d.label, levelTerms) });
+    }
+    return resolved;
+  }, [appliedConfig.dimensions, levelTerms]);
+  const mets = useMemo(() => {
+    const seen = new Set<string>();
+    const resolved: MetricDef[] = [];
+    for (const id of appliedConfig.metrics) {
+      if (seen.has(id)) continue;
+      const m = METRIC_DEFS.find((def) => def.id === id);
+      if (!m) continue;
+      seen.add(id);
+      resolved.push(m);
+    }
+    return resolved;
+  }, [appliedConfig.metrics]);
+
+  // The one column list the header, totals row and every data row all render from - a metric can sit
+  // between two dimensions here, unlike `dims`/`mets` above, which stay two lists purely because other
+  // code (the filter popover lookup, `submitSave`'s required-field check, `scrollMargin`) still keys off
+  // "is this id a dimension" and has no reason to care where it currently sits on screen.
+  //
+  // Stable array identity across renders for the same reason `dims`/`mets` are: it is a prop on the
+  // memoized ReportRow below, and `dims`/`mets` are themselves already stable, so this only needs to
+  // stay stable across a render where none of its three inputs changed.
+  const orderedColumns = useMemo<Column[]>(() => {
+    const dimById = new Map(dims.map((d) => [d.id, d] as const));
+    const metById = new Map(mets.map((m) => [m.id, m] as const));
+    const ids = resolveColumnOrder(dims.map((d) => d.id), mets.map((m) => m.id), appliedConfig.columnOrder);
+    const columns: Column[] = [];
+    for (const id of ids) {
+      const dim = dimById.get(id);
+      if (dim) {
+        columns.push({ kind: "dimension", dim });
+        continue;
+      }
+      const met = metById.get(id);
+      if (met) columns.push({ kind: "metric", met });
+    }
+    return columns;
+  }, [dims, mets, appliedConfig.columnOrder]);
+  orderedColumnsRef.current = orderedColumns;
+  // The dragged column's own position in `orderedColumns`, and the resolved drop boundary against that
+  // same order - both `-1` while no drag is in progress. Passed down to the memoized ReportRow below as
+  // two plain `number` props (see ReportRowProps) rather than a data attribute read by CSS `nth-child()`:
+  // either number only changes a handful of times per drag - when the cursor crosses a column boundary -
+  // not once per animation frame (the frame-driven value is the raw cursor position, which never reaches
+  // either of these), so reconciling the ~30 mounted rows on that change is negligible. The memo on
+  // ReportRow exists to keep per-keystroke typing cheap (hundreds of events into one cell), not to survive
+  // a drag.
+  const dragColumnIndex = dragColumn == null ? -1 : orderedColumns.findIndex((col) => idOf(col) === dragColumn);
+  const dropBoundaryIndex = dropBoundary ?? -1;
+  const draggedColumnLabel = dragColumnIndex === -1 ? undefined : labelOf(orderedColumns[dragColumnIndex]);
 
   // Windows the data rows so scrolling a large campaign doesn't mount every loaded row - the sticky
   // <thead> + totals row sit above the virtualized content inside the same scroll container, so
@@ -1411,6 +1813,18 @@ export function ReportingTab() {
               sortDirection: sortField ? sortDirection : undefined,
               dimensions: appliedConfig.dimensions,
               metrics: appliedConfig.metrics,
+              // So a rearranged table downloads in the order the user is actually looking at, not the
+              // dimensions-then-metrics order the backend would otherwise concatenate them in.
+              //
+              // The columns as rendered, deliberately, not the stored `appliedConfig.columnOrder`: that
+              // one may only cover part of the selection (a column ticked on since the last drag has no
+              // place in it yet), and the server resolves the remainder by its own rule - every unlisted
+              // id at the end - while this screen inserts an unlisted dimension back among the
+              // dimensions. Sending the resolved order leaves the server nothing to resolve, so the
+              // workbook cannot disagree with the table it was downloaded from.
+              columnOrder: orderedColumns.map((column) =>
+                column.kind === "dimension" ? column.dim.id : column.met.id
+              ),
             }
           : {}
       );
@@ -2152,88 +2566,138 @@ export function ReportingTab() {
               <table className="reporting-tab__data-tbl">
                 <thead ref={dataTheadRef}>
                   <tr>
-                    {dims.map((d) => {
-                      // The date window is its own state, not a value list, so its column's filter
-                      // icon lights up from the window instead of from `filterState`.
-                      const filterValues = filterState[d.id] ?? [];
-                      const isFiltered = d.id === "date"
-                        ? dateWindow.from !== "" || dateWindow.to !== ""
-                        : filterValues.length > 0;
-                      return (
-                        <th key={d.id} className={dimColClass(d.id)} style={columnStyle(columnWidths[d.id])}>
-                          <div className="reporting-tab__col-head">
-                            <button
-                              type="button"
-                              className={cn("reporting-tab__sort-btn", sortField === d.id.toUpperCase() && "reporting-tab__sort-btn--active")}
-                              onClick={() => toggleSort(d.id)}
-                              disabled={isReloading || editing}
-                            >
-                              <span
-                                className="reporting-tab__sort-label"
-                                title={d.description ? `${d.label} — ${d.description}` : d.label}
-                              >
-                                {d.label}
-                              </span>
-                              <SortIcon active={sortField === d.id.toUpperCase() ? sortDirection.toLowerCase() as "asc" | "desc" : undefined} />
-                            </button>
-                            <div className="reporting-tab__filter-wrap">
+                    {orderedColumns.map((col, index) => {
+                      const id = idOf(col);
+                      const prevId = index > 0 ? idOf(orderedColumns[index - 1]) : undefined;
+                      const nextId = index < orderedColumns.length - 1 ? idOf(orderedColumns[index + 1]) : undefined;
+                      const grip = (
+                        <ColumnGrip
+                          columnId={id}
+                          label={labelOf(col)}
+                          prevId={prevId}
+                          nextId={nextId}
+                          dragging={dragColumn === id}
+                          onDragStart={startColumnDrag}
+                          onMove={moveColumnStep}
+                        />
+                      );
+                      const resizer = (
+                        <ColumnResizer
+                          columnId={id}
+                          label={labelOf(col)}
+                          width={columnWidths[id]}
+                          onResize={resizeColumn}
+                        />
+                      );
+                      const thClassName = cn(
+                        col.kind === "dimension" ? dimColClass(id) : metricColClass(id),
+                        dragCellClass(index, dragColumnIndex),
+                        dropCellClass(index, dropBoundaryIndex, orderedColumns.length)
+                      );
+                      if (col.kind === "dimension") {
+                        const d = col.dim;
+                        // The date window is its own state, not a value list, so its column's filter
+                        // icon lights up from the window instead of from `filterState`.
+                        const filterValues = filterState[d.id] ?? [];
+                        const isFiltered = d.id === "date"
+                          ? dateWindow.from !== "" || dateWindow.to !== ""
+                          : filterValues.length > 0;
+                        return (
+                          <th key={d.id} className={thClassName} style={columnStyle(columnWidths[d.id])}>
+                            <div className="reporting-tab__col-head">
+                              {grip}
                               <button
                                 type="button"
-                                className={cn("reporting-tab__filter-btn", isFiltered && "reporting-tab__filter-btn--active")}
-                                aria-label={`Filter ${d.label}`}
-                                aria-expanded={openFilterFor === d.id}
-                                disabled={editing}
-                                onClick={(event) => {
-                                  setFilterAnchor(event.currentTarget);
-                                  setOpenFilterFor((current) => (current === d.id ? null : d.id));
-                                }}
+                                className={cn("reporting-tab__sort-btn", sortField === d.id.toUpperCase() && "reporting-tab__sort-btn--active")}
+                                onClick={() => toggleSort(d.id)}
+                                disabled={isReloading || editing}
                               >
-                                <FilterIcon />
+                                <span
+                                  className="reporting-tab__sort-label"
+                                  title={d.description ? `${d.label} — ${d.description}` : d.label}
+                                >
+                                  {d.label}
+                                </span>
+                                <SortIcon active={sortField === d.id.toUpperCase() ? sortDirection.toLowerCase() as "asc" | "desc" : undefined} />
                               </button>
+                              <div className="reporting-tab__filter-wrap">
+                                <button
+                                  type="button"
+                                  className={cn("reporting-tab__filter-btn", isFiltered && "reporting-tab__filter-btn--active")}
+                                  aria-label={`Filter ${d.label}`}
+                                  aria-expanded={openFilterFor === d.id}
+                                  disabled={editing}
+                                  onClick={(event) => {
+                                    setFilterAnchor(event.currentTarget);
+                                    setOpenFilterFor((current) => (current === d.id ? null : d.id));
+                                  }}
+                                >
+                                  <FilterIcon />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                          <ColumnResizer columnId={d.id} label={d.label} width={columnWidths[d.id]} onResize={resizeColumn} />
+                            {resizer}
+                          </th>
+                        );
+                      }
+                      const m = col.met;
+                      return (
+                        <th key={m.id} className={thClassName} style={columnStyle(columnWidths[m.id])}>
+                          {grip}
+                          <button
+                            type="button"
+                            className={cn("reporting-tab__sort-btn", sortField === m.id.toUpperCase() && "reporting-tab__sort-btn--active")}
+                            onClick={() => toggleSort(m.id)}
+                            disabled={isReloading || editing}
+                          >
+                            <span
+                              className="reporting-tab__sort-label"
+                              title={m.description ? `${m.label} — ${m.description}` : m.label}
+                            >
+                              {m.label}
+                            </span>
+                            <span className="reporting-tab__agg">{m.agg}</span>
+                            <SortIcon active={sortField === m.id.toUpperCase() ? sortDirection.toLowerCase() as "asc" | "desc" : undefined} />
+                          </button>
+                          {resizer}
                         </th>
                       );
                     })}
-                    {mets.map((m) => (
-                      <th key={m.id} className={metricColClass(m.id)} style={columnStyle(columnWidths[m.id])}>
-                        <button
-                          type="button"
-                          className={cn("reporting-tab__sort-btn", sortField === m.id.toUpperCase() && "reporting-tab__sort-btn--active")}
-                          onClick={() => toggleSort(m.id)}
-                          disabled={isReloading || editing}
-                        >
-                          <span
-                            className="reporting-tab__sort-label"
-                            title={m.description ? `${m.label} — ${m.description}` : m.label}
-                          >
-                            {m.label}
-                          </span>
-                          <span className="reporting-tab__agg">{m.agg}</span>
-                          <SortIcon active={sortField === m.id.toUpperCase() ? sortDirection.toLowerCase() as "asc" | "desc" : undefined} />
-                        </button>
-                        <ColumnResizer columnId={m.id} label={m.label} width={columnWidths[m.id]} onResize={resizeColumn} />
-                      </th>
-                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   <tr className="reporting-tab__totals" ref={totalsRowRef}>
-                    {dims.map((d) => (
-                      <td key={d.id} className={dimColClass(d.id)} style={columnStyle(columnWidths[d.id])}>
-                        {totDim(d.id)}
-                      </td>
-                    ))}
-                    {mets.map((m) => (
-                      <td key={m.id} className={metricColClass(m.id)} style={columnStyle(columnWidths[m.id])}>
-                        {totalCell(totals, m.id)}
-                      </td>
-                    ))}
+                    {orderedColumns.map((col, index) =>
+                      col.kind === "dimension" ? (
+                        <td
+                          key={col.dim.id}
+                          className={cn(
+                            dimColClass(col.dim.id),
+                            dragCellClass(index, dragColumnIndex),
+                            dropCellClass(index, dropBoundaryIndex, orderedColumns.length)
+                          )}
+                          style={columnStyle(columnWidths[col.dim.id])}
+                        >
+                          {totDim(col.dim.id)}
+                        </td>
+                      ) : (
+                        <td
+                          key={col.met.id}
+                          className={cn(
+                            metricColClass(col.met.id),
+                            dragCellClass(index, dragColumnIndex),
+                            dropCellClass(index, dropBoundaryIndex, orderedColumns.length)
+                          )}
+                          style={columnStyle(columnWidths[col.met.id])}
+                        >
+                          {totalCell(totals, col.met.id)}
+                        </td>
+                      )
+                    )}
                   </tr>
                   {virtualPaddingTop > 0 && (
                     <tr className="reporting-tab__spacer-row" aria-hidden="true">
-                      <td style={{ height: virtualPaddingTop }} colSpan={dims.length + mets.length} />
+                      <td style={{ height: virtualPaddingTop }} colSpan={orderedColumns.length} />
                     </tr>
                   )}
                   {virtualRows.map((virtualRow) => {
@@ -2246,8 +2710,9 @@ export function ReportingTab() {
                           row={row}
                           override={override}
                           isAdded={isAdded}
-                          dims={dims}
-                          mets={mets}
+                          columns={orderedColumns}
+                          dragColIndex={dragColumnIndex}
+                          dropBoundaryIndex={dropBoundaryIndex}
                           editing={editing}
                           editMode={editMode}
                           invalidCells={invalidCells}
@@ -2267,12 +2732,12 @@ export function ReportingTab() {
                   })}
                   {virtualPaddingBottom > 0 && (
                     <tr className="reporting-tab__spacer-row" aria-hidden="true">
-                      <td style={{ height: virtualPaddingBottom }} colSpan={dims.length + mets.length} />
+                      <td style={{ height: virtualPaddingBottom }} colSpan={orderedColumns.length} />
                     </tr>
                   )}
                   {reportRows.hasNextPage && (
                     <tr ref={sentinelRef}>
-                      <td colSpan={dims.length + mets.length} className="reporting-tab__load-more">
+                      <td colSpan={orderedColumns.length} className="reporting-tab__load-more">
                         {reportRows.isFetchingNextPage && <LoadingSpinner label="Loading more rows" size="sm" />}
                       </td>
                     </tr>
@@ -2282,6 +2747,17 @@ export function ReportingTab() {
             </div>
             {isReloading && <LoadingOverlay label="Updating…" className="reporting-tab__reload-overlay" />}
           </div>
+          {dragColumn != null && dragPointer != null && draggedColumnLabel != null && (
+            // Names the column being carried, at the cursor - the only place it stays legible once the
+            // table has scrolled (autoscroll or otherwise) out from under wherever the drag started.
+            <div
+              className="reporting-tab__col-drag-label"
+              style={{ left: dragPointer.x, top: dragPointer.y }}
+              aria-hidden="true"
+            >
+              {draggedColumnLabel}
+            </div>
+          )}
 
           {openFilterDef?.id === "date" ? (
             <DateWindowPopover
@@ -2338,8 +2814,17 @@ interface ReportRowProps {
   row: KeyedReportRow;
   override: Partial<KeyedReportRow> | undefined;
   isAdded: boolean;
-  dims: DimDef[];
-  mets: MetricDef[];
+  /** Every rendered column, dimension and metric interleaved, in on-screen order. */
+  columns: Column[];
+  /** The dragged column's own position in `columns` (see `dragColumnIndex` in `ReportingTab`), `-1` while
+   *  no drag is in progress. A plain `number`, not folded into an object with `dropBoundaryIndex`: `memo`
+   *  below compares props by value for primitives, so two numbers let a drag re-render the mounted rows
+   *  only on the handful of frames where one of them actually changes (a boundary crossing) - an object
+   *  literal rebuilt every render would always compare as new and defeat that. */
+  dragColIndex: number;
+  /** The resolved drop boundary against `columns` (see `dropBoundaryIndex` in `ReportingTab`), `-1` while
+   *  no drag is in progress. See `dragColIndex` for why this is its own separate `number` prop. */
+  dropBoundaryIndex: number;
   editing: boolean;
   editMode: EditMode;
   invalidCells: ReadonlyMap<string, string>;
@@ -2363,14 +2848,18 @@ interface ReportRowProps {
  * changed. Effective only because the parent passes a per-row-stable `override` (from `staged.adj`,
  * a `Record` that keeps other keys' references stable across an edit - see
  * NEW-UX-PLAN/11-REPORTING-TABLE-PERFORMANCE-PLAN.md D5/D6) and stable (`useCallback`) edit handlers,
- * rather than rebuilding a merged array/new closures on every keystroke.
+ * rather than rebuilding a merged array/new closures on every keystroke. `dragColIndex`/`dropBoundaryIndex`
+ * cost the same nothing: both are plain numbers that only change a handful of times per column drag - see
+ * their own doc comments on `ReportRowProps` - not once per keystroke, which is the case this memo exists
+ * to keep cheap.
  */
 const ReportRow = memo(function ReportRow({
   row,
   override,
   isAdded,
-  dims,
-  mets,
+  columns,
+  dragColIndex,
+  dropBoundaryIndex,
   editing,
   editMode,
   invalidCells,
@@ -2388,127 +2877,141 @@ const ReportRow = memo(function ReportRow({
   // constructed name by splitting on "_". So they are shown here as that same split, updating as the
   // name is typed - a value typed into them directly would simply vanish on the next read.
   const nameParts = isAdded ? constructedNameParts(String(merged.line_item_name ?? "")) : undefined;
+
+  function renderDim(d: DimDef & { label: string }, index: number) {
+    const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
+    const isInherited = isAdded && lockedDimIds.has(d.id);
+    const isFromName = isAdded && NAME_DERIVED_DIMS.has(d.id);
+    return (
+      <td
+        key={d.id}
+        className={cn(
+          dimColClass(d.id),
+          isFromName && editing && "reporting-tab__cell--derived",
+          dragCellClass(index, dragColIndex),
+          dropCellClass(index, dropBoundaryIndex, columns.length)
+        )}
+        style={columnStyle(columnWidths[d.id])}
+        title={
+          editing && isFromName
+            ? "Read from the constructed name — edit the name to change it"
+            : editing && isInherited
+              ? "Inherited from this campaign"
+              : undefined
+        }
+      >
+        {editing && isAdded && isFromName ? (
+          <>
+            {nameParts?.[d.id] || "—"}
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && !isInherited ? (
+          <>
+            <input
+              className={cn(
+                "reporting-tab__cell-input",
+                isRequiredInvalid && "reporting-tab__cell-input--error"
+              )}
+              // A date cell gets the calendar, like the report period and the Setup tab's add-line
+              // form. Not only to save typing: this value is written to a BigQuery DATE column, and
+              // a text box happily accepts "10/22/2025" or "yesterday" for the insert to choke on.
+              type={d.id === DATE_DIM_ID ? "date" : "text"}
+              aria-label={`${d.label} for new line`}
+              aria-invalid={isRequiredInvalid}
+              value={String(merged[d.id as keyof KeyedReportRow] ?? "")}
+              onChange={(event) => onUpdateAddedRow(row.key, d.id, event.target.value)}
+            />
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && isRequiredInvalid ? (
+          <>
+            {dimCell(d.id, merged)}
+            <span className="reporting-tab__cell-error">Required</span>
+          </>
+        ) : (
+          dimCell(d.id, merged)
+        )}
+        {d.id === "line_item_id" && isAdded && !editing && (
+          <span className="reporting-tab__badge reporting-tab__badge--manual">Manual</span>
+        )}
+        {d.id === "line_item_id" && !isAdded && isModified && (
+          <span className="reporting-tab__badge reporting-tab__badge--modified">Modified</span>
+        )}
+      </td>
+    );
+  }
+
+  function renderMet(m: MetricDef, index: number) {
+    const id = cellKey(row.key, m.id);
+    const cellEditable = editing && editMode === "lines" && EDITABLE_METRIC_IDS.has(m.id);
+    const isInvalid = invalidCells.has(id);
+    const isMetricRequired = isAdded && requiredCells.has(id);
+    const cellModified = !isAdded && override?.[m.id as keyof KeyedReportRow] != null;
+    const draft = metricDrafts.get(id);
+    const display =
+      draft !== undefined
+        ? draft
+        : editableMetricDisplay(merged[m.id as keyof KeyedReportRow]);
+    return (
+      <td
+        key={m.id}
+        className={cn(
+          metricColClass(m.id),
+          cellModified && "reporting-tab__metric-cell--modified",
+          dragCellClass(index, dragColIndex),
+          dropCellClass(index, dropBoundaryIndex, columns.length)
+        )}
+        style={columnStyle(columnWidths[m.id])}
+        title={cellModified ? `Original: ${rowMetricCell(row, m.id)}` : undefined}
+      >
+        {cellEditable ? (
+          <input
+            className={cn(
+              "reporting-tab__cell-input",
+              "reporting-tab__cell-input--num",
+              (isInvalid || isMetricRequired) && "reporting-tab__cell-input--error"
+            )}
+            type="text"
+            inputMode="decimal"
+            aria-label={`${m.label} for ${merged.line_item_id || "new line"}`}
+            aria-invalid={isInvalid || isMetricRequired}
+            value={display}
+            placeholder={!isAdded ? editableMetricDisplay(row[m.id as keyof KeyedReportRow]) : undefined}
+            onChange={(event) =>
+              isAdded
+                ? onUpdateAddedRow(row.key, m.id, event.target.value)
+                : onUpdateCell(row.key, m.id, event.target.value)
+            }
+          />
+        ) : m.id === "conversions" && onOpenConversions && !isAdded && merged.conversions != null ? (
+          /* Not an input like the delivery metrics: this figure is a sum over conversion actions,
+             and a number typed here would have no action to belong to. The button opens the rows
+             it is made of, which is where a figure can be edited.
+
+             A blank cell is left alone. It means the join attached nothing here - either no
+             conversions match the row, or the row is one of the siblings a campaign-level channel
+             deliberately blanks so its total is stated once. Neither has a breakdown to show, and
+             offering one would promise rows that are not there. */
+          <button
+            type="button"
+            className="reporting-tab__conv-open"
+            aria-label={`Conversions by action for ${merged.line_item_name || merged.line_item_id || "this row"}`}
+            onClick={() => onOpenConversions(row)}
+          >
+            {rowMetricCell(merged, m.id)}
+          </button>
+        ) : (
+          rowMetricCell(merged, m.id)
+        )}
+        {isMetricRequired && <span className="reporting-tab__cell-error">Required</span>}
+        {isInvalid && <span className="reporting-tab__cell-error">{invalidCells.get(id)}</span>}
+      </td>
+    );
+  }
+
   return (
     <>
-      {dims.map((d) => {
-        const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
-        const isInherited = isAdded && lockedDimIds.has(d.id);
-        const isFromName = isAdded && NAME_DERIVED_DIMS.has(d.id);
-        return (
-          <td
-            key={d.id}
-            className={cn(dimColClass(d.id), isFromName && editing && "reporting-tab__cell--derived")}
-            style={columnStyle(columnWidths[d.id])}
-            title={
-              editing && isFromName
-                ? "Read from the constructed name — edit the name to change it"
-                : editing && isInherited
-                  ? "Inherited from this campaign"
-                  : undefined
-            }
-          >
-            {editing && isAdded && isFromName ? (
-              <>
-                {nameParts?.[d.id] || "—"}
-                {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
-              </>
-            ) : editing && isAdded && !isInherited ? (
-              <>
-                <input
-                  className={cn(
-                    "reporting-tab__cell-input",
-                    isRequiredInvalid && "reporting-tab__cell-input--error"
-                  )}
-                  // A date cell gets the calendar, like the report period and the Setup tab's add-line
-                  // form. Not only to save typing: this value is written to a BigQuery DATE column, and
-                  // a text box happily accepts "10/22/2025" or "yesterday" for the insert to choke on.
-                  type={d.id === DATE_DIM_ID ? "date" : "text"}
-                  aria-label={`${d.label} for new line`}
-                  aria-invalid={isRequiredInvalid}
-                  value={String(merged[d.id as keyof KeyedReportRow] ?? "")}
-                  onChange={(event) => onUpdateAddedRow(row.key, d.id, event.target.value)}
-                />
-                {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
-              </>
-            ) : editing && isAdded && isRequiredInvalid ? (
-              <>
-                {dimCell(d.id, merged)}
-                <span className="reporting-tab__cell-error">Required</span>
-              </>
-            ) : (
-              dimCell(d.id, merged)
-            )}
-            {d.id === "line_item_id" && isAdded && !editing && (
-              <span className="reporting-tab__badge reporting-tab__badge--manual">Manual</span>
-            )}
-            {d.id === "line_item_id" && !isAdded && isModified && (
-              <span className="reporting-tab__badge reporting-tab__badge--modified">Modified</span>
-            )}
-          </td>
-        );
-      })}
-      {mets.map((m) => {
-        const id = cellKey(row.key, m.id);
-        const cellEditable = editing && editMode === "lines" && EDITABLE_METRIC_IDS.has(m.id);
-        const isInvalid = invalidCells.has(id);
-        const isMetricRequired = isAdded && requiredCells.has(id);
-        const cellModified = !isAdded && override?.[m.id as keyof KeyedReportRow] != null;
-        const draft = metricDrafts.get(id);
-        const display =
-          draft !== undefined
-            ? draft
-            : editableMetricDisplay(merged[m.id as keyof KeyedReportRow]);
-        return (
-          <td
-            key={m.id}
-            className={cn(metricColClass(m.id), cellModified && "reporting-tab__metric-cell--modified")}
-            style={columnStyle(columnWidths[m.id])}
-            title={cellModified ? `Original: ${rowMetricCell(row, m.id)}` : undefined}
-          >
-            {cellEditable ? (
-              <input
-                className={cn(
-                  "reporting-tab__cell-input",
-                  "reporting-tab__cell-input--num",
-                  (isInvalid || isMetricRequired) && "reporting-tab__cell-input--error"
-                )}
-                type="text"
-                inputMode="decimal"
-                aria-label={`${m.label} for ${merged.line_item_id || "new line"}`}
-                aria-invalid={isInvalid || isMetricRequired}
-                value={display}
-                placeholder={!isAdded ? editableMetricDisplay(row[m.id as keyof KeyedReportRow]) : undefined}
-                onChange={(event) =>
-                  isAdded
-                    ? onUpdateAddedRow(row.key, m.id, event.target.value)
-                    : onUpdateCell(row.key, m.id, event.target.value)
-                }
-              />
-            ) : m.id === "conversions" && onOpenConversions && !isAdded && merged.conversions != null ? (
-              /* Not an input like the delivery metrics: this figure is a sum over conversion actions,
-                 and a number typed here would have no action to belong to. The button opens the rows
-                 it is made of, which is where a figure can be edited.
-
-                 A blank cell is left alone. It means the join attached nothing here - either no
-                 conversions match the row, or the row is one of the siblings a campaign-level channel
-                 deliberately blanks so its total is stated once. Neither has a breakdown to show, and
-                 offering one would promise rows that are not there. */
-              <button
-                type="button"
-                className="reporting-tab__conv-open"
-                aria-label={`Conversions by action for ${merged.line_item_name || merged.line_item_id || "this row"}`}
-                onClick={() => onOpenConversions(row)}
-              >
-                {rowMetricCell(merged, m.id)}
-              </button>
-            ) : (
-              rowMetricCell(merged, m.id)
-            )}
-            {isMetricRequired && <span className="reporting-tab__cell-error">Required</span>}
-            {isInvalid && <span className="reporting-tab__cell-error">{invalidCells.get(id)}</span>}
-          </td>
-        );
-      })}
+      {columns.map((col, index) => (col.kind === "dimension" ? renderDim(col.dim, index) : renderMet(col.met, index)))}
     </>
   );
 });
@@ -2517,6 +3020,77 @@ const ReportRow = memo(function ReportRow({
  * an auto-layout table keeps sizing the column to its content and the drag appears to do nothing. */
 function columnStyle(width: number | undefined): CSSProperties | undefined {
   return width == null ? undefined : { width, minWidth: width, maxWidth: width };
+}
+
+interface ColumnGripProps {
+  columnId: string;
+  label: string;
+  /** The column immediately to this one's left in the unified render order, absent when it is already
+   * first overall - dimension or metric, since a drag can now cross between them. */
+  prevId: string | undefined;
+  /** The column immediately to this one's right in the unified render order, absent when it is already
+   * last overall. */
+  nextId: string | undefined;
+  /** Whether this column is the one currently held by the pointer. */
+  dragging: boolean;
+  onDragStart: (columnId: string, x: number, y: number) => void;
+  onMove: (columnId: string, direction: "left" | "right") => void;
+}
+
+/**
+ * The handle that picks a column up and moves it.
+ *
+ * A handle of its own rather than the whole header: the header already spends its clicks on sorting,
+ * its trailing edge on resizing and a button of its own on filtering, and a drag threshold layered over
+ * that would make every one of them a guess about what the hand meant. Small and quiet until the header
+ * is hovered, for the same reason the resize grip is - a table of thirty columns cannot afford another
+ * always-lit control per column.
+ *
+ * A real `button`, and the arrow keys move the column one place, because a pointer drag is the only
+ * gesture a mouse can make and a keyboard user would otherwise be stuck with whatever order the report
+ * was saved in. Both paths go through the same reorder over the same unified column list, so a dimension
+ * and a metric can swap past each other on either path and the two can never drift apart.
+ */
+function ColumnGrip({
+  columnId,
+  label,
+  prevId,
+  nextId,
+  dragging,
+  onDragStart,
+  onMove,
+}: ColumnGripProps) {
+  function onPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    // Without this the browser starts a text selection across the header row instead, which both looks
+    // broken and swallows the pointermove the drag is watching for.
+    event.preventDefault();
+    onDragStart(columnId, event.clientX, event.clientY);
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    // Guarded on the neighbour actually existing, not just the key pressed, so the first dimension
+    // and the last metric each stop at their own end of the list rather than crossing into the other.
+    if (event.key === "ArrowLeft" && prevId != null) {
+      event.preventDefault();
+      onMove(columnId, "left");
+    } else if (event.key === "ArrowRight" && nextId != null) {
+      event.preventDefault();
+      onMove(columnId, "right");
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={cn("reporting-tab__col-grip", dragging && "reporting-tab__col-grip--dragging")}
+      aria-label={`Move ${label}`}
+      title={`Drag to move ${label}, or use the arrow keys`}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+    >
+      <GripIcon />
+    </button>
+  );
 }
 
 interface ColumnResizerProps {

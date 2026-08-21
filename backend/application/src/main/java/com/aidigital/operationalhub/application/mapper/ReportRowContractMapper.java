@@ -18,6 +18,7 @@ import com.aidigital.operationalhub.service.agency.model.ReportRowTotalsModel;
 import com.aidigital.operationalhub.service.agency.search.ReportRowSortField;
 import com.aidigital.operationalhub.service.common.search.SortCriterion;
 import com.aidigital.operationalhub.service.common.search.SortDirection;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -28,7 +29,10 @@ import java.util.List;
  * Maps {@link ReportRowModel}s to the generated report-row contract.
  */
 @Component
+@RequiredArgsConstructor
 public class ReportRowContractMapper {
+
+	private final ColumnOrderArranger columnOrderArranger;
 
 	/**
 	 * Maps one generated report-row request into the service-facing command shape used by list/export
@@ -50,7 +54,12 @@ public class ReportRowContractMapper {
 	}
 
 	/**
-	 * Maps the current-view export column lists into workbook order: dimensions first, then metrics.
+	 * Maps the current-view export column lists into workbook order: dimensions first, then metrics by
+	 * default, then arranged by the request's saved {@code columnOrder} when one is given.
+	 * {@code dimensions}/{@code metrics} alone still decide which columns are included -
+	 * {@link ColumnOrderArranger} only decides where a selected column sits, and never resurrects an id
+	 * that is not selected. A {@code null}/empty {@code columnOrder} leaves the default dimensions-then-
+	 * metrics order byte-identical to the pre-{@code columnOrder} behaviour.
 	 *
 	 * @param request the generated request body, or {@code null}
 	 * @return export columns, empty when none were requested
@@ -66,7 +75,7 @@ public class ReportRowContractMapper {
 		if (request.getMetrics() != null) {
 			columns.addAll(request.getMetrics());
 		}
-		return List.copyOf(columns);
+		return columnOrderArranger.arrange(columns, request.getColumnOrder());
 	}
 
 	/**

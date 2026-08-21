@@ -71,6 +71,7 @@ public class HubReportViewServiceImpl implements HubReportViewService {
 		existing.setNote(changes.getNote());
 		existing.setDimensions(changes.getDimensions());
 		existing.setMetrics(changes.getMetrics());
+		existing.setColumnOrder(changes.getColumnOrder());
 		existing.setFilters(changes.getFilters());
 		cacheInvalidationEventService.publishUpdateEvent(HubReportView.class);
 		return existing;
@@ -95,6 +96,7 @@ public class HubReportViewServiceImpl implements HubReportViewService {
 		copy.setNote(source.getNote());
 		copy.setDimensions(source.getDimensions());
 		copy.setMetrics(source.getMetrics());
+		copy.setColumnOrder(source.getColumnOrder());
 		copy.setFilters(source.getFilters());
 		return create(campaignId, copy);
 	}

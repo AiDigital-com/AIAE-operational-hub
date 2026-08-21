@@ -29,11 +29,18 @@ export type ReportViewUpsertV1 = components["schemas"]["ReportViewUpsertV1"];
 export type InsertionOrderV1 = components["schemas"]["InsertionOrderV1"];
 export type InsertionOrderLineItemV1 = components["schemas"]["InsertionOrderLineItemV1"];
 
-/** Which dimensions, metrics, and active row filters a report view persists. */
+/** Which dimensions, metrics, active row filters, and on-screen column arrangement a report view persists. */
 export interface ReportConfig {
   dimensions: string[];
   metrics: string[];
   filters: ReportRowFilterV1[];
+  /**
+   * Dimension and metric ids, interleaved, in the order their columns render - never a statement of
+   * which columns exist (`dimensions`/`metrics` alone decide that). An id absent from this list keeps
+   * its default place - every dimension first, then every metric - and an id here that isn't selected
+   * renders nothing. Empty means the default arrangement.
+   */
+  columnOrder: string[];
 }
 
 /** A saved (or draft) report view — the client-facing shape the Reporting tab consumes. */

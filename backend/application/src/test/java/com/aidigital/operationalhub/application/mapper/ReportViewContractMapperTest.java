@@ -223,6 +223,62 @@ class ReportViewContractMapperTest {
 	}
 
 	@Test
+	void shouldRoundTripColumnOrderBetweenUpsertEntityAndV1Test() {
+		// Given: a saved arrangement interleaving a metric between two dimensions
+		ReportViewUpsertV1 request = new ReportViewUpsertV1();
+		request.setName("Arranged report");
+		request.setType(ReportViewTypeEnumV1.BASIC);
+		request.setStatus(ReportViewStatusEnumV1.SAVED);
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions"));
+		request.setColumnOrder(List.of("line_item_id", "impressions", "date"));
+
+		// When:
+		HubReportView entity = mapper.fromUpsert(request);
+		entity.setId(7L);
+		entity.setCampaignId(42L);
+		entity.setCreatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
+		entity.setUpdatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
+
+		// Then: the entity persists the arrangement comma-joined, like dimensions/metrics
+		assertThat(entity.getColumnOrder()).isEqualTo("line_item_id,impressions,date");
+
+		// When: mapped back to the contract
+		ReportViewV1 v1 = mapper.toV1(entity);
+
+		// Then: the saved arrangement round-trips unchanged
+		assertThat(v1.getColumnOrder()).containsExactly("line_item_id", "impressions", "date");
+	}
+
+	@Test
+	void shouldLeaveColumnOrderEmptyWhenReportHasNoSavedArrangementTest() {
+		// Given: a report saved before columnOrder existed - no arrangement to persist
+		ReportViewUpsertV1 request = new ReportViewUpsertV1();
+		request.setName("Legacy report");
+		request.setType(ReportViewTypeEnumV1.BASIC);
+		request.setStatus(ReportViewStatusEnumV1.SAVED);
+		request.setDimensions(List.of("date", "line_item_id"));
+		request.setMetrics(List.of("impressions"));
+
+		// When:
+		HubReportView entity = mapper.fromUpsert(request);
+
+		// Then: stored as empty, not as a list containing one blank string
+		assertThat(entity.getColumnOrder()).isEmpty();
+
+		// When: read back as if freshly loaded from a pre-existing row (column_order left null)
+		entity.setId(7L);
+		entity.setCampaignId(42L);
+		entity.setColumnOrder(null);
+		entity.setCreatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
+		entity.setUpdatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
+		ReportViewV1 v1 = mapper.toV1(entity);
+
+		// Then: the contract carries an empty list, never one blank-string entry
+		assertThat(v1.getColumnOrder()).isEmpty();
+	}
+
+	@Test
 	void shouldDeserializeMalformedFiltersColumnAsEmptyListTest() {
 		// Given:
 		HubReportView entity = entity("date", "impressions");

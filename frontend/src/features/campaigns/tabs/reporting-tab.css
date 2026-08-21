@@ -1257,6 +1257,97 @@
   margin-right: auto;
 }
 
+/* ── column reordering ── */
+/* Quiet until its own header is hovered or it takes focus, the same way the resize grip is: thirty
+   columns each carrying a permanently lit handle would read as noise across the whole header row. */
+.reporting-tab__col-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 0.875rem;
+  height: 1.125rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  opacity: 0;
+  cursor: grab;
+  /* A metric header has no flex wrapper - it is right-aligned inline content - so the grip has to line
+     itself up with the label it sits beside there. */
+  vertical-align: middle;
+  /* The drag is driven by pointer events, so the browser must not claim the gesture for scrolling. */
+  touch-action: none;
+}
+
+.reporting-tab__col-grip svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.reporting-tab__data-tbl thead th:hover .reporting-tab__col-grip,
+.reporting-tab__col-grip:focus-visible,
+.reporting-tab__col-grip--dragging {
+  opacity: 1;
+}
+
+.reporting-tab__col-grip:hover,
+.reporting-tab__col-grip:focus-visible {
+  color: var(--muted-strong);
+}
+
+.reporting-tab__col-grip--dragging {
+  color: var(--primary);
+  cursor: grabbing;
+}
+
+/* The column being carried fades everywhere it renders - header, totals, every data row - not only its
+   header cell, so the eye can still find it once the table has scrolled well past that header. Applied as
+   a class on each affected cell (see dragCellClass in reporting-tab.tsx), not a data attribute read with
+   :nth-child(): the dragged column's own position only changes a handful of times per drag - when the
+   cursor crosses a column boundary, not once per animation frame - so reconciling the ~30 mounted rows on
+   that change is negligible; the memo on ReportRow exists to keep per-keystroke typing cheap, not to
+   survive a drag. */
+.reporting-tab__cell--dragging {
+  opacity: .5;
+}
+
+/* The insertion line: a vertical rule at the boundary the dragged column would land on if released now,
+   resolved each animation frame from cursor geometry (see resolveDropBoundary in reporting-tab.tsx) but,
+   like the dimming class above, only ever landing on a different cell on a boundary crossing, not on every
+   frame. Drawn on the column the boundary sits before; the one boundary with no such column - past every
+   rendered column - is `.reporting-tab__cell--drop-after` below instead. An inset box-shadow rather than an
+   absolutely positioned pseudo-element: it needs no positioning context on the cell (so the totals row can
+   keep `position: sticky` uncontested), takes no part in layout, and isn't clipped by the `overflow: hidden`
+   these cells already carry for column resizing. */
+.reporting-tab__cell--drop-before {
+  box-shadow: inset 0.125rem 0 0 0 var(--primary);
+}
+
+/* The one boundary with no column to draw the leading-edge shadow on - past every rendered column - drawn on
+   the last column's trailing edge instead (see dropCellClass in reporting-tab.tsx). */
+.reporting-tab__cell--drop-after {
+  box-shadow: inset -0.125rem 0 0 0 var(--primary);
+}
+
+/* Names the column being carried, at the cursor - the only place it stays legible once the table has
+   scrolled (autoscroll or otherwise dragged) out from under wherever the drag started. Fixed rather than
+   placed in flow: it tracks the cursor in viewport coordinates, not the table's own layout. */
+.reporting-tab__col-drag-label {
+  position: fixed;
+  z-index: 300;
+  transform: translate(0.75rem, -50%);
+  pointer-events: none;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+}
+
 /* ── column resizing ── */
 /* Sits inside the header cell's trailing padding - inside, because the cell now clips its overflow.
    It anchors to the <th>, which is already `position: sticky` above and so is its containing block. */

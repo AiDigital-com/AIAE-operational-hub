@@ -53,6 +53,7 @@ public class ReportViewContractMapper {
 		v1.setEdited(entity.getUpdatedAt().equals(entity.getCreatedAt()) ? null : format(entity.getUpdatedAt()));
 		v1.setDimensions(split(entity.getDimensions()));
 		v1.setMetrics(split(entity.getMetrics()));
+		v1.setColumnOrder(split(entity.getColumnOrder()));
 		v1.setFilters(deserializeFilters(entity.getFilters()));
 		return v1;
 	}
@@ -98,6 +99,7 @@ public class ReportViewContractMapper {
 		entity.setNote(request.getNote());
 		entity.setDimensions(join(request.getDimensions()));
 		entity.setMetrics(join(request.getMetrics()));
+		entity.setColumnOrder(join(request.getColumnOrder()));
 		entity.setFilters(serializeFilters(request.getFilters()));
 		return entity;
 	}
