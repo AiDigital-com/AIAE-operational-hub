@@ -130,15 +130,20 @@ export function Campaigns() {
   const title = clientId != null ? clientName || CLIENT_WITHOUT_NAME : "Campaigns";
   const industry = campaigns.map((campaign) => cleanClientName(campaign.industry_vertical)).find(Boolean) ?? "";
 
-  // Line items + budget are rolled up from the mock pacing overlay of only the currently loaded page
-  // (the campaign list itself is server-paginated) — see 01-MIGRATION-PLAN.md C1.
+  // Line items are the campaign's own real `line_item_count` — COUNT(DISTINCT line_item_id) over the IO
+  // Lines table, the same number the Setup tab lists and the Overview already rolls up. NOT the mock
+  // pacing overlay's `li`, which built one synthetic line item per *channel* (mock/setup.ts falls back to
+  // a single "General" tactic for every real media tactic its hardcoded TACTICS map does not know), so a
+  // 15-line campaign on 3 channels read as 3 here while its own Setup tab said 15.
+  // Budget stays on `campPacing`, which passes the real `campaign.budget` straight through.
+  // Both cover only the currently loaded page (the campaign list itself is server-paginated) — see
+  // 01-MIGRATION-PLAN.md C1.
   const { lineItemTotal, budgetTotal } = useMemo(() => {
     let li = 0;
     let budget = 0;
     for (const campaign of campaigns) {
-      const pacing = campPacing(toPacingCampaign(campaign));
-      li += pacing.li;
-      budget += pacing.budget;
+      li += campaign.line_item_count ?? 0;
+      budget += campPacing(toPacingCampaign(campaign)).budget;
     }
     return { lineItemTotal: li, budgetTotal: budget };
   }, [campaigns]);
@@ -356,7 +361,7 @@ function CampaignRows({
         <td className="overview__flight">
           {pacing?.flight}<span className="overview__days">{pacing?.days}</span>
         </td>
-        <td className="overview__camp-table-num overview__camp-budget">{pacing?.li ?? 0}</td>
+        <td className="overview__camp-table-num overview__camp-budget">{campaign.line_item_count ?? 0}</td>
         <td>
           <div className="overview__actions">
             <button

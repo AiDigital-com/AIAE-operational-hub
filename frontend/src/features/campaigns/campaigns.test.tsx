@@ -232,8 +232,8 @@ describe("Campaigns", () => {
     // Given:
     vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
       content: [
-        aCampaignV1({ id: 1, name: "Campaign One", client_id: 42, budget: 10_000 }),
-        aCampaignV1({ id: 2, name: "Campaign Two", client_id: 42, budget: 20_000 }),
+        aCampaignV1({ id: 1, name: "Campaign One", client_id: 42, budget: 10_000, line_item_count: 15 }),
+        aCampaignV1({ id: 2, name: "Campaign Two", client_id: 42, budget: 20_000, line_item_count: 4 }),
       ],
       totalElements: 2,
       totalPages: 1,
@@ -243,8 +243,10 @@ describe("Campaigns", () => {
     renderCampaigns(42);
     await screen.findByText("Campaign One");
 
-    // Then: N campaigns is real/exact; line items/budget are rolled up from the mock pacing overlay
-    expect(screen.getByText(/^2 campaigns · \d+ line items? · \$/)).toBeInTheDocument();
+    // Then: campaigns and line items are both real and exact - the line-item rollup sums the campaigns'
+    // own `line_item_count`, so it must be 15 + 4 and not whatever the mock pacing overlay would invent.
+    // Budget stays loose: it still comes through `campPacing`, which only passes the real budget along.
+    expect(screen.getByText(/^2 campaigns · 19 line items · \$/)).toBeInTheDocument();
   });
 
   it("should prefer the API client name over a stale client placeholder from route state", async () => {
@@ -329,6 +331,42 @@ describe("Campaigns", () => {
     // Then:
     expect(screen.getByText("Paused Campaign")).toBeInTheDocument();
     expect(screen.queryByText("Live Campaign")).not.toBeInTheDocument();
+  });
+
+  it("should show the campaign's real line-item count in its row, matching the line items it expands to", async () => {
+    // Given: a campaign whose 15 real line items sit on 3 media tactics. The mock pacing overlay used to
+    // supply this cell, and it counted *channels*: mock/setup.ts builds one insertion order per channel and
+    // falls back to a single "General" tactic for any real media tactic its hardcoded TACTICS map does not
+    // know - which is all three of these. So it read 3 while the campaign's own Setup tab read 15.
+    const lineItems = Array.from({ length: 15 }, (_, i) =>
+      anInsertionOrderLineItemV1({ line_item_id: 1001 + i })
+    );
+    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
+      content: [aCampaignV1({
+        id: 1,
+        name: "Campaign One",
+        client_id: 42,
+        channels: ["Programmatic Display", "CTV/OTT", "Online Video"],
+        line_item_count: 15,
+      })],
+      totalElements: 1,
+      totalPages: 1,
+    }));
+    vi.mocked(listCampaignInsertionOrders).mockResolvedValue([
+      anInsertionOrderV1({ order_id: 276198, line_items: lineItems }),
+    ]);
+
+    // When:
+    renderCampaigns(42);
+    const row = (await screen.findByText("Campaign One")).closest("tr") as HTMLElement;
+
+    // Then: the line-item cell is the API's real count, not the channel count the mock would have produced.
+    expect(within(row).getAllByRole("cell")[4]).toHaveTextContent(/^15$/);
+
+    // And: expanding the row lists exactly that many - the invariant that broke, asserted end to end.
+    await userEvent.click(within(row).getByRole("button", { name: /Expand Campaign One/ }));
+    expect(await screen.findByText("LI 1001")).toBeInTheDocument();
+    expect(screen.getAllByText(/^LI \d+$/)).toHaveLength(15);
   });
 
   it("should expand a campaign row to show its real line items, and collapse it again", async () => {
