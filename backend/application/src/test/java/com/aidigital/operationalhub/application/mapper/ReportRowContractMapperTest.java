@@ -119,6 +119,7 @@ class ReportRowContractMapperTest {
 		request.setDateTo(LocalDate.parse("2026-03-20"));
 		request.setDimensions(List.of("date", "line_item_id"));
 		request.setMetrics(List.of("impressions", "spend"));
+		request.setColumnOrder(List.of("impressions", "date", "line_item_id"));
 
 		// When:
 		ReportRowSearchCommand command = mapper.toSearchCommand(request);
@@ -132,6 +133,28 @@ class ReportRowContractMapperTest {
 		assertThat(command.dateRange().from()).isEqualTo("2026-03-10");
 		assertThat(command.dateRange().to()).isEqualTo("2026-03-20");
 		assertThat(command.columns()).containsExactly("date", "line_item_id", "impressions", "spend");
+		assertThat(command.columnOrder()).containsExactly("impressions", "date", "line_item_id");
+	}
+
+	@Test
+	void shouldMapAnAbsentColumnOrderThroughUnchangedWhenTheRequestCarriesNoneTest() {
+		// Given: a request that never set columnOrder at all
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+
+		// When:
+		ReportRowSearchCommand command = mapper.toSearchCommand(request);
+
+		// Then: passed through untouched - toSearchCommand does not invent a default here
+		assertThat(command.columnOrder()).isEmpty();
+	}
+
+	@Test
+	void shouldMapANullColumnOrderThroughUnchangedWhenTheRequestIsNullTest() {
+		// When:
+		ReportRowSearchCommand command = mapper.toSearchCommand(null);
+
+		// Then:
+		assertThat(command.columnOrder()).isNull();
 	}
 
 	@Test

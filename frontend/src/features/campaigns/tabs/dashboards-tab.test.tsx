@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -146,6 +146,50 @@ async function openSourceMenu() {
 function datasetHeaders(): HTMLElement[] {
   const table = document.querySelector(".data-table__tbl") as HTMLElement;
   return Array.from(table.querySelectorAll("thead th"));
+}
+
+/** Stubs every dataset header cell's bounding rect as a uniform `width`-px column, left to right - so a
+ *  drag's geometry resolves against real x positions instead of jsdom's all-zero layout. The real widths
+ *  don't matter here, only that each column occupies its own known span. */
+function stubHeaderRects(width = 150) {
+  let left = 0;
+  for (const cell of datasetHeaders()) {
+    const right = left + width;
+    vi.spyOn(cell, "getBoundingClientRect").mockReturnValue({
+      left, right, top: 0, bottom: 30, width, height: 30, x: left, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    left = right;
+  }
+}
+
+/** Stubs `requestAnimationFrame` so a test can run the drag's geometry effect exactly once, on demand -
+ *  jsdom never paints, so nothing would ever call the real one. */
+function stubAnimationFrame(): () => void {
+  let pending: (() => void) | null = null;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+    pending = () => callback(0);
+    return 1;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  return () => {
+    const run = pending;
+    pending = null;
+    if (run) act(run);
+  };
+}
+
+/** Drags the header at `fromIndex` and releases it just past the left edge of the header at `toIndex` -
+ *  uniform 150px columns (see `stubHeaderRects`), so the drop always lands immediately before `toIndex`
+ *  regardless of which side of it `fromIndex` started on. Stubs the geometry and drives the one animation
+ *  frame the drop needs to resolve a boundary. */
+function dragHeaderBefore(fromIndex: number, toIndex: number) {
+  const runFrame = stubAnimationFrame();
+  stubHeaderRects();
+  const headers = datasetHeaders();
+  fireEvent.pointerDown(headers[fromIndex], { clientX: fromIndex * 150 + 10, clientY: 10 });
+  fireEvent.pointerMove(window, { clientX: toIndex * 150 + 10, clientY: 10 });
+  runFrame();
+  fireEvent.pointerUp(window);
 }
 
 let intersectionCallbacks: IntersectionObserverCallback[] = [];
@@ -472,16 +516,34 @@ describe("DashboardsTab", () => {
     const dateAt = before.findIndex((text) => text.includes("Date"));
     expect(dateAt).toBeLessThan(channelAt);
 
-    // When: Channel is dropped onto Date
-    const headers = datasetHeaders();
-    fireEvent.dragStart(headers[channelAt]);
-    fireEvent.dragOver(headers[dateAt]);
-    fireEvent.drop(headers[dateAt]);
+    // When: Channel is dropped just left of Date's own midpoint
+    dragHeaderBefore(channelAt, dateAt);
 
     // Then:
     const after = headerOrder();
     expect(after.findIndex((text) => text.includes("Channel") && !text.includes("short")))
       .toBeLessThan(after.findIndex((text) => text.includes("Date")));
+  });
+
+  it("should still let a metric land between two dimensions - Dashboards has never enforced that boundary, unlike Reporting's old restriction", async () => {
+    // Given: a metric well after the leading dimensions
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard()]));
+    vi.mocked(updateDashboard).mockResolvedValue(aDashboard());
+    renderTab();
+    await screen.findByText("Prospecting");
+    const before = datasetHeaders().map((cell) => cell.textContent ?? "");
+    const impressionsAt = before.findIndex((text) => text.includes("Impressions"));
+    expect(impressionsAt).toBeGreaterThan(1);
+
+    // When: it is dropped between Date (index 0) and Line item (index 1)
+    dragHeaderBefore(impressionsAt, 1);
+
+    // Then: the shared table has no dimension/metric concept of its own to refuse it with, and
+    // Dashboards' own reorder callback never modelled one either - the caller-controlled default here is
+    // "allow", proven rather than assumed.
+    const after = datasetHeaders().map((cell) => cell.textContent ?? "");
+    expect(after[0]).toContain("Date");
+    expect(after[1]).toContain("Impressions");
   });
 
   it("should save a rearrangement at once, without waiting for Apply", async () => {
@@ -493,10 +555,8 @@ describe("DashboardsTab", () => {
     const headers = datasetHeaders();
     const columnCount = headers.length;
 
-    // When: the second column is dropped onto the first
-    fireEvent.dragStart(headers[1]);
-    fireEvent.dragOver(headers[0]);
-    fireEvent.drop(headers[0]);
+    // When: the second column is dropped just left of the first's own midpoint
+    dragHeaderBefore(1, 0);
 
     // Then: a whole arrangement is written, seeded from the columns on screen rather than the one pair
     // that moved - and Apply stays off, because rearranging is a way of reading the preview rather than a
@@ -522,15 +582,13 @@ describe("DashboardsTab", () => {
     const headers = datasetHeaders();
     const unmentioned = headers.length - 1;
 
-    // When: the last column - one the saved order says nothing about - is dropped on the first
-    fireEvent.dragStart(headers[unmentioned]);
-    fireEvent.dragOver(headers[0]);
-    fireEvent.drop(headers[0]);
+    // When: the last column - one the saved order says nothing about - is dropped just left of the first
+    const movedLabelBefore = headers[unmentioned].textContent ?? "";
+    dragHeaderBefore(unmentioned, 0);
 
     // Then: it moves, and the saved arrangement now covers every column. It used to sit still: the move
     // looked the column up in the saved order, found nothing, and returned the order unchanged.
-    const movedLabel = headers[unmentioned].textContent ?? "";
-    await waitFor(() => expect(datasetHeaders()[0].textContent).toBe(movedLabel));
+    await waitFor(() => expect(datasetHeaders()[0].textContent).toBe(movedLabelBefore));
     await waitFor(() => expect(updateDashboard).toHaveBeenCalledTimes(1));
     expect(vi.mocked(updateDashboard).mock.calls[0][2].columnOrder).toHaveLength(headers.length);
   });
@@ -573,11 +631,8 @@ describe("DashboardsTab", () => {
     const rowReads = vi.mocked(listDashboardDatasetRows).mock.calls.length;
     const countReads = vi.mocked(previewDashboardDataset).mock.calls.length;
 
-    // When: a column is dropped onto another
-    const headers = datasetHeaders();
-    fireEvent.dragStart(headers[1]);
-    fireEvent.dragOver(headers[0]);
-    fireEvent.drop(headers[0]);
+    // When: a column is dropped just left of another's own midpoint
+    dragHeaderBefore(1, 0);
     await waitFor(() => expect(updateDashboard).toHaveBeenCalledTimes(1));
 
     // Then: the order is saved, and neither BigQuery read is repeated - the rows are the same rows in a

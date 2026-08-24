@@ -8,14 +8,16 @@ import {
   DataTable,
   DataTableChips,
   DataTableViewControls,
+  columnDragCellClass,
+  columnDropCellClass,
   columnStyle,
 } from "../../../shared/ui/data-table/data-table";
-import type { DataTableColumn } from "../../../shared/ui/data-table/data-table";
+import type { DataTableColumn, DataTableColumnReorder } from "../../../shared/ui/data-table/data-table";
 import {
   DataTableDateFilterPopover,
   DataTableValueFilterPopover,
 } from "../../../shared/ui/data-table/data-table-popover";
-import { useColumnDrag, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
+import { insertAtBoundary, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
 import {
   EditIcon,
   MoreVerticalIcon,
@@ -339,6 +341,61 @@ function inSavedOrder<T extends { id: string }>(
     .map((def, canonical) => ({ def, canonical }))
     .sort((a, b) => place(a.def.id) - place(b.def.id) || a.canonical - b.canonical)
     .map((entry) => entry.def);
+}
+
+/** One column of the unified, on-screen order the table renders from - a dimension or a metric, carrying
+ *  its own definition so the header, the totals row and the body rows can all tell which cell-rendering
+ *  rules apply without a second lookup. Replaces rendering from `dims`/`mets` as two separate lists: those
+ *  still say which columns are selected (and, for dimensions, the grouping key), but concatenating them
+ *  always puts every dimension before every metric, which is exactly the arrangement a metric dropped
+ *  between two dimensions needs to escape. */
+type ReportColumn = { kind: "dimension"; dim: DimDef } | { kind: "metric"; met: MetricDef };
+
+/**
+ * The full column order a report actually renders, as one interleaved list of ids.
+ *
+ * `columnOrder` may only cover part of the current selection - a freshly selected column has no place in
+ * it yet - so this resolves it into a complete list before anything renders or a drag reorders it: every
+ * id `columnOrder` names, in that order (dropping any id that isn't currently selected); then every
+ * dimension `columnOrder` doesn't mention, inserted right after the last dimension it does (or at the very
+ * start when it names none), so an unlisted dimension still lands among the dimensions rather than at the
+ * tail of the whole table; then every metric it doesn't mention, appended at the very end. Absent/empty
+ * `columnOrder` reduces to the historic default: every dimension in fallback order, then every metric.
+ *
+ * @param dimensionIds the currently selected dimension ids, in fallback order
+ * @param metricIds    the currently selected metric ids, in fallback order
+ * @param columnOrder  the report's saved/dragged arrangement, or `undefined` for a report saved before
+ *                      this field existed
+ * @returns every selected id exactly once, in the order its column renders
+ */
+function resolveColumnOrder(
+  dimensionIds: string[],
+  metricIds: string[],
+  columnOrder: string[] | undefined
+): string[] {
+  const selectedDims = new Set(dimensionIds);
+  const selectedMets = new Set(metricIds);
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const id of columnOrder ?? []) {
+    if ((selectedDims.has(id) || selectedMets.has(id)) && !seen.has(id)) {
+      ordered.push(id);
+      seen.add(id);
+    }
+  }
+  let dimInsertAt = ordered.reduce((last, id, index) => (selectedDims.has(id) ? index + 1 : last), 0);
+  for (const id of dimensionIds) {
+    if (seen.has(id)) continue;
+    ordered.splice(dimInsertAt, 0, id);
+    seen.add(id);
+    dimInsertAt += 1;
+  }
+  for (const id of metricIds) {
+    if (seen.has(id)) continue;
+    ordered.push(id);
+    seen.add(id);
+  }
+  return ordered;
 }
 
 /** Membership form of the view's adjustment key, for the raw-grain edit guard. */
@@ -935,7 +992,7 @@ export function ReportingTab() {
   );
 
   /**
-   * Moves a column to where another one sits.
+   * Moves a column to sit immediately before or after another, named by id and side.
    *
    * Writes both configs: applied, so the move is visible the moment it happens, and draft, so "Save report"
    * keeps it. It deliberately does not touch `appliedGroupBy`, which stays in canonical order - a drag
@@ -944,15 +1001,15 @@ export function ReportingTab() {
    * The arrangement is also saved at once, as the Dashboards preview saves its own: an order is how someone
    * reads the report, and having to press a button to keep it meant every reload undid the reading.
    *
-   * The first drag seeds the order from the columns currently shown, in canonical order, so what gets saved
-   * is a complete arrangement rather than one pair of ids the rest has to be guessed around.
+   * Unlike Dashboards, this reporting table has no fixed group boundary to enforce: dimensions and
+   * metrics render from one interleaved order (see `orderedColumns`), so a metric may land anywhere in it,
+   * including between two dimensions.
+   *
+   * The first move seeds the order from the columns currently shown, in canonical order, so what gets
+   * saved is a complete arrangement rather than one pair of ids the rest has to be guessed around.
    */
-  const moveColumn = useCallback((fromId: string, toId: string) => {
+  const moveColumn = useCallback((fromId: string, toId: string, side: "before" | "after") => {
     if (fromId === toId) return;
-    const isDimension = (id: string) => DIM_DEFS.some((d) => d.id === id);
-    // Dimensions stay left of metrics, as every report in this product reads: the table renders the two
-    // groups in turn, and a metric dropped among the dimensions would land somewhere nobody aimed at.
-    if (isDimension(fromId) !== isDimension(toId)) return;
     const reorder = (config: ReportConfig): ReportConfig => {
       const shown = [...DIM_DEFS.map((d) => d.id), ...METRIC_DEFS.map((m) => m.id)].filter(
         (id) => config.dimensions.includes(id) || config.metrics.includes(id)
@@ -960,11 +1017,12 @@ export function ReportingTab() {
       // Reconciled, not just seeded: a metric ticked after the last arrangement is not in the saved order,
       // and looking it up there would find nothing and move nothing - a column you can see and cannot move.
       const order = withShownColumns(config.columnOrder ?? [], shown);
-      const from = order.indexOf(fromId);
-      const to = order.indexOf(toId);
-      if (from === -1 || to === -1) return config;
-      order.splice(to, 0, ...order.splice(from, 1));
-      return { ...config, columnOrder: order };
+      const without = order.filter((id) => id !== fromId);
+      const targetIndex = without.indexOf(toId);
+      if (targetIndex === -1) return config;
+      const boundary = side === "before" ? targetIndex : targetIndex + 1;
+      const next = insertAtBoundary(order, fromId, boundary);
+      return next === order ? config : { ...config, columnOrder: next };
     };
     setAppliedConfig(reorder);
     setDraftConfig(reorder);
@@ -972,27 +1030,28 @@ export function ReportingTab() {
   }, [persistColumnOrder]);
 
   /**
-   * Keyboard equivalent of dragging a header one slot left or right. It uses the same saved order contract as
-   * {@link moveColumn}, so keyboard and pointer users end up with the same report payload - including the
-   * save, so a keyboard user's arrangement survives a reload exactly as a dragged one does.
+   * Keyboard equivalent of dragging a header one slot left or right, across the whole interleaved
+   * arrangement rather than within its own group - a keyboard user reaches exactly the arrangements a
+   * pointer drag can now reach. Uses the same saved order contract as {@link moveColumn}, so keyboard and
+   * pointer users end up with the same report payload - including the save, so a keyboard user's
+   * arrangement survives a reload exactly as a dragged one does.
    */
   const nudgeColumn = useCallback((id: string, offset: -1 | 1) => {
-    const isDimension = DIM_DEFS.some((d) => d.id === id);
-    const groupIds = (isDimension ? DIM_DEFS : METRIC_DEFS).map((definition) => definition.id);
     const reorder = (config: ReportConfig): ReportConfig => {
       const shown = [...DIM_DEFS.map((d) => d.id), ...METRIC_DEFS.map((m) => m.id)].filter(
         (columnId) => config.dimensions.includes(columnId) || config.metrics.includes(columnId)
       );
       const order = withShownColumns(config.columnOrder ?? [], shown);
-      const visibleGroupOrder = order.filter((columnId) => groupIds.includes(columnId) && shown.includes(columnId));
-      const fromGroupIndex = visibleGroupOrder.indexOf(id);
-      const toGroupIndex = fromGroupIndex + offset;
-      if (fromGroupIndex === -1 || toGroupIndex < 0 || toGroupIndex >= visibleGroupOrder.length) return config;
-      const from = order.indexOf(id);
-      const to = order.indexOf(visibleGroupOrder[toGroupIndex]);
-      if (from === -1 || to === -1) return config;
-      order.splice(to, 0, ...order.splice(from, 1));
-      return { ...config, columnOrder: order };
+      const visible = order.filter((columnId) => shown.includes(columnId));
+      const fromVisible = visible.indexOf(id);
+      const toVisible = fromVisible + offset;
+      if (fromVisible === -1 || toVisible < 0 || toVisible >= visible.length) return config;
+      const without = order.filter((existing) => existing !== id);
+      const targetIndex = without.indexOf(visible[toVisible]);
+      if (targetIndex === -1) return config;
+      const boundary = offset === -1 ? targetIndex : targetIndex + 1;
+      const next = insertAtBoundary(order, id, boundary);
+      return next === order ? config : { ...config, columnOrder: next };
     };
     setAppliedConfig(reorder);
     setDraftConfig(reorder);
@@ -1001,11 +1060,11 @@ export function ReportingTab() {
 
   // Off while editing - a table full of inputs is not a table to rearrange, and a stray drag mid-edit
   // would move a column out from under a half-typed value.
-  const { draggingColumnId, columnDragProps } = useColumnDrag({
+  const columnReorder: DataTableColumnReorder = {
     onReorder: moveColumn,
     onNudge: nudgeColumn,
     disabled: editing,
-  });
+  };
   const openConversions = useCallback((row: KeyedReportRow) => {
     const channel = row.channel ? String(row.channel) : undefined;
     const requiredDimensionIds: string[] = [...CONVERSION_BREAKDOWN_BASE_DIM_IDS];
@@ -1066,35 +1125,62 @@ export function ReportingTab() {
   const orderedDimensionIds = useMemo(() => dims.map((dimension) => dimension.id), [dims]);
   const orderedMetricIds = useMemo(() => mets.map((metric) => metric.id), [mets]);
 
-  // The two column groups as the table sees them: one list, dimensions first, each carrying the class
-  // that sizes and aligns it. Memoized because the table re-measures its header whenever this array's
-  // identity changes, and because a fresh array every render would defeat the row memo below.
+  // The one column list the header, totals row and every data row all render from - a metric can sit
+  // between two dimensions here, unlike `dims`/`mets` above, which stay two lists purely because other
+  // code (the filter popover lookup, `submitSave`'s required-field check) still keys off "is this id a
+  // dimension" and has no reason to care where it currently sits on screen.
+  //
+  // Stable array identity across renders for the same reason `dims`/`mets` are: it is a prop on the
+  // memoized ReportRow below, and `dims`/`mets` are themselves already stable, so this only needs to stay
+  // stable across a render where none of its three inputs changed.
+  const orderedColumns = useMemo<ReportColumn[]>(() => {
+    const dimById = new Map(dims.map((d) => [d.id, d] as const));
+    const metById = new Map(mets.map((m) => [m.id, m] as const));
+    const ids = resolveColumnOrder(dims.map((d) => d.id), mets.map((m) => m.id), appliedConfig.columnOrder);
+    const result: ReportColumn[] = [];
+    for (const id of ids) {
+      const dim = dimById.get(id);
+      if (dim) {
+        result.push({ kind: "dimension", dim });
+        continue;
+      }
+      const met = metById.get(id);
+      if (met) result.push({ kind: "metric", met });
+    }
+    return result;
+  }, [dims, mets, appliedConfig.columnOrder]);
+
+  // The single interleaved list as the table sees them, each carrying the class that sizes and aligns
+  // it. Memoized because the table re-measures its header whenever this array's identity changes, and
+  // because a fresh array every render would defeat the row memo below.
   const columns = useMemo<DataTableColumn[]>(
-    () => [
-      ...dims.map((dimension) => ({
-        id: dimension.id,
-        label: dimension.label,
-        title: dimension.description ? `${dimension.label} — ${dimension.description}` : dimension.label,
-        className: dimColClass(dimension.id),
-        sortable: true,
-        filterable: true,
-        // The date window is its own state, not a value list, so its column's filter icon lights up
-        // from the window instead of from `filterState`.
-        filtered:
-          dimension.id === DATE_DIM_ID
-            ? dateWindow.from !== "" || dateWindow.to !== ""
-            : (filterState[dimension.id] ?? []).length > 0,
-      })),
-      ...mets.map((metric) => ({
-        id: metric.id,
-        label: metric.label,
-        title: metric.description ? `${metric.label} — ${metric.description}` : metric.label,
-        className: metricColClass(metric.id),
-        agg: metric.agg,
-        sortable: true,
-      })),
-    ],
-    [dims, mets, dateWindow, filterState]
+    () =>
+      orderedColumns.map((col) =>
+        col.kind === "dimension"
+          ? {
+              id: col.dim.id,
+              label: col.dim.label,
+              title: col.dim.description ? `${col.dim.label} — ${col.dim.description}` : col.dim.label,
+              className: dimColClass(col.dim.id),
+              sortable: true,
+              filterable: true,
+              // The date window is its own state, not a value list, so its column's filter icon lights up
+              // from the window instead of from `filterState`.
+              filtered:
+                col.dim.id === DATE_DIM_ID
+                  ? dateWindow.from !== "" || dateWindow.to !== ""
+                  : (filterState[col.dim.id] ?? []).length > 0,
+            }
+          : {
+              id: col.met.id,
+              label: col.met.label,
+              title: col.met.description ? `${col.met.label} — ${col.met.description}` : col.met.label,
+              className: metricColClass(col.met.id),
+              agg: col.met.agg,
+              sortable: true,
+            }
+      ),
+    [orderedColumns, dateWindow, filterState]
   );
 
   const reportViewsSentinelRef = useRef<HTMLTableRowElement>(null);
@@ -1506,6 +1592,10 @@ export function ReportingTab() {
               // The editable bulk template intentionally keeps its fixed raw round-trip schema below.
               dimensions: orderedDimensionIds,
               metrics: orderedMetricIds,
+              // The fully resolved on-screen order, not the possibly-partial saved `columnOrder` - a
+              // freshly ticked column has no place in that one yet, and the workbook has to match the
+              // screen rather than reproduce the gap.
+              columnOrder: orderedColumns.map((col) => (col.kind === "dimension" ? col.dim.id : col.met.id)),
             }
           : {}
       );
@@ -2216,13 +2306,14 @@ export function ReportingTab() {
             columns={columns}
             rows={orderedRows}
             getRowKey={(item) => item.renderKey}
-            renderCells={(item) => (
+            renderCells={(item, _index, draggedColumnIndex, dropBoundaryIndex) => (
               <ReportRow
                 row={item.row}
                 override={item.isAdded ? undefined : staged.adj[item.row.key]}
                 isAdded={item.isAdded}
-                dims={dims}
-                mets={mets}
+                columns={orderedColumns}
+                draggedColumnIndex={draggedColumnIndex}
+                dropBoundaryIndex={dropBoundaryIndex}
                 editing={editing}
                 editMode={editMode}
                 invalidCells={invalidCells}
@@ -2238,18 +2329,35 @@ export function ReportingTab() {
                 onOpenConversions={openConversions}
               />
             )}
-            renderPinnedCells={() => (
+            renderPinnedCells={(draggedColumnIndex, dropBoundaryIndex) => (
               <>
-                {dims.map((d) => (
-                  <td key={d.id} className={dimColClass(d.id)} style={columnStyle(columnWidths[d.id])}>
-                    {totDim(d.id)}
-                  </td>
-                ))}
-                {mets.map((m) => (
-                  <td key={m.id} className={metricColClass(m.id)} style={columnStyle(columnWidths[m.id])}>
-                    {totalCell(totals, m.id)}
-                  </td>
-                ))}
+                {orderedColumns.map((col, index) =>
+                  col.kind === "dimension" ? (
+                    <td
+                      key={col.dim.id}
+                      className={cn(
+                        dimColClass(col.dim.id),
+                        columnDragCellClass(index, draggedColumnIndex),
+                        columnDropCellClass(index, dropBoundaryIndex, orderedColumns.length)
+                      )}
+                      style={columnStyle(columnWidths[col.dim.id])}
+                    >
+                      {totDim(col.dim.id)}
+                    </td>
+                  ) : (
+                    <td
+                      key={col.met.id}
+                      className={cn(
+                        metricColClass(col.met.id),
+                        columnDragCellClass(index, draggedColumnIndex),
+                        columnDropCellClass(index, dropBoundaryIndex, orderedColumns.length)
+                      )}
+                      style={columnStyle(columnWidths[col.met.id])}
+                    >
+                      {totalCell(totals, col.met.id)}
+                    </td>
+                  )
+                )}
               </>
             )}
             columnWidths={columnWidths}
@@ -2264,8 +2372,7 @@ export function ReportingTab() {
             }}
             openFilterColumnId={openFilterFor}
             filterDisabled={editing}
-            draggingColumnId={draggingColumnId}
-            columnDragProps={columnDragProps}
+            columnReorder={columnReorder}
             hasNextPage={reportRows.hasNextPage}
             isFetchingNextPage={reportRows.isFetchingNextPage}
             fetchNextPage={reportRows.fetchNextPage}
@@ -2345,8 +2452,16 @@ interface ReportRowProps {
   row: KeyedReportRow;
   override: Partial<KeyedReportRow> | undefined;
   isAdded: boolean;
-  dims: DimDef[];
-  mets: MetricDef[];
+  /** The one on-screen column order - dimensions and metrics interleaved exactly as the header renders
+   *  them (see `orderedColumns`), so a metric between two dimensions in the header sees the same metric
+   *  between the same two dimensions here. */
+  columns: ReportColumn[];
+  /** The dragged column's position in `columns`, and the boundary the insertion line sits at - both
+   *  `-1` while no drag is in progress. Two plain `number`s rather than one object: this row is memoized,
+   *  and an object literal would be a new reference every render, busting that memo on every keystroke
+   *  elsewhere on the page rather than only on an actual boundary crossing. */
+  draggedColumnIndex: number;
+  dropBoundaryIndex: number;
   editing: boolean;
   editMode: EditMode;
   invalidCells: ReadonlyMap<string, string>;
@@ -2369,15 +2484,17 @@ interface ReportRowProps {
  * change, a page arriving) doesn't reconcile every mounted row - only the row whose own props actually
  * changed. Effective only because the parent passes a per-row-stable `override` (from `staged.adj`,
  * a `Record` that keeps other keys' references stable across an edit - see
- * NEW-UX-PLAN/11-REPORTING-TABLE-PERFORMANCE-PLAN.md D5/D6) and stable (`useCallback`) edit handlers,
- * rather than rebuilding a merged array/new closures on every keystroke.
+ * NEW-UX-PLAN/11-REPORTING-TABLE-PERFORMANCE-PLAN.md D5/D6), stable (`useCallback`) edit handlers, and
+ * the two drag-state numbers above rather than an object, so a column drag only reconciles this row on a
+ * boundary crossing.
  */
 const ReportRow = memo(function ReportRow({
   row,
   override,
   isAdded,
-  dims,
-  mets,
+  columns,
+  draggedColumnIndex,
+  dropBoundaryIndex,
   editing,
   editMode,
   invalidCells,
@@ -2395,127 +2512,148 @@ const ReportRow = memo(function ReportRow({
   // constructed name by splitting on "_". So they are shown here as that same split, updating as the
   // name is typed - a value typed into them directly would simply vanish on the next read.
   const nameParts = isAdded ? constructedNameParts(String(merged.line_item_name ?? "")) : undefined;
+
+  /** The dragged/drop-boundary classes for the column at `index` - identical wherever a cell renders,
+   *  header, totals or here, so the eye can find the column being carried regardless of where it looks. */
+  function dragClass(index: number): string {
+    return cn(
+      columnDragCellClass(index, draggedColumnIndex),
+      columnDropCellClass(index, dropBoundaryIndex, columns.length)
+    );
+  }
+
+  function renderDim(d: DimDef, index: number) {
+    const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
+    const isInherited = isAdded && lockedDimIds.has(d.id);
+    const isFromName = isAdded && NAME_DERIVED_DIMS.has(d.id);
+    return (
+      <td
+        key={d.id}
+        className={cn(
+          dimColClass(d.id),
+          isFromName && editing && "reporting-tab__cell--derived",
+          dragClass(index)
+        )}
+        style={columnStyle(columnWidths[d.id])}
+        title={
+          editing && isFromName
+            ? "Read from the constructed name — edit the name to change it"
+            : editing && isInherited
+              ? "Inherited from this campaign"
+              : undefined
+        }
+      >
+        {editing && isAdded && isFromName ? (
+          <>
+            {nameParts?.[d.id] || "—"}
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && !isInherited ? (
+          <>
+            <input
+              className={cn(
+                "reporting-tab__cell-input",
+                isRequiredInvalid && "reporting-tab__cell-input--error"
+              )}
+              // A date cell gets the calendar, like the report period and the Setup tab's add-line
+              // form. Not only to save typing: this value is written to a BigQuery DATE column, and
+              // a text box happily accepts "10/22/2025" or "yesterday" for the insert to choke on.
+              type={d.id === DATE_DIM_ID ? "date" : "text"}
+              aria-label={`${d.label} for new line`}
+              aria-invalid={isRequiredInvalid}
+              value={String(merged[d.id as keyof KeyedReportRow] ?? "")}
+              onChange={(event) => onUpdateAddedRow(row.key, d.id, event.target.value)}
+            />
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && isRequiredInvalid ? (
+          <>
+            {dimCell(d.id, merged)}
+            <span className="reporting-tab__cell-error">Required</span>
+          </>
+        ) : (
+          dimCell(d.id, merged)
+        )}
+        {d.id === "line_item_id" && isAdded && !editing && (
+          <span className="reporting-tab__badge reporting-tab__badge--manual">Manual</span>
+        )}
+        {d.id === "line_item_id" && !isAdded && isModified && (
+          <span className="reporting-tab__badge reporting-tab__badge--modified">Modified</span>
+        )}
+      </td>
+    );
+  }
+
+  function renderMet(m: MetricDef, index: number) {
+    const id = cellKey(row.key, m.id);
+    const cellEditable = editing && editMode === "lines" && EDITABLE_METRIC_IDS.has(m.id);
+    const isInvalid = invalidCells.has(id);
+    const isMetricRequired = isAdded && requiredCells.has(id);
+    const cellModified = !isAdded && override?.[m.id as keyof KeyedReportRow] != null;
+    const draft = metricDrafts.get(id);
+    const display =
+      draft !== undefined
+        ? draft
+        : editableMetricDisplay(merged[m.id as keyof KeyedReportRow]);
+    return (
+      <td
+        key={m.id}
+        className={cn(
+          metricColClass(m.id),
+          cellModified && "reporting-tab__metric-cell--modified",
+          dragClass(index)
+        )}
+        style={columnStyle(columnWidths[m.id])}
+        title={cellModified ? `Original: ${rowMetricCell(row, m.id)}` : undefined}
+      >
+        {cellEditable ? (
+          <input
+            className={cn(
+              "reporting-tab__cell-input",
+              "reporting-tab__cell-input--num",
+              (isInvalid || isMetricRequired) && "reporting-tab__cell-input--error"
+            )}
+            type="text"
+            inputMode="decimal"
+            aria-label={`${m.label} for ${merged.line_item_id || "new line"}`}
+            aria-invalid={isInvalid || isMetricRequired}
+            value={display}
+            placeholder={!isAdded ? editableMetricDisplay(row[m.id as keyof KeyedReportRow]) : undefined}
+            onChange={(event) =>
+              isAdded
+                ? onUpdateAddedRow(row.key, m.id, event.target.value)
+                : onUpdateCell(row.key, m.id, event.target.value)
+            }
+          />
+        ) : m.id === "conversions" && onOpenConversions && !isAdded && merged.conversions != null ? (
+          /* Not an input like the delivery metrics: this figure is a sum over conversion actions,
+             and a number typed here would have no action to belong to. The button opens the rows
+             it is made of, which is where a figure can be edited.
+
+             A blank cell is left alone. It means the join attached nothing here - either no
+             conversions match the row, or the row is one of the siblings a campaign-level channel
+             deliberately blanks so its total is stated once. Neither has a breakdown to show, and
+             offering one would promise rows that are not there. */
+          <button
+            type="button"
+            className="reporting-tab__conv-open"
+            aria-label={`Conversions by action for ${merged.line_item_name || merged.line_item_id || "this row"}`}
+            onClick={() => onOpenConversions(row)}
+          >
+            {rowMetricCell(merged, m.id)}
+          </button>
+        ) : (
+          rowMetricCell(merged, m.id)
+        )}
+        {isMetricRequired && <span className="reporting-tab__cell-error">Required</span>}
+        {isInvalid && <span className="reporting-tab__cell-error">{invalidCells.get(id)}</span>}
+      </td>
+    );
+  }
+
   return (
     <>
-      {dims.map((d) => {
-        const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
-        const isInherited = isAdded && lockedDimIds.has(d.id);
-        const isFromName = isAdded && NAME_DERIVED_DIMS.has(d.id);
-        return (
-          <td
-            key={d.id}
-            className={cn(dimColClass(d.id), isFromName && editing && "reporting-tab__cell--derived")}
-            style={columnStyle(columnWidths[d.id])}
-            title={
-              editing && isFromName
-                ? "Read from the constructed name — edit the name to change it"
-                : editing && isInherited
-                  ? "Inherited from this campaign"
-                  : undefined
-            }
-          >
-            {editing && isAdded && isFromName ? (
-              <>
-                {nameParts?.[d.id] || "—"}
-                {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
-              </>
-            ) : editing && isAdded && !isInherited ? (
-              <>
-                <input
-                  className={cn(
-                    "reporting-tab__cell-input",
-                    isRequiredInvalid && "reporting-tab__cell-input--error"
-                  )}
-                  // A date cell gets the calendar, like the report period and the Setup tab's add-line
-                  // form. Not only to save typing: this value is written to a BigQuery DATE column, and
-                  // a text box happily accepts "10/22/2025" or "yesterday" for the insert to choke on.
-                  type={d.id === DATE_DIM_ID ? "date" : "text"}
-                  aria-label={`${d.label} for new line`}
-                  aria-invalid={isRequiredInvalid}
-                  value={String(merged[d.id as keyof KeyedReportRow] ?? "")}
-                  onChange={(event) => onUpdateAddedRow(row.key, d.id, event.target.value)}
-                />
-                {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
-              </>
-            ) : editing && isAdded && isRequiredInvalid ? (
-              <>
-                {dimCell(d.id, merged)}
-                <span className="reporting-tab__cell-error">Required</span>
-              </>
-            ) : (
-              dimCell(d.id, merged)
-            )}
-            {d.id === "line_item_id" && isAdded && !editing && (
-              <span className="reporting-tab__badge reporting-tab__badge--manual">Manual</span>
-            )}
-            {d.id === "line_item_id" && !isAdded && isModified && (
-              <span className="reporting-tab__badge reporting-tab__badge--modified">Modified</span>
-            )}
-          </td>
-        );
-      })}
-      {mets.map((m) => {
-        const id = cellKey(row.key, m.id);
-        const cellEditable = editing && editMode === "lines" && EDITABLE_METRIC_IDS.has(m.id);
-        const isInvalid = invalidCells.has(id);
-        const isMetricRequired = isAdded && requiredCells.has(id);
-        const cellModified = !isAdded && override?.[m.id as keyof KeyedReportRow] != null;
-        const draft = metricDrafts.get(id);
-        const display =
-          draft !== undefined
-            ? draft
-            : editableMetricDisplay(merged[m.id as keyof KeyedReportRow]);
-        return (
-          <td
-            key={m.id}
-            className={cn(metricColClass(m.id), cellModified && "reporting-tab__metric-cell--modified")}
-            style={columnStyle(columnWidths[m.id])}
-            title={cellModified ? `Original: ${rowMetricCell(row, m.id)}` : undefined}
-          >
-            {cellEditable ? (
-              <input
-                className={cn(
-                  "reporting-tab__cell-input",
-                  "reporting-tab__cell-input--num",
-                  (isInvalid || isMetricRequired) && "reporting-tab__cell-input--error"
-                )}
-                type="text"
-                inputMode="decimal"
-                aria-label={`${m.label} for ${merged.line_item_id || "new line"}`}
-                aria-invalid={isInvalid || isMetricRequired}
-                value={display}
-                placeholder={!isAdded ? editableMetricDisplay(row[m.id as keyof KeyedReportRow]) : undefined}
-                onChange={(event) =>
-                  isAdded
-                    ? onUpdateAddedRow(row.key, m.id, event.target.value)
-                    : onUpdateCell(row.key, m.id, event.target.value)
-                }
-              />
-            ) : m.id === "conversions" && onOpenConversions && !isAdded && merged.conversions != null ? (
-              /* Not an input like the delivery metrics: this figure is a sum over conversion actions,
-                 and a number typed here would have no action to belong to. The button opens the rows
-                 it is made of, which is where a figure can be edited.
-
-                 A blank cell is left alone. It means the join attached nothing here - either no
-                 conversions match the row, or the row is one of the siblings a campaign-level channel
-                 deliberately blanks so its total is stated once. Neither has a breakdown to show, and
-                 offering one would promise rows that are not there. */
-              <button
-                type="button"
-                className="reporting-tab__conv-open"
-                aria-label={`Conversions by action for ${merged.line_item_name || merged.line_item_id || "this row"}`}
-                onClick={() => onOpenConversions(row)}
-              >
-                {rowMetricCell(merged, m.id)}
-              </button>
-            ) : (
-              rowMetricCell(merged, m.id)
-            )}
-            {isMetricRequired && <span className="reporting-tab__cell-error">Required</span>}
-            {isInvalid && <span className="reporting-tab__cell-error">{invalidCells.get(id)}</span>}
-          </td>
-        );
-      })}
+      {columns.map((col, index) => (col.kind === "dimension" ? renderDim(col.dim, index) : renderMet(col.met, index)))}
     </>
   );
 });

@@ -3194,6 +3194,22 @@ components:
           description: Optional metric column ids to include in a current-view .xlsx export.
           items:
             type: string
+        columnOrder:
+          type: array
+          description: >
+            The order the export's columns are written in, as dimension and metric ids in one
+            interleaved list. Narrows nothing - `dimensions` and `metrics` above still decide which
+            columns are included; this decides only where each one sits. Needed because those two
+            fields cannot express a metric sitting between two dimensions, which the report view can:
+            concatenating them always yields every dimension and then every metric.
+
+            Send a fully resolved order - every included id, in the order they are to be written. Ids
+            here that are not included are ignored, and an included id left out is written after the
+            ones named here. That trailing rule is a fallback for a partial list, not a placement rule:
+            a caller matching a screen resolves its own gaps first, because only the caller knows where
+            an unplaced column sits there. Omit for the default order, every dimension then every metric.
+          items:
+            type: string
     ReportRowSortFieldEnumV1:
       type: string
       description: >

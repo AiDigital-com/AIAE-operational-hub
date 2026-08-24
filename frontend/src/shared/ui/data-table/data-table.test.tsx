@@ -1,12 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataTable, DataTableChips, DataTableViewControls, columnStyle } from "./data-table";
-import type { DataTableColumn } from "./data-table";
+import { DataTable, DataTableChips, DataTableViewControls, columnStyle, resolveDropBoundary } from "./data-table";
+import type { DataTableColumn, DataTableColumnReorder } from "./data-table";
 import {
   MIN_COLUMN_WIDTH,
-  useColumnDrag,
   useColumnWidths,
   useTableExpand,
   withShownColumns,
@@ -65,19 +64,22 @@ function aRow(index: number): Row {
   return { id: `row-${index}`, name: `Line ${index}`, spend: index * 100 };
 }
 
-/** Wires the component to the same hooks a real consumer holds, so the tests exercise the pair. */
+/** Wires the component to the same hooks a real consumer holds, so the tests exercise the pair. Passing
+ *  `onReorder` is what offers reordering at all - a harness with none renders exactly as a consumer that
+ *  never wires `columnReorder` would. */
 function Harness({
   rows = [aRow(0), aRow(1)],
   columns = COLUMNS,
-  onReorder = () => {},
-  onNudge = () => {},
+  onReorder,
+  onNudge,
+  reorderDisabled,
   ...rest
 }: Partial<Parameters<typeof DataTable<Row>>[0]> & {
-  onReorder?: (fromId: string, toId: string) => void;
-  onNudge?: (columnId: string, offset: -1 | 1) => void;
+  onReorder?: DataTableColumnReorder["onReorder"];
+  onNudge?: DataTableColumnReorder["onNudge"];
+  reorderDisabled?: boolean;
 } = {}) {
   const { columnWidths, resizeColumn } = useColumnWidths();
-  const { draggingColumnId, columnDragProps } = useColumnDrag({ onReorder, onNudge });
   return (
     <DataTable<Row>
       columns={columns}
@@ -94,11 +96,50 @@ function Harness({
       )}
       columnWidths={columnWidths}
       onResizeColumn={resizeColumn}
-      draggingColumnId={draggingColumnId}
-      columnDragProps={columnDragProps}
+      columnReorder={onReorder ? { onReorder, onNudge, disabled: reorderDisabled } : undefined}
       {...rest}
     />
   );
+}
+
+/** Stubs the rendered header cells' bounding rects left-to-right at the given pixel widths, so the
+ *  drag's geometry resolves against real x positions instead of jsdom's all-zero layout. */
+function stubHeaderRects(widths: number[]) {
+  const cells = screen.getAllByRole("columnheader");
+  let left = 0;
+  cells.forEach((cell, index) => {
+    const width = widths[index] ?? 150;
+    vi.spyOn(cell, "getBoundingClientRect").mockReturnValue({
+      left,
+      right: left + width,
+      top: 0,
+      bottom: 30,
+      width,
+      height: 30,
+      x: left,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    left += width;
+  });
+}
+
+/** Stubs `requestAnimationFrame` so a test can run the drag's geometry effect exactly once, on demand -
+ *  jsdom never paints, so nothing would ever call the real one. The returned function runs the one
+ *  pending frame (if any) inside `act`, so the resulting state update is flushed before the next
+ *  assertion; calling it again after a fresh frame has been scheduled advances one more frame. */
+function stubAnimationFrame(): () => void {
+  let pending: (() => void) | null = null;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+    pending = () => callback(0);
+    return 1;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  return () => {
+    const run = pending;
+    pending = null;
+    if (run) act(run);
+  };
 }
 
 /** The mounted body rows, ignoring the pinned, spacer, status and sentinel rows. */
@@ -225,22 +266,122 @@ describe("DataTable column width", () => {
   });
 });
 
+describe("resolveDropBoundary", () => {
+  // Name spans 0-150, Spend spans 150-300 - real geometry, not jsdom's zeros.
+  const rects = [
+    { left: 0, right: 150 },
+    { left: 150, right: 300 },
+  ];
+
+  it("should land before a column when the cursor sits left of its own midpoint", () => {
+    // Given/When: 200 is inside Spend (150-300), left of its midpoint (225)
+    // Then: the boundary sits directly before Spend
+    expect(resolveDropBoundary(rects, 200)).toBe(1);
+  });
+
+  it("should land after a column when the cursor sits right of its own midpoint", () => {
+    // Given/When: 260 is inside Spend, right of its midpoint (225)
+    // Then: the boundary sits past every rendered column
+    expect(resolveDropBoundary(rects, 260)).toBe(2);
+  });
+
+  it("should clamp to the last column once the cursor has scrolled past the table's own right edge", () => {
+    expect(resolveDropBoundary(rects, 500)).toBe(2);
+  });
+
+  it("should land at the only possible boundary when there are no columns to speak of", () => {
+    expect(resolveDropBoundary([], 100)).toBe(0);
+  });
+});
+
 describe("DataTable column reorder", () => {
-  it("should report a drop as a move from the dragged column to the dropped-on one", () => {
+  it("should report a drop naming the neighbour column and the side, resolved once per animation frame from cursor geometry", () => {
+    // Given: Name (0-150) and Spend (150-300), and a drag in progress
     const onReorder = vi.fn();
     render(<Harness onReorder={onReorder} />);
-    const [nameTh, spendTh] = screen.getAllByRole("columnheader");
+    const runFrame = stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [, spendTh] = screen.getAllByRole("columnheader");
 
-    fireEvent.dragStart(spendTh);
-    fireEvent.dragOver(nameTh);
-    fireEvent.drop(nameTh);
+    // When: Spend is picked up and released left of Name's own midpoint (75)
+    fireEvent.pointerDown(spendTh, { clientX: 200, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 50, clientY: 10 });
+    runFrame();
+    fireEvent.pointerUp(window);
 
-    expect(onReorder).toHaveBeenCalledWith("spend", "name");
+    // Then: it lands before Name, not "at" it - the boundary the geometry actually resolved
+    expect(onReorder).toHaveBeenCalledWith("spend", "name", "before");
+  });
+
+  it("should land after a column when the cursor is released right of its own midpoint", () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    const runFrame = stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [nameTh] = screen.getAllByRole("columnheader");
+
+    // When: Name is picked up and released right of Spend's own midpoint (225)
+    fireEvent.pointerDown(nameTh, { clientX: 50, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 260, clientY: 10 });
+    runFrame();
+    fireEvent.pointerUp(window);
+
+    expect(onReorder).toHaveBeenCalledWith("name", "spend", "after");
+  });
+
+  it("should still resolve a drop position while the cursor is tracked over the body rows, not only the header", () => {
+    // Given: the same geometry as the first test, but the pointer never visits the header's own row
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    const runFrame = stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [, spendTh] = screen.getAllByRole("columnheader");
+
+    // When: tracked well below the header, over where a data row renders
+    fireEvent.pointerDown(spendTh, { clientX: 200, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 50, clientY: 400 });
+    runFrame();
+    fireEvent.pointerUp(window);
+
+    // Then: only x ever mattered to the boundary
+    expect(onReorder).toHaveBeenCalledWith("spend", "name", "before");
+  });
+
+  it("should abandon the move on Escape instead of committing it", () => {
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    const runFrame = stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [, spendTh] = screen.getAllByRole("columnheader");
+
+    fireEvent.pointerDown(spendTh, { clientX: 200, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 50, clientY: 10 });
+    runFrame();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(window);
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it("should change nothing on a press with no movement", () => {
+    // Given: a drag started but no animation frame ever resolving a boundary (no `runFrame()` call)
+    const onReorder = vi.fn();
+    render(<Harness onReorder={onReorder} />);
+    stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [, spendTh] = screen.getAllByRole("columnheader");
+
+    // When: picked up and released at once
+    fireEvent.pointerDown(spendTh, { clientX: 200, clientY: 10 });
+    fireEvent.pointerUp(window);
+
+    // Then:
+    expect(onReorder).not.toHaveBeenCalled();
   });
 
   it("should move a column with alt+arrow, so reordering is not pointer-only", () => {
     const onNudge = vi.fn();
-    render(<Harness onNudge={onNudge} />);
+    render(<Harness onReorder={() => {}} onNudge={onNudge} />);
     const [, spendTh] = screen.getAllByRole("columnheader");
 
     fireEvent.keyDown(spendTh, { key: "ArrowLeft", altKey: true });
@@ -250,7 +391,7 @@ describe("DataTable column reorder", () => {
 
   it("should ignore an arrow press without alt, which belongs to the control that has focus", () => {
     const onNudge = vi.fn();
-    render(<Harness onNudge={onNudge} />);
+    render(<Harness onReorder={() => {}} onNudge={onNudge} />);
     const [, spendTh] = screen.getAllByRole("columnheader");
 
     fireEvent.keyDown(spendTh, { key: "ArrowLeft" });
@@ -259,12 +400,19 @@ describe("DataTable column reorder", () => {
   });
 
   it("should fade the column being dragged", () => {
+    render(<Harness onReorder={() => {}} />);
+    const [, spendTh] = screen.getAllByRole("columnheader");
+
+    fireEvent.pointerDown(spendTh, { clientX: 200, clientY: 10 });
+
+    expect(spendTh.className).toContain("data-table__col--dragging");
+  });
+
+  it("should offer no reordering at all when the consumer supplies no columnReorder", () => {
     render(<Harness />);
     const [, spendTh] = screen.getAllByRole("columnheader");
 
-    fireEvent.dragStart(spendTh);
-
-    expect(spendTh.className).toContain("data-table__col--dragging");
+    expect(spendTh).not.toHaveAttribute("tabindex");
   });
 });
 
@@ -511,55 +659,56 @@ describe("useTableExpand", () => {
 
 /** Guards the memo contract the Reporting tab's row component depends on. */
 describe("DataTable render stability", () => {
-  it("should keep one identity for the resize and drag callbacks across unrelated renders", () => {
-    const seen: Array<{ resize: unknown; drag: unknown }> = [];
+  it("should keep one identity for the resize callback across unrelated renders", () => {
+    const seen: unknown[] = [];
     function Probe({ tick }: { tick: number }) {
       const { resizeColumn } = useColumnWidths();
-      const { columnDragProps } = useColumnDrag({ onReorder: () => {} });
-      seen.push({ resize: resizeColumn, drag: columnDragProps });
+      seen.push(resizeColumn);
       return <span>{tick}</span>;
     }
     const { rerender } = render(<Probe tick={1} />);
     rerender(<Probe tick={2} />);
 
-    expect(seen[1].resize).toBe(seen[0].resize);
-    expect(seen[1].drag).toBe(seen[0].drag);
+    expect(seen[1]).toBe(seen[0]);
   });
 });
 
-/** A consumer that holds its own order, the way Dashboards will. */
-describe("useColumnDrag with consumer-held order", () => {
+/** A consumer that holds its own flat order and reorders through it, the way Dashboards does - no
+ *  dimension/metric grouping in sight, proving the shared mechanism needs none to work. */
+describe("DataTable column reorder with consumer-held order", () => {
   it("should let a consumer with one flat column list reorder without modelling groups", () => {
     function Reorderable() {
       const [order, setOrder] = useState(["name", "spend"]);
-      const { columnDragProps } = useColumnDrag({
-        onReorder: (fromId, toId) =>
-          setOrder((current) => {
-            const next = [...current];
-            next.splice(next.indexOf(toId), 0, ...next.splice(next.indexOf(fromId), 1));
-            return next;
-          }),
-      });
+      const onReorder: DataTableColumnReorder["onReorder"] = (fromId, toId, side) =>
+        setOrder((current) => {
+          const without = current.filter((id) => id !== fromId);
+          const targetIndex = without.indexOf(toId);
+          if (targetIndex === -1) return current;
+          without.splice(side === "before" ? targetIndex : targetIndex + 1, 0, fromId);
+          return without;
+        });
+      const columns = order.map((id) => ({ id, label: id }));
       return (
-        <table>
-          <thead>
-            <tr>
-              {order.map((id) => (
-                <th key={id} {...columnDragProps(id)}>
-                  {id}
-                </th>
-              ))}
-            </tr>
-          </thead>
-        </table>
+        <DataTable
+          columns={columns}
+          rows={[]}
+          getRowKey={(row: { id: string }) => row.id}
+          renderCells={() => null}
+          columnWidths={{}}
+          onResizeColumn={() => {}}
+          columnReorder={{ onReorder }}
+        />
       );
     }
     render(<Reorderable />);
-    const [first, second] = screen.getAllByRole("columnheader");
+    const runFrame = stubAnimationFrame();
+    stubHeaderRects([150, 150]);
+    const [, second] = screen.getAllByRole("columnheader");
 
-    fireEvent.dragStart(second);
-    fireEvent.dragOver(first);
-    fireEvent.drop(first);
+    fireEvent.pointerDown(second, { clientX: 200, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 50, clientY: 10 });
+    runFrame();
+    fireEvent.pointerUp(window);
 
     expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["spend", "name"]);
   });

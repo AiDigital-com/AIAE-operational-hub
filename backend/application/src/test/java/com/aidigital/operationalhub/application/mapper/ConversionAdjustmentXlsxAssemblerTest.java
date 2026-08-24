@@ -23,7 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConversionAdjustmentXlsxAssemblerTest {
 
 	private final ConversionAdjustmentXlsxAssembler assembler =
-			new ConversionAdjustmentXlsxAssembler(new WorkbookRowParser(), new ReportRowXlsxExportAssembler());
+			new ConversionAdjustmentXlsxAssembler(
+					new WorkbookRowParser(), new ReportRowXlsxExportAssembler(new ColumnOrderArranger()));
 
 	private ConversionRowModel row(String action, Double conversions) {
 		return new ConversionRowModel(

@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "../../style/cn";
 import { ExpandIcon, FilterIcon, SortIcon } from "../icons/icons";
 import { COLUMN_RESIZE_STEP } from "./data-table-hooks";
-import type { ColumnDragProps } from "./data-table-hooks";
 import "./data-table.css";
 
 /** How tall one row is assumed to be before it has been measured. Matches the density set in
@@ -14,6 +13,125 @@ const DEFAULT_ROW_HEIGHT = 30;
 
 /** How many rows beyond the visible window stay mounted, so a fast scroll does not show blank space. */
 const ROW_OVERSCAN = 8;
+
+/** How near the scroll container's left/right edge a column drag has to get before the table starts
+ *  autoscrolling under it - wide enough to find without hunting for a hairline, narrow enough that most
+ *  of a wide table stays free to actually drop into. */
+export const COLUMN_DRAG_AUTOSCROLL_ZONE_PX = 48;
+
+/** The fastest the table autoscrolls during a column drag, reached only right at the scroll container's
+ *  own edge - scaled down elsewhere in the zone above so the scroll doesn't lurch the moment it starts. */
+export const COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME = 16;
+
+/**
+ * Which boundary between rendered columns a cursor at viewport x `x` is nearest, given each column's
+ * current header rect in on-screen (left-to-right) order.
+ *
+ * The candidate column is whichever one's own horizontal span the cursor sits inside - clamped to the
+ * last one once the cursor has scrolled past the table's own right edge - and the cursor's side of THAT
+ * column's own midpoint decides whether the boundary lands before or after it. Only `x` matters: the
+ * header cells span the same horizontal range the body cells beneath them do, so a cursor tracked over a
+ * data row rather than the header resolves exactly the same boundary - which is the fix for a drag only
+ * ever registering over the header row.
+ *
+ * @param rects the header cells' current bounding rects, in render order - the dragged column's own
+ *              header still counted, so the boundary this returns is against that order, not it removed
+ * @param x     the cursor's current viewport x
+ * @returns a boundary in `[0, rects.length]`
+ */
+export function resolveDropBoundary(rects: readonly { left: number; right: number }[], x: number): number {
+  if (rects.length === 0) return 0;
+  let candidate = rects.length - 1;
+  for (let i = 0; i < rects.length; i += 1) {
+    if (x < rects[i].right) {
+      candidate = i;
+      break;
+    }
+  }
+  const midpoint = (rects[candidate].left + rects[candidate].right) / 2;
+  return x < midpoint ? candidate : candidate + 1;
+}
+
+/** How fast to autoscroll for a given depth into the edge zone - proportional, capped at
+ *  {@link COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME} right at the scroll container's own edge. */
+function columnDragAutoscrollSpeed(depthIntoZone: number): number {
+  const depth = Math.min(depthIntoZone, COLUMN_DRAG_AUTOSCROLL_ZONE_PX);
+  return (depth / COLUMN_DRAG_AUTOSCROLL_ZONE_PX) * COLUMN_DRAG_AUTOSCROLL_MAX_PX_PER_FRAME;
+}
+
+/** Scrolls the table's own horizontal scroll container when the cursor sits inside
+ *  {@link COLUMN_DRAG_AUTOSCROLL_ZONE_PX} of either edge during a column drag, faster the closer to the
+ *  edge - so a column can be dragged all the way from one end of a wide table to the other without
+ *  letting go and starting over partway. */
+function runColumnDragAutoscroll(container: HTMLElement, x: number): void {
+  const rect = container.getBoundingClientRect();
+  const fromLeft = x - rect.left;
+  const fromRight = rect.right - x;
+  if (fromLeft >= 0 && fromLeft < COLUMN_DRAG_AUTOSCROLL_ZONE_PX) {
+    container.scrollLeft -= columnDragAutoscrollSpeed(COLUMN_DRAG_AUTOSCROLL_ZONE_PX - fromLeft);
+  } else if (fromRight >= 0 && fromRight < COLUMN_DRAG_AUTOSCROLL_ZONE_PX) {
+    container.scrollLeft += columnDragAutoscrollSpeed(COLUMN_DRAG_AUTOSCROLL_ZONE_PX - fromRight);
+  }
+}
+
+/**
+ * Where a dragged column should land, named by one of the OTHER columns rather than by a raw position -
+ * so a caller matching it back to its own (possibly differently-scoped) id list always means the same
+ * thing: land next to this id, on this side of it.
+ *
+ * A boundary sitting on either side of the dragged column's own current slot names the dragged column
+ * itself as the neighbour, which every caller reads back as a no-op (its own id is never among "the
+ * columns other than it").
+ *
+ * @param ids          every rendered column's id, in on-screen order - the same order `boundary` was
+ *                     resolved against
+ * @param draggedIndex the dragged column's own index within `ids`
+ * @param boundary     the boundary from {@link resolveDropBoundary}, against that same order
+ */
+function columnDropTarget(
+  ids: readonly string[],
+  draggedIndex: number,
+  boundary: number
+): { neighborId: string; side: "before" | "after" } {
+  const before = boundary <= draggedIndex;
+  const neighborIndex = before ? boundary : boundary - 1;
+  return { neighborId: ids[neighborIndex], side: before ? "before" : "after" };
+}
+
+/** Whether the column at `colIndex` - its position in a rendered order - is the one currently being
+ *  dragged, so its cell should fade. Applied identically to a column's header cell, its pinned/totals
+ *  cell and every visible body cell, so the eye can find the column being carried wherever it renders,
+ *  not only in the header it was picked up from. `draggedColumnIndex` is `-1` while no drag is in
+ *  progress, which this can never equal a real `colIndex`. */
+export function columnDragCellClass(colIndex: number, draggedColumnIndex: number): string | false {
+  return colIndex === draggedColumnIndex && "data-table__col--dragging";
+}
+
+/** Whether the column at `colIndex` carries the insertion line marking where the dragged column would
+ *  land if released now - drawn on the leading edge of the column the boundary sits before, except for
+ *  the one boundary with no column of its own to sit before (past every rendered column), which draws on
+ *  the trailing edge of the last column instead. `dropBoundaryIndex` is `-1` while no drag is in
+ *  progress. Derived from `colIndex`/`columnCount` rather than any fixed ceiling, so it holds for however
+ *  many columns a table actually renders. */
+export function columnDropCellClass(colIndex: number, dropBoundaryIndex: number, columnCount: number): string | false {
+  if (dropBoundaryIndex < 0) return false;
+  if (dropBoundaryIndex >= columnCount) return colIndex === columnCount - 1 && "data-table__col--drop-after";
+  return colIndex === dropBoundaryIndex && "data-table__col--drop-before";
+}
+
+/** The reorder callbacks a table offers through its column headers. Both `onReorder` and this option
+ *  bundle are optional - a table with no arrangement to persist offers no reordering at all. */
+export interface DataTableColumnReorder {
+  /** Moves a column to sit immediately before or after another, named by id. The caller decides whether
+   *  the move is allowed - a two-group table may refuse a metric dropped among its dimensions - and
+   *  where the resulting order is kept; this component holds no order of its own. */
+  onReorder: (fromId: string, toId: string, side: "before" | "after") => void;
+  /** Keyboard equivalent of dragging one slot left or right. */
+  onNudge?: (columnId: string, offset: -1 | 1) => void;
+  /** Off while the table is being edited: a table full of inputs is not a table to rearrange, and a
+   *  stray drag mid-edit would move a column out from under a half-typed value. */
+  disabled?: boolean;
+}
 
 /**
  * One column of a data table.
@@ -216,8 +334,12 @@ export interface DataTableProps<T> {
    *  prepends rows would remount its whole tail mid-edit, and only the consumer knows what makes one of
    *  its rows the same row. */
   getRowKey: (row: T, index: number) => string;
-  /** The row's `<td>`s - cells, not a row: the `<tr>` carries the virtualizer's measurement ref. */
-  renderCells: (row: T, index: number) => ReactNode;
+  /** The row's `<td>`s - cells, not a row: the `<tr>` carries the virtualizer's measurement ref.
+   *  `draggedColumnIndex`/`dropBoundaryIndex` are the same two numbers the header itself renders from
+   *  (see `DataTableColumnReorder`), `-1` while no drag is in progress - passed as plain numbers, not an
+   *  object, so a consumer's own memoized row component only re-renders on an actual boundary crossing
+   *  (a handful of times per drag) rather than on every animation frame. */
+  renderCells: (row: T, index: number, draggedColumnIndex: number, dropBoundaryIndex: number) => ReactNode;
   /** Column widths the user has dragged, from `useColumnWidths`. */
   columnWidths: Record<string, number>;
   onResizeColumn: (columnId: string, width: number) => void;
@@ -235,13 +357,14 @@ export interface DataTableProps<T> {
   openFilterColumnId?: string | null;
   filterDisabled?: boolean;
 
-  /** From `useColumnDrag`. Both must be supplied for reordering to be offered at all. */
-  draggingColumnId?: string | null;
-  columnDragProps?: (columnId: string) => ColumnDragProps;
+  /** Offers drag-to-reorder (and its keyboard equivalent) on every column header. Absent means the table
+   *  cannot be rearranged at all. */
+  columnReorder?: DataTableColumnReorder;
 
   /** The pinned first body row - totals, typically. Its height is measured, so it is rendered here
-   *  rather than handed over as opaque markup: the virtualizer's coordinate space starts below it. */
-  renderPinnedCells?: () => ReactNode;
+   *  rather than handed over as opaque markup: the virtualizer's coordinate space starts below it.
+   *  Receives the same `draggedColumnIndex`/`dropBoundaryIndex` pair `renderCells` does. */
+  renderPinnedCells?: (draggedColumnIndex: number, dropBoundaryIndex: number) => ReactNode;
 
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
@@ -287,8 +410,7 @@ export function DataTable<T>({
   onOpenFilter,
   openFilterColumnId = null,
   filterDisabled = false,
-  draggingColumnId = null,
-  columnDragProps,
+  columnReorder,
   renderPinnedCells,
   hasNextPage = false,
   isFetchingNextPage = false,
@@ -351,6 +473,139 @@ export function DataTable<T>({
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage]);
 
+  // The column the pointer is carrying, and the boundary it would land on - resolved from cursor
+  // geometry each animation frame (see the effect below), against the full rendered order, rather than
+  // from whichever header the pointer happens to be vertically over. That is the fix for a drag only
+  // ever registering over the header row: vertical position stops mattering at all.
+  const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
+  const [dropBoundary, setDropBoundary] = useState<number | null>(null);
+  // "Latest value" refs, so the window listeners and the geometry effect below can each bind once per
+  // drag instead of re-binding (or re-running their setup) on every frame or every pointer event.
+  const draggingColumnIdRef = useRef<string | null>(null);
+  draggingColumnIdRef.current = draggingColumnId;
+  const dropBoundaryRef = useRef<number | null>(null);
+  dropBoundaryRef.current = dropBoundary;
+  const columnReorderRef = useRef(columnReorder);
+  columnReorderRef.current = columnReorder;
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  // The raw cursor position, written on every pointermove without touching React state at all - the
+  // geometry effect below is what turns this into a render, once per animation frame rather than once
+  // per event (pointermove fires far more often than the screen repaints).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  /** Picks a column up. The drop boundary starts empty, so a press with no movement - no animation
+   *  frame ever resolving one - changes nothing. */
+  const startColumnDrag = useCallback((columnId: string, x: number, y: number) => {
+    pointerRef.current = { x, y };
+    setDraggingColumnId(columnId);
+    setDropBoundary(null);
+  }, []);
+
+  /** Starts a drag from a header cell's own pointerdown, unless the press actually landed on one of the
+   *  cell's interactive children - the sort button, the filter button, the resize handle - which have
+   *  their own gestures and must not also pick the column up. */
+  const onHeaderPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLTableCellElement>, columnId: string) => {
+      if (!columnReorder || columnReorder.disabled) return;
+      if ((event.target as HTMLElement).closest("button, input, .data-table__resizer")) return;
+      event.preventDefault();
+      startColumnDrag(columnId, event.clientX, event.clientY);
+    },
+    [columnReorder, startColumnDrag]
+  );
+
+  const onHeaderKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTableCellElement>, columnId: string) => {
+      const onNudge = columnReorderRef.current?.onNudge;
+      if (!columnReorder || columnReorder.disabled || !event.altKey || !onNudge) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      onNudge(columnId, event.key === "ArrowLeft" ? -1 : 1);
+    },
+    [columnReorder]
+  );
+
+  // Tracks the drag for as long as one is in progress: pointermove only ever updates the plain ref
+  // above (see the geometry effect below for why), release commits whatever boundary that effect last
+  // resolved, and Escape abandons the move instead of committing it. Bound on `window`, not the table,
+  // because a pointerup or a released Escape the window never hears would leave a column stuck to the
+  // cursor - the pointer is regularly outside the table by the time it lets go.
+  useEffect(() => {
+    if (draggingColumnId == null) return undefined;
+    const move = (event: PointerEvent) => {
+      pointerRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const clear = () => {
+      setDraggingColumnId(null);
+      setDropBoundary(null);
+      pointerRef.current = null;
+    };
+    const commit = () => {
+      const boundary = dropBoundaryRef.current;
+      const reorder = columnReorderRef.current;
+      const fromId = draggingColumnIdRef.current;
+      if (boundary != null && reorder && fromId != null) {
+        const ids = columnsRef.current.map((column) => column.id);
+        const draggedIndex = ids.indexOf(fromId);
+        if (draggedIndex !== -1) {
+          const target = columnDropTarget(ids, draggedIndex, boundary);
+          if (target.neighborId !== fromId) reorder.onReorder(fromId, target.neighborId, target.side);
+        }
+      }
+      clear();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clear();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", clear);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", clear);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [draggingColumnId]);
+
+  // The drag's own geometry, resolved once per animation frame rather than once per `pointermove` -
+  // pointermove fires far more often than the screen repaints, and each resolution reads every header
+  // cell's current bounding rect, which forces layout. Running from a frame rather than the event also
+  // means the boundary keeps resolving while `runColumnDragAutoscroll` scrolls the table underneath an
+  // otherwise-stationary cursor, which a purely event-driven read never would.
+  useEffect(() => {
+    if (draggingColumnId == null) return undefined;
+    let frame = requestAnimationFrame(tick);
+    function tick() {
+      const container = scrollRef.current;
+      const thead = theadRef.current;
+      const pointer = pointerRef.current;
+      if (container && thead && pointer) {
+        const rects = Array.from(thead.querySelectorAll<HTMLElement>("th")).map((cell) =>
+          cell.getBoundingClientRect()
+        );
+        const boundary = resolveDropBoundary(rects, pointer.x);
+        if (boundary !== dropBoundaryRef.current) setDropBoundary(boundary);
+        runColumnDragAutoscroll(container, pointer.x);
+      }
+      frame = requestAnimationFrame(tick);
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [draggingColumnId]);
+
+  // The dragged column's own position in `columns`, and the resolved drop boundary against that same
+  // order - both `-1` while no drag is in progress. Handed to the header below and out to the consumer's
+  // `renderCells`/`renderPinnedCells` as plain `number`s rather than a fresh object each render: either
+  // number only changes a handful of times per drag - when the cursor crosses a column boundary, not
+  // once per animation frame - so reconciling a consumer's memoized row on that change is negligible.
+  const draggedColumnIndex = useMemo(
+    () => (draggingColumnId == null ? -1 : columns.findIndex((column) => column.id === draggingColumnId)),
+    [columns, draggingColumnId]
+  );
+  const dropBoundaryIndex = dropBoundary ?? -1;
+
   return (
     <div
       className={cn("data-table", expanded && "data-table--expanded", className)}
@@ -363,7 +618,7 @@ export function DataTable<T>({
         <table className="data-table__tbl">
           <thead ref={theadRef}>
             <tr>
-              {columns.map((column) => {
+              {columns.map((column, columnIndex) => {
                 const isSorted = sortColumnId != null && sortColumnId.toLowerCase() === column.id.toLowerCase();
                 const width = columnWidths[column.id];
                 const label = (
@@ -416,10 +671,15 @@ export function DataTable<T>({
                     className={cn(
                       "data-table__col",
                       column.className,
-                      draggingColumnId === column.id && "data-table__col--dragging"
+                      columnDragCellClass(columnIndex, draggedColumnIndex),
+                      columnDropCellClass(columnIndex, dropBoundaryIndex, columnCount)
                     )}
                     style={columnStyle(width)}
-                    {...columnDragProps?.(column.id)}
+                    // Focusable only once reordering is offered: Alt+Arrow needs a focus target to fire
+                    // on, and a `<th>` carries none of its own.
+                    tabIndex={columnReorder ? 0 : undefined}
+                    onPointerDown={columnReorder ? (event) => onHeaderPointerDown(event, column.id) : undefined}
+                    onKeyDown={columnReorder ? (event) => onHeaderKeyDown(event, column.id) : undefined}
                   >
                     {/* Wrapped only when there is something beside the label: a lone sort button sizes
                         itself against the cell, and a wrapper would change how its label ellipsizes. */}
@@ -445,7 +705,7 @@ export function DataTable<T>({
           <tbody>
             {renderPinnedCells && (
               <tr className="data-table__totals" ref={pinnedRowRef}>
-                {renderPinnedCells()}
+                {renderPinnedCells(draggedColumnIndex, dropBoundaryIndex)}
               </tr>
             )}
             {paddingTop > 0 && (
@@ -455,7 +715,7 @@ export function DataTable<T>({
             )}
             {virtualRows.map((virtualRow) => (
               <tr key={virtualRow.key} ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
-                {renderCells(rows[virtualRow.index], virtualRow.index)}
+                {renderCells(rows[virtualRow.index], virtualRow.index, draggedColumnIndex, dropBoundaryIndex)}
               </tr>
             ))}
             {paddingBottom > 0 && (

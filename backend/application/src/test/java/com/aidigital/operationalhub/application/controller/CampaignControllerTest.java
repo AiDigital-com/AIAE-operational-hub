@@ -245,7 +245,7 @@ class CampaignControllerTest {
 	void shouldListReportRowsForCurrentUserTest() {
 		// Given: no request body at all (an optional POST body), so neither sort nor filters are requested
 		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
-		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, List.of(), null, List.of());
+		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, List.of(), null, List.of(), List.of());
 		ReportRowPageModel page = new ReportRowPageModel(List.of(), 1, 25, false, 0L, null, null, null, 0);
 		ReportRowsPageResponseV1 response = new ReportRowsPageResponseV1();
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
@@ -271,7 +271,7 @@ class CampaignControllerTest {
 		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
 		request.setSortField(ReportRowSortFieldEnumV1.CHANNEL);
 		request.setSortDirection(DirectionEnumV1.DESC);
-		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), sort, List.of(), null, List.of());
+		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), sort, List.of(), null, List.of(), List.of());
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);
 		doReturn(page).when(reportRowService).findReportRows(currentUser, 42L, 1, 25, List.of(), sort, List.of(), null);
@@ -295,7 +295,7 @@ class CampaignControllerTest {
 		request.setFilters(List.of(filterV1));
 		List<ReportRowFilterModel> filters =
 				List.of(new ReportRowFilterModel(ReportRowSortField.CHANNEL, List.of("Display", "Video")));
-		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, filters, null, List.of());
+		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, filters, null, List.of(), List.of());
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);
 		doReturn(page).when(reportRowService).findReportRows(currentUser, 42L, 1, 25, List.of(), null, filters, null);
@@ -355,9 +355,11 @@ class CampaignControllerTest {
 		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
 		request.setDimensions(List.of("date", "line_item_id"));
 		request.setMetrics(List.of("impressions"));
+		request.setColumnOrder(List.of("impressions", "date", "line_item_id"));
 		ReportRowSearchCommand search =
 				new ReportRowSearchCommand(List.of(), null, List.of(), null,
-						List.of("date", "line_item_id", "impressions"));
+						List.of("date", "line_item_id", "impressions"),
+						List.of("impressions", "date", "line_item_id"));
 		Resource streamedResource = new ByteArrayResource(new byte[] {1, 2, 3});
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);
@@ -374,13 +376,41 @@ class CampaignControllerTest {
 		assertThat(result.getBody()).isSameAs(streamedResource);
 
 		// The controller hands the responder a writer closure - invoke it here to verify it delegates
-		// to the export assembler with the resolved rows, current-view columns and the report's totals.
+		// to the export assembler with the resolved rows, current-view columns, the requested column
+		// order and the report's totals.
 		ArgumentCaptor<XlsxWriter> writerCaptor = ArgumentCaptor.forClass(XlsxWriter.class);
 		verify(xlsxDownloadResponder).respond(eq("Q1 Launch/Promo"), eq("report"), eq(false), writerCaptor.capture());
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
 		writerCaptor.getValue().write(out);
-		verify(reportRowXlsxExportAssembler)
-				.writeWorkbook(out, export.rows(), List.of("date", "line_item_id", "impressions"), export.totals());
+		verify(reportRowXlsxExportAssembler).writeWorkbook(
+				out, export.rows(), List.of("date", "line_item_id", "impressions"),
+				List.of("impressions", "date", "line_item_id"), export.totals());
+	}
+
+	@Test
+	void shouldPassAnAbsentColumnOrderThroughToTheAssemblerUntouchedTest() throws Exception {
+		// Given: a request that never sets columnOrder - the command carries whatever the mapper resolved
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		ReportRowExportModel export = new ReportRowExportModel(
+				List.of(), false, "Q1 Launch/Promo", Instancio.create(ReportRowTotalsModel.class));
+		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
+		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, List.of(), null, List.of(), null);
+		Resource streamedResource = new ByteArrayResource(new byte[] {1, 2, 3});
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(search).when(reportRowMapper).toSearchCommand(request);
+		doReturn(export).when(reportRowService).exportReportRows(currentUser, 42L, List.of(), null, List.of(), null);
+		doReturn(ResponseEntity.ok(streamedResource)).when(xlsxDownloadResponder)
+				.respond(eq("Q1 Launch/Promo"), eq("report"), eq(false), any(XlsxWriter.class));
+
+		// When:
+		controller.exportReportRows(42L, request);
+
+		// Then: the controller forwards the null it was given rather than inventing a default itself
+		ArgumentCaptor<XlsxWriter> writerCaptor = ArgumentCaptor.forClass(XlsxWriter.class);
+		verify(xlsxDownloadResponder).respond(eq("Q1 Launch/Promo"), eq("report"), eq(false), writerCaptor.capture());
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		writerCaptor.getValue().write(out);
+		verify(reportRowXlsxExportAssembler).writeWorkbook(out, export.rows(), List.of(), null, export.totals());
 	}
 
 	@Test
@@ -392,7 +422,7 @@ class CampaignControllerTest {
 		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
 		request.setGroupBy(List.of(ReportRowFilterFieldEnumV1.DATE, ReportRowFilterFieldEnumV1.CHANNEL));
 		List<ReportRowSortField> groupBy = List.of(ReportRowSortField.DATE, ReportRowSortField.CHANNEL);
-		ReportRowSearchCommand search = new ReportRowSearchCommand(groupBy, null, List.of(), null, List.of());
+		ReportRowSearchCommand search = new ReportRowSearchCommand(groupBy, null, List.of(), null, List.of(), List.of());
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);
 		doReturn(export).when(reportRowService).exportReportRows(currentUser, 42L, groupBy, null, List.of(), null);
@@ -413,7 +443,7 @@ class CampaignControllerTest {
 		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
 		request.setGroupBy(List.of(ReportRowFilterFieldEnumV1.DATE));
 		ReportRowSearchCommand search =
-				new ReportRowSearchCommand(List.of(ReportRowSortField.DATE), null, List.of(), null, List.of());
+				new ReportRowSearchCommand(List.of(ReportRowSortField.DATE), null, List.of(), null, List.of(), List.of());
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);
 		doReturn(export).when(reportRowService).exportReportRows(currentUser, 42L, List.of(), null, List.of(), null);
@@ -432,7 +462,7 @@ class CampaignControllerTest {
 		ReportRowExportModel export = new ReportRowExportModel(
 				List.of(), false, "Q1 Launch/Promo", Instancio.create(ReportRowTotalsModel.class));
 		ReportRowSearchRequestV1 request = new ReportRowSearchRequestV1();
-		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, List.of(), null, List.of());
+		ReportRowSearchCommand search = new ReportRowSearchCommand(List.of(), null, List.of(), null, List.of(), List.of());
 		Resource streamedResource = new ByteArrayResource(new byte[] {1, 2, 3});
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(search).when(reportRowMapper).toSearchCommand(request);

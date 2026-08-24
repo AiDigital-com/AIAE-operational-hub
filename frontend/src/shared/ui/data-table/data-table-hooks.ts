@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type { RefObject } from "react";
 
 /** The narrowest a column may be dragged. Below this a column stops being readable at all, and the drag
  *  becomes a way to lose a column rather than to size it. */
@@ -56,79 +56,29 @@ export function withShownColumns(savedOrder: readonly string[], shownIds: readon
   return [...savedOrder, ...shownIds.filter((id) => !mentioned.has(id))];
 }
 
-/** The handlers a header cell spreads onto its own `<th>` to take part in drag-to-reorder. */
-export interface ColumnDragProps {
-  draggable: boolean;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: (event: ReactDragEvent<HTMLTableCellElement>) => void;
-  onDrop: (event: ReactDragEvent<HTMLTableCellElement>) => void;
-  onKeyDown: (event: ReactKeyboardEvent<HTMLTableCellElement>) => void;
-}
-
-export interface UseColumnDragOptions {
-  /** Moves the dragged column to where the dropped-on column sits. The caller decides whether the move
-   *  is allowed - a two-group table refuses a metric dropped among its dimensions - and where the new
-   *  order is kept, which is why this hook holds no order of its own. */
-  onReorder: (fromId: string, toId: string) => void;
-  /** Keyboard equivalent of dragging one slot left or right. */
-  onNudge?: (columnId: string, offset: -1 | 1) => void;
-  /** Off while the table is being edited: a table full of inputs is not a table to rearrange, and a
-   *  stray drag mid-edit would move a column out from under a half-typed value. */
-  disabled?: boolean;
-}
-
 /**
- * Drag-to-reorder for column headers.
+ * Inserts one id at a boundary drawn against the ids that remain once it is removed - the way a drop (or
+ * an arrow-key nudge) actually asks for a move to read: "land right here", rather than "take this
+ * column's slot and shift it aside". `boundaryIndex` is a position in that *reduced* list: `0` lands
+ * before its first remaining id, `without.length` lands after its last. Removing `id` shifts every index
+ * to its right left by one, so a caller converting a screen position (or a neighbouring id) into this
+ * index has to account for that shift itself - this function only ever sees the already-adjusted number.
  *
- * Native HTML5 drag rather than a library: it is four handlers on a cell that already exists, and a
- * dependency for that would be the larger change. The handlers must be spread onto the `<th>` itself -
- * a drop target is the element the browser dispatches at, and an inner wrapper would never see it.
+ * Returns the same array reference when the landing boundary reproduces the current order, so a drop
+ * that lands where it started cannot churn whatever state holds the order (and through it every memo
+ * keyed on it).
  *
- * @param options the reorder callbacks and the disabled flag
- * @return the id currently being dragged, and the per-column handler factory
+ * @param ids           the current display order, including `id`
+ * @param id            the column being moved
+ * @param boundaryIndex where it lands, against `ids` with `id` removed
+ * @returns the reordered ids, or `ids` unchanged when `id` is absent or the move is a no-op
  */
-export function useColumnDrag(options: UseColumnDragOptions): {
-  draggingColumnId: string | null;
-  columnDragProps: (columnId: string) => ColumnDragProps;
-} {
-  const { disabled = false } = options;
-  /** The column being dragged, or null. Held in state rather than in the drag event so the drop target
-   *  can refuse a drag from another group without reading dataTransfer, which is write-only mid-drag. */
-  const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
-  // Read through a ref so `columnDragProps` keeps one identity per drag state rather than one per render.
-  // It is called once per column while the header renders, and a consumer that passes its callbacks
-  // inline - which is the natural way to write them - would otherwise re-spread new handlers onto every
-  // `<th>` on every keystroke elsewhere on the page.
-  const callbacksRef = useRef(options);
-  callbacksRef.current = options;
-
-  const columnDragProps = useCallback(
-    (columnId: string): ColumnDragProps => ({
-      draggable: !disabled,
-      onDragStart: () => setDraggingColumnId(columnId),
-      onDragEnd: () => setDraggingColumnId(null),
-      onDragOver: (event) => {
-        // preventDefault is what marks this cell as a place a drop may land; without it the browser refuses.
-        if (draggingColumnId && draggingColumnId !== columnId) event.preventDefault();
-      },
-      onDrop: (event) => {
-        event.preventDefault();
-        if (draggingColumnId) callbacksRef.current.onReorder(draggingColumnId, columnId);
-        setDraggingColumnId(null);
-      },
-      onKeyDown: (event) => {
-        const onNudge = callbacksRef.current.onNudge;
-        if (disabled || !event.altKey || !onNudge) return;
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        onNudge(columnId, event.key === "ArrowLeft" ? -1 : 1);
-      },
-    }),
-    [disabled, draggingColumnId]
-  );
-
-  return { draggingColumnId, columnDragProps };
+export function insertAtBoundary(ids: string[], id: string, boundaryIndex: number): string[] {
+  const without = ids.filter((existing) => existing !== id);
+  if (without.length === ids.length) return ids;
+  const at = Math.max(0, Math.min(boundaryIndex, without.length));
+  const next = [...without.slice(0, at), id, ...without.slice(at)];
+  return next.every((value, index) => value === ids[index]) ? ids : next;
 }
 
 /**

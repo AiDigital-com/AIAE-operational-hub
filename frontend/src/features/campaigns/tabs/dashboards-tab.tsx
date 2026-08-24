@@ -9,10 +9,12 @@ import {
   DataTable,
   DataTableChips,
   DataTableViewControls,
+  columnDragCellClass,
+  columnDropCellClass,
   columnStyle,
 } from "../../../shared/ui/data-table/data-table";
-import type { DataTableChip, DataTableColumn } from "../../../shared/ui/data-table/data-table";
-import { useColumnDrag, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
+import type { DataTableChip, DataTableColumn, DataTableColumnReorder } from "../../../shared/ui/data-table/data-table";
+import { insertAtBoundary, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
 import {
   DataTableDateFilterPopover,
   DataTableValueFilterPopover,
@@ -1094,15 +1096,16 @@ function DashboardDatasetTable({
   }, [columnOrder, columns, onSaveColumnOrder]);
   const rows = useDashboardDatasetRows(campaignId, dashboard.id, dashboard.optionalColumns, filters, dateWindow);
 
-  const moveColumn = useCallback((fromId: string, toId: string) => {
+  // No dimension/metric split here - the schema is a fixed template list, not two groups with a boundary
+  // to keep - so a column may already land anywhere among the others; that has not changed.
+  const moveColumn = useCallback((fromId: string, toId: string, side: "before" | "after") => {
     if (fromId === toId) return;
     reorder((next) => {
-      const from = next.indexOf(fromId);
-      const to = next.indexOf(toId);
-      if (from === -1 || to === -1) return next;
-      const reordered = [...next];
-      reordered.splice(to, 0, ...reordered.splice(from, 1));
-      return reordered;
+      const without = next.filter((id) => id !== fromId);
+      const targetIndex = without.indexOf(toId);
+      if (targetIndex === -1) return next;
+      const boundary = side === "before" ? targetIndex : targetIndex + 1;
+      return insertAtBoundary(next, fromId, boundary);
     });
   }, [reorder]);
 
@@ -1116,16 +1119,15 @@ function DashboardDatasetTable({
       const fromVisible = visible.indexOf(columnId);
       const toVisible = fromVisible + offset;
       if (fromVisible === -1 || toVisible < 0 || toVisible >= visible.length) return next;
-      const from = next.indexOf(columnId);
-      const to = next.indexOf(visible[toVisible]);
-      if (from === -1 || to === -1) return next;
-      const reordered = [...next];
-      reordered.splice(to, 0, ...reordered.splice(from, 1));
-      return reordered;
+      const without = next.filter((id) => id !== columnId);
+      const targetIndex = without.indexOf(visible[toVisible]);
+      if (targetIndex === -1) return next;
+      const boundary = offset === -1 ? targetIndex : targetIndex + 1;
+      return insertAtBoundary(next, columnId, boundary);
     });
   }, [reorder, columns]);
 
-  const { draggingColumnId, columnDragProps } = useColumnDrag({ onReorder: moveColumn, onNudge: nudgeColumn });
+  const columnReorder: DataTableColumnReorder = { onReorder: moveColumn, onNudge: nudgeColumn };
 
   // The template's order until the user drags one, then theirs. A column the saved order does not mention
   // - the optional pair, switched back on after a drag - falls in behind the ones it does.
@@ -1233,12 +1235,16 @@ function DashboardDatasetTable({
         columns={tableColumns}
         rows={content}
         getRowKey={(_row, index) => `row-${index}`}
-        renderCells={(row) => (
+        renderCells={(row, _index, draggedColumnIndex, dropBoundaryIndex) => (
           <>
             {tableColumns.map((column, index) => (
               <td
                 key={column.id}
-                className={column.className}
+                className={cn(
+                  column.className,
+                  columnDragCellClass(index, draggedColumnIndex),
+                  columnDropCellClass(index, dropBoundaryIndex, tableColumns.length)
+                )}
                 style={columnStyle(columnWidths[column.id])}
                 title={formatDatasetValue(orderedColumns[index], row.values)}
               >
@@ -1255,8 +1261,7 @@ function DashboardDatasetTable({
           setOpenFilter((current) => (current?.column.id === columnId ? null : { column, anchor }));
         }}
         openFilterColumnId={openFilter?.column.id ?? null}
-        draggingColumnId={draggingColumnId}
-        columnDragProps={columnDragProps}
+        columnReorder={columnReorder}
         hasNextPage={rows.hasNextPage}
         isFetchingNextPage={rows.isFetchingNextPage}
         fetchNextPage={rows.fetchNextPage}
