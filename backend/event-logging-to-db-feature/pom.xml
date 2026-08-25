@@ -6,7 +6,7 @@
   module so *ServiceImpl classes can carry @LogUsage; `application` picks
   it up transitively through the service edge.
 
-  Copied from the AIAE-replit-llm-aux template (templates/generated-project/
+  Copied from the AIAE project template (templates/generated-project/
   scaffold/backend/event-logging-to-db-feature) so the feature stays recognisable
   and removable. Only the package root, this pom's parent, and one pointcut line
   in UsageLoggingAspect differ from the template - see that class for why.

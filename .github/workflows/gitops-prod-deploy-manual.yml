@@ -1,0 +1,323 @@
+name: PROD GitOps Deploy Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Production version in X.Y.Z format
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: operational-hub-production-release
+  cancel-in-progress: false
+
+env:
+  API_IMAGE: aidigital.aiae-projects/operational-hub-application
+
+jobs:
+  release:
+    name: Build release images and deploy production
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
+      FRONTEND_DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
+      APP_CONFIG_SECRET_NAME: ${{ vars.APP_CONFIG_SECRET_NAME }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        shell: bash
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          required=(
+            AWS_ROLE_TO_ASSUME
+            AWS_REGION
+            FRONTEND_BUCKET
+            FRONTEND_DISTRIBUTION_ID
+            APP_CONFIG_SECRET_NAME
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub environment variable: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Validate production release
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.release_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release_version must use X.Y.Z format"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_NAME}" != "${{ inputs.release_version }}" ]; then
+            echo "::error::Run this workflow from the ${{ inputs.release_version }} branch"
+            exit 1
+          fi
+
+      - name: Resolve production image tags
+        id: release
+        shell: bash
+        run: |
+          image_tag="${{ inputs.release_version }}-${GITHUB_SHA::12}"
+          {
+            echo "image_tag=${image_tag}"
+            echo "liquibase_tag=liquibase-${image_tag}"
+            echo "deployment_revision=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Load frontend configuration
+        shell: bash
+        run: |
+          config=$(aws secretsmanager get-secret-value \
+            --secret-id "$APP_CONFIG_SECRET_NAME" \
+            --query SecretString \
+            --output text)
+          clerk_publishable_key=$(jq -r '.CLERK_PUBLISHABLE_KEY // empty' <<<"$config")
+          if [ -z "$clerk_publishable_key" ]; then
+            echo "::error::CLERK_PUBLISHABLE_KEY is missing from $APP_CONFIG_SECRET_NAME"
+            exit 1
+          fi
+          echo "::add-mask::$clerk_publishable_key"
+          echo "CLERK_PUBLISHABLE_KEY=$clerk_publishable_key" >> "$GITHUB_ENV"
+
+      - name: Verify Terraform-managed ECR repository
+        run: aws ecr describe-repositories --repository-names "$API_IMAGE" >/dev/null
+
+      - name: Check immutable production image tags
+        id: image-tags
+        shell: bash
+        run: |
+          application_exists=false
+          liquibase_exists=false
+
+          if [ "$(aws ecr batch-get-image \
+            --repository-name "$API_IMAGE" \
+            --image-ids imageTag="${{ steps.release.outputs.image_tag }}" \
+            --query 'length(images)' \
+            --output text)" = "1" ]; then
+            application_exists=true
+          fi
+
+          if [ "$(aws ecr batch-get-image \
+            --repository-name "$API_IMAGE" \
+            --image-ids imageTag="${{ steps.release.outputs.liquibase_tag }}" \
+            --query 'length(images)' \
+            --output text)" = "1" ]; then
+            liquibase_exists=true
+          fi
+
+          {
+            echo "application_exists=${application_exists}"
+            echo "liquibase_exists=${liquibase_exists}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push application image
+        if: steps.image-tags.outputs.application_exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.API_IMAGE }}:${{ steps.release.outputs.image_tag }}
+
+      - name: Build and push Liquibase image
+        if: steps.image-tags.outputs.liquibase_exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Liquibase.Dockerfile
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.API_IMAGE }}:${{ steps.release.outputs.liquibase_tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ env.CLERK_PUBLISHABLE_KEY }}
+          VITE_CLERK_JWT_TEMPLATE: aidigital-api
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy production frontend
+        shell: bash
+        run: |
+          release_prefix="s3://${FRONTEND_BUCKET}/releases/${{ steps.release.outputs.image_tag }}"
+          aws s3 sync frontend/dist "$release_prefix" \
+            --delete \
+            --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "${release_prefix}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" \
+            --delete \
+            --exclude index.html \
+            --exclude "releases/*" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+          aws cloudfront create-invalidation \
+            --distribution-id "${FRONTEND_DISTRIBUTION_ID}" \
+            --paths "/*" >/dev/null
+
+      - name: Checkout versions repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_VERSIONS_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-versions
+
+      - name: Pin production image versions
+        uses: mikefarah/yq@v4.45.1
+        env:
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          LIQUIBASE_TAG: ${{ steps.release.outputs.liquibase_tag }}
+          DEPLOYMENT_REVISION: ${{ steps.release.outputs.deployment_revision }}
+        with:
+          cmd: >-
+            yq -i
+            '.image.tag = strenv(IMAGE_TAG) |
+            .image.pullPolicy = "IfNotPresent" |
+            .liquibase.image.tag = strenv(LIQUIBASE_TAG) |
+            .liquibase.image.pullPolicy = "IfNotPresent" |
+            .deploymentRevision = strenv(DEPLOYMENT_REVISION)'
+            gitops-versions/operational-hub-api/values.yaml
+
+      - name: Commit production versions
+        id: versions
+        working-directory: gitops-versions
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operational-hub-api/values.yaml
+          git commit -m "[operational-hub-api][${{ steps.release.outputs.image_tag }}]"
+          git push origin HEAD:main
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout production Helm environment
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_HELM_REPOSITORY }}
+          ref: prod
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-helm
+
+      - name: Pin production versions revision
+        uses: mikefarah/yq@v4.45.1
+        env:
+          VERSIONS_REVISION: ${{ steps.versions.outputs.revision }}
+        with:
+          cmd: >-
+            yq -i
+            '.source.operationalHubVersionsRevision = strenv(VERSIONS_REVISION)'
+            gitops-helm/aiae/values.yaml
+
+      - name: Commit production deployment
+        working-directory: gitops-helm
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aiae/values.yaml
+          git commit -m "[operational-hub-api][${{ steps.release.outputs.image_tag }}]"
+          git push origin HEAD:prod
+
+      - name: Retain current and previous production image pairs
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          CURRENT_IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          CURRENT_LIQUIBASE_TAG: ${{ steps.release.outputs.liquibase_tag }}
+        run: |
+          image_details=$(aws ecr describe-images \
+            --repository-name "$API_IMAGE" \
+            --filter tagStatus=TAGGED \
+            --output json)
+
+          previous_image_tag=$(jq -r \
+            --arg prefix "${RELEASE_VERSION}-" \
+            --arg current "$CURRENT_IMAGE_TAG" \
+            '[.imageDetails[]
+              | .imagePushedAt as $pushed
+              | .imageTags[]?
+              | select(startswith($prefix) and . != $current)
+              | {tag: ., pushed: $pushed}]
+            | sort_by(.pushed)
+            | reverse
+            | .[0].tag // empty' <<<"$image_details")
+
+          previous_liquibase_tag=""
+          if [ -n "$previous_image_tag" ]; then
+            previous_liquibase_tag="liquibase-${previous_image_tag}"
+          fi
+
+          while IFS= read -r tag; do
+            case "$tag" in
+              "${RELEASE_VERSION}-"*|"liquibase-${RELEASE_VERSION}-"*)
+                if [ "$tag" = "$CURRENT_IMAGE_TAG" ] \
+                  || [ "$tag" = "$CURRENT_LIQUIBASE_TAG" ] \
+                  || [ "$tag" = "$previous_image_tag" ] \
+                  || [ "$tag" = "$previous_liquibase_tag" ]; then
+                  continue
+                fi
+                aws ecr batch-delete-image \
+                  --repository-name "$API_IMAGE" \
+                  --image-ids "imageTag=${tag}" >/dev/null
+                ;;
+            esac
+          done < <(jq -r '.imageDetails[].imageTags[]?' <<<"$image_details")
+
+      - name: Mark production release as restorable
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          LIQUIBASE_TAG: ${{ steps.release.outputs.liquibase_tag }}
+        run: |
+          jq -n \
+            --arg releaseVersion "${{ inputs.release_version }}" \
+            --arg imageTag "$IMAGE_TAG" \
+            --arg liquibaseTag "$LIQUIBASE_TAG" \
+            --arg sourceSha "$GITHUB_SHA" \
+            '{
+              releaseVersion: $releaseVersion,
+              imageTag: $imageTag,
+              liquibaseTag: $liquibaseTag,
+              sourceSha: $sourceSha
+            }' | aws s3 cp - \
+              "s3://${FRONTEND_BUCKET}/releases/${IMAGE_TAG}/release.json" \
+              --cache-control "no-cache,no-store,must-revalidate" \
+              --content-type "application/json"

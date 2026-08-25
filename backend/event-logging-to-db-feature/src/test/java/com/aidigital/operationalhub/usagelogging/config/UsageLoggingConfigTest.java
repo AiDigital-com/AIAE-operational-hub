@@ -45,7 +45,7 @@ class UsageLoggingConfigTest {
     @Test
     void shouldFailFastForPlaceholderServiceNameTest() {
         // When / Then:
-        assertThatThrownBy(() -> config.postgresUsageLogger(usageEventSink, props("replit-mvp-template")))
+        assertThatThrownBy(() -> config.postgresUsageLogger(usageEventSink, props("project-template")))
             .isInstanceOf(IllegalStateException.class);
     }
 

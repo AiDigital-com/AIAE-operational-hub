@@ -30,9 +30,6 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       allowedHosts: [
-        ".replit.dev",
-        ".repl.co",
-        ".kirk.replit.dev",
         "localhost",
         "127.0.0.1",
       ],
@@ -50,7 +47,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      outDir: "../backend/application/src/main/resources/static",
+      outDir: "dist",
       emptyOutDir: true,
       // Pinned rather than left on Vite's own "modules" default, so the compiled output's browser
       // baseline can't silently drift on a future Vite upgrade.
@@ -59,7 +56,7 @@ export default defineConfig(({ mode }) => {
     preview: {
       host: "0.0.0.0",
       port: 5173,
-      allowedHosts: [".replit.dev", ".repl.co", ".kirk.replit.dev", "localhost", "127.0.0.1"],
+      allowedHosts: ["localhost", "127.0.0.1"],
     },
   };
 });

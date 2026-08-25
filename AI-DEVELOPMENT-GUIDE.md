@@ -37,10 +37,8 @@ GSD is the project lifecycle framework, not a replacement for domain skills. It
 maintains planning state, supports long-running/multi-phase work, dispatches
 specialized agents, and provides discuss/plan/execute/verify/ship loops.
 
-GSD is opt-in. Replit Agent does not consume Claude Code's GSD runtime, so a
-generated Replit project must not initialize GSD automatically or spend agent
-credits on it. Install it only when the project will be developed with Claude
-Code and the work benefits from a persistent multi-phase workflow.
+GSD is opt-in. Install it only when the work benefits from a persistent
+multi-phase workflow.
 
 Check and install explicitly:
 

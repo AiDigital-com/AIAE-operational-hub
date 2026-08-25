@@ -1,0 +1,21 @@
+server:
+  shutdown: graceful
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 35s
+  liquibase:
+    enabled: false
+
+management:
+  health:
+    probes:
+      enabled: true
+
+oph:
+  cache:
+    warmup-enabled: true
+
+logging:
+  level:
+    org.zalando.logbook: ${LOGBOOK_LEVEL:TRACE}
