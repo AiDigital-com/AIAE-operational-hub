@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.netsuite.impl;
 
 import com.aidigital.operationalhub.cachemanagement.event.CacheInvalidationEventService;
+import com.aidigital.operationalhub.domain.entity.HubAgencyOwnerOverride;
 import com.aidigital.operationalhub.domain.entity.HubRole;
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubScopeType;
@@ -9,6 +10,7 @@ import com.aidigital.operationalhub.domain.entity.HubTeamAgency;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.domain.enums.Grade;
 import com.aidigital.operationalhub.domain.enums.HubStatus;
+import com.aidigital.operationalhub.service.entity.HubAgencyOwnerOverrideService;
 import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
 import com.aidigital.operationalhub.service.entity.HubRoleService;
 import com.aidigital.operationalhub.service.entity.HubScopeTypeService;
@@ -68,6 +70,10 @@ class NetSuiteSyncReconcilerTest {
 	private static final String TEAM_NAME = "Media Optimization: Jane";
 	private static final String EMAIL = "jane@example.com";
 	private static final String LEAD_NAME = "Jane Lead";
+	private static final Long OWNER_USER_ID = 200L;
+	private static final Long GHOST_USER_ID = 999L;
+	private static final String OWNER_EMAIL = "asya@example.com";
+	private static final String OWNER_NAME = "Asya Tikhomolova";
 	private static final String MEMBER_NAME = "John Member";
 
 	@Mock
@@ -87,6 +93,9 @@ class NetSuiteSyncReconcilerTest {
 
 	@Mock
 	private HubTeamAgencyService teamAgencyService;
+
+	@Mock
+	private HubAgencyOwnerOverrideService agencyOwnerOverrideService;
 
 	@Mock
 	private CacheInvalidationEventService cacheInvalidationEventService;
@@ -109,7 +118,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 1));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 1, 0));
 
 		ArgumentCaptor<HubTeam> teamCaptor = ArgumentCaptor.forClass(HubTeam.class);
 		verify(teamService).create(teamCaptor.capture());
@@ -160,7 +169,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0, 0));
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService).save(assignmentCaptor.capture());
 		assertThat(assignmentCaptor.getValue().getRole().getId()).isEqualTo(MEMBER_ROLE_ID);
@@ -182,7 +191,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
 		verify(teamService, never()).create(any());
 		verify(teamService, never()).saveFromNetSuite(any());
 
@@ -210,7 +219,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification: nothing changed, and no duplicate row was ever attempted
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0, 0));
 		verify(assignmentService, never()).save(any());
 	}
 
@@ -230,7 +239,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
 		assertThat(stale.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService, times(2)).save(assignmentCaptor.capture());
@@ -259,7 +268,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
 		assertThat(danglingAssignment.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
 		ArgumentCaptor<HubRoleAssignment> savedCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService).save(savedCaptor.capture());
@@ -283,7 +292,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0, 0));
 		verify(assignmentService, never()).save(any());
 	}
 
@@ -304,7 +313,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 0, 0, 0));
 		verify(teamService, never()).create(any());
 		verify(teamService, never()).saveFromNetSuite(any());
 		verify(assignmentService, never()).save(any());
@@ -327,7 +336,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0, 0));
 		assertThat(stale.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService, times(2)).save(assignmentCaptor.capture());
@@ -355,7 +364,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification: the user metadata can still refresh, but role assignments stay untouched.
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 0, 0, 0));
 		assertThat(admin.getStatus()).isEqualTo(HubStatus.ACTIVE.getCode());
 		verify(assignmentService, never()).save(any());
 	}
@@ -379,7 +388,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0, 0));
 		assertThat(admin.getStatus()).isEqualTo(HubStatus.ACTIVE.getCode());
 		verify(assignmentService, never()).save(any());
 	}
@@ -402,7 +411,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification: the existing row is reactivated in place - no new row inserted
-		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(1, 1, 1, 0, 0));
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService).save(assignmentCaptor.capture());
 		assertThat(assignmentCaptor.getValue()).isSameAs(revoked);
@@ -427,7 +436,7 @@ class NetSuiteSyncReconcilerTest {
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
 		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 0, 0, 0));
+		assertThat(summary).isEqualTo(new SyncSummary(0, 0, 0, 0, 0));
 		assertThat(legacyTeam.getStatus()).isEqualTo(HubStatus.INACTIVE.getCode());
 		verify(teamService).saveFromNetSuite(legacyTeam);
 	}
@@ -645,13 +654,162 @@ class NetSuiteSyncReconcilerTest {
 		assertThat(saveCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
 	}
 
+	@Test
+	void shouldMapAgencyViaOverrideWhenOwnerIsNotATeamLeadTest() {
+		// Given: the agency's IO Lines owner is a director, so she is in no automatic-match map and her
+		// agencies are dropped - the defect the override exists to fix. An active override names her
+		// hub_users row as the owner and the synced Team Lead's hub_users row as the target.
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE"), resolvedDirector(OWNER_EMAIL, OWNER_NAME)),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any()))
+				.thenReturn(List.of(user(USER_ID, EMAIL), user(OWNER_USER_ID, OWNER_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(TL_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode()))
+				.thenReturn(List.of(override(OWNER_USER_ID, USER_ID, HubStatus.ACTIVE.getCode())));
+
+		// When: IO Lines names the director as the agency's mpo_team_lead
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, OWNER_NAME)));
+
+		// Then: matched on the owner's own hub_users display name, and mapped to the Team Lead's team
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		assertThat(summary.overridesApplied()).isEqualTo(1);
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
+	}
+
+	@Test
+	void shouldPreferOverrideOverAutomaticNameMatchForTheSameOwnerTest() {
+		// Given: LEAD_NAME is itself a synced Team Lead on TEAM_ID - the automatic name match a plain sync
+		// would take - but an active override for that same person redirects to a second Team Lead's team.
+		// The override (attempt zero) must win over the automatic name match (attempt one).
+		stubDictionaries();
+		Long overriddenTeamId = 20L;
+		String otherLeadEmail = "other@example.com";
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE"),
+						resolvedTeamLead(otherLeadEmail, OWNER_NAME, "HOUSE")),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE"),
+						resolvedTeam(otherLeadEmail, OWNER_NAME, "Media Optimization: Other", "HOUSE")));
+		HubTeam overriddenTeam = Instancio.of(HubTeam.class)
+				.set(field(HubTeam::getId), overriddenTeamId)
+				.set(field(HubTeam::getTeamName), "Media Optimization: Other")
+				.set(field(HubTeam::isFromNetSuite), false)
+				.create();
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID), overriddenTeam));
+		when(userService.findAllByEmailIgnoreCaseIn(any()))
+				.thenReturn(List.of(user(USER_ID, EMAIL), user(OWNER_USER_ID, otherLeadEmail)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode()))
+				.thenReturn(List.of(override(USER_ID, OWNER_USER_ID, HubStatus.ACTIVE.getCode())));
+
+		// When: IO Lines names LEAD_NAME, which the automatic name match would resolve to TEAM_ID
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
+
+		// Then: the override's team wins, not the team the plain name match would have picked
+		assertThat(summary.overridesApplied()).isEqualTo(1);
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(overriddenTeamId);
+	}
+
+	@Test
+	void shouldSkipOverrideWhoseOwnerIsNotASyncedEmployeeTest() {
+		// Given: an active override whose owner_user_id belongs to nobody in this run - the employee left,
+		// or their employment status changed. It must be skipped, and the agency must still get its normal
+		// automatic match rather than being dropped along with the stale row.
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE")),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID, EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(TL_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode()))
+				.thenReturn(List.of(override(GHOST_USER_ID, USER_ID, HubStatus.ACTIVE.getCode())));
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
+
+		// Then: the stale override contributed nothing, and the automatic name match still applied
+		assertThat(summary.overridesApplied()).isEqualTo(0);
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
+	}
+
+	@Test
+	void shouldSkipOverrideWhoseTeamLeadLeadsNoTeamThisRunTest() {
+		// Given: an active override pointing at a team_lead_user_id who leads no team this run - the row
+		// is unusable, and pointing the agency at "no team" would be worse than leaving it alone.
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE"), resolvedDirector(OWNER_EMAIL, OWNER_NAME)),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any()))
+				.thenReturn(List.of(user(USER_ID, EMAIL), user(OWNER_USER_ID, OWNER_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(TL_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode()))
+				.thenReturn(List.of(override(OWNER_USER_ID, GHOST_USER_ID, HubStatus.ACTIVE.getCode())));
+
+		// When: IO Lines names the director, whose only route to a team was that override
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, OWNER_NAME)));
+
+		// Then: nothing mapped, and no mapping written
+		assertThat(summary.overridesApplied()).isEqualTo(0);
+		assertThat(summary.agenciesMapped()).isEqualTo(0);
+		verify(teamAgencyService, never()).save(any());
+	}
+
+	@Test
+	void shouldIgnoreInactiveOverrideRowTest() {
+		// Given: the entity service is asked for ACTIVE rows only, so an inactive row never reaches the
+		// reconciler; the agency falls through to the automatic attempts.
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE")),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID, EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(TL_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
+
+		// Then: resolved via the ordinary name match, not via any override
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		assertThat(summary.overridesApplied()).isEqualTo(0);
+		verify(agencyOwnerOverrideService).findAllByStatus(HubStatus.ACTIVE.getCode());
+	}
+
 	/**
 	 * Builds the reconciler under test, wired with this test's mocks and a real {@link NameNormalizer}
 	 * (constructed fresh per test rather than shared, per {@code .claude/rules/20-tests.md}).
 	 */
 	private NetSuiteSyncReconciler reconciler() {
 		return new NetSuiteSyncReconciler(teamService, userService, roleService, scopeTypeService, assignmentService,
-				teamAgencyService, cacheInvalidationEventService, new NameNormalizer());
+				teamAgencyService, agencyOwnerOverrideService, cacheInvalidationEventService, new NameNormalizer());
 	}
 
 	private void stubDictionaries() {
@@ -663,6 +821,9 @@ class NetSuiteSyncReconcilerTest {
 				.thenReturn(role(DIRECTOR_ROLE_ID, RbacRoleCode.DIRECTOR.getCode()));
 		when(scopeTypeService.existingByScopeCode(RbacScopeCode.TEAM.getCode())).thenReturn(scopeType(TEAM_SCOPE_ID));
 		when(scopeTypeService.existingByScopeCode(RbacScopeCode.ALL.getCode())).thenReturn(scopeType(ALL_SCOPE_ID));
+		// resolveOwnerOverrides() runs unconditionally on every reconcile() call, just like the role/scope
+		// dictionary lookups above; tests that exercise override behavior re-stub this with a specific list.
+		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode())).thenReturn(List.of());
 	}
 
 	private static ResolvedEmployee resolvedTeamLead(String email, String name, String podKey) {
@@ -709,9 +870,13 @@ class NetSuiteSyncReconcilerTest {
 	}
 
 	private static HubUser user(Long id) {
+		return user(id, EMAIL);
+	}
+
+	private static HubUser user(Long id, String email) {
 		return Instancio.of(HubUser.class)
 				.set(field(HubUser::getId), id)
-				.set(field(HubUser::getEmail), EMAIL)
+				.set(field(HubUser::getEmail), email)
 				.create();
 	}
 
@@ -729,6 +894,14 @@ class NetSuiteSyncReconcilerTest {
 		return Instancio.of(HubTeamAgency.class)
 				.set(field(HubTeamAgency::getAgencyId), agencyId)
 				.set(field(HubTeamAgency::getTeamId), teamId)
+				.create();
+	}
+
+	private static HubAgencyOwnerOverride override(Long ownerUserId, Long teamLeadUserId, String status) {
+		return Instancio.of(HubAgencyOwnerOverride.class)
+				.set(field(HubAgencyOwnerOverride::getOwnerUserId), ownerUserId)
+				.set(field(HubAgencyOwnerOverride::getTeamLeadUserId), teamLeadUserId)
+				.set(field(HubAgencyOwnerOverride::getStatus), status)
 				.create();
 	}
 }

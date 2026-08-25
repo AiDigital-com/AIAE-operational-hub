@@ -19,6 +19,8 @@
 	<include file="/db/changelog/schema/0012-dashboard-filters.xml"/>
 	<include file="/db/changelog/schema/0013-dashboard-column-order.xml"/>
 	<include file="/db/changelog/schema/0014-usage-events.xml"/>
+	<include file="/db/changelog/schema/0015-agency-owner-overrides.xml"/>
 	<include file="/db/changelog/data/0001-rbac-dictionaries.xml"/>
+	<include file="/db/changelog/data/0002-agency-owner-overrides.xml"/>
 
 </databaseChangeLog>

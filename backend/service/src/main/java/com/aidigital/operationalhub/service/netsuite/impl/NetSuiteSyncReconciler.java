@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.netsuite.impl;
 
 import com.aidigital.operationalhub.cachemanagement.event.CacheInvalidationEventService;
+import com.aidigital.operationalhub.domain.entity.HubAgencyOwnerOverride;
 import com.aidigital.operationalhub.domain.entity.HubRole;
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubScopeType;
@@ -8,6 +9,7 @@ import com.aidigital.operationalhub.domain.entity.HubTeam;
 import com.aidigital.operationalhub.domain.entity.HubTeamAgency;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.domain.enums.HubStatus;
+import com.aidigital.operationalhub.service.entity.HubAgencyOwnerOverrideService;
 import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
 import com.aidigital.operationalhub.service.entity.HubRoleService;
 import com.aidigital.operationalhub.service.entity.HubScopeTypeService;
@@ -64,6 +66,7 @@ public class NetSuiteSyncReconciler {
 	private final HubScopeTypeService scopeTypeService;
 	private final HubRoleAssignmentService assignmentService;
 	private final HubTeamAgencyService teamAgencyService;
+	private final HubAgencyOwnerOverrideService agencyOwnerOverrideService;
 	private final CacheInvalidationEventService cacheInvalidationEventService;
 	private final NameNormalizer nameNormalizer;
 
@@ -91,6 +94,7 @@ public class NetSuiteSyncReconciler {
 				.collect(Collectors.toMap(HubTeam::getTeamName, team -> team));
 		Map<String, HubTeam> teamByLeadEmail =
 				reconcileTeams(resolution.teams(), userByEmail, existingTeamsByName);
+		Map<String, HubTeam> teamByOverriddenOwnerName = resolveOwnerOverrides(teamByLeadEmail, userByEmail);
 
 		List<Long> userIds = userByEmail.values().stream().map(HubUser::getId).toList();
 		Map<Long, List<HubRoleAssignment>> assignmentsByUserId = assignmentService.findAllByUserIds(userIds)
@@ -120,8 +124,9 @@ public class NetSuiteSyncReconciler {
 			}
 		}
 
-		int agenciesMapped =
-				reconcileAgencyMappings(agencyLeads, teamByEmployeeName, teamByEmployeeEmailLocalPart);
+		int agenciesMapped = reconcileAgencyMappings(
+				agencyLeads, teamByOverriddenOwnerName, teamByEmployeeName, teamByEmployeeEmailLocalPart);
+		int overridesApplied = countOverrideMatches(agencyLeads, teamByOverriddenOwnerName);
 
 		// Propagate to other nodes: the sync may have changed users, assignments, and mappings. The team
 		// cache is already invalidated per-write by HubTeamService.create/saveFromNetSuite, so no separate
@@ -130,7 +135,8 @@ public class NetSuiteSyncReconciler {
 		cacheInvalidationEventService.publishUpdateEvent(HubRoleAssignment.class);
 		cacheInvalidationEventService.publishUpdateEvent(HubTeamAgency.class);
 
-		return new SyncSummary(resolution.teams().size(), userByEmail.size(), assignmentsUpdated, agenciesMapped);
+		return new SyncSummary(
+				resolution.teams().size(), userByEmail.size(), assignmentsUpdated, agenciesMapped, overridesApplied);
 	}
 
 	/**
@@ -343,16 +349,124 @@ public class NetSuiteSyncReconciler {
 	}
 
 	/**
-	 * Mirrors the {@code hub_team_agencies} table against the IO Lines agency-to-lead pairs: each
-	 * agency is mapped to the team of its MPO team lead (resolved via the synced Team Leads). A lead
-	 * name with no exact match falls back to a derived-email match (see
+	 * Resolves every active agency-owner override into the lookup {@link #reconcileAgencyMappings} uses:
+	 * the team each overridden owner's agencies should go to, keyed by that owner's normalized
+	 * {@code display_name}.
+	 *
+	 * <p>The row stores {@code hub_users} ids on both sides, but an agency arrives from IO Lines carrying
+	 * only a {@code mpo_team_lead} display name - {@code AgencyLeadBigQueryService} selects nothing else,
+	 * and the source table exposes no identifier for a person. Rather than resolve that incoming name to a
+	 * user (the very step that is unreliable), this method goes the other way: it reads the owner's own
+	 * {@code display_name} out of {@code hub_users} and matches on that. An override therefore only
+	 * applies when NetSuite spells the owner the way Rippling does.
+	 *
+	 * <p>A row is logged and skipped, never silently ignored, when the owner or the Team Lead is absent
+	 * from this run's synced employees (they left the company, or their employment status changed), when
+	 * the named Team Lead leads no team this run, or when the owner carries no display name. A typo or a
+	 * stale row is exactly the failure mode this override mechanism exists to remove.
+	 *
+	 * @param teamByLeadEmail the persisted teams keyed by Team Lead work email (see {@link #reconcile})
+	 * @param userByEmail     the persisted users keyed by work email (see {@link #upsertUsers})
+	 * @return the team each normalized override owner name maps to
+	 */
+	Map<String, HubTeam> resolveOwnerOverrides(
+			Map<String, HubTeam> teamByLeadEmail, Map<String, HubUser> userByEmail) {
+		Map<Long, HubUser> userById = userByEmail.values().stream()
+				.collect(Collectors.toMap(HubUser::getId, user -> user, (first, second) -> first));
+		Map<Long, HubTeam> teamByLeadUserId = new HashMap<>();
+		for (Map.Entry<String, HubTeam> entry : teamByLeadEmail.entrySet()) {
+			HubUser lead = userByEmail.get(entry.getKey());
+			if (lead != null) {
+				teamByLeadUserId.putIfAbsent(lead.getId(), entry.getValue());
+			}
+		}
+
+		Map<String, HubTeam> teamByOverriddenOwnerName = new HashMap<>();
+		List<HubAgencyOwnerOverride> overrides =
+				agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode());
+		for (HubAgencyOwnerOverride override : overrides) {
+			HubUser owner = userById.get(override.getOwnerUserId());
+			HubTeam team = teamByLeadUserId.get(override.getTeamLeadUserId());
+			if (owner == null || owner.getDisplayName() == null || owner.getDisplayName().isBlank()) {
+				log.warn("Agency owner override's owner is not a synced employee with a display name this "
+								+ "run: overrideId={}, ownerUserId={}",
+						override.getId(), override.getOwnerUserId());
+				continue;
+			}
+			if (team == null) {
+				log.warn("Agency owner override's team lead leads no team this run: overrideId={}, "
+								+ "teamLeadUserId={}",
+						override.getId(), override.getTeamLeadUserId());
+				continue;
+			}
+			teamByOverriddenOwnerName.put(nameNormalizer.normalize(owner.getDisplayName()), team);
+		}
+		return teamByOverriddenOwnerName;
+	}
+
+	/**
+	 * Counts the agencies whose IO Lines owner name matches an active override, i.e. how many entries
+	 * {@link #reconcileAgencyMappings}'s override attempt (attempt zero) resolves, reported as
+	 * {@link SyncSummary#overridesApplied()}. Counted in a separate pass so
+	 * {@link #reconcileAgencyMappings} keeps returning a single {@code agenciesMapped} count, like every
+	 * other reconcile helper.
+	 *
+	 * <p><strong>Keep in step with {@link #reconcileAgencyMappings}.</strong> This method re-derives which
+	 * agencies the override attempt claims rather than observing what that method actually decided, so the
+	 * two only agree because the override is tried first there and always wins. Any change to the skip
+	 * guard, the name normalization, or the order of the match attempts in
+	 * {@link #reconcileAgencyMappings} must be mirrored here, or the reported count silently stops
+	 * describing the mappings that were written.
+	 *
+	 * @param agencyLeads               the agency-to-lead pairs from IO Lines
+	 * @param teamByOverriddenOwnerName the team each normalized override owner name maps to (see
+	 *                                  {@link #resolveOwnerOverrides})
+	 * @return the number of agencies whose owner matched an active override
+	 */
+	int countOverrideMatches(List<AgencyLead> agencyLeads, Map<String, HubTeam> teamByOverriddenOwnerName) {
+		int count = 0;
+		for (AgencyLead lead : agencyLeads) {
+			if (lead.agencyId() == null || lead.mpoTeamLead() == null) {
+				continue;
+			}
+			if (teamByOverriddenOwnerName.containsKey(nameNormalizer.normalize(lead.mpoTeamLead()))) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * Mirrors the {@code hub_team_agencies} table against the IO Lines agency-to-lead pairs: each agency
+	 * is mapped to the team of its MPO team lead. An active {@code hub_agency_owner_overrides} row for
+	 * that owner name is tried first (attempt zero) - a deliberate human decision that must also be able
+	 * to correct a wrong automatic match, not only fill a gap left by one - before falling back to the
+	 * synced Team Leads themselves. A lead name with no exact match falls back to a derived-email match
+	 * (see
 	 * {@link #deriveEmailLocalPart(String)}), then to a first-name local-part match (see
 	 * {@link #deriveFirstNameEmailLocalPart(String)}), since a synced employee's email local part can
 	 * outlive a later display-name change (e.g. a handed-down mailbox) while IO Lines keeps recording the
 	 * original name or a shortened legacy alias. Agencies still unresolved after these attempts are
 	 * skipped; mappings no longer backed by a pair are removed.
 	 *
+	 * <p>The three automatic attempts below are deliberately left exactly as they were when the override
+	 * layer was added, rather than widened to match against the whole roster. Roughly a dozen display-name
+	 * aliases already resolve through {@link #deriveEmailLocalPart(String)} and
+	 * {@link #deriveFirstNameEmailLocalPart(String)} and account for the large majority of mapped
+	 * agencies; several of those keys become ambiguous against the full roster (two employees share a
+	 * first name, or an email local part collides across two mail domains), and a correct widening would
+	 * have to drop the ambiguous ones. That risked far more coverage than the override layer recovers, so
+	 * the override is additive: anything that resolved before resolves the same way after.
+	 *
+	 * <p><strong>Keep in step with {@link #countOverrideMatches}.</strong> That method reports
+	 * {@link SyncSummary#overridesApplied()} by re-deriving the override attempt over the same
+	 * {@code agencyLeads}, duplicating this method's skip guard and name normalization. Changing either
+	 * of those, or moving the override out of first position, requires the same change there - otherwise
+	 * the reported count keeps describing an attempt order this method no longer uses.
+	 *
 	 * @param agencyLeads                  the agency-to-lead pairs from IO Lines
+	 * @param teamByOverriddenOwnerName    the team each normalized override owner name maps to (see
+	 *                                     {@link #resolveOwnerOverrides}), tried before automatic matching
 	 * @param teamByEmployeeName           the team each (normalized) Team Lead name leads
 	 * @param teamByEmployeeEmailLocalPart the team each Team Lead's email local part leads, used as a
 	 *                                     fallback when the name match misses
@@ -360,6 +474,7 @@ public class NetSuiteSyncReconciler {
 	 */
 	int reconcileAgencyMappings(
 			List<AgencyLead> agencyLeads,
+			Map<String, HubTeam> teamByOverriddenOwnerName,
 			Map<String, HubTeam> teamByEmployeeName,
 			Map<String, HubTeam> teamByEmployeeEmailLocalPart) {
 		Map<Long, Long> desired = new HashMap<>();
@@ -367,7 +482,11 @@ public class NetSuiteSyncReconciler {
 			if (lead.agencyId() == null || lead.mpoTeamLead() == null) {
 				continue;
 			}
-			HubTeam team = teamByEmployeeName.get(nameNormalizer.normalize(lead.mpoTeamLead()));
+			String normalizedOwner = nameNormalizer.normalize(lead.mpoTeamLead());
+			HubTeam team = teamByOverriddenOwnerName.get(normalizedOwner);
+			if (team == null) {
+				team = teamByEmployeeName.get(normalizedOwner);
+			}
 			if (team == null) {
 				team = teamByEmployeeEmailLocalPart.get(deriveEmailLocalPart(lead.mpoTeamLead()));
 			}

@@ -45,7 +45,7 @@ class NetSuiteSyncSchedulerTest {
 			work.run();
 			return null;
 		}).when(syncLockGuard).runIfLockAcquired(anyString(), anyString(), any());
-		when(netSuiteSyncService.sync()).thenReturn(new SyncSummary(1, 2, 3, 4));
+		when(netSuiteSyncService.sync()).thenReturn(new SyncSummary(1, 2, 3, 4, 0));
 
 		// When:
 		scheduler.syncDaily();
@@ -65,7 +65,7 @@ class NetSuiteSyncSchedulerTest {
 		when(netSuiteSyncService.sync()).thenAnswer(invocation -> {
 			// Read inside the sync: this is the only moment the name is supposed to exist.
 			assertThat(operationContext.current()).isEqualTo("netsuite_sync");
-			return new SyncSummary(1, 2, 3, 4);
+			return new SyncSummary(1, 2, 3, 4, 0);
 		});
 
 		// When:

@@ -69,7 +69,7 @@ class NetSuiteSyncServiceImplTest {
 						List.of(DataQualityFlag.DUPLICATE_TEAM_NAME))),
 				List.of(new ResolvedTeam(EMAIL, NAME, "Media Optimization: Jane", "HOUSE",
 						List.of(DataQualityFlag.DUPLICATE_TEAM_NAME))));
-		SyncSummary reconcilerResult = new SyncSummary(1, 1, 1, 1);
+		SyncSummary reconcilerResult = new SyncSummary(1, 1, 1, 1, 0);
 
 		when(ripplingEmployeeService.loadActiveEmployees()).thenReturn(employees);
 		when(orgTreeTeamResolver.resolve(employees)).thenReturn(resolution);
@@ -93,7 +93,7 @@ class NetSuiteSyncServiceImplTest {
 		List<RipplingEmployee> employees = List.of();
 		List<AgencyLead> agencyLeads = List.of();
 		OrgResolution resolution = new OrgResolution(List.of(), List.of());
-		SyncSummary reconcilerResult = new SyncSummary(0, 0, 0, 0);
+		SyncSummary reconcilerResult = new SyncSummary(0, 0, 0, 0, 0);
 
 		when(ripplingEmployeeService.loadActiveEmployees()).thenReturn(employees);
 		when(orgTreeTeamResolver.resolve(employees)).thenReturn(resolution);
