@@ -243,7 +243,7 @@ class BigQueryDashboardDataSourceServiceTest {
 		assertThat(pageSql.getValue())
 				.contains("WHERE CAST(`Channel` AS STRING) IN ('Google Search', 'O\\'Brien')")
 				.contains("CAST(`Date` AS DATE) >= DATE '2026-08-01'")
-				.contains("ORDER BY `Date` ASC, `lvl1` ASC, `lvl3` ASC, `Impressions` DESC")
+				.contains("ORDER BY `Date` ASC, `lvl1` ASC, `Creative` ASC, `Impressions` DESC")
 				.endsWith("LIMIT 25 OFFSET 25");
 		assertThat(page.pageNumber()).isEqualTo(2);
 		assertThat(page.pageSize()).isEqualTo(25);

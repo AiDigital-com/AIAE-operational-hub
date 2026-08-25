@@ -3,9 +3,11 @@ package com.aidigital.operationalhub.service.agency.bigquery.model;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,16 +25,17 @@ class DashboardBasicSqlTest {
 
 	@Test
 	void shouldEmitTheTemplatesColumnsInItsOwnOrderTest() {
-		// Given: the 51 columns the spreadsheet's Basic report produces, in its order
+		// Given: the 51 columns the spreadsheet's Basic report produces, in its order, renamed to match the
+		// ClicData template - see `backend/Clicdata matching (2).csv`
 		List<String> expected = List.of(
-				"Date", "week_start", "quarter", "Tactic", "goal", "Channel", "Channel_Short_Name", "lvl1",
-				"campaign_short_name", "lvl3", "CNB_audience", "CNB_geo", "CNB_language", "CNB_message",
-				"CNB_creative_tag", "CNB_keyword_group", "CNB_flight_identifier", "CNB_other", "Impressions",
-				"Clicks", "Cost", "Completions", "Conversions", "IVT_Rate", "CPC", "CPM", "CPV", "AVCR", "CTR",
-				"ivt_benchmark", "cpc_benchmark", "ctr_benchmark", "cpv_benchmark", "cpc_plan", "cpv_plan",
-				"cpm_plan", "CTR_impressions", "CPM_impressions", "AVCR_impressions", "CPA_cost", "CPV_cost",
-				"CPM_cost", "CPC_cost", "CPC_clicks", "CPA_conversions", "cr_benchmark", "cpa_benchmark",
-				"avcr_benchmark", "line_item_description", "Revenue", "ROAS");
+				"Date", "week_start_date_monday", "Quarter", "Tactic", "Goal", "Channel", "Channel_Short_Name",
+				"lvl1", "Campaign_Short_Name", "Creative", "CNB_audience", "CNB_geo", "CNB_language",
+				"CNB_message", "CNB_creative_tag", "CNB_keyword_group", "CNB_flight_identifier", "CNB_other",
+				"Impressions", "Clicks", "Cost", "Completions", "Conversions", "IVT", "CPC", "CPM", "CPV", "AVCR",
+				"CTR", "IVT_Benchmark", "CPC_Benchmark", "CTR_Benchmark", "CPV_Benchmark", "CPC_Plan", "CPV_Plan",
+				"CPM_Plan", "CTR_Impressions", "CPM_Impressions", "AVCR_Impressions", "CPA_Cost", "CPV_Cost",
+				"CPM_Cost", "CPC_Cost", "CPC_Clicks", "CPA_Conversions", "CR_Benchmark", "CPA_Benchmark",
+				"AVCR_Benchmark", "Line_Item_Description", "Revenue", "ROAS");
 
 		// When:
 		List<String> actual = DashboardBasicSql.outputColumns(true).stream()
@@ -41,6 +44,35 @@ class DashboardBasicSqlTest {
 
 		// Then:
 		assertThat(actual).containsExactlyElementsOf(expected);
+	}
+
+	@Test
+	void shouldExposeExactlyTheClicDataTemplatesNamesPlusTheHubsOwnUnmappedExtrasTest() {
+		// Given: this output schema is a contract with ClicData, not a local naming choice - the 42 names
+		// `backend/Clicdata matching (2).csv` binds to (source of truth for the rename), plus the 9 the Hub
+		// keeps although the CSV does not mention them: `Channel`/`lvl1` by the analyst's explicit request,
+		// `CPC`/`CPM`/`CPV`/`AVCR`/`CTR` because ClicData computes those itself, and `Revenue`/`ROAS` because
+		// they were previously added by formula on the Google Sheet side
+		Set<String> clicDataTemplateNames = Set.of(
+				"Channel_Short_Name", "Date", "week_start_date_monday", "Quarter", "Tactic", "Creative", "IVT",
+				"Goal", "Impressions", "Clicks", "CPC_Clicks", "CPM_Impressions", "CPM_Cost", "AVCR_Impressions",
+				"CTR_Impressions", "CPA_Cost", "Cost", "Completions", "Conversions", "CPC_Cost",
+				"CPA_Conversions", "CNB_creative_tag", "CNB_message", "CNB_language", "CNB_geo",
+				"CNB_keyword_group", "CNB_flight_identifier", "CNB_audience", "CNB_other", "CPC_Benchmark",
+				"CPV_Benchmark", "CTR_Benchmark", "IVT_Benchmark", "CPC_Plan", "CPV_Cost", "CPV_Plan", "CPM_Plan",
+				"Campaign_Short_Name", "CR_Benchmark", "AVCR_Benchmark", "CPA_Benchmark", "Line_Item_Description");
+		Set<String> deliberatelyUnmapped =
+				Set.of("Channel", "lvl1", "CPC", "CPM", "CPV", "AVCR", "CTR", "Revenue", "ROAS");
+
+		// When:
+		List<String> actual = DashboardBasicSql.outputColumns(true).stream()
+				.map(DashboardBasicSqlTest::aliasOf)
+				.toList();
+
+		// Then:
+		assertThat(actual).hasSize(51);
+		assertThat(actual).containsExactlyInAnyOrderElementsOf(
+				Stream.concat(clicDataTemplateNames.stream(), deliberatelyUnmapped.stream()).toList());
 	}
 
 	@Test
@@ -172,6 +204,8 @@ class DashboardBasicSqlTest {
 
 		// Then: the column stays in the schema either way - the template's shape is fixed - but with the
 		// creative off every row reads the same dash, so rows aggregate across creatives
+		// Note: these fragments come from deliveryCte's internal level-three alias, which stays `lvl3` -
+		// only the final SELECT's output alias becomes `Creative` (see shouldEmitTheTemplatesColumnsInItsOwnOrderTest)
 		assertThat(withCreative).contains("IF(`constructed_name_lvl3` = '--', '-', `constructed_name_lvl3`) AS lvl3");
 		assertThat(withoutCreative).contains("'-' AS lvl3").doesNotContain("`constructed_name_lvl3`");
 		assertThat(withoutCreative).contains("`lvl3`");
@@ -184,10 +218,10 @@ class DashboardBasicSqlTest {
 		List<String> on = DashboardBasicSql.outputColumns(true);
 
 		// Then: a blank numerator with a populated denominator would still divide into a figure, so both go
-		assertThat(columnNamed(off, "CPA_cost")).isEqualTo("NULL AS CPA_cost");
-		assertThat(columnNamed(off, "CPA_conversions")).isEqualTo("NULL AS CPA_conversions");
-		assertThat(columnNamed(on, "CPA_cost")).contains("`cpa_needed` = 'YES'");
-		assertThat(columnNamed(on, "CPA_conversions")).contains("`cpa_needed` = 'YES'");
+		assertThat(columnNamed(off, "CPA_Cost")).isEqualTo("NULL AS CPA_Cost");
+		assertThat(columnNamed(off, "CPA_Conversions")).isEqualTo("NULL AS CPA_Conversions");
+		assertThat(columnNamed(on, "CPA_Cost")).contains("`cpa_needed` = 'YES'");
+		assertThat(columnNamed(on, "CPA_Conversions")).contains("`cpa_needed` = 'YES'");
 	}
 
 	@Test

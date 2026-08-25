@@ -213,7 +213,7 @@ public class BigQueryDashboardDataSourceService implements DashboardDataSourceSe
 		int offset = (pageNumber - 1) * pageSize;
 		return filteredQuery(query, criteria)
 				+ "\nORDER BY " + BqSql.col("Date") + " ASC, " + BqSql.col(DashboardBasicSql.LEVEL_ONE_ALIAS)
-				+ " ASC, " + BqSql.col(DashboardBasicSql.LEVEL_THREE_ALIAS) + " ASC, "
+				+ " ASC, " + BqSql.col(DashboardBasicSql.LEVEL_THREE_OUTPUT) + " ASC, "
 				+ BqSql.col("Impressions") + " DESC\n"
 				+ "LIMIT " + pageSize + " OFFSET " + offset;
 	}

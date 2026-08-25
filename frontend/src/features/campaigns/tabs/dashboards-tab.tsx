@@ -66,15 +66,15 @@ interface SchemaColumn {
  */
 const BASIC_DIMENSIONS: SchemaColumn[] = [
   { id: "date", label: "Date", field: "Date", format: "date" },
-  { id: "line_item", label: "Line item", field: "line_item_description" },
-  { id: "week", label: "Week (Mon start)", field: "week_start", format: "date" },
-  { id: "quarter", label: "Quarter", field: "quarter" },
+  { id: "line_item", label: "Line item", field: "Line_Item_Description" },
+  { id: "week", label: "Week (Mon start)", field: "week_start_date_monday", format: "date" },
+  { id: "quarter", label: "Quarter", field: "Quarter" },
   { id: "tactic", label: "Tactic", field: "Tactic" },
   { id: "channel", label: "Channel", field: "Channel" },
   { id: "channel_short", label: "Channel (short)", field: "Channel_Short_Name" },
   { id: "level1", label: "Level 1 naming", field: "lvl1" },
-  { id: "campaign_short", label: "Campaign (short)", field: "campaign_short_name" },
-  { id: "creative", label: "Creative", field: "lvl3", optional: true },
+  { id: "campaign_short", label: "Campaign (short)", field: "Campaign_Short_Name" },
+  { id: "creative", label: "Creative", field: "Creative", optional: true },
   { id: "audience", label: "Audience", field: "CNB_audience" },
   { id: "geo", label: "Geo", field: "CNB_geo" },
   { id: "language", label: "Language", field: "CNB_language" },
@@ -92,7 +92,7 @@ const BASIC_METRICS: SchemaColumn[] = [
   { id: "cost", label: "Cost", field: "Cost", agg: "SUM", format: "currency" },
   { id: "completions", label: "Completions", field: "Completions", agg: "SUM", format: "number" },
   { id: "conversions", label: "Conversions", field: "Conversions", agg: "SUM", format: "number" },
-  { id: "ivt", label: "IVT", field: "IVT_Rate", agg: "SUM", format: "number" },
+  { id: "ivt", label: "IVT", field: "IVT", agg: "SUM", format: "number" },
   { id: "cpc", label: "CPC", field: "CPC", agg: "WTD", format: "currency" },
   { id: "cpm", label: "CPM", field: "CPM", agg: "WTD", format: "currency" },
   { id: "cpv", label: "CPV", field: "CPV", agg: "WTD", format: "currency" },
@@ -1015,8 +1015,8 @@ function valueFor(column: SchemaColumn, values: Record<string, unknown>): unknow
   if (column.id !== "cpa") {
     return column.field ? values[column.field] : undefined;
   }
-  const cost = numberValue(values.CPA_cost);
-  const conversions = numberValue(values.CPA_conversions);
+  const cost = numberValue(values.CPA_Cost);
+  const conversions = numberValue(values.CPA_Conversions);
   return cost != null && conversions != null && conversions > 0 ? cost / conversions : null;
 }
 
