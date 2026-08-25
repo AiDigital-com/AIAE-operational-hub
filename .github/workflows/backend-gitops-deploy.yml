@@ -1,0 +1,162 @@
+name: Backend GitOps Deploy
+
+on:
+  push:
+    branches:
+      - 1.0.0
+      - dev
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target GitOps environment
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: operational-hub-gitops-deploy
+  cancel-in-progress: false
+
+env:
+  API_IMAGE: aidigital.aiae-projects/operational-hub-application
+
+jobs:
+  deploy:
+    name: Build images and update Feedlot-style GitOps revisions
+    if: github.event_name == 'workflow_dispatch' || vars.GITOPS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || (github.ref_name == 'main' && 'prod') || 'dev' }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve deployment environment
+        id: deploy-env
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            env_name="${{ inputs.environment }}"
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            env_name="prod"
+          else
+            env_name="dev"
+          fi
+
+          image_tag="${GITHUB_SHA::12}"
+          echo "name=${env_name}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+          echo "liquibase_tag=liquibase-${image_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify backend
+        run: mvn -f backend/pom.xml verify -B
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_CI_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Verify Terraform-managed ECR repository
+        run: aws ecr describe-repositories --repository-names "$API_IMAGE" >/dev/null
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.API_IMAGE }}:${{ steps.deploy-env.outputs.image_tag }}
+
+      - name: Build and push Liquibase image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Liquibase.Dockerfile
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.API_IMAGE }}:${{ steps.deploy-env.outputs.liquibase_tag }}
+
+      - name: Checkout versions repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_VERSIONS_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-versions
+
+      - name: Update immutable image versions
+        uses: mikefarah/yq@v4.45.1
+        env:
+          IMAGE_TAG: ${{ steps.deploy-env.outputs.image_tag }}
+          LIQUIBASE_TAG: ${{ steps.deploy-env.outputs.liquibase_tag }}
+        with:
+          cmd: >-
+            yq -i
+            '.image.tag = strenv(IMAGE_TAG) |
+            .liquibase.image.tag = strenv(LIQUIBASE_TAG)'
+            gitops-versions/operational-hub-api/values.yaml
+
+      - name: Commit versions update
+        id: versions
+        working-directory: gitops-versions
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operational-hub-api/values.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "[operational-hub-api][${{ steps.deploy-env.outputs.image_tag }}]"
+            git push origin HEAD:main
+          fi
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Helm environment branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_HELM_REPOSITORY }}
+          ref: ${{ steps.deploy-env.outputs.name }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-helm
+
+      - name: Pin versions revision in environment
+        uses: mikefarah/yq@v4.45.1
+        env:
+          VERSIONS_REVISION: ${{ steps.versions.outputs.revision }}
+        with:
+          cmd: >-
+            yq -i
+            '.source.operationalHubVersionsRevision = strenv(VERSIONS_REVISION)'
+            gitops-helm/aiae/values.yaml
+
+      - name: Commit environment revision
+        working-directory: gitops-helm
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aiae/values.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "[operational-hub-api][${{ steps.deploy-env.outputs.image_tag }}]"
+            git push origin HEAD:${{ steps.deploy-env.outputs.name }}
+          fi

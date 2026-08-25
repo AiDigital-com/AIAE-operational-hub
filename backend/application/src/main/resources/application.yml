@@ -54,7 +54,8 @@ spring:
           sharedCache:
             mode: ENABLE_SELECTIVE
   liquibase:
-    enabled: true
+    # Production migrations run through the Argo CD sync hook before Deployment.
+    enabled: false
     change-log: classpath:db/changelog/db.changelog-master.xml
   task:
     scheduling:
