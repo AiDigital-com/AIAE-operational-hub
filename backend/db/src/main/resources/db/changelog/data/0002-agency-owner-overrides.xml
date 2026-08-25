@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<!--
+		runAlways with onFail="CONTINUE" rather than a one-shot changeSet: the row references hub_users,
+		and hub_users is populated by the NetSuite/Rippling sync, which runs after Liquibase. On an
+		environment whose database already holds the two employees (e.g. production) this inserts on the
+		first run. On a freshly created database it finds neither, is skipped WITHOUT being marked as
+		ran, and inserts on the first startup after a sync has populated hub_users. MARK_RAN would
+		instead retire the changeSet permanently on exactly the environments that still need it.
+	-->
+	<changeSet id="add-hub_agency_owner_overrides" author="claude" runAlways="true">
+		<preConditions onFail="CONTINUE" onFailMessage="Asya Tikhomolova override not seeded yet: either it already exists, or hub_users does not hold both employees. Retried on the next startup.">
+			<and>
+				<sqlCheck expectedResult="0">
+					select count(*)
+					from hub_agency_owner_overrides ovr
+					join hub_users owner on owner.id = ovr.owner_user_id
+					where lower(owner.email) = 'asya.tikhomolova@aidigital.com'
+				</sqlCheck>
+				<sqlCheck expectedResult="2">
+					select count(*)
+					from hub_users
+					where lower(email) in ('asya.tikhomolova@aidigital.com', 'mariia.tonkovskaia@aidigital.com')
+				</sqlCheck>
+			</and>
+		</preConditions>
+		<sqlFile path="sql/addHubAgencyOwnerOverrides.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+</databaseChangeLog>

@@ -54,11 +54,12 @@ public class NetSuiteSyncScheduler {
 			SyncSummary summary = netSuiteSyncService.sync();
 			LOG.info(
 					"Scheduled BQ NetSuite/Rippling sync finished: teams={}, users={}, assignmentsUpdated={}, "
-							+ "agenciesMapped={}",
+							+ "agenciesMapped={}, overridesApplied={}",
 					summary.teams(),
 					summary.users(),
 					summary.assignmentsUpdated(),
-					summary.agenciesMapped());
+					summary.agenciesMapped(),
+					summary.overridesApplied());
 		} catch (RuntimeException e) {
 			LOG.error("Scheduled BQ NetSuite/Rippling sync failed", e);
 		} finally {

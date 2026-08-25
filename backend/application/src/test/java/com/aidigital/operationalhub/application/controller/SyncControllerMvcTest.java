@@ -49,7 +49,7 @@ class SyncControllerMvcTest {
 		// Given:
 		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
-		doReturn(new SyncSummary(3, 12, 5, 8)).when(netSuiteSyncService).sync();
+		doReturn(new SyncSummary(3, 12, 5, 8, 2)).when(netSuiteSyncService).sync();
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When:
