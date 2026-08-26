@@ -3,9 +3,7 @@ name: Backend GitOps Deploy
 on:
   push:
     branches:
-      - 1.0.0
-      - dev
-      - main
+      - cicd_test
   workflow_dispatch:
     inputs:
       environment:
@@ -15,7 +13,6 @@ on:
         type: choice
         options:
           - dev
-          - prod
 
 permissions:
   contents: read
@@ -33,7 +30,7 @@ jobs:
     name: Build images and update Feedlot-style GitOps revisions
     if: github.event_name == 'workflow_dispatch' || vars.GITOPS_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || (github.ref_name == 'main' && 'prod') || 'dev' }}
+    environment: ${{ inputs.environment || 'dev' }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -42,13 +39,7 @@ jobs:
         id: deploy-env
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            env_name="${{ inputs.environment }}"
-          elif [ "${{ github.ref_name }}" = "main" ]; then
-            env_name="prod"
-          else
-            env_name="dev"
-          fi
+          env_name="${{ inputs.environment || 'dev' }}"
 
           image_tag="${GITHUB_SHA::12}"
           echo "name=${env_name}" >> "$GITHUB_OUTPUT"
