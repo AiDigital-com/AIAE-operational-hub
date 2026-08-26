@@ -60,10 +60,39 @@ jobs:
       - name: Verify Terraform-managed ECR repository
         run: aws ecr describe-repositories --repository-names "$API_IMAGE" >/dev/null
 
+      - name: Check immutable image tags
+        id: image-tags
+        shell: bash
+        run: |
+          application_exists=false
+          liquibase_exists=false
+
+          if [ "$(aws ecr batch-get-image \
+            --repository-name "$API_IMAGE" \
+            --image-ids imageTag="${{ steps.deploy-env.outputs.image_tag }}" \
+            --query 'length(images)' \
+            --output text)" = "1" ]; then
+            application_exists=true
+          fi
+
+          if [ "$(aws ecr batch-get-image \
+            --repository-name "$API_IMAGE" \
+            --image-ids imageTag="${{ steps.deploy-env.outputs.liquibase_tag }}" \
+            --query 'length(images)' \
+            --output text)" = "1" ]; then
+            liquibase_exists=true
+          fi
+
+          {
+            echo "application_exists=${application_exists}"
+            echo "liquibase_exists=${liquibase_exists}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push application image
+        if: steps.image-tags.outputs.application_exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -72,6 +101,7 @@ jobs:
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.API_IMAGE }}:${{ steps.deploy-env.outputs.image_tag }}
 
       - name: Build and push Liquibase image
+        if: steps.image-tags.outputs.liquibase_exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
