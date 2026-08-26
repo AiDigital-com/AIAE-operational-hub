@@ -38,7 +38,7 @@ The product is intentionally operational rather than marketing-facing: it is a w
 | `backend/report-aggregate` | Aggregated backend packaging module. |
 | `frontend/src/features` | Product features: agencies, clients, campaigns, reporting tabs, RBAC/team management. |
 | `frontend/src/shared` | Shared API client, auth helpers, UI primitives, formatting, config. |
-| `scripts` | Local/Replit build and run wrappers. |
+| `scripts` | Local build, run, and verification wrappers. |
 
 ## Backend Modules
 
@@ -237,8 +237,8 @@ npm run typecheck
 
 ```bash
 # From repository root: wrapper scripts
-bash scripts/replit-dev-backend.sh
-bash scripts/replit-dev-frontend.sh
+bash scripts/local-dev-backend.sh
+bash scripts/local-dev-frontend.sh
 bash scripts/local-verify.sh
 ```
 
@@ -255,7 +255,6 @@ npm run generate:api
 | --- | --- |
 | `PORT` | Backend port, default `5000`. |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | PostgreSQL connection for normal profiles. |
-| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | Replit PostgreSQL variables, mapped in the Replit profile/scripts. |
 | `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` | Clerk frontend/backend publishable keys. |
 | `AUTH_ALLOWED_EMAIL_DOMAIN` | Allowed login email domain, default `aidigital.com`. |
 | `AUTH_AUTHORIZED_PARTIES` | Allowed JWT authorized parties/frontend origins. |

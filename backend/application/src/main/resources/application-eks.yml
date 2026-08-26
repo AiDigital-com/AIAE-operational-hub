@@ -1,0 +1,39 @@
+server:
+  shutdown: graceful
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 35s
+  main:
+    lazy-initialization: true
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    properties:
+      hibernate:
+        boot.allow_jdbc_metadata_access: false
+        temp.use_jdbc_metadata_defaults: false
+    hibernate:
+      ddl-auto: validate
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 1
+      idle-timeout: 10000
+      connection-timeout: 10000
+      leak-detection-threshold: 20000
+      auto-commit: false
+  liquibase:
+    enabled: false
+
+management:
+  health:
+    probes:
+      enabled: true
+
+oph:
+  cache:
+    warmup-enabled: false
+
+logging:
+  level:
+    org.zalando.logbook: ${LOGBOOK_LEVEL:INFO}

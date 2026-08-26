@@ -25,8 +25,7 @@ public class SecurityProperties {
 	public static class Cors {
 
 		@NotBlank
-		private String allowedOrigins =
-				"https://*.replit.dev,https://*.repl.co,http://localhost:5173,http://localhost:5000";
+		private String allowedOrigins = "http://localhost:5173,http://localhost:5000";
 
 		private long maxAgeSeconds = 3600L;
 	}
@@ -38,7 +37,7 @@ public class SecurityProperties {
 	@Getter
 	public static class Csp {
 
-		private String frameAncestors = "'self' https://*.replit.dev https://*.repl.co";
+		private String frameAncestors = "'self'";
 
 	}
 }

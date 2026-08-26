@@ -12,7 +12,7 @@
 					converterClass="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
 	<timestamp key="timestamp-by-second" datePattern="yyyyMMdd'T'HHmmss"/>
 
-	<springProfile name="!(local | replit)">
+	<springProfile name="!(local | eks)">
 		<appender name="fileAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
 			<file>${LOG_FILE}</file>
 			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -41,7 +41,7 @@
 		</root>
 	</springProfile>
 
-	<springProfile name="local | replit">
+	<springProfile name="local | eks">
 		<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
 			<encoder>
 				<Pattern>${CONSOLE_LOG_PATTERN:-%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %X{requestUUID} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}}

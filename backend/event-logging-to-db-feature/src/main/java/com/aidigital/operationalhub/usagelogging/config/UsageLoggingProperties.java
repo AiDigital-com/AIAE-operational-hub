@@ -15,7 +15,7 @@ public class UsageLoggingProperties {
     private boolean enabled = true;
 
     /** Stable lowercase-hyphen identifier (e.g. `employee-directory`). Must
-     *  NOT remain the template placeholder `replit-mvp-template` in deployment. */
+     *  NOT remain a template placeholder in deployment. */
     private String serviceName;
 
     /** `prod` | `staging` | `dev`. */

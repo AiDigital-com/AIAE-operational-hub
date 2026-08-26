@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ClerkJwtClaimsValidatorTest {
 
 	private static final String TRUSTED_ORIGIN = "http://localhost:5173";
-	private static final String REPLIT_ORIGIN = "https://operational-hub.replit.app";
+	private static final String SECOND_TRUSTED_ORIGIN = "https://dev.example.com";
 
 	@Test
 	void shouldAcceptValidAidigitalApiTemplateClaims() {
@@ -73,11 +73,11 @@ class ClerkJwtClaimsValidatorTest {
 	@Test
 	void shouldParseCommaSeparatedAuthorizedParties() {
 		// Arrange
-		Jwt jwt = baseJwt().claim("azp", REPLIT_ORIGIN).build();
+		Jwt jwt = baseJwt().claim("azp", SECOND_TRUSTED_ORIGIN).build();
 
 		// Act
 		OAuth2TokenValidatorResult result = validator(
-				TRUSTED_ORIGIN + ", " + REPLIT_ORIGIN).validate(jwt);
+				TRUSTED_ORIGIN + ", " + SECOND_TRUSTED_ORIGIN).validate(jwt);
 
 		// Verification
 		assertThat(result.hasErrors()).isFalse();
