@@ -28,7 +28,6 @@ env:
 jobs:
   deploy:
     name: Build images and update Feedlot-style GitOps revisions
-    if: github.event_name == 'workflow_dispatch' || vars.GITOPS_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     steps:
