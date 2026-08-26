@@ -27,7 +27,7 @@ env:
 
 jobs:
   deploy:
-    name: Build images and update Feedlot-style GitOps revisions
+    name: Build images and update GitOps revisions
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     steps:
