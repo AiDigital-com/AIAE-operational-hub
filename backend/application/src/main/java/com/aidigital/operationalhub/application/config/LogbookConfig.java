@@ -103,7 +103,7 @@ public class LogbookConfig {
 				"(?i).*credential.*", "(?i).*authorization.*",
 				"(?i)privateKey", "(?i)clientSecret", "(?i)serviceAccount");
 		private Map<String, List<String>> excluded = Map.of(
-				"/**/actuator/**", List.of("GET"),
+				"/actuator/**", List.of("GET"),
 				"/**/swagger-ui/**", List.of("GET"),
 				"/**/specs/**", List.of("GET"),
 				"/health", List.of("GET"),
