@@ -1,0 +1,188 @@
+name: PROD GitOps Rollback Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Production version to restore in X.Y.Z format
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: operational-hub-production-release
+  cancel-in-progress: false
+
+env:
+  API_IMAGE: aidigital.aiae-projects/operational-hub-application
+
+jobs:
+  rollback:
+    name: Restore production release
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
+      FRONTEND_DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
+    steps:
+      - name: Validate rollback configuration
+        shell: bash
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          required=(
+            AWS_ROLE_TO_ASSUME
+            AWS_REGION
+            FRONTEND_BUCKET
+            FRONTEND_DISTRIBUTION_ID
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub environment variable: ${name}"
+              exit 1
+            fi
+          done
+
+          if [[ ! "${{ inputs.release_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release_version must use X.Y.Z format"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve latest complete release
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          image_details=$(aws ecr describe-images \
+            --repository-name "$API_IMAGE" \
+            --filter tagStatus=TAGGED \
+            --output json)
+
+          image_tag=""
+          while IFS= read -r candidate; do
+            liquibase_candidate="liquibase-${candidate}"
+            if [ "$(aws ecr batch-get-image \
+              --repository-name "$API_IMAGE" \
+              --image-ids "imageTag=${liquibase_candidate}" \
+              --query 'length(images)' \
+              --output text)" = "1" ] \
+              && aws s3api head-object \
+                --bucket "$FRONTEND_BUCKET" \
+                --key "releases/${candidate}/index.html" >/dev/null 2>&1 \
+              && aws s3api head-object \
+                --bucket "$FRONTEND_BUCKET" \
+                --key "releases/${candidate}/release.json" >/dev/null 2>&1; then
+              image_tag="$candidate"
+              break
+            fi
+          done < <(jq -r \
+            --arg prefix "${RELEASE_VERSION}-" \
+            '[.imageDetails[]
+              | .imagePushedAt as $pushed
+              | .imageTags[]?
+              | select(startswith($prefix))
+              | {tag: ., pushed: $pushed}]
+            | sort_by(.pushed)
+            | reverse
+            | .[].tag' <<<"$image_details")
+
+          if [ -z "$image_tag" ]; then
+            echo "::error::No complete restorable release found for ${RELEASE_VERSION}"
+            exit 1
+          fi
+
+          {
+            echo "image_tag=${image_tag}"
+            echo "liquibase_tag=liquibase-${image_tag}"
+            echo "deployment_revision=rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout versions repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_VERSIONS_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-versions
+
+      - name: Pin rollback image versions
+        uses: mikefarah/yq@v4.45.1
+        env:
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          LIQUIBASE_TAG: ${{ steps.release.outputs.liquibase_tag }}
+          DEPLOYMENT_REVISION: ${{ steps.release.outputs.deployment_revision }}
+        with:
+          cmd: >-
+            yq -i
+            '.image.tag = strenv(IMAGE_TAG) |
+            .image.pullPolicy = "IfNotPresent" |
+            .liquibase.image.tag = strenv(LIQUIBASE_TAG) |
+            .liquibase.image.pullPolicy = "IfNotPresent" |
+            .deploymentRevision = strenv(DEPLOYMENT_REVISION)'
+            gitops-versions/operational-hub-api/values.yaml
+
+      - name: Commit rollback versions
+        id: versions
+        working-directory: gitops-versions
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operational-hub-api/values.yaml
+          git commit -m "[operational-hub-api][rollback][${{ steps.release.outputs.image_tag }}]"
+          git push origin HEAD:main
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout production Helm environment
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_HELM_REPOSITORY }}
+          ref: prod
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-helm
+
+      - name: Pin rollback versions revision
+        uses: mikefarah/yq@v4.45.1
+        env:
+          VERSIONS_REVISION: ${{ steps.versions.outputs.revision }}
+        with:
+          cmd: >-
+            yq -i
+            '.source.operationalHubVersionsRevision = strenv(VERSIONS_REVISION)'
+            gitops-helm/aiae/values.yaml
+
+      - name: Commit production rollback
+        working-directory: gitops-helm
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aiae/values.yaml
+          git commit -m "[operational-hub-api][rollback][${{ steps.release.outputs.image_tag }}]"
+          git push origin HEAD:prod
+
+      - name: Restore production frontend
+        shell: bash
+        run: |
+          release_prefix="s3://${FRONTEND_BUCKET}/releases/${{ steps.release.outputs.image_tag }}"
+          aws s3 sync "$release_prefix" "s3://${FRONTEND_BUCKET}" \
+            --exclude index.html \
+            --exclude release.json \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp "${release_prefix}/index.html" "s3://${FRONTEND_BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+          aws cloudfront create-invalidation \
+            --distribution-id "${FRONTEND_DISTRIBUTION_ID}" \
+            --paths "/*" >/dev/null

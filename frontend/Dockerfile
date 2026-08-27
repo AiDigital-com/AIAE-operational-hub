@@ -1,4 +1,4 @@
-# Frontend Dockerfile — local-dev / handoff only. Not used on Replit.
+# Frontend Dockerfile - local development and handoff only.
 #
 # Build context is the REPO ROOT (set in docker-compose.yml as `context: .`).
 
@@ -18,6 +18,6 @@ RUN npm run generate:api && npm run build
 
 FROM nginx:1.27-alpine
 ENV APP_CONTEXT_PATH=
-COPY --from=build /workspace/backend/application/src/main/resources/static /usr/share/nginx/html
+COPY --from=build /workspace/frontend/dist /usr/share/nginx/html
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 EXPOSE 80

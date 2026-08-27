@@ -35,7 +35,7 @@ import java.util.Set;
 public class UsageLoggingConfig {
 
     private static final Set<String> PLACEHOLDERS = Set.of(
-        "replit-mvp-template",
+        "project-template",
         "<stable-service-name>",
         "<service-name>",
         "change-me",
