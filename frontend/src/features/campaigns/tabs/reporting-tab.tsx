@@ -52,6 +52,7 @@ import {
   downloadConversionAdjustmentTemplate,
   exportReportRows,
 } from "../api";
+import { ADD_LINE_ID_DIM_IDS, ADD_LINE_LEVEL_ID_DIM_ID, ADD_LINE_LEVEL_NAME_DIM_ID } from "../constants/add-line";
 import {
   useReportRowDistinctValues,
   useReportRows,
@@ -63,6 +64,8 @@ import {
 } from "../hooks";
 import type { DateWindow } from "../hooks";
 import type { CampaignTabContext } from "../campaign-workspace";
+import { AddLineIdCell } from "./add-line-id-cell";
+import type { AddLineLevel } from "../model/add-line";
 import type {
   DirectionEnumV1,
   ReportConfig,
@@ -309,6 +312,8 @@ const CAMPAIGN_LEVEL_CONVERSION_CHANNELS = new Set(["Google SEM", "Google Search
 /** The CNB_* dimensions the view derives by splitting the constructed name, so an added row shows
  * them read-only rather than inviting a value that would be overwritten on read. */
 const NAME_DERIVED_DIMS = new Set<string>(CONSTRUCTED_NAME_PART_IDS);
+/** The three constructed-id dimensions an added row never lets the user type (PDI_117 D1). */
+const ID_DERIVED_DIMS = new Set<string>(ADD_LINE_ID_DIM_IDS);
 
 /**
  * Puts a report's columns in the order it was saved with, for one group of them (dimensions or metrics).
@@ -690,6 +695,16 @@ export function ReportingTab() {
       }
     },
     [markCellValidity, snapshotOnce]
+  );
+
+  /** Fills one level's resolved/picked id - the id is never typed (D1); the name cell is untouched.
+   *  PDI_117 D2: resolution is per level, so this is the only Add Line identity wiring the parent owns -
+   *  each level decides for itself whether it resolved or was generated, with no row-level mode state. */
+  const onResolveAddLineId = useCallback(
+    (key: string, level: AddLineLevel, id: string) => {
+      updateAddedRow(key, ADD_LINE_LEVEL_ID_DIM_ID[level], id);
+    },
+    [updateAddedRow]
   );
 
   const [downloading, setDownloading] = useState(false);
@@ -2327,6 +2342,8 @@ export function ReportingTab() {
                    are really the rows the panel found is settled by the panel, which can
                    compare their sum against the figure - a check no dimension list can make. */
                 onOpenConversions={openConversions}
+                campaignId={campaign.id}
+                onResolveAddLineId={onResolveAddLineId}
               />
             )}
             renderPinnedCells={(draggedColumnIndex, dropBoundaryIndex) => (
@@ -2477,6 +2494,12 @@ interface ReportRowProps {
   onUpdateAddedRow: (key: string, field: string, raw: string) => void;
   /** Opens the row's conversions by action. Absent on a grouped report, where a row is many rows. */
   onOpenConversions?: (row: KeyedReportRow) => void;
+  /** The campaign this row belongs to - the Add Line id cells resolve/generate against the campaign's
+   *  own mart data (PDI_117), so they need the id regardless of what the row itself carries. */
+  campaignId: number;
+  /** This row's current Add Line mode (D2) - a plain string, not an object, so it can vary per row
+   *  without busting every other row's memo. */
+  onResolveAddLineId: (key: string, level: AddLineLevel, id: string) => void;
 }
 
 /**
@@ -2505,6 +2528,8 @@ const ReportRow = memo(function ReportRow({
   onUpdateCell,
   onUpdateAddedRow,
   onOpenConversions,
+  campaignId,
+  onResolveAddLineId,
 }: ReportRowProps) {
   const merged = override ? { ...row, ...override } : row;
   const isModified = Boolean(override);
@@ -2526,24 +2551,49 @@ const ReportRow = memo(function ReportRow({
     const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
     const isInherited = isAdded && lockedDimIds.has(d.id);
     const isFromName = isAdded && NAME_DERIVED_DIMS.has(d.id);
+    // PDI_117: the three constructed ids are never an input at all on an added row - resolved from the
+    // (still plain-text) typed name or generated server-side, but never typed (D1). Every other cell,
+    // including platform/account/account_id/date and the three name cells, keeps its existing behaviour.
+    const isIdDim = isAdded && ID_DERIVED_DIMS.has(d.id);
+    const levelForIdDim: AddLineLevel | null =
+      d.id === "line_item_id" ? "LVL1" : d.id === "insertion_order_id" ? "LVL2"
+        : d.id === "campaign_constructed_id" ? "LVL3" : null;
     return (
       <td
         key={d.id}
         className={cn(
           dimColClass(d.id),
-          isFromName && editing && "reporting-tab__cell--derived",
+          (isFromName || isIdDim) && editing && "reporting-tab__cell--derived",
           dragClass(index)
         )}
         style={columnStyle(columnWidths[d.id])}
         title={
-          editing && isFromName
-            ? "Read from the constructed name — edit the name to change it"
-            : editing && isInherited
-              ? "Inherited from this campaign"
-              : undefined
+          editing && isIdDim
+            ? "Selected or generated automatically — never typed"
+            : editing && isFromName
+              ? "Read from the constructed name — edit the name to change it"
+              : editing && isInherited
+                ? "Inherited from this campaign"
+                : undefined
         }
       >
-        {editing && isAdded && isFromName ? (
+        {editing && isIdDim && levelForIdDim ? (
+          <>
+            <AddLineIdCell
+              campaignId={campaignId}
+              level={levelForIdDim}
+              platform={String(merged.platform ?? "")}
+              accountId={String(merged.account_id ?? "")}
+              typedName={String(merged[ADD_LINE_LEVEL_NAME_DIM_ID[levelForIdDim] as keyof KeyedReportRow] ?? "")}
+              currentId={String(merged[d.id as keyof KeyedReportRow] ?? "")}
+              nameLvl1={String(merged.line_item_name ?? "")}
+              nameLvl2={String(merged.insertion_order_name ?? "")}
+              nameLvl3={String(merged.campaign_constructed_name ?? "")}
+              onResolved={(level, id) => onResolveAddLineId(row.key, level, id)}
+            />
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && isFromName ? (
           <>
             {nameParts?.[d.id] || "—"}
             {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}

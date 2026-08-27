@@ -2,6 +2,10 @@ package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignPageResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedEntityLevelEnumV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedEntityPageResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedIdsPreviewRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedIdsPreviewResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionAdjustmentRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionAdjustmentRowV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionBreakdownRequestV1;
@@ -30,6 +34,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.ReportVie
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportViewUpsertV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportViewV1;
 import com.aidigital.operationalhub.application.mapper.CampaignSearchContractMapper;
+import com.aidigital.operationalhub.application.mapper.ConstructedEntityContractMapper;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionBreakdownV1;
 import com.aidigital.operationalhub.application.mapper.ConversionAdjustmentXlsxAssembler;
 import com.aidigital.operationalhub.application.mapper.ConversionBreakdownContractMapper;
@@ -49,8 +54,11 @@ import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.ConversionAdjustmentService;
 import com.aidigital.operationalhub.service.agency.InsertionOrderService;
 import com.aidigital.operationalhub.service.agency.ReportRowService;
+import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
 import com.aidigital.operationalhub.service.agency.model.ConversionBreakdownQuery;
 import com.aidigital.operationalhub.service.agency.model.ConversionRowExportModel;
 import com.aidigital.operationalhub.service.agency.model.ConversionRowModel;
@@ -171,6 +179,9 @@ class CampaignControllerTest {
 
 	@Mock
 	private DashboardDataSourceService dashboardDataSourceService;
+
+	@Mock
+	private ConstructedEntityContractMapper constructedEntityMapper;
 
 	@InjectMocks
 	private CampaignController controller;
@@ -323,6 +334,54 @@ class CampaignControllerTest {
 		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
 		assertThat(result.getBody()).isEqualTo(values);
 		verify(reportRowService).findDistinctValues(currentUser, 42L, ReportRowSortField.CHANNEL);
+	}
+
+	@Test
+	void shouldListConstructedEntitiesForCurrentUserTest() {
+		// Given:
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		Page<ConstructedEntity> page = new PageImpl<>(List.of(
+				new ConstructedEntity("Line 1", "12345", "2026-03-01", "2026-03-10", 500L)));
+		ConstructedEntityPageResponseV1 response = new ConstructedEntityPageResponseV1();
+		response.setTotalElements(1L);
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(ConstructedEntityLevel.LVL1).when(constructedEntityMapper).toLevel(ConstructedEntityLevelEnumV1.LVL1);
+		doReturn(page).when(reportRowService).findConstructedEntities(
+				currentUser, 42L, ConstructedEntityLevel.LVL1, "dv_360_dlv", "acct-1", "Line 1", 1, 20);
+		doReturn(response).when(constructedEntityMapper).toPageResponse(page);
+
+		// When:
+		var result = controller.listConstructedEntities(
+				42L, ConstructedEntityLevelEnumV1.LVL1, "dv_360_dlv", "acct-1", "Line 1", 1, 20);
+
+		// Then:
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(response);
+		verify(reportRowService).findConstructedEntities(
+				currentUser, 42L, ConstructedEntityLevel.LVL1, "dv_360_dlv", "acct-1", "Line 1", 1, 20);
+	}
+
+	@Test
+	void shouldPreviewConstructedIdsForCurrentUserTest() {
+		// Given:
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		ConstructedIdsPreviewRequestV1 request = new ConstructedIdsPreviewRequestV1("Name 1", "Name 2", "Name 3");
+		ConstructedIdsPreviewModel preview = Instancio.create(ConstructedIdsPreviewModel.class);
+		ConstructedIdsPreviewResponseV1 response = new ConstructedIdsPreviewResponseV1();
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn("Name 1").when(constructedEntityMapper).toName(request);
+		doReturn("Name 2").when(constructedEntityMapper).toNameLvl2(request);
+		doReturn("Name 3").when(constructedEntityMapper).toNameLvl3(request);
+		doReturn(preview).when(reportRowService).previewConstructedIds(currentUser, 42L, "Name 1", "Name 2", "Name 3");
+		doReturn(response).when(constructedEntityMapper).toResponse(preview);
+
+		// When:
+		var result = controller.previewConstructedIds(42L, request);
+
+		// Then:
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(response);
+		verify(reportRowService).previewConstructedIds(currentUser, 42L, "Name 1", "Name 2", "Name 3");
 	}
 
 	@Test

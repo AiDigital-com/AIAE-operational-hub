@@ -220,7 +220,47 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * A live dashboard cannot be renamed, because its name is part of the BigQuery table name ClicData reads.
 	 */
 	OPH_042("OPH_042", "Remove the data source before renaming '%s' - the name is part of its BigQuery table, "
-			+ "and a renamed dashboard would leave ClicData reading the old table.");
+			+ "and a renamed dashboard would leave ClicData reading the old table."),
+
+	/**
+	 * Add Line V1: the platform/account/account id triple has no delivery in this campaign's mart yet.
+	 */
+	OPH_043("OPH_043", "No delivery exists yet for platform '%s', account '%s' (%s) in this campaign - pick an "
+			+ "existing platform/account."),
+
+	/**
+	 * Add Line V2: the selected line's ids do not match any entity in the campaign's mart data.
+	 */
+	OPH_044("OPH_044",
+			"The selected line no longer matches any campaign delivery data - refresh and pick it again."),
+
+	/**
+	 * Add Line V3: an override, not an addition - a mart row already exists for that line and date.
+	 */
+	OPH_045("OPH_045", "This line already exists for %s - edit it instead of adding it again."),
+
+	/**
+	 * Add Line V4: the generated line's (date, ids) key already exists in the mart.
+	 */
+	OPH_046("OPH_046",
+			"A line with date %s and these constructed ids already exists - edit it instead of adding it again."),
+
+	/**
+	 * Add Line V6: a generated line's name must split into exactly sixteen naming-convention segments.
+	 */
+	OPH_047("OPH_047",
+			"The line name must be provided and have exactly sixteen underscore-separated segments."),
+
+	/**
+	 * Add Line V7: a generated line's name must stay within the campaign it was added to.
+	 */
+	OPH_048("OPH_048", "The line name must start with this campaign's naming prefix '%s'."),
+
+	/**
+	 * Add Line V8: a level was submitted for generation, but its name already matches real mart data.
+	 */
+	OPH_049("OPH_049",
+			"This line already exists in platform data - select it instead of creating a new one.");
 
 	private final String code;
 	private final String description;

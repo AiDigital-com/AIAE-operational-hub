@@ -2,6 +2,8 @@ import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
   CampaignSearchRequestV1,
+  ConstructedEntityLevelEnumV1,
+  ConstructedIdsPreviewRequestV1,
   ConversionAdjustmentRequestV1,
   ConversionBreakdownRequestV1,
   ConversionRowSearchRequestV1,
@@ -81,6 +83,47 @@ export async function listReportRowDistinctValues(campaignId: number, field: Rep
   return requireData(
     await apiClient.GET("/api/v1/campaigns/{campaignId}/report-rows/distinct-values", {
       params: { path: { campaignId }, query: { field } },
+    })
+  );
+}
+
+/**
+ * Resolves one constructed-name level's typed name against the campaign's own mart data - Add Line mode
+ * A's identity resolution. A blank `name` matches every entity at the level, which is used as a
+ * lightweight "does this campaign have any data at this level yet" probe.
+ */
+export async function listConstructedEntities(
+  campaignId: number,
+  level: ConstructedEntityLevelEnumV1,
+  platform: string | undefined,
+  accountId: string | undefined,
+  name: string | undefined,
+  pageNumber: number,
+  pageSize: number,
+  signal?: AbortSignal
+) {
+  return requireData(
+    await apiClient.GET("/api/v1/campaigns/{campaignId}/report-rows/constructed-entities", {
+      params: {
+        path: { campaignId },
+        query: { level, platform, accountId, name, pageNumber, pageSize },
+      },
+      signal,
+    })
+  );
+}
+
+/** Previews the constructed ids Add Line mode B would generate/reuse for the given names. */
+export async function previewConstructedIds(
+  campaignId: number,
+  body: ConstructedIdsPreviewRequestV1,
+  signal?: AbortSignal
+) {
+  return requireData(
+    await apiClient.POST("/api/v1/campaigns/{campaignId}/report-rows/constructed-ids/preview", {
+      params: { path: { campaignId } },
+      body,
+      signal,
     })
   );
 }

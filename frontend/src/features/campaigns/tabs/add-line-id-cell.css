@@ -1,0 +1,111 @@
+/* Add Line per-level resolved-id cells (PDI_117). */
+
+.add-line-id {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.add-line-id__value {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.add-line-id__badge {
+  padding: 0.0625rem 0.4375rem;
+  border-radius: var(--pill, 999px);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: var(--bg);
+  overflow-wrap: anywhere;
+  max-inline-size: 100%;
+}
+
+.add-line-id__ambiguous {
+  padding: 0.0625rem 0.4375rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.add-line-id__ambiguous:hover,
+.add-line-id__ambiguous:focus-visible {
+  border-color: var(--primary);
+}
+
+.add-line-id__change {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.add-line-id__change:hover,
+.add-line-id__change:focus-visible {
+  color: var(--primary-strong, var(--primary));
+}
+
+.add-line-id__hint {
+  margin: 0;
+  max-inline-size: 12rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--attention-text, var(--muted-strong));
+  overflow-wrap: anywhere;
+}
+
+.add-line-id__pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.add-line-id__pop-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-line-id__pop-item:hover,
+.add-line-id__pop-item:focus-visible {
+  background: var(--bg);
+}
+
+.add-line-id__pop-item-id {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.add-line-id__pop-item-meta {
+  font-size: 0.6875rem;
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}

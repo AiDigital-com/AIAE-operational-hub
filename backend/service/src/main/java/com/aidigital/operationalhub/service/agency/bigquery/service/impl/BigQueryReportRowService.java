@@ -10,12 +10,17 @@ import com.aidigital.operationalhub.service.agency.bigquery.model.BqRequest;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRow;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqSql;
 import com.aidigital.operationalhub.service.agency.bigquery.model.CampaignDeliveryScope;
+import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.bigquery.model.ReportRowMetricSql;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQueryWriteGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.ReportQueryExecutor;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdOrigin;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
+import com.aidigital.operationalhub.service.agency.model.ResolvedConstructedId;
 import com.aidigital.operationalhub.service.agency.model.ReportRowDateRangeModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowExportModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowFilterModel;
@@ -30,6 +35,7 @@ import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -172,6 +178,9 @@ public class BigQueryReportRowService implements ReportRowService {
 	private final CampaignService campaignService;
 	private final CampaignDeliveryScopeResolver scopeResolver;
 	private final ReportQueryExecutor reportQueryExecutor;
+	private final AddedRowValidator addedRowValidator;
+	private final ConstructedEntityLookup constructedEntityLookup;
+	private final ConstructedIdGenerator constructedIdGenerator;
 
 	@Override
 	public ReportRowPageModel findReportRows(
@@ -896,7 +905,67 @@ public class BigQueryReportRowService implements ReportRowService {
 	public long saveAdjustments(CurrentUserModel user, long campaignId, List<AdjustmentRowModel> adjustments) {
 		validateAdjustments(adjustments);
 		CampaignDeliveryScope scope = resolveScope(user, campaignId);
-		return writeAdjustments(scope.campaign(), user, adjustments);
+		return writeAdjustments(scope.campaign(), user, resolveAddedRows(scope, adjustments));
+	}
+
+	/**
+	 * Resolves every manually-added row's identity through {@link AddedRowValidator} (PDI_117 V1-V7)
+	 * before it reaches {@link #writeAdjustments} - the platform/account/account id, three names and
+	 * three ids the client sent for an added row are never trusted outright. Override rows (already
+	 * identified by an existing report row) pass through unchanged.
+	 *
+	 * @param scope       the resolved campaign delivery scope
+	 * @param adjustments the requested adjustments
+	 * @return the same batch, with every added row's identity replaced by its resolved, validated value
+	 * @throws BusinessException OPH_043-OPH_048 when an added row fails a validation rule
+	 */
+	List<AdjustmentRowModel> resolveAddedRows(CampaignDeliveryScope scope, List<AdjustmentRowModel> adjustments) {
+		List<AdjustmentRowModel> resolved = new ArrayList<>(adjustments.size());
+		for (AdjustmentRowModel adjustment : adjustments) {
+			resolved.add(adjustment.added() ? addedRowValidator.resolve(scope, adjustment) : adjustment);
+		}
+		return resolved;
+	}
+
+	@Override
+	public Page<ConstructedEntity> findConstructedEntities(
+			CurrentUserModel user, long campaignId, ConstructedEntityLevel level, String platform, String accountId,
+			String name, int pageNumber, int pageSize) {
+		CampaignDeliveryScope scope = resolveScope(user, campaignId);
+		return constructedEntityLookup.findEntities(scope, level, platform, accountId, name, pageNumber, pageSize);
+	}
+
+	@Override
+	public ConstructedIdsPreviewModel previewConstructedIds(
+			CurrentUserModel user, long campaignId, String name, String nameLvl2, String nameLvl3) {
+		CampaignDeliveryScope scope = resolveScope(user, campaignId);
+		// The level-1 name alone identifies the campaign scope levels 2/3 are hashed against (D3) - see
+		// ConstructedIdGenerator's Javadoc for why the whole level-1 name is not used instead.
+		String campaignScope = constructedIdGenerator.scopeOf(name);
+		return new ConstructedIdsPreviewModel(
+				previewLevel(scope, ConstructedEntityLevel.LVL1, name, List.of(name)),
+				previewLevel(scope, ConstructedEntityLevel.LVL2, nameLvl2, List.of(campaignScope, nameLvl2)),
+				previewLevel(scope, ConstructedEntityLevel.LVL3, nameLvl3, List.of(campaignScope, nameLvl3)));
+	}
+
+	/**
+	 * Previews one level's constructed id: the mart's own id when the name already matches exactly one
+	 * real entity in this campaign, otherwise a freshly generated, namespaced id.
+	 *
+	 * @param scope          the resolved campaign delivery scope
+	 * @param level          the constructed-name level
+	 * @param name           the level's typed constructed name
+	 * @param hashComponents the ordered components {@link ConstructedIdGenerator#generate} would hash if
+	 *                       no existing entity matches - {@code [name]} for level 1, {@code [scope, name]}
+	 *                       for levels 2 and 3
+	 * @return the previewed id and its origin
+	 */
+	ResolvedConstructedId previewLevel(
+			CampaignDeliveryScope scope, ConstructedEntityLevel level, String name, List<String> hashComponents) {
+		return constructedEntityLookup.findSingleExistingId(scope, level, name)
+				.map(id -> new ResolvedConstructedId(id, ConstructedIdOrigin.EXISTING))
+				.orElseGet(() -> new ResolvedConstructedId(
+						constructedIdGenerator.generate(hashComponents), ConstructedIdOrigin.GENERATED));
 	}
 
 	@Override
@@ -1203,7 +1272,7 @@ public class BigQueryReportRowService implements ReportRowService {
 	 *
 	 * @param adjustments the requested adjustments
 	 * @throws BusinessException OPH_027 when the batch is empty, an override carries no editable metric
-	 *                           change, or a manually-added row is missing a line item id or a date
+	 *                           change, or a manually-added row is missing a date
 	 */
 	void validateAdjustments(List<AdjustmentRowModel> adjustments) {
 		if (adjustments == null || adjustments.isEmpty()) {
@@ -1211,10 +1280,13 @@ public class BigQueryReportRowService implements ReportRowService {
 		}
 		for (AdjustmentRowModel adjustment : adjustments) {
 			if (adjustment.added()) {
-				if (isBlank(adjustment.lineItemId()) || isBlank(adjustment.date())) {
+				// The three constructed ids are never required from the client here: the user cannot type one
+				// (PDI_117 D1), and AddedRowValidator resolves/validates the whole identity - including
+				// rejecting a row whose platform/account/account id or ids/names do not check out - once this
+				// batch reaches saveAdjustments's resolveAddedRows step.
+				if (isBlank(adjustment.date())) {
 					throw new BusinessException(
-							OperationalHubErrorReason.OPH_027,
-							"a manually-added row requires a line item id and a date");
+							OperationalHubErrorReason.OPH_027, "a manually-added row requires a date");
 				}
 			} else if (isBlank(adjustment.date())) {
 				throw new BusinessException(OperationalHubErrorReason.OPH_027, "an adjustment requires a date");

@@ -1,6 +1,9 @@
 package com.aidigital.operationalhub.service.agency;
 
+import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
+import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowDateRangeModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowExportModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowFilterModel;
@@ -9,6 +12,7 @@ import com.aidigital.operationalhub.service.agency.model.WorkbookAdjustmentRow;
 import com.aidigital.operationalhub.service.agency.search.ReportRowSortField;
 import com.aidigital.operationalhub.service.common.search.SortCriterion;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 
@@ -130,4 +134,47 @@ public interface ReportRowService {
 	 *                                                                          BigQuery write fails
 	 */
 	int applyBulkAdjustments(CurrentUserModel user, long campaignId, List<WorkbookAdjustmentRow> uploadedRows);
+
+	/**
+	 * Returns one page of one constructed-name level's entities from the campaign's own mart data
+	 * matching an exact typed name - resolves an Add Line name cell to a real entity id instead of
+	 * letting the user type one (PDI_117 mode A). Also used, with {@code name} blank, as a lightweight
+	 * "does this campaign have any data at this level yet" probe.
+	 *
+	 * @param user       the current user
+	 * @param campaignId the campaign id
+	 * @param level      the constructed-name level to resolve at
+	 * @param platform   narrows results to one platform, or {@code null}/blank for every platform
+	 * @param accountId  narrows results to one platform account id, or {@code null}/blank for every account
+	 * @param name       the exact constructed name to resolve, or {@code null}/blank to match every entity
+	 * @param pageNumber the one-based page number
+	 * @param pageSize   the page size
+	 * @return the requested page of entities
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException if the campaign is
+	 *                                                                          unknown or not visible
+	 *                                                                          to the user, or the
+	 *                                                                          BigQuery read fails
+	 */
+	Page<ConstructedEntity> findConstructedEntities(
+			CurrentUserModel user, long campaignId, ConstructedEntityLevel level, String platform, String accountId,
+			String name, int pageNumber, int pageSize);
+
+	/**
+	 * Previews the deterministic constructed ids Add Line mode B would generate for the given names,
+	 * without writing anything. {@link #saveAdjustments} re-derives the same values server-side
+	 * regardless of what the client sends (PDI_117 D5) - this is a convenience read, not the authority.
+	 *
+	 * @param user               the current user
+	 * @param campaignId         the campaign id
+	 * @param name               the level-1 constructed name
+	 * @param nameLvl2           the level-2 constructed name
+	 * @param nameLvl3           the level-3 constructed name
+	 * @return the three levels' previewed ids
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException if the campaign is
+	 *                                                                          unknown or not visible
+	 *                                                                          to the user, or the
+	 *                                                                          BigQuery read fails
+	 */
+	ConstructedIdsPreviewModel previewConstructedIds(
+			CurrentUserModel user, long campaignId, String name, String nameLvl2, String nameLvl3);
 }
