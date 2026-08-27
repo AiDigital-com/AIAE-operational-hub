@@ -10,6 +10,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.model.BqInsert;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRequest;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRow;
 import com.aidigital.operationalhub.service.agency.bigquery.model.CampaignDeliveryScope;
+import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.bigquery.model.ReportRowMetricSql;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQueryWriteGateway;
@@ -17,6 +18,10 @@ import com.aidigital.operationalhub.service.agency.bigquery.service.CachedBigQue
 import com.aidigital.operationalhub.service.agency.bigquery.service.ReportQueryExecutor;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdOrigin;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
+import com.aidigital.operationalhub.service.agency.model.ResolvedConstructedId;
 import com.aidigital.operationalhub.service.agency.model.ReportRowDateRangeModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowExportModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowFilterModel;
@@ -38,11 +43,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -54,6 +62,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.spy;
@@ -92,6 +101,15 @@ class BigQueryReportRowServiceTest {
 	@Mock
 	private CampaignDeliveryScopeResolver scopeResolver;
 
+	@Mock
+	private AddedRowValidator addedRowValidator;
+
+	@Mock
+	private ConstructedEntityLookup constructedEntityLookup;
+
+	@Mock
+	private ConstructedIdGenerator constructedIdGenerator;
+
 	private BigQuerySearchGateway searchGateway;
 	private BigQueryReportRowService service;
 	private ReportQueryExecutor reportQueryExecutor;
@@ -107,8 +125,17 @@ class BigQueryReportRowServiceTest {
 				bigQueryProperties,
 				campaignService,
 				scopeResolver,
-				reportQueryExecutor);
+				reportQueryExecutor,
+				addedRowValidator,
+				constructedEntityLookup,
+				constructedIdGenerator);
 		lenientAdjustmentsView();
+		// Default pass-through: every pre-existing test that writes an added row built its
+		// AdjustmentRowModel as the value it expects to see written. PDI_117 inserts AddedRowValidator
+		// between validateAdjustments and writeAdjustments, so without this default every one of those
+		// tests would see a Mockito-default null instead.
+		lenient().when(addedRowValidator.resolve(any(), any()))
+				.thenAnswer(invocation -> invocation.getArgument(1));
 	}
 
 	@Test
@@ -1704,14 +1731,18 @@ class BigQueryReportRowServiceTest {
 	}
 
 	@Test
-	void shouldRejectAnAddedRowMissingLineItemIdTest() {
-		// Given: a manually-added row whose line item id was never filled in
+	void shouldNotRejectAnAddedRowMissingLineItemIdAtScalarValidationTest() {
+		// Given: a manually-added row whose line item id was never filled in - PDI_117 moved this rule
+		// off validateAdjustments's scalar checks and onto AddedRowValidator (mocked here as a pass-through,
+		// so this only proves validateAdjustments itself no longer rejects a blank id before that point)
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		givenCampaign();
+		when(bigQueryWriteClient.execute(anyString())).thenReturn(1L);
 		AdjustmentRowModel missingLineItemId = adjustmentWithRequiredFields(true, "2026-03-15", "New Line", null);
 
-		// When/Then:
-		assertThatThrownBy(() -> service.saveAdjustments(null, 42L, List.of(missingLineItemId)))
-				.isInstanceOf(BusinessException.class)
-				.hasMessageContaining("a manually-added row requires a line item id and a date");
+		// When/Then: does not throw
+		long affected = service.saveAdjustments(user, 42L, List.of(missingLineItemId));
+		assertThat(affected).isEqualTo(1L);
 	}
 
 	@Test
@@ -1722,7 +1753,43 @@ class BigQueryReportRowServiceTest {
 		// When/Then:
 		assertThatThrownBy(() -> service.saveAdjustments(null, 42L, List.of(missingDate)))
 				.isInstanceOf(BusinessException.class)
-				.hasMessageContaining("a manually-added row requires a line item id and a date");
+				.hasMessageContaining("a manually-added row requires a date");
+	}
+
+	@Test
+	void shouldResolveAddedRowsThroughAddedRowValidatorBeforeWritingTest() {
+		// Given: AddedRowValidator resolves the added row's identity to different values than the client
+		// sent (mirrors what real V1-V7 resolution does)
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		givenCampaign();
+		when(bigQueryWriteClient.execute(anyString())).thenReturn(1L);
+		AdjustmentRowModel submitted = adjustmentWithRequiredFields(true, "2026-03-15", "typed-name", "typed-id");
+		AdjustmentRowModel resolved =
+				adjustmentWithRequiredFields(true, "2026-03-15", "resolved-name", "OPH_resolvedid0000");
+		when(addedRowValidator.resolve(any(), eq(submitted))).thenReturn(resolved);
+
+		// When:
+		service.saveAdjustments(user, 42L, List.of(submitted));
+
+		// Then: the resolved row was written, not the client-submitted one
+		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+		verify(bigQueryWriteClient).execute(sql.capture());
+		assertThat(sql.getValue()).contains("resolved-name").contains("OPH_resolvedid0000");
+		assertThat(sql.getValue()).doesNotContain("typed-name").doesNotContain("typed-id");
+	}
+
+	@Test
+	void shouldNotPassOverrideRowsThroughAddedRowValidatorTest() {
+		// Given: a plain override (added=false)
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		givenCampaign();
+		when(bigQueryWriteClient.execute(anyString())).thenReturn(1L);
+
+		// When:
+		service.saveAdjustments(user, 42L, List.of(overrideAdjustment(1234L)));
+
+		// Then:
+		verifyNoInteractions(addedRowValidator);
 	}
 
 	@Test
@@ -2158,5 +2225,47 @@ class BigQueryReportRowServiceTest {
 
 		// Then:
 		assertThat(resolved.id()).isEqualTo(42L);
+	}
+
+	@Test
+	void shouldDelegateConstructedEntityLookupToTheResolvedCampaignScopeTest() {
+		// Given:
+		givenCampaign();
+		ConstructedEntity entity = new ConstructedEntity("Line 1", "12345", "2026-03-01", "2026-03-10", 500L);
+		Page<ConstructedEntity> page = new PageImpl<>(List.of(entity));
+		when(constructedEntityLookup.findEntities(
+				any(), eq(ConstructedEntityLevel.LVL1), eq("dv_360_dlv"), eq("acct-1"), eq("Line 1"), eq(1), eq(20)))
+				.thenReturn(page);
+
+		// When:
+		Page<ConstructedEntity> result = service.findConstructedEntities(
+				null, 42L, ConstructedEntityLevel.LVL1, "dv_360_dlv", "acct-1", "Line 1", 1, 20);
+
+		// Then:
+		assertThat(result.getContent()).containsExactly(entity);
+	}
+
+	@Test
+	void shouldPreviewExistingIdWhenTheTypedNameMatchesExactlyOneMartEntityTest() {
+		// Given:
+		givenCampaign();
+		when(constructedEntityLookup.findSingleExistingId(any(), eq(ConstructedEntityLevel.LVL1), eq("Line 1")))
+				.thenReturn(Optional.of("12345"));
+		when(constructedEntityLookup.findSingleExistingId(any(), eq(ConstructedEntityLevel.LVL2), eq("IO 1")))
+				.thenReturn(Optional.empty());
+		when(constructedEntityLookup.findSingleExistingId(any(), eq(ConstructedEntityLevel.LVL3), eq("Creative 1")))
+				.thenReturn(Optional.empty());
+		when(constructedIdGenerator.scopeOf("Line 1")).thenReturn("Line 1 Scope");
+		when(constructedIdGenerator.generate(List.of("Line 1 Scope", "IO 1"))).thenReturn("OPH_ioid00000000");
+		when(constructedIdGenerator.generate(List.of("Line 1 Scope", "Creative 1"))).thenReturn("OPH_creativeid000");
+
+		// When:
+		ConstructedIdsPreviewModel preview = service.previewConstructedIds(null, 42L, "Line 1", "IO 1", "Creative 1");
+
+		// Then:
+		assertThat(preview.level1()).isEqualTo(new ResolvedConstructedId("12345", ConstructedIdOrigin.EXISTING));
+		assertThat(preview.level2()).isEqualTo(new ResolvedConstructedId("OPH_ioid00000000", ConstructedIdOrigin.GENERATED));
+		assertThat(preview.level3())
+				.isEqualTo(new ResolvedConstructedId("OPH_creativeid000", ConstructedIdOrigin.GENERATED));
 	}
 }

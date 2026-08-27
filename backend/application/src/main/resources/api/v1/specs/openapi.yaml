@@ -647,6 +647,148 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/constructed-entities:
+    get:
+      tags:
+        - campaigns
+      operationId: listConstructedEntities
+      description: >
+        Resolves one constructed-name level's typed name against the campaign's own mart data (PDI_117
+        Add Line mode A - the user still types the name; the Hub resolves it to a real entity instead of
+        letting the user type its id). A name can carry several distinct platform ids
+        (constructed_name -> constructed_id is one-to-many), so a match also carries the delivery-date
+        range and impressions a disambiguation popover needs to tell them apart when more than one comes
+        back. Sourced from the same platform_mart_adjustments_view_op_hub rows the report-rows endpoint
+        reads, scoped to this campaign.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: level
+          in: query
+          required: true
+          description: The constructed-name level to resolve the name at.
+          schema:
+            $ref: '#/components/schemas/ConstructedEntityLevelEnumV1'
+        - name: platform
+          in: query
+          required: false
+          description: Narrows results to one delivery platform.
+          schema:
+            type: string
+            maxLength: 200
+        - name: accountId
+          in: query
+          required: false
+          description: Narrows results to one platform account id.
+          schema:
+            type: string
+            maxLength: 200
+        - name: name
+          in: query
+          required: false
+          description: The exact constructed name (as typed in the added row's cell) to resolve.
+          schema:
+            type: string
+            maxLength: 500
+        - $ref: '#/components/parameters/PageNumberParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: A page of the level's constructed entities was found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstructedEntityPageResponseV1'
+        '400':
+          description: The level or paging parameters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading constructed entities from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/constructed-ids/preview:
+    post:
+      tags:
+        - campaigns
+      operationId: previewConstructedIds
+      description: >
+        Previews the deterministic, OPH_-namespaced constructed ids Add Line mode B ("line is not present
+        in platform data") would generate for the given names, without writing anything, so the UI can
+        show the generated id before Save. saveReportRowAdjustments re-derives the same ids server-side
+        for every added row regardless of what the client sends - this endpoint is a convenience read, not
+        the authority.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The names to preview generated ids for.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConstructedIdsPreviewRequestV1'
+      responses:
+        '200':
+          description: The preview was computed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstructedIdsPreviewResponseV1'
+        '400':
+          description: The request body failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while computing the preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/campaigns/{campaignId}/report-rows/adjustments:
     post:
       tags:
@@ -3622,6 +3764,112 @@ components:
           description: The number of override rows written (0 when the upload changed nothing).
       required:
         - applied
+    ConstructedEntityLevelEnumV1:
+      type: string
+      description: >
+        Which constructed-name level the Add Line cascading picker (PDI_117) is reading - what a level
+        denotes depends on the row's platform (line item, ad set, campaign or insertion order); see
+        ReportRowV1's line_item_name/insertion_order_name/campaign_constructed_name.
+      enum:
+        - LVL1
+        - LVL2
+        - LVL3
+    ConstructedIdOriginEnumV1:
+      type: string
+      description: >
+        Whether a constructed id came from an existing mart entity the user selected (Add Line mode A) or
+        was freshly generated from a typed name (mode B).
+      enum:
+        - EXISTING
+        - GENERATED
+    ConstructedEntityV1:
+      type: object
+      description: >
+        One constructed-name-level entity from the campaign's own mart data, as listed by the Add Line
+        cascading picker. first_date/last_date/impressions are the discriminators a disambiguation
+        popover shows when one name carries several distinct ids.
+      properties:
+        name:
+          type: string
+          description: The entity's constructed name at this level.
+        id:
+          type: string
+          description: The entity's constructed id at this level.
+        first_date:
+          type: string
+          description: Earliest delivery date (ISO format) this entity was seen on.
+        last_date:
+          type: string
+          description: Latest delivery date (ISO format) this entity was seen on.
+        impressions:
+          type: integer
+          format: int64
+          description: Summed delivered impressions for this entity, or null.
+      required:
+        - name
+        - id
+    ConstructedEntityPageResponseV1:
+      description: A page of a campaign's constructed-name-level entities.
+      allOf:
+        - $ref: '#/components/schemas/PageResponseV1'
+        - type: object
+          properties:
+            content:
+              type: array
+              description: The constructed entities on this page.
+              items:
+                $ref: '#/components/schemas/ConstructedEntityV1'
+          required:
+            - content
+    ConstructedIdsPreviewRequestV1:
+      type: object
+      description: The names Add Line mode B would write, to preview the ids the server would generate.
+      properties:
+        constructed_name:
+          type: string
+          description: The level-1 constructed name.
+          minLength: 1
+          maxLength: 500
+        constructed_name_lvl2:
+          type: string
+          description: The level-2 constructed name.
+          minLength: 1
+          maxLength: 500
+        constructed_name_lvl3:
+          type: string
+          description: The level-3 constructed name.
+          minLength: 1
+          maxLength: 500
+      required:
+        - constructed_name
+        - constructed_name_lvl2
+        - constructed_name_lvl3
+    ConstructedIdPreviewV1:
+      type: object
+      description: One level's previewed constructed id.
+      properties:
+        id:
+          type: string
+          description: The id that would be written for this level.
+        origin:
+          $ref: '#/components/schemas/ConstructedIdOriginEnumV1'
+      required:
+        - id
+        - origin
+    ConstructedIdsPreviewResponseV1:
+      type: object
+      description: The three levels' previewed constructed ids.
+      properties:
+        level1:
+          $ref: '#/components/schemas/ConstructedIdPreviewV1'
+        level2:
+          $ref: '#/components/schemas/ConstructedIdPreviewV1'
+        level3:
+          $ref: '#/components/schemas/ConstructedIdPreviewV1'
+      required:
+        - level1
+        - level2
+        - level3
     ReportRowTotalsV1:
       type: object
       description: >

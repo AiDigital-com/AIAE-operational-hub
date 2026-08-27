@@ -37,6 +37,13 @@ export type DashboardDatasetRowsPageResponseV1 = components["schemas"]["Dashboar
 export type DashboardPageResponseV1 = components["schemas"]["DashboardPageResponseV1"];
 export type InsertionOrderV1 = components["schemas"]["InsertionOrderV1"];
 export type InsertionOrderLineItemV1 = components["schemas"]["InsertionOrderLineItemV1"];
+export type ConstructedEntityLevelEnumV1 = components["schemas"]["ConstructedEntityLevelEnumV1"];
+export type ConstructedIdOriginEnumV1 = components["schemas"]["ConstructedIdOriginEnumV1"];
+export type ConstructedEntityV1 = components["schemas"]["ConstructedEntityV1"];
+export type ConstructedEntityPageResponseV1 = components["schemas"]["ConstructedEntityPageResponseV1"];
+export type ConstructedIdsPreviewRequestV1 = components["schemas"]["ConstructedIdsPreviewRequestV1"];
+export type ConstructedIdPreviewV1 = components["schemas"]["ConstructedIdPreviewV1"];
+export type ConstructedIdsPreviewResponseV1 = components["schemas"]["ConstructedIdsPreviewResponseV1"];
 
 /** Which dimensions, metrics, and active row filters a report view persists. */
 export interface ReportConfig {

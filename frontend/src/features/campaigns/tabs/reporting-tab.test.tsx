@@ -15,9 +15,11 @@ import {
   duplicateReportView,
   exportReportRows,
   listCampaignReportRows,
+  listConstructedEntities,
   listConversionBreakdown,
   listReportRowDistinctValues,
   listReportViews,
+  previewConstructedIds,
   saveReportRowAdjustments,
   updateReportView,
   uploadBulkAdjustments,
@@ -49,6 +51,15 @@ vi.mock("../api", () => ({
   updateReportView: vi.fn(),
   deleteReportView: vi.fn(),
   duplicateReportView: vi.fn(),
+  // PDI_117 Add Line id resolution/preview - defaulted so every existing "Add line" test (most of which
+  // do not care about identity resolution at all) gets a harmless, non-throwing answer: no mart entities
+  // to resolve against. Tests that actually cover resolution override this per test.
+  listConstructedEntities: vi.fn().mockResolvedValue({ pageNumber: 1, pageSize: 1, totalElements: 0, totalPages: 0, content: [] }),
+  previewConstructedIds: vi.fn().mockResolvedValue({
+    level1: { id: "OPH_defaultlevel1", origin: "GENERATED" },
+    level2: { id: "OPH_defaultlevel2", origin: "GENERATED" },
+    level3: { id: "OPH_defaultlevel3", origin: "GENERATED" },
+  }),
 }));
 
 function deferred<T>() {
@@ -2159,7 +2170,10 @@ describe("ReportingTab editing", () => {
   });
 
   it("should trim a typed key before writing it, as every spreadsheet comparison does", async () => {
-    // Given: an added line whose Level 1 name arrived with a stray space around it, as a paste does
+    // Given: an added line whose Level 1 name arrived with a stray space around it, as a paste does.
+    // PDI_117: the three constructed ids are never typed and resolution is per level (D2) - the default
+    // mock campaign has no mart data at all, so every level resolves to nothing and must be confirmed as
+    // new individually. The point of this test is the typed name key, not how the ids get filled.
     vi.mocked(saveReportRowAdjustments).mockResolvedValue(undefined);
     renderReportingTab();
     await screen.findByText("LI-1");
@@ -2175,15 +2189,32 @@ describe("ReportingTab editing", () => {
       ["Account for new line", " Proxim Agency "],
       ["Account id for new line", "12345"],
       ["Constructed name L1 for new line", "  ProximAgency_FPCU_12  "],
-      ["Constructed id L1 for new line", "695346"],
       ["Constructed name L2 for new line", "IO-1"],
-      ["Constructed id L2 for new line", "IO1"],
       ["Constructed name L3 for new line", "Whitelist"],
-      ["Constructed id L3 for new line", "WL1"],
     ];
     for (const [name, value] of typed) {
       fireEvent.change(screen.getByRole("textbox", { name }), { target: { value } });
     }
+    // Each level independently resolves to nothing and must be confirmed as new before it generates
+    for (const level of ["LVL1", "LVL2", "LVL3"]) {
+      const confirmButton = await screen.findByRole(
+        "button", { name: `${level} id - no match, create it as new?` }
+      );
+      await userEvent.click(confirmButton);
+    }
+    // The generated ids fill in asynchronously (debounced preview) before Save is allowed to proceed
+    // One budget covering all three rather than three one-second budgets in series: the ids arrive
+    // together in a single debounced preview response, so waiting for them separately spends the first
+    // two budgets on an event that has already happened and leaves the third to absorb every delay. On
+    // a loaded CI runner that third budget expires while React is still flushing the staged updates.
+    await waitFor(
+      () => {
+        expect(screen.getByText("OPH_defaultlevel1")).toBeInTheDocument();
+        expect(screen.getByText("OPH_defaultlevel2")).toBeInTheDocument();
+        expect(screen.getByText("OPH_defaultlevel3")).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
 
     // When:
     await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
@@ -2214,7 +2245,8 @@ describe("ReportingTab editing", () => {
     expect(await screen.findByText(/Fill required fields before saving/)).toBeInTheDocument();
     expect(saveReportRowAdjustments).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Date for new line")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("textbox", { name: /Constructed id L1 for new line/ })).toHaveAttribute("aria-invalid", "true");
+    // PDI_117: the constructed id cells are never inputs, so a missing id shows the same "Required" text
+    // as every other empty REQUIRED cell rather than an invalid textbox of its own.
     // All 10 REQUIRED key dims empty + at least one metric (impressions) flagged Required
     expect(screen.getAllByText("Required").length).toBeGreaterThanOrEqual(10);
   });

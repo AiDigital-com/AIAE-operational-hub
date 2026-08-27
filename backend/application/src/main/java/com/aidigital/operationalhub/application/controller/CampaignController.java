@@ -4,6 +4,10 @@ import com.aidigital.operationalhub.application.api.v1.generated.CampaignsApi;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignPageResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSearchRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedEntityLevelEnumV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedEntityPageResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedIdsPreviewRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ConstructedIdsPreviewResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionAdjustmentRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.DashboardCreateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.DashboardDataSourceRequestV1;
@@ -26,6 +30,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.ReportVie
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportViewUpsertV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportViewV1;
 import com.aidigital.operationalhub.application.mapper.CampaignSearchContractMapper;
+import com.aidigital.operationalhub.application.mapper.ConstructedEntityContractMapper;
 import com.aidigital.operationalhub.application.mapper.ConversionAdjustmentXlsxAssembler;
 import com.aidigital.operationalhub.application.mapper.ConversionBreakdownContractMapper;
 import com.aidigital.operationalhub.application.mapper.DashboardContractMapper;
@@ -43,8 +48,10 @@ import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.ConversionAdjustmentService;
 import com.aidigital.operationalhub.service.agency.InsertionOrderService;
 import com.aidigital.operationalhub.service.agency.ReportRowService;
+import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
 import com.aidigital.operationalhub.service.agency.model.ConversionRowExportModel;
 import com.aidigital.operationalhub.service.agency.model.ConversionRowModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowDateRangeModel;
@@ -100,6 +107,7 @@ public class CampaignController implements CampaignsApi {
 	private final XlsxDownloadResponder xlsxDownloadResponder;
 	private final ReportViewContractMapper reportViewMapper;
 	private final DashboardContractMapper dashboardMapper;
+	private final ConstructedEntityContractMapper constructedEntityMapper;
 
 	@Override
 	public ResponseEntity<CampaignPageResponseV1> searchCampaigns(
@@ -141,6 +149,28 @@ public class CampaignController implements CampaignsApi {
 		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
 		ReportRowSortField sortField = reportRowMapper.toFilterField(field);
 		return ResponseEntity.ok(reportRowService.findDistinctValues(currentUser, campaignId, sortField));
+	}
+
+	@Override
+	public ResponseEntity<ConstructedEntityPageResponseV1> listConstructedEntities(
+			Long campaignId, ConstructedEntityLevelEnumV1 level, String platform, String accountId, String name,
+			Integer pageNumber, Integer pageSize) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		ConstructedEntityLevel resolvedLevel = constructedEntityMapper.toLevel(level);
+		return ResponseEntity.ok(constructedEntityMapper.toPageResponse(reportRowService.findConstructedEntities(
+				currentUser, campaignId, resolvedLevel, platform, accountId, name, pageNumber, pageSize)));
+	}
+
+	@Override
+	public ResponseEntity<ConstructedIdsPreviewResponseV1> previewConstructedIds(
+			Long campaignId, ConstructedIdsPreviewRequestV1 constructedIdsPreviewRequestV1) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		ConstructedIdsPreviewModel preview = reportRowService.previewConstructedIds(
+				currentUser, campaignId,
+				constructedEntityMapper.toName(constructedIdsPreviewRequestV1),
+				constructedEntityMapper.toNameLvl2(constructedIdsPreviewRequestV1),
+				constructedEntityMapper.toNameLvl3(constructedIdsPreviewRequestV1));
+		return ResponseEntity.ok(constructedEntityMapper.toResponse(preview));
 	}
 
 	@Override

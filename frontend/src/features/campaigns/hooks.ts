@@ -1,4 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useDebounce } from "../../shared/hooks/use-debounce";
+import { ADD_LINE_RESOLVE_DEBOUNCE_MS, ADD_LINE_RESOLVE_PAGE_SIZE } from "./constants/add-line";
 import { DEFAULT_DIMS, DEFAULT_METRICS } from "../pacing/mock/reports";
 import {
   applyConversionAdjustments,
@@ -12,12 +14,14 @@ import {
   getCampaign,
   listCampaignInsertionOrders,
   listCampaignReportRows,
+  listConstructedEntities,
   listConversionBreakdown,
   listDashboardDatasetDistinctValues,
   listDashboardDatasetRows,
   listDashboards,
   listReportRowDistinctValues,
   listReportViews,
+  previewConstructedIds,
   previewDashboardDataset,
   removeDashboardDataSource,
   saveReportRowAdjustments,
@@ -29,6 +33,7 @@ import {
 import { toSetupModel } from "./setup";
 import type {
   CampaignV1,
+  ConstructedEntityLevelEnumV1,
   ConversionAdjustmentRowV1,
   ConversionBreakdownRequestV1,
   DashboardDatasetFilterV1,
@@ -174,6 +179,102 @@ export function useSaveReportRowAdjustments(campaignId: number | undefined) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["campaigns", "report-rows", campaignId] });
     },
+  });
+}
+
+/**
+ * Resolves one constructed-name level's typed name against the campaign's own mart data - PDI_117 mode
+ * A's identity resolution (the name stays a free-text cell; only the id is resolved instead of typed).
+ * Disabled until the owning added row is in edit mode; the name itself is debounced
+ * ({@link ADD_LINE_RESOLVE_DEBOUNCE_MS}) so settling on a value issues one request, not one per keystroke,
+ * and the query key carries the debounced term, so re-rendering mid-type does not refetch.
+ *
+ * @param campaignId the campaign id
+ * @param level      the constructed-name level to resolve at
+ * @param platform   the row's current platform, or empty for every platform
+ * @param accountId  the row's current platform account id, or empty for every account
+ * @param name       the raw (not yet debounced) typed constructed name
+ * @param enabled    whether the owning row is in edit mode and in mode A
+ */
+export function useResolveConstructedName(
+  campaignId: number | undefined,
+  level: ConstructedEntityLevelEnumV1,
+  platform: string,
+  accountId: string,
+  name: string,
+  enabled: boolean
+) {
+  const debouncedName = useDebounce(name, ADD_LINE_RESOLVE_DEBOUNCE_MS);
+  return useQuery({
+    queryKey: ["campaigns", "constructed-entities", campaignId, level, platform, accountId, debouncedName],
+    queryFn: ({ signal }) =>
+      listConstructedEntities(
+        campaignId as number, level, platform || undefined, accountId || undefined, debouncedName || undefined,
+        1, ADD_LINE_RESOLVE_PAGE_SIZE, signal
+      ),
+    enabled: enabled && campaignId != null && debouncedName !== "",
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Whether the campaign has any level-1 mart data at all - a lightweight, campaign-scoped probe (not a
+ * per-row read: every added row's empty-state check shares this one cached query) used to explain and
+ * steer to Add Line mode B when a brand-new campaign has no platform data yet.
+ *
+ * @param campaignId the campaign id
+ * @param enabled    whether at least one added row is currently open in mode A
+ */
+export function useCampaignHasConstructedEntities(campaignId: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["campaigns", "constructed-entities", "any", campaignId],
+    queryFn: ({ signal }) =>
+      listConstructedEntities(campaignId as number, "LVL1", undefined, undefined, undefined, 1, 1, signal),
+    enabled: enabled && campaignId != null,
+    staleTime: 5 * 60_000,
+    select: (data) => data.content.length > 0,
+  });
+}
+
+/**
+ * Previews the constructed ids Add Line mode B would generate/reuse for the given names, so the row can
+ * show the resolved value before Save. Disabled until mode B is active and every level has a typed name -
+ * a preview of a blank or partial name is not meaningful and {@link saveReportRowAdjustments} would
+ * recompute it server-side regardless.
+ *
+ * @param campaignId the campaign id
+ * @param name       the level-1 typed constructed name
+ * @param nameLvl2   the level-2 typed constructed name
+ * @param nameLvl3   the level-3 typed constructed name
+ * @param enabled    whether the owning row is currently in mode B
+ */
+export function useConstructedIdsPreview(
+  campaignId: number | undefined,
+  name: string,
+  nameLvl2: string,
+  nameLvl3: string,
+  enabled: boolean
+) {
+  const debouncedName = useDebounce(name, ADD_LINE_RESOLVE_DEBOUNCE_MS);
+  const debouncedNameLvl2 = useDebounce(nameLvl2, ADD_LINE_RESOLVE_DEBOUNCE_MS);
+  const debouncedNameLvl3 = useDebounce(nameLvl3, ADD_LINE_RESOLVE_DEBOUNCE_MS);
+  const everyNamePresent = debouncedName !== "" && debouncedNameLvl2 !== "" && debouncedNameLvl3 !== "";
+  return useQuery({
+    queryKey: [
+      "campaigns", "constructed-ids-preview", campaignId, debouncedName, debouncedNameLvl2, debouncedNameLvl3,
+    ],
+    queryFn: ({ signal }) =>
+      previewConstructedIds(
+        campaignId as number,
+        {
+          constructed_name: debouncedName,
+          constructed_name_lvl2: debouncedNameLvl2,
+          constructed_name_lvl3: debouncedNameLvl3,
+        },
+        signal
+      ),
+    enabled: enabled && campaignId != null && everyNamePresent,
+    staleTime: 30_000,
   });
 }
 
