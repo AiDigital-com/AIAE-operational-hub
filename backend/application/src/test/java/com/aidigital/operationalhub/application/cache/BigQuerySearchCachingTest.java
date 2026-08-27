@@ -14,10 +14,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+import javax.management.MalformedObjectNameException;
+import javax.management.ObjectName;
+import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,6 +75,21 @@ class BigQuerySearchCachingTest {
 		Mockito.reset(bigQueryClient);
 		Objects.requireNonNull(cacheManager.getCache(CachedBigQuerySearchExecutor.CACHE_NAME)).clear();
 		bigQuerySearchCacheProperties.setSearchEnabled(true);
+	}
+
+	@Test
+	void shouldExposeCacheStatisticsToMicrometerTest() throws MalformedObjectNameException {
+		// Given:
+		var statisticsObjectName = new ObjectName(
+				"javax.cache:type=CacheStatistics,CacheManager=*,Cache="
+						+ CachedBigQuerySearchExecutor.CACHE_NAME);
+
+		// When:
+		var registeredStatistics = ManagementFactory.getPlatformMBeanServer()
+				.queryNames(statisticsObjectName, null);
+
+		// Then:
+		assertThat(registeredStatistics).isNotEmpty();
 	}
 
 	@Test

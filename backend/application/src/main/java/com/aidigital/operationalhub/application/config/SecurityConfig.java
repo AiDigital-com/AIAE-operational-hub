@@ -35,8 +35,9 @@ import java.util.List;
  * Spring Security configuration for the Operational Hub.
  *
  * <p>Configures an OAuth2 resource server validating Clerk-issued JWTs. Everything under
- * {@code /api/v1/**} requires an authenticated JWT; the actuator health endpoint and the OpenAPI
- * documentation endpoints are permitted anonymously. There is no mock-auth fallback.
+ * {@code /api/v1/**} requires an authenticated JWT; the actuator health and Prometheus scrape
+ * endpoints and the OpenAPI documentation endpoints are permitted anonymously. The scrape endpoint
+ * is only routed inside the Kubernetes cluster. There is no mock-auth fallback.
  */
 @Configuration
 @RequiredArgsConstructor
@@ -47,6 +48,7 @@ public class SecurityConfig {
 	private static final String[] PUBLIC_PATHS = {
 			"/actuator/health",
 			"/actuator/health/**",
+			"/actuator/prometheus",
 			"/v3/api-docs/**",
 			"/swagger-ui/**",
 			"/swagger-ui.html",
@@ -79,7 +81,8 @@ public class SecurityConfig {
 	private final CompanyEmailDomainAuthorizationManager companyEmailDomainAuthorizationManager;
 
 	/**
-	 * Builds the security filter chain: stateless, JWT resource server, public health/docs.
+	 * Builds the security filter chain: stateless JWT resource server with public health, metrics, and
+	 * documentation endpoints.
 	 *
 	 * @param http the {@link HttpSecurity} to configure
 	 * @return the configured {@link SecurityFilterChain}
