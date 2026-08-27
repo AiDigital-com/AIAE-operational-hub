@@ -34,6 +34,26 @@ public record BqRow(Map<String, Object> values) {
 	}
 
 	/**
+	 * Returns the column value as a {@code Boolean}, or {@code null} when absent. Used for an aggregate
+	 * boolean result such as {@code LOGICAL_OR(...)} - BigQuery's REST response surfaces every scalar
+	 * value as its string form, so a raw {@code "true"}/{@code "false"} is parsed the same way a raw
+	 * numeric string is in {@link #getLong} and {@link #getDouble}.
+	 *
+	 * @param column the column name
+	 * @return the boolean value, or {@code null}
+	 */
+	public Boolean getBoolean(String column) {
+		Object value = values.get(column);
+		if (value == null) {
+			return null;
+		}
+		if (value instanceof Boolean bool) {
+			return bool;
+		}
+		return Boolean.parseBoolean(value.toString());
+	}
+
+	/**
 	 * Returns the column value as a {@code Double}, or {@code null} when absent or not numeric.
 	 *
 	 * @param column the column name

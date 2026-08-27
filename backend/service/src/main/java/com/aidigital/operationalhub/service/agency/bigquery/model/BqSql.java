@@ -390,6 +390,43 @@ public final class BqSql {
 	}
 
 	/**
+	 * Wraps an arbitrary expression in {@code ARRAY_AGG(DISTINCT ... IGNORE NULLS)} - the
+	 * expression-level counterpart of {@link #arrayAggDistinct(String)}, for aggregating something that
+	 * is not a bare column (a conditional {@code CASE}, in particular - the shape a folded per-level
+	 * name-resolution read needs, one conditional aggregate per level over a single scan).
+	 *
+	 * @param expression the expression to aggregate, built from this class
+	 * @return the wrapped expression
+	 */
+	public static String arrayAggDistinctExpression(String expression) {
+		return "ARRAY_AGG(DISTINCT " + expression + " IGNORE NULLS)";
+	}
+
+	/**
+	 * Wraps a boolean expression in {@code LOGICAL_OR(...)} - true when any row in the aggregated group
+	 * satisfies it, used to fold an existence check ("does any row in scope match?") into the same
+	 * conditional-aggregate scan as other per-row checks instead of a separate {@code LIMIT 1} read.
+	 *
+	 * @param condition the boolean expression to aggregate
+	 * @return the wrapped expression
+	 */
+	public static String logicalOr(String condition) {
+		return "LOGICAL_OR(" + condition + ")";
+	}
+
+	/**
+	 * Builds {@code `column` IS NOT NULL} as a composable expression - the expression-level counterpart
+	 * of {@link BqRequest.Builder#whereNotNull(String)}, for building a larger expression (a
+	 * {@code CASE} condition inside an aggregate, say) rather than adding a standalone predicate.
+	 *
+	 * @param column the unquoted column name
+	 * @return the rendered expression
+	 */
+	public static String isNotNull(String column) {
+		return col(column) + " IS NOT NULL";
+	}
+
+	/**
 	 * Wraps a column in {@code COUNT(DISTINCT ...) OVER ()}, a window function computing the total
 	 * distinct-value count across the whole (post {@code GROUP BY}, pre {@code LIMIT}) result set, so a
 	 * paged query can carry its own total without a separate count job.

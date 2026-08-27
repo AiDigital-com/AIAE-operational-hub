@@ -1,8 +1,10 @@
 package com.aidigital.operationalhub.service.agency.bigquery.service.impl;
 
 import com.aidigital.operationalhub.externalservices.bigquery.config.BigQueryProperties;
+import com.aidigital.operationalhub.service.agency.bigquery.model.BqInsert;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRequest;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRow;
+import com.aidigital.operationalhub.service.agency.bigquery.model.BqSql;
 import com.aidigital.operationalhub.service.agency.bigquery.model.CampaignDeliveryScope;
 import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
@@ -13,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 import static com.aidigital.operationalhub.service.agency.bigquery.model.BigQueryAdjustmentsViewColumns.ACCOUNT;
 import static com.aidigital.operationalhub.service.agency.bigquery.model.BigQueryAdjustmentsViewColumns.ACCOUNT_ID;
@@ -30,13 +33,34 @@ import static com.aidigital.operationalhub.service.agency.bigquery.model.BigQuer
  * common addition, not an edge case, so a row may legitimately carry real ids at some levels and
  * generated ones at others. The client-supplied identity is never trusted outright (D5) - for every
  * level this class re-resolves the name against the campaign's own mart data itself.
+ *
+ * <p><strong>PDI_117-perf:</strong> the naive shape of this class issued six scoped BigQuery reads per
+ * added row, and every one of them re-ran the campaign's own {@code SELECT DISTINCT constructed_name}
+ * scope as a nested subquery - a second full pass over the view on top of the read's own scan. This
+ * class instead resolves the campaign's scope names once per request ({@link #resolveScopeNames}),
+ * inlines them as escaped literals into every other read ({@link #campaignScoped}), folds V1 and the
+ * three per-level name resolves into one conditional-aggregate scan ({@link #findScopedResolution}), and
+ * runs the unscoped V4 check before the narrower, campaign-scoped V3 check so the common (no collision)
+ * case never pays for the second read ({@link #requireValidKey}). None of this changes what is
+ * validated or which error code a given failure produces - only how many BigQuery reads, and how many
+ * passes over the view, get there.
  */
 @Component
 @RequiredArgsConstructor
 class AddedRowValidator {
 
-	private static final String ALIAS_NAME = "matched_name";
-	private static final String ALIAS_ID = "matched_id";
+	/** Select alias the folded read exposes level 1's distinct matched real ids under. */
+	private static final String LVL1_IDS_ALIAS = "matched_ids_lvl1";
+	/** Select alias the folded read exposes level 2's distinct matched real ids under. */
+	private static final String LVL2_IDS_ALIAS = "matched_ids_lvl2";
+	/** Select alias the folded read exposes level 3's distinct matched real ids under. */
+	private static final String LVL3_IDS_ALIAS = "matched_ids_lvl3";
+	/** Select alias the folded read exposes V1's own triple-has-delivery check under. */
+	private static final String HAS_DELIVERY_ALIAS = "has_delivery";
+	/** A typed empty array literal - the folded read's answer for a level whose client name is blank. */
+	private static final String EMPTY_ID_ARRAY = "ARRAY<STRING>[]";
+	/** A synthetic, fully-absent row - the folded read's answer when BigQuery returns no aggregate row. */
+	private static final BqRow EMPTY_AGGREGATE_ROW = new BqRow(Map.of());
 	/** The sixteen naming-convention segments a generated level-1 name must split into (PDI_117 V6/Fact D). */
 	private static final int REQUIRED_NAME_SEGMENTS = 16;
 
@@ -55,20 +79,21 @@ class AddedRowValidator {
 	 * @throws BusinessException OPH_043-OPH_049 when any validation rule fails
 	 */
 	AdjustmentRowModel resolve(CampaignDeliveryScope scope, AdjustmentRowModel adjustment) {
-		requireKnownDeliveryAccount(scope, adjustment);
+		requireNonBlankDeliveryAccount(adjustment);
+		List<String> scopeNames = resolveScopeNames(scope);
+		ScopedRowResolution resolution = findScopedResolution(scope, scopeNames, adjustment);
+		requireKnownDeliveryAccount(adjustment, resolution.hasKnownDeliveryAccount());
 		ConstructedLevelIdentity level1 = resolveLevel(
-				scope, ConstructedEntityLevel.LVL1, adjustment.lineItemName(), adjustment.lineItemId(), true,
-				adjustment.lineItemName());
+				scopeNames, ConstructedEntityLevel.LVL1, adjustment.lineItemName(), adjustment.lineItemId(), true,
+				adjustment.lineItemName(), resolution.level1MatchedIds());
 		ConstructedLevelIdentity level2 = resolveLevel(
-				scope, ConstructedEntityLevel.LVL2, adjustment.insertionOrderName(), adjustment.insertionOrderId(),
-				false, adjustment.lineItemName());
+				scopeNames, ConstructedEntityLevel.LVL2, adjustment.insertionOrderName(),
+				adjustment.insertionOrderId(), false, adjustment.lineItemName(), resolution.level2MatchedIds());
 		ConstructedLevelIdentity level3 = resolveLevel(
-				scope, ConstructedEntityLevel.LVL3, adjustment.campaignConstructedName(),
-				adjustment.campaignConstructedId(), false, adjustment.lineItemName());
-		if (everyLevelResolvedReal(level1, level2, level3)) {
-			requireNotAnOverride(scope, adjustment, level1.id(), level2.id(), level3.id());
-		}
-		requireUnusedKey(adjustment.date(), level1.id(), level2.id(), level3.id());
+				scopeNames, ConstructedEntityLevel.LVL3, adjustment.campaignConstructedName(),
+				adjustment.campaignConstructedId(), false, adjustment.lineItemName(), resolution.level3MatchedIds());
+		boolean everyLevelReal = everyLevelResolvedReal(level1, level2, level3);
+		requireValidKey(scope, scopeNames, adjustment, level1.id(), level2.id(), level3.id(), everyLevelReal);
 		return withIdentity(
 				adjustment,
 				adjustment.platform(), adjustment.account(), adjustment.accountId(),
@@ -76,14 +101,139 @@ class AddedRowValidator {
 	}
 
 	/**
-	 * Resolves one constructed-name level independently (D2). The client's own id for that level states
-	 * what it must already be true: a real (non-{@code OPH_}) id means the client believes this level is
-	 * an existing entity, and V2 confirms the name actually resolves to that exact id; a blank or
-	 * {@code OPH_}-prefixed id means the client believes the level is new, and V8 confirms the name
-	 * really resolves to nothing before a fresh id is generated. Level 1 additionally applies V6/V7
-	 * before generating.
+	 * Resolves the campaign's own distinct level-1 constructed names once per request (PDI_117-perf) and
+	 * inlines them into every other read this class runs ({@link #campaignScoped}), instead of each read
+	 * re-running the same {@code SELECT DISTINCT constructed_name ...} as a nested subquery.
 	 *
-	 * @param scope       the resolved campaign delivery scope
+	 * <p>Routed through {@link BigQuerySearchGateway#fetchCachedUntilWrite} rather than the plain,
+	 * uncached {@link BigQuerySearchGateway#fetch}: the campaign's scope only changes when this
+	 * application itself writes a new constructed name, and every such write already evicts that cache
+	 * region (see {@link BigQuerySearchGateway#evictSearchCache()}), so a repeat save on the same
+	 * campaign can skip this read entirely rather than only saving the subquery it used to cost.
+	 *
+	 * @param scope the resolved campaign delivery scope
+	 * @return the campaign's distinct level-1 constructed names, possibly empty
+	 */
+	List<String> resolveScopeNames(CampaignDeliveryScope scope) {
+		return gateway.fetchCachedUntilWrite(
+				scope.constructedNames(), row -> row.getString(CampaignDeliveryScopeResolver.CONSTRUCTED_NAME_ALIAS));
+	}
+
+	/**
+	 * V1 (existence half) and the three per-level name resolves, folded into one conditional-aggregate
+	 * scan of the campaign's scoped rows - each level's distinct matched real ids and V1's own
+	 * platform/account/account id existence check are independent conditional aggregates over the same
+	 * pass, rather than four separate scoped reads. Does not select the popover's discriminators
+	 * ({@code first_date}/{@code last_date}/{@code impressions}) - the save path never needs them; those
+	 * stay on {@code constructed-entities}, read through {@code ConstructedEntityLookup} unchanged.
+	 *
+	 * @param scope      the resolved campaign delivery scope
+	 * @param scopeNames the campaign's pre-fetched distinct level-1 constructed names
+	 * @param adjustment the added row
+	 * @return the folded resolution
+	 */
+	ScopedRowResolution findScopedResolution(
+			CampaignDeliveryScope scope, List<String> scopeNames, AdjustmentRowModel adjustment) {
+		BqRequest request = campaignScoped(scope, scopeNames)
+				.selectExpression(
+						matchedIdsExpression(ConstructedEntityLevel.LVL1, adjustment.lineItemName()), LVL1_IDS_ALIAS)
+				.selectExpression(
+						matchedIdsExpression(ConstructedEntityLevel.LVL2, adjustment.insertionOrderName()),
+						LVL2_IDS_ALIAS)
+				.selectExpression(
+						matchedIdsExpression(ConstructedEntityLevel.LVL3, adjustment.campaignConstructedName()),
+						LVL3_IDS_ALIAS)
+				.selectExpression(hasDeliveryExpression(adjustment), HAS_DELIVERY_ALIAS)
+				.build();
+		List<BqRow> rows = gateway.fetch(request, row -> row);
+		BqRow aggregate = rows.isEmpty() ? EMPTY_AGGREGATE_ROW : rows.getFirst();
+		return new ScopedRowResolution(
+				aggregate.getStringList(LVL1_IDS_ALIAS),
+				aggregate.getStringList(LVL2_IDS_ALIAS),
+				aggregate.getStringList(LVL3_IDS_ALIAS),
+				Boolean.TRUE.equals(aggregate.getBoolean(HAS_DELIVERY_ALIAS)));
+	}
+
+	/**
+	 * Builds one level's conditional-aggregate select expression for {@link #findScopedResolution}: the
+	 * distinct real ids of scoped rows whose name column exactly equals the client's typed name - the
+	 * same {@code name = value AND id IS NOT NULL} condition the old per-level read applied as a
+	 * {@code WHERE} clause, applied here as an {@code ARRAY_AGG(DISTINCT CASE WHEN ... THEN ... END)}
+	 * instead so all three levels share one scan. A blank name yields a typed empty array with no
+	 * aggregation at all, matching the old read's own blank-name short-circuit
+	 * ({@code findLevelMatches} used to return {@code List.of()} without querying).
+	 *
+	 * @param level the constructed-name level
+	 * @param name  the level's client-submitted name, may be blank
+	 * @return the select expression
+	 */
+	String matchedIdsExpression(ConstructedEntityLevel level, String name) {
+		if (isBlank(name)) {
+			return EMPTY_ID_ARRAY;
+		}
+		String condition = BqSql.allOf(
+				BqSql.equalsLiteral(level.getNameColumn(), name), BqSql.isNotNull(level.getIdColumn()));
+		String caseExpression = BqSql.caseWhen(Map.of(condition, BqSql.col(level.getIdColumn())), null);
+		return BqSql.arrayAggDistinctExpression(caseExpression);
+	}
+
+	/**
+	 * Builds V1's existence-check select expression for {@link #findScopedResolution}: whether any row in
+	 * the campaign's scope carries the row's exact platform/account/account id triple.
+	 *
+	 * @param adjustment the added row
+	 * @return the select expression
+	 */
+	String hasDeliveryExpression(AdjustmentRowModel adjustment) {
+		String condition = BqSql.allOf(
+				BqSql.equalsLiteral(PLATFORM, adjustment.platform()),
+				BqSql.equalsLiteral(ACCOUNT, adjustment.account()),
+				BqSql.equalsLiteral(ACCOUNT_ID, adjustment.accountId()));
+		return BqSql.logicalOr(condition);
+	}
+
+	/**
+	 * V1 (blank-input half): the row's platform/account/account id triple must be present before any
+	 * BigQuery read is attempted - a fast, read-free rejection for the common "field left empty" case.
+	 *
+	 * @param adjustment the added row
+	 * @throws BusinessException OPH_043 when any of the three fields is blank
+	 */
+	void requireNonBlankDeliveryAccount(AdjustmentRowModel adjustment) {
+		if (isBlank(adjustment.platform()) || isBlank(adjustment.account()) || isBlank(adjustment.accountId())) {
+			throw new BusinessException(
+					OperationalHubErrorReason.OPH_043,
+					adjustment.platform(), adjustment.account(), adjustment.accountId());
+		}
+	}
+
+	/**
+	 * V1 (existence half): the row's platform/account/account id triple must already have delivery
+	 * somewhere in this campaign's mart data - closes the read view's "vanishing row" failure mode (the
+	 * added-rows branch joins on date and the three constructed ids only, with no platform/account
+	 * condition), and keeps a manually-added row's platform from being free-text junk.
+	 *
+	 * @param adjustment  the added row
+	 * @param hasDelivery {@link #findScopedResolution}'s V1 existence check for this triple
+	 * @throws BusinessException OPH_043 when the triple matches no campaign delivery
+	 */
+	void requireKnownDeliveryAccount(AdjustmentRowModel adjustment, boolean hasDelivery) {
+		if (!hasDelivery) {
+			throw new BusinessException(
+					OperationalHubErrorReason.OPH_043,
+					adjustment.platform(), adjustment.account(), adjustment.accountId());
+		}
+	}
+
+	/**
+	 * Resolves one constructed-name level independently (D2), from the ids {@link #findScopedResolution}
+	 * already fetched for it. The client's own id for that level states what it must already be true: a
+	 * real (non-{@code OPH_}) id means the client believes this level is an existing entity, and V2
+	 * confirms the name actually resolves to that exact id; a blank or {@code OPH_}-prefixed id means the
+	 * client believes the level is new, and V8 confirms the name really resolves to nothing before a
+	 * fresh id is generated. Level 1 additionally applies V6/V7 before generating.
+	 *
+	 * @param scopeNames  the campaign's pre-fetched distinct level-1 constructed names, used by V7
 	 * @param level       the constructed-name level to resolve
 	 * @param clientName  the level's client-submitted (still free-text, still trusted) name
 	 * @param clientId    the level's client-submitted id - never trusted as a source of truth, only as a
@@ -91,85 +241,32 @@ class AddedRowValidator {
 	 * @param isLevelOne  whether this is level 1 - gates V6/V7, which only apply there
 	 * @param level1Name  the row's level-1 name, used to derive the campaign scope (D3) when a
 	 *                    level-2/level-3 name needs to be generated; unused for level 1 itself
+	 * @param matchedIds  the level's distinct real ids whose name matches {@code clientName} exactly, from
+	 *                    {@link #findScopedResolution}; a matched row's own name is always {@code
+	 *                    clientName} itself, since the folded read's condition is an exact equality
 	 * @return the level's resolved identity
 	 * @throws BusinessException OPH_044 (V2), OPH_047 (V6), OPH_048 (V7) or OPH_049 (V8)
 	 */
 	ConstructedLevelIdentity resolveLevel(
-			CampaignDeliveryScope scope, ConstructedEntityLevel level, String clientName, String clientId,
-			boolean isLevelOne, String level1Name) {
-		List<BqRow> matches = findLevelMatches(scope, level, clientName);
+			List<String> scopeNames, ConstructedEntityLevel level, String clientName, String clientId,
+			boolean isLevelOne, String level1Name, List<String> matchedIds) {
 		if (isRealId(clientId)) {
-			return matches.stream()
-					.filter(row -> clientId.equals(row.getString(ALIAS_ID)))
-					.findFirst()
-					.map(row -> new ConstructedLevelIdentity(row.getString(ALIAS_NAME), row.getString(ALIAS_ID)))
-					.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_044));
+			if (matchedIds.contains(clientId)) {
+				return new ConstructedLevelIdentity(clientName, clientId);
+			}
+			throw new BusinessException(OperationalHubErrorReason.OPH_044);
 		}
-		if (!matches.isEmpty()) {
+		if (!matchedIds.isEmpty()) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_049);
 		}
 		if (isLevelOne) {
 			requireSixteenSegments(clientName);
-			requireInheritedPrefix(scope, clientName);
+			requireInheritedPrefix(scopeNames, clientName);
 			return new ConstructedLevelIdentity(clientName, idGenerator.generate(List.of(requireName(clientName))));
 		}
 		String campaignScopeName = idGenerator.scopeOf(requireName(level1Name));
 		return new ConstructedLevelIdentity(
 				clientName, idGenerator.generate(List.of(campaignScopeName, requireName(clientName))));
-	}
-
-	/**
-	 * V1: the row's platform/account/account id triple must already have delivery somewhere in this
-	 * campaign's mart data. Closes the read view's "vanishing row" failure mode (the added-rows branch
-	 * joins on date and the three constructed ids only, with no platform/account condition), and keeps a
-	 * manually-added row's platform from being free-text junk.
-	 *
-	 * @param scope      the resolved campaign delivery scope
-	 * @param adjustment the added row
-	 * @throws BusinessException OPH_043 when the triple is blank or matches no campaign delivery
-	 */
-	void requireKnownDeliveryAccount(CampaignDeliveryScope scope, AdjustmentRowModel adjustment) {
-		if (isBlank(adjustment.platform()) || isBlank(adjustment.account()) || isBlank(adjustment.accountId())) {
-			throw new BusinessException(
-					OperationalHubErrorReason.OPH_043,
-					adjustment.platform(), adjustment.account(), adjustment.accountId());
-		}
-		BqRequest request = campaignScoped(scope)
-				.select(PLATFORM)
-				.whereEquals(PLATFORM, adjustment.platform())
-				.whereEquals(ACCOUNT, adjustment.account())
-				.whereEquals(ACCOUNT_ID, adjustment.accountId())
-				.limitOffset(1, 0)
-				.build();
-		if (gateway.fetch(request, row -> row.getString(PLATFORM)).isEmpty()) {
-			throw new BusinessException(
-					OperationalHubErrorReason.OPH_043,
-					adjustment.platform(), adjustment.account(), adjustment.accountId());
-		}
-	}
-
-	/**
-	 * Finds every distinct (name, id) pair this level's exact name resolves to in the campaign's own mart
-	 * data - the shared read behind V2 (does the client's real id actually belong to this name), V8 (does
-	 * a "new" name really match nothing) and level 1's real-id path.
-	 *
-	 * @param scope the resolved campaign delivery scope
-	 * @param level the constructed-name level to resolve
-	 * @param name  the exact constructed name to match
-	 * @return the matching (name, id) rows; empty when the name is blank or matches nothing
-	 */
-	List<BqRow> findLevelMatches(CampaignDeliveryScope scope, ConstructedEntityLevel level, String name) {
-		if (isBlank(name)) {
-			return List.of();
-		}
-		BqRequest request = campaignScoped(scope)
-				.distinct()
-				.select(level.getNameColumn(), ALIAS_NAME)
-				.select(level.getIdColumn(), ALIAS_ID)
-				.whereNotNull(level.getIdColumn())
-				.whereEquals(level.getNameColumn(), name)
-				.build();
-		return gateway.fetch(request, row -> row);
 	}
 
 	/**
@@ -201,20 +298,43 @@ class AddedRowValidator {
 	}
 
 	/**
-	 * V3: when every level resolved to a real entity, that entity must have no row on the row's own
-	 * requested date already - otherwise this is an edit of an existing row, not an addition, and must go
-	 * through the override path instead.
+	 * V3 and V4, folded into one happy-path read: V4 tests the final (date, id1, id2, id3) key completely
+	 * unscoped; V3 tests the same key within the campaign, only when every level resolved real. The
+	 * campaign-scoped set is always a subset of the unscoped one, so when the unscoped read finds nothing,
+	 * the scoped one cannot find anything either and both rules pass with a single read. Only when the
+	 * unscoped read finds something does a second, narrower read run - and only when V3 could even apply
+	 * (every level real) - to tell the two errors apart.
 	 *
-	 * @param scope      the resolved campaign delivery scope
-	 * @param adjustment the added row, carrying the requested date and account id
-	 * @param id1        the resolved, real level-1 id
-	 * @param id2        the resolved, real level-2 id
-	 * @param id3        the resolved, real level-3 id
-	 * @throws BusinessException OPH_045 when a row already exists for that entity on that date
+	 * @param scope          the resolved campaign delivery scope
+	 * @param scopeNames     the campaign's pre-fetched distinct level-1 constructed names
+	 * @param adjustment     the added row, carrying the requested date, platform and account id
+	 * @param id1            the resolved level-1 id
+	 * @param id2            the resolved level-2 id
+	 * @param id3            the resolved level-3 id
+	 * @param everyLevelReal whether every level resolved to a real mart entity (gates V3 - see
+	 *                       {@link #everyLevelResolvedReal})
+	 * @throws BusinessException OPH_045 (V3) when the entity already has a row on that date within the
+	 *                           campaign, or OPH_046 (V4) when the key is used anywhere in the mart
 	 */
-	void requireNotAnOverride(
-			CampaignDeliveryScope scope, AdjustmentRowModel adjustment, String id1, String id2, String id3) {
-		BqRequest request = campaignScoped(scope)
+	void requireValidKey(
+			CampaignDeliveryScope scope, List<String> scopeNames, AdjustmentRowModel adjustment,
+			String id1, String id2, String id3, boolean everyLevelReal) {
+		BqRequest unscopedRequest = new BqRequest.Builder()
+				.from(gateway.qualify(bigQueryProperties.getAdjustmentsView()))
+				.select(DATE)
+				.whereEquals(DATE, adjustment.date())
+				.whereEquals(CONSTRUCTED_ID, id1)
+				.whereEquals(CONSTRUCTED_ID_LVL2, id2)
+				.whereEquals(CONSTRUCTED_ID_LVL3, id3)
+				.limitOffset(1, 0)
+				.build();
+		if (gateway.fetch(unscopedRequest, row -> row.getString(DATE)).isEmpty()) {
+			return;
+		}
+		if (!everyLevelReal) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_046, adjustment.date());
+		}
+		BqRequest scopedRequest = campaignScoped(scope, scopeNames)
 				.select(DATE)
 				.whereEquals(PLATFORM, adjustment.platform())
 				.whereEquals(ACCOUNT_ID, adjustment.accountId())
@@ -224,9 +344,10 @@ class AddedRowValidator {
 				.whereEquals(DATE, adjustment.date())
 				.limitOffset(1, 0)
 				.build();
-		if (!gateway.fetch(request, row -> row.getString(DATE)).isEmpty()) {
+		if (!gateway.fetch(scopedRequest, row -> row.getString(DATE)).isEmpty()) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_045, adjustment.date());
 		}
+		throw new BusinessException(OperationalHubErrorReason.OPH_046, adjustment.date());
 	}
 
 	/**
@@ -251,13 +372,13 @@ class AddedRowValidator {
 	 * campaign it was created in. A campaign with no mart rows yet (or whose rows do not agree on any
 	 * leading segment) has no prefix to enforce, and this check is skipped.
 	 *
-	 * @param scope the resolved campaign delivery scope
-	 * @param name  the level-1 constructed name
+	 * @param scopeNames the campaign's pre-fetched distinct level-1 constructed names
+	 * @param name       the level-1 constructed name
 	 * @throws BusinessException OPH_048 when a non-empty prefix is known and {@code name} does not start
 	 *                           with it
 	 */
-	void requireInheritedPrefix(CampaignDeliveryScope scope, String name) {
-		String prefix = inheritedPrefix(scope);
+	void requireInheritedPrefix(List<String> scopeNames, String name) {
+		String prefix = inheritedPrefix(scopeNames);
 		if (!prefix.isEmpty() && (isBlank(name) || !name.startsWith(prefix))) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_048, prefix);
 		}
@@ -267,22 +388,23 @@ class AddedRowValidator {
 	 * Computes the campaign's inherited naming prefix the same way the frontend seeds a new added row's
 	 * name with one ({@code inheritedNamePrefix} in {@code frontend/src/features/pacing/mock/reports.ts}):
 	 * the leading underscore-separated segments every known constructed name in the campaign agrees on,
-	 * stopping at the first segment they disagree on (or that any of them leaves blank).
+	 * stopping at the first segment they disagree on (or that any of them leaves blank). Computed purely
+	 * from the already-fetched {@code scopeNames} (PDI_117-perf) - this used to be its own BigQuery read
+	 * ({@code gateway.fetch(scope.constructedNames(), ...)}); now it costs nothing beyond the single
+	 * request-level scope read every other check in this class already needs.
 	 *
-	 * @param scope the resolved campaign delivery scope
+	 * @param scopeNames the campaign's pre-fetched distinct level-1 constructed names
 	 * @return the shared prefix (including its trailing underscore), or {@code ""} when nothing is shared
 	 */
-	String inheritedPrefix(CampaignDeliveryScope scope) {
-		List<String> names = gateway.fetch(
-				scope.constructedNames(), row -> row.getString(CampaignDeliveryScopeResolver.CONSTRUCTED_NAME_ALIAS));
-		if (names.isEmpty()) {
+	String inheritedPrefix(List<String> scopeNames) {
+		if (scopeNames.isEmpty()) {
 			return "";
 		}
 		StringBuilder prefix = new StringBuilder();
 		for (int index = 0; index < REQUIRED_NAME_SEGMENTS; index++) {
 			String agreed = null;
 			boolean allAgree = true;
-			for (String name : names) {
+			for (String name : scopeNames) {
 				String[] segments = name.split("_", -1);
 				String segment = index < segments.length ? segments[index] : "";
 				if (segment.isBlank()) {
@@ -305,48 +427,48 @@ class AddedRowValidator {
 	}
 
 	/**
-	 * V4: the final resolved (date, id1, id2, id3) key must not already be used anywhere in the mart -
-	 * deliberately unscoped by campaign or account id, because the read view's {@code added_rows} branch
-	 * joins on date and the three constructed ids only (no platform/account/account id condition, see
-	 * PDI_117-PLAN.md Fact C). Applies to every added row, whatever mix of resolved/generated levels it
-	 * carries: a collision from a completely different campaign or advertiser on the same date would
-	 * still make the colliding row vanish from the view, so this check must see the whole mart, not just
-	 * this campaign's slice of it.
+	 * A fresh query builder scoped to the campaign's own constructed names, the same way every other
+	 * campaign-scoped report-row read is scoped - inlined as escaped string literals (PDI_117-perf) when
+	 * the set renders under BigQuery's statement-length ceiling, so the query pays for one pass over the
+	 * view instead of two (the inlined predicate versus the old nested {@code IN (SELECT DISTINCT ...)}
+	 * subquery, which was itself a second full scan). Falls back to that original subquery form when the
+	 * set is too large to inline safely, following the same length-aware idea
+	 * {@link BqInsert.Builder#buildBatches(int)} applies to a large write batch, so an unusually large
+	 * campaign degrades to the old (still correct) query shape rather than breaking the statement.
 	 *
-	 * @param date the row's requested delivery date
-	 * @param id1  the resolved level-1 id
-	 * @param id2  the resolved level-2 id
-	 * @param id3  the resolved level-3 id
-	 * @throws BusinessException OPH_046 when the key already matches a mart row
+	 * <p>An empty scope (a campaign with no known delivery yet) is scoped to a literal {@code FALSE}
+	 * rather than left unrestricted - {@link BqRequest.Builder#whereInStrings} is a no-op on an empty
+	 * list, and omitting the predicate entirely would incorrectly widen every read in this class to the
+	 * whole view instead of matching nothing.
+	 *
+	 * @param scope      the resolved campaign delivery scope
+	 * @param scopeNames the campaign's pre-fetched distinct level-1 constructed names
+	 * @return a new, campaign-scoped builder
 	 */
-	void requireUnusedKey(String date, String id1, String id2, String id3) {
-		BqRequest request = new BqRequest.Builder()
-				.from(gateway.qualify(bigQueryProperties.getAdjustmentsView()))
-				.select(DATE)
-				.whereEquals(DATE, date)
-				.whereEquals(CONSTRUCTED_ID, id1)
-				.whereEquals(CONSTRUCTED_ID_LVL2, id2)
-				.whereEquals(CONSTRUCTED_ID_LVL3, id3)
-				.limitOffset(1, 0)
-				.build();
-		if (!gateway.fetch(request, row -> row.getString(DATE)).isEmpty()) {
-			throw new BusinessException(OperationalHubErrorReason.OPH_046, date);
+	BqRequest.Builder campaignScoped(CampaignDeliveryScope scope, List<String> scopeNames) {
+		BqRequest.Builder builder = new BqRequest.Builder()
+				.from(gateway.qualify(bigQueryProperties.getAdjustmentsView()));
+		if (scopeNames.isEmpty()) {
+			return builder.whereFalse();
 		}
+		if (fitsInlineLimit(scopeNames)) {
+			return builder.whereInStrings(CONSTRUCTED_NAME, scopeNames);
+		}
+		return builder.whereInSubquery(
+				CONSTRUCTED_NAME, CampaignDeliveryScopeResolver.CONSTRUCTED_NAME_ALIAS, scope.constructedNames());
 	}
 
 	/**
-	 * A fresh query builder scoped to the campaign's own constructed names, the same way every other
-	 * campaign-scoped report-row read is scoped.
+	 * Whether the campaign's scope names render, as an inlined {@code IN ('a', 'b', ...)} literal list,
+	 * safely under BigQuery's fixed statement-length limit - the same ceiling
+	 * {@link BqInsert#MAX_STATEMENT_BYTES} guards a large insert batch against, reused here rather than
+	 * duplicated since both guard the identical BigQuery constraint.
 	 *
-	 * @param scope the resolved campaign delivery scope
-	 * @return a new, campaign-scoped builder
+	 * @param scopeNames the campaign's distinct level-1 constructed names
+	 * @return {@code true} when the rendered literal list is safely under the ceiling
 	 */
-	BqRequest.Builder campaignScoped(CampaignDeliveryScope scope) {
-		return new BqRequest.Builder()
-				.from(gateway.qualify(bigQueryProperties.getAdjustmentsView()))
-				.whereInSubquery(
-						CONSTRUCTED_NAME, CampaignDeliveryScopeResolver.CONSTRUCTED_NAME_ALIAS,
-						scope.constructedNames());
+	boolean fitsInlineLimit(List<String> scopeNames) {
+		return BqSql.in(CONSTRUCTED_NAME, scopeNames).length() <= BqInsert.MAX_STATEMENT_BYTES;
 	}
 
 	/**
