@@ -2227,7 +2227,13 @@ describe("ReportingTab editing", () => {
     const sent = (calls[calls.length - 1] as { adjustments: Record<string, unknown>[] }).adjustments[0];
     expect(sent.line_item_name).toBe("ProximAgency_FPCU_12");
     expect(sent.account).toBe("Proxim Agency");
-  });
+    // This runs in ~525ms locally, so the ceiling below is not a duration - a passing run never spends
+    // it. It exists because the test waits out three debounced resolutions plus the id preview, and a
+    // CI runner measured ~2.6x slower turns that wait into seconds. The default 5s budget is shared
+    // with the waitFor above, so the two starve each other exactly when the machine is loaded.
+    // If this ever times out again, the cause is no longer a tight budget: do not raise this further,
+    // find out why the third level's generated id never renders.
+  }, 20_000);
 
   it("should block save and keep editing when an added line is missing required write-table fields", async () => {
     // Given: an added line left blank. Editing suite shows RAW_GRAIN_DIMS (every BigQuery REQUIRED
