@@ -78,11 +78,24 @@ public final class DashboardBasicSql {
 	private static final List<String> CAMPAIGN_LEVEL_CONVERSION_CHANNELS =
 			List.of("YouTube", "Google SEM", "Google Search");
 
-	/** Alias of the level-1 name in the output - the template's name for it. */
+	/** Alias of the level-1 name, used internally and in the output alike - it is also the template's name for it. */
 	public static final String LEVEL_ONE_ALIAS = "lvl1";
 
-	/** Alias of the level-3 (creative) name in the output. */
+	/**
+	 * Internal alias of the level-3 (creative) name, used by every CTE that carries it - {@code groupedNames()},
+	 * {@code deliveryCte}, {@code conversionsCte} ({@code conv_lvl3}) and {@code joinedCte}
+	 * ({@code delivery.lvl3}). Unlike {@link #LEVEL_ONE_ALIAS}, this is not the template's output name; see
+	 * {@link #LEVEL_THREE_OUTPUT}.
+	 */
 	public static final String LEVEL_THREE_ALIAS = "lvl3";
+
+	/**
+	 * The ClicData template's name for the level-3 (creative) column, used only in the final {@code SELECT}'s
+	 * output alias and in the outer {@code ORDER BY}. Kept distinct from {@link #LEVEL_THREE_ALIAS} because the
+	 * internal CTEs must keep saying {@code lvl3} - the conversions join matches on that name - while the
+	 * written table must expose {@code Creative} to match the template ClicData binds to.
+	 */
+	public static final String LEVEL_THREE_OUTPUT = "Creative";
 
 	/** The plans table's owning-spreadsheet column - one value per reporting document. */
 	private static final String SPREADSHEET_ID = "spreadsheet_id";
@@ -172,7 +185,7 @@ public final class DashboardBasicSql {
 				+ "FROM joined\n"
 				+ "LEFT JOIN plans_n_benches ON joined." + LEVEL_ONE_ALIAS + " = plans_n_benches."
 				+ CONSTRUCTED_NAME + "\n"
-				+ "ORDER BY " + BqSql.col(DATE) + " ASC, " + LEVEL_ONE_ALIAS + " ASC, " + LEVEL_THREE_ALIAS
+				+ "ORDER BY " + BqSql.col(DATE) + " ASC, " + LEVEL_ONE_ALIAS + " ASC, " + LEVEL_THREE_OUTPUT
 				+ " ASC, " + BqSql.col(IMPRESSIONS) + " DESC";
 	}
 
@@ -442,49 +455,48 @@ public final class DashboardBasicSql {
 		List<String> columns = new ArrayList<>();
 		columns.add(BqSql.col(DATE) + " AS Date");
 		columns.add("DATE_SUB(" + BqSql.col(DATE) + ", INTERVAL MOD(EXTRACT(DAYOFWEEK FROM "
-				+ BqSql.col(DATE) + ") + 5, 7) DAY) AS week_start");
+				+ BqSql.col(DATE) + ") + 5, 7) DAY) AS week_start_date_monday");
 		columns.add("FORMAT_DATE('%Q', " + BqSql.col(DATE) + ") || 'Q' || FORMAT_DATE('%Y', "
-				+ BqSql.col(DATE) + ") AS quarter");
+				+ BqSql.col(DATE) + ") AS Quarter");
 		columns.add(BqSql.col(CNB_TACTIC) + " AS Tactic");
-		// goal belongs here, fifth, and this list is 51 columns long. Both were briefly taken to be wrong:
-		// the reporting tool's own tables come in four generations - 44, 49, 50 and 51 columns - and three
-		// 50-column ones sampled first (they sort first, being underscore-prefixed) have no goal. The
-		// current spreadsheet does emit it: its query selects 49 columns with goal fifth, and its sheet adds
-		// Revenue and ROAS by formula, which is the 51-column generation and what this builds. The older
-		// generations are older templates, recognisable by sheet-side header names the query never produces
-		// - Level_1_Naming for lvl1, Creative for lvl3, week_start_date_monday for week_start.
-		columns.add(BqSql.col("goal"));
+		// goal belongs here, fifth, and this list is 51 columns long: the reporting tool's own tables come in
+		// four generations - 44, 49, 50 and 51 columns - and this is the 51-column one, the current
+		// spreadsheet's, whose sheet adds Revenue and ROAS by formula on top of the query's 49. `backend/Clicdata
+		// matching (2).csv` is the source of truth for every output name below; `Channel` and `lvl1` are kept
+		// unmapped by request even though the CSV omits them - see the rename plan for why. `Level_1_Naming` as
+		// a name for `lvl1` was never confirmed against a real template and is not used anywhere in this class.
+		columns.add(BqSql.col("goal") + " AS Goal");
 		columns.add(BqSql.col(CNB_CHANNEL) + " AS Channel");
 		columns.add(BqSql.caseWhen(channelShortNames(), BqSql.col(CNB_CHANNEL)) + " AS Channel_Short_Name");
 		columns.add(BqSql.col(LEVEL_ONE_ALIAS));
-		columns.add(BqSql.col("campaign_short_name"));
-		columns.add(BqSql.col(LEVEL_THREE_ALIAS));
+		columns.add(BqSql.col("campaign_short_name") + " AS Campaign_Short_Name");
+		columns.add(BqSql.col(LEVEL_THREE_ALIAS) + " AS " + LEVEL_THREE_OUTPUT);
 		freeDimensions().forEach(column -> columns.add(BqSql.col(column)));
 		columns.add(positiveOnly(IMPRESSIONS) + " AS Impressions");
 		columns.add(positiveOnly(CLICKS) + " AS Clicks");
 		columns.add(ReportRowMetricSql.COST + " AS Cost");
 		columns.add(positiveOnly(COMPLETES) + " AS Completions");
 		columns.add(positiveOnly(JOINED_CONVERSIONS) + " AS Conversions");
-		columns.add(ReportRowMetricSql.IVT + " AS IVT_Rate");
+		columns.add(ReportRowMetricSql.IVT + " AS IVT");
 		columns.add(ReportRowMetricSql.CPC + " AS CPC");
 		columns.add(ReportRowMetricSql.CPM + " AS CPM");
 		columns.add(ReportRowMetricSql.CPV + " AS CPV");
 		columns.add(AVCR_FRACTION + " AS AVCR");
 		columns.add(CTR_FRACTION + " AS CTR");
-		benchmarkColumns().forEach(column -> columns.add(BqSql.col(column)));
-		columns.add(clickableImpressions() + " AS CTR_impressions");
-		columns.add(gated(ReportRowMetricSql.CPM_ELIGIBLE, BqSql.col(IMPRESSIONS)) + " AS CPM_impressions");
-		columns.add(viewableImpressions() + " AS AVCR_impressions");
-		columns.add(cpaSide(includeCpa, ReportRowMetricSql.COST) + " AS CPA_cost");
-		columns.add(gated(ReportRowMetricSql.CPV_ELIGIBLE, ReportRowMetricSql.COST) + " AS CPV_cost");
-		columns.add(gated(ReportRowMetricSql.CPM_ELIGIBLE, ReportRowMetricSql.COST) + " AS CPM_cost");
-		columns.add(gated(costPriceableByClick(), ReportRowMetricSql.COST) + " AS CPC_cost");
-		columns.add(gated(ReportRowMetricSql.CPC_ELIGIBLE, BqSql.col(CLICKS)) + " AS CPC_clicks");
-		columns.add(cpaSide(includeCpa, positiveOnly(JOINED_CONVERSIONS)) + " AS CPA_conversions");
-		columns.add(BqSql.col("cr_benchmark"));
-		columns.add(BqSql.col("cpa_benchmark"));
-		columns.add(BqSql.col("avcr_benchmark"));
-		columns.add(BqSql.col(LINE_ITEM_DESCRIPTION));
+		benchmarkAndPlanColumns().forEach((column, output) -> columns.add(BqSql.col(column) + " AS " + output));
+		columns.add(clickableImpressions() + " AS CTR_Impressions");
+		columns.add(gated(ReportRowMetricSql.CPM_ELIGIBLE, BqSql.col(IMPRESSIONS)) + " AS CPM_Impressions");
+		columns.add(viewableImpressions() + " AS AVCR_Impressions");
+		columns.add(cpaSide(includeCpa, ReportRowMetricSql.COST) + " AS CPA_Cost");
+		columns.add(gated(ReportRowMetricSql.CPV_ELIGIBLE, ReportRowMetricSql.COST) + " AS CPV_Cost");
+		columns.add(gated(ReportRowMetricSql.CPM_ELIGIBLE, ReportRowMetricSql.COST) + " AS CPM_Cost");
+		columns.add(gated(costPriceableByClick(), ReportRowMetricSql.COST) + " AS CPC_Cost");
+		columns.add(gated(ReportRowMetricSql.CPC_ELIGIBLE, BqSql.col(CLICKS)) + " AS CPC_Clicks");
+		columns.add(cpaSide(includeCpa, positiveOnly(JOINED_CONVERSIONS)) + " AS CPA_Conversions");
+		columns.add(BqSql.col("cr_benchmark") + " AS CR_Benchmark");
+		columns.add(BqSql.col("cpa_benchmark") + " AS CPA_Benchmark");
+		columns.add(BqSql.col("avcr_benchmark") + " AS AVCR_Benchmark");
+		columns.add(BqSql.col(LINE_ITEM_DESCRIPTION) + " AS Line_Item_Description");
 		columns.add(positiveOnly(JOINED_REVENUE) + " AS Revenue");
 		columns.add("IF(" + BqSql.greaterThan(ReportRowMetricSql.COST, ZERO) + ", "
 				+ BqSql.safeDivide(BqSql.col(JOINED_REVENUE), ReportRowMetricSql.COST) + ", " + NULL + ") AS ROAS");
@@ -689,14 +701,21 @@ public final class DashboardBasicSql {
 	}
 
 	/**
-	 * The benchmark and plan columns the output carries between its metrics and its helper columns.
+	 * The benchmark and plan columns the output carries between its metrics and its helper columns, mapped from
+	 * their {@code elevate_plans_n_benches} source name to the ClicData template's output name for them.
 	 *
-	 * @return the column names, in output order
+	 * @return the source column to output name, in output order
 	 */
-	static List<String> benchmarkColumns() {
-		return List.of(
-				"ivt_benchmark", "cpc_benchmark", "ctr_benchmark", "cpv_benchmark", "cpc_plan", "cpv_plan",
-				"cpm_plan");
+	static Map<String, String> benchmarkAndPlanColumns() {
+		Map<String, String> columns = new LinkedHashMap<>();
+		columns.put("ivt_benchmark", "IVT_Benchmark");
+		columns.put("cpc_benchmark", "CPC_Benchmark");
+		columns.put("ctr_benchmark", "CTR_Benchmark");
+		columns.put("cpv_benchmark", "CPV_Benchmark");
+		columns.put("cpc_plan", "CPC_Plan");
+		columns.put("cpv_plan", "CPV_Plan");
+		columns.put("cpm_plan", "CPM_Plan");
+		return columns;
 	}
 
 	/**

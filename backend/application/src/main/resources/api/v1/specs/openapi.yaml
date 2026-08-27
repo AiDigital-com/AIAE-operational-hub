@@ -1855,7 +1855,9 @@ paths:
         - name: field
           in: query
           required: true
-          description: Dashboard output column alias to inspect.
+          description: >
+            Dashboard output column alias to inspect, spelled exactly as the written table spells it -
+            for example Date, Channel, or Line_Item_Description. Matched case-sensitively.
           schema:
             type: string
       responses:
@@ -4113,7 +4115,12 @@ components:
       properties:
         field:
           type: string
-          description: Dashboard output column alias, for example Date, Channel, Impressions, or line_item_description.
+          description: >
+            Dashboard output column alias, spelled exactly as the written table spells it - for example
+            Date, Channel, Impressions, or Line_Item_Description. Matched case-sensitively against the
+            dashboard's own output columns, so a name differing only in case is rejected. These are the
+            ClicData template's names rather than the Hub's own, since the written table is what a
+            ClicData dashboard binds to.
         values:
           type: array
           description: Values accepted for that column.

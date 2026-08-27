@@ -90,15 +90,15 @@ function aDatasetPage(): DashboardDatasetRowsPageResponseV1 {
       {
         values: {
           Date: "2026-08-01",
-          line_item_description: "Prospecting",
+          Line_Item_Description: "Prospecting",
           Tactic: "Display",
           Channel: "Meta",
           Impressions: 1200,
           Clicks: 34,
           Cost: 56.78,
           Conversions: 4,
-          CPA_cost: 56.78,
-          CPA_conversions: 4,
+          CPA_Cost: 56.78,
+          CPA_Conversions: 4,
         },
       },
     ],
