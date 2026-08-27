@@ -309,6 +309,19 @@ public record BqRequest(String sql) {
 		}
 
 		/**
+		 * Adds a literal {@code FALSE} predicate - matches no rows. Used when a candidate scope is known
+		 * to be empty (e.g. a campaign with no known delivery yet), so the query still runs the correct
+		 * shape but matches nothing, rather than omitting the predicate entirely - which would incorrectly
+		 * widen the read to every row instead of scoping it to nothing.
+		 *
+		 * @return this builder
+		 */
+		public Builder whereFalse() {
+			predicates.add("FALSE");
+			return this;
+		}
+
+		/**
 		 * Adds a {@code `column` IN (...)} predicate over the given numeric ids; a no-op when empty.
 		 *
 		 * @param column the column
