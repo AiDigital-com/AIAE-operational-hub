@@ -19,6 +19,7 @@ import {
 } from "../../../shared/ui/data-table/data-table-popover";
 import { insertAtBoundary, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
 import {
+  CloseIcon,
   EditIcon,
   MoreVerticalIcon,
   PlusIcon,
@@ -146,6 +147,27 @@ function withKey(row: ReportRowV1): KeyedReportRow {
  * already have an undo snapshot for their current edit streak. */
 function cellKey(key: string, metricId: string): string {
   return `${key}::${metricId}`;
+}
+
+/** Whether a manually-added row still holds only what `addRow` seeded — the inherited campaign
+ * fields and the naming-convention prefix. Blank/undefined values count as unset on both sides,
+ * because `parseMetricInput` stores `undefined` for a metric the user typed into and then cleared. */
+function isPristineAddedRow(
+  row: KeyedReportRow,
+  inheritedFields: Partial<KeyedReportRow>,
+  namePrefix: string
+): boolean {
+  const seed: Partial<Record<string, unknown>> = { ...inheritedFields, line_item_name: namePrefix };
+  const isUnset = (value: unknown) => value == null || value === "";
+  for (const field of Object.keys(row)) {
+    if (field === "key") continue;
+    const rowValue = row[field as keyof KeyedReportRow];
+    if (isUnset(rowValue)) continue;
+    const seedValue = seed[field];
+    if (isUnset(seedValue)) return false;
+    if (String(rowValue) !== String(seedValue)) return false;
+  }
+  return true;
 }
 
 function dimColClass(id: string): string {
@@ -1120,6 +1142,76 @@ export function ReportingTab() {
   }, [keyedTableRows]);
   const namePrefix = useMemo(() => inheritedNamePrefix(keyedTableRows), [keyedTableRows]);
   const lockedDimIds = useMemo(() => new Set(Object.keys(inheritedFields)), [inheritedFields]);
+
+  /**
+   * Removes one manually-added row from the staged batch (see the ✕ rendered by `ReportRow`, next to
+   * `updateAddedRow` conceptually - declared here instead because it needs `inheritedFields`/`namePrefix`
+   * in its dep array, and both are only defined above this point).
+   *
+   * Confirms first only when the row is no longer pristine (D5) - a row added by mistake and untouched
+   * since must vanish on the first click, while one the user has already filled in is worth asking about.
+   *
+   * Purges every piece of per-cell state keyed to the row (D3): a stale `invalidCells`/`requiredCells`
+   * entry left behind would point `submitSave`'s validation at a row no longer on screen. Also drops the
+   * row's own history entries and prunes it out of every surviving snapshot (D4), so Undo can never bring
+   * a removed row back.
+   *
+   * Reads current state through the setter callback form (or `stagedRef`, for the pristine check that has
+   * to run before any setter) rather than closing over `staged`/`history`/`snapshotted` directly, so this
+   * stays a stable callback for the memoized `ReportRow` despite carrying `inheritedFields`/`namePrefix`
+   * in its deps - both are themselves `useMemo`-stable across keystrokes.
+   */
+  const removeAddedRow = useCallback(
+    (key: string) => {
+      const prefix = cellKey(key, "");
+      const performRemoval = () => {
+        setStaged((current) => ({ ...current, added: current.added.filter((row) => row.key !== key) }));
+        setInvalidCells((current) => {
+          const next = new Map([...current].filter(([id]) => !id.startsWith(prefix)));
+          return next.size === current.size ? current : next;
+        });
+        setMetricDrafts((current) => {
+          const next = new Map([...current].filter(([id]) => !id.startsWith(prefix)));
+          return next.size === current.size ? current : next;
+        });
+        setRequiredCells((current) => {
+          const next = new Set([...current].filter((id) => !id.startsWith(prefix)));
+          return next.size === current.size ? current : next;
+        });
+        setSnapshotted((current) => {
+          const next = new Set([...current].filter((id) => !id.startsWith(prefix)));
+          return next.size === current.size ? current : next;
+        });
+        setHistory((current) => {
+          const next = current
+            .filter((entry) => !entry.cellId.startsWith(prefix))
+            .map((entry) => {
+              const prunedAdded = entry.snapshot.added.filter((row) => row.key !== key);
+              return prunedAdded.length === entry.snapshot.added.length
+                ? entry
+                : { ...entry, snapshot: { ...entry.snapshot, added: prunedAdded } };
+            });
+          return next.length === current.length && next.every((entry, i) => entry === current[i])
+            ? current
+            : next;
+        });
+      };
+
+      const row = stagedRef.current.added.find((r) => r.key === key);
+      if (!row) return;
+      if (isPristineAddedRow(row, inheritedFields, namePrefix)) {
+        performRemoval();
+        return;
+      }
+      setConfirmDialog({
+        title: "Remove this line?",
+        message: "The values you entered on this new line will be lost.",
+        confirmLabel: "Remove line",
+        onConfirm: performRemoval,
+      });
+    },
+    [inheritedFields, namePrefix]
+  );
 
   // Stable array identity across renders (same `appliedConfig`/platform mix) so passing `dims`/`mets`
   // to the memoized ReportRow below never busts its memo on its own. The level labels are resolved
@@ -2338,6 +2430,7 @@ export function ReportingTab() {
                 columnWidths={columnWidths}
                 onUpdateCell={updateCell}
                 onUpdateAddedRow={updateAddedRow}
+                onRemoveAddedRow={removeAddedRow}
                 /* Offered on every report, grouped or not. Whether the rows behind the cell
                    are really the rows the panel found is settled by the panel, which can
                    compare their sum against the figure - a check no dimension list can make. */
@@ -2492,6 +2585,9 @@ interface ReportRowProps {
   columnWidths: Record<string, number>;
   onUpdateCell: (key: string, metricId: string, raw: string) => void;
   onUpdateAddedRow: (key: string, field: string, raw: string) => void;
+  /** Removes this manually-added row from the staged batch. Absent for a rendered existing row - the
+   *  ✕ only ever shows on an added one (D1). */
+  onRemoveAddedRow?: (key: string) => void;
   /** Opens the row's conversions by action. Absent on a grouped report, where a row is many rows. */
   onOpenConversions?: (row: KeyedReportRow) => void;
   /** The campaign this row belongs to - the Add Line id cells resolve/generate against the campaign's
@@ -2527,6 +2623,7 @@ const ReportRow = memo(function ReportRow({
   columnWidths,
   onUpdateCell,
   onUpdateAddedRow,
+  onRemoveAddedRow,
   onOpenConversions,
   campaignId,
   onResolveAddLineId,
@@ -2547,6 +2644,36 @@ const ReportRow = memo(function ReportRow({
     );
   }
 
+  /** Whether the cell at `index` carries this row's remove control - the leading cell of an added row
+   *  while editing. Separate from `removeControl` because the cell itself needs to know: it becomes the
+   *  button's containing block and gives up its left padding to it (see `reporting-tab__cell--removable`). */
+  function hasRemoveControl(index: number): boolean {
+    return index === 0 && isAdded && editing && Boolean(onRemoveAddedRow);
+  }
+
+  /** The added row's own remove control. Lives in the row's leading cell rather than a column of its
+   *  own: this component renders cells, not the <tr>, and a real column would have to be threaded
+   *  through DataTable's header, drag indices, widths and colSpan for one row-level affordance.
+   *
+   *  Positioned out of the cell's content flow (CSS), not rendered before it inline: a cell clips its
+   *  overflow, and an inline button would push the neighbouring `width: 100%` input right by its own
+   *  width and get that input's right edge clipped - on the leading date cell, exactly where a native
+   *  date input keeps its calendar icon and year segment, which cost the ability to enter the date. */
+  function removeControl(index: number) {
+    if (!hasRemoveControl(index) || !onRemoveAddedRow) return null;
+    return (
+      <button
+        type="button"
+        className="reporting-tab__row-remove"
+        aria-label="Remove new line"
+        title="Remove this line"
+        onClick={() => onRemoveAddedRow(row.key)}
+      >
+        <CloseIcon />
+      </button>
+    );
+  }
+
   function renderDim(d: DimDef, index: number) {
     const isRequiredInvalid = requiredCells.has(cellKey(row.key, d.id));
     const isInherited = isAdded && lockedDimIds.has(d.id);
@@ -2564,6 +2691,7 @@ const ReportRow = memo(function ReportRow({
         className={cn(
           dimColClass(d.id),
           (isFromName || isIdDim) && editing && "reporting-tab__cell--derived",
+          hasRemoveControl(index) && "reporting-tab__cell--removable",
           dragClass(index)
         )}
         style={columnStyle(columnWidths[d.id])}
@@ -2577,6 +2705,7 @@ const ReportRow = memo(function ReportRow({
                 : undefined
         }
       >
+        {removeControl(index)}
         {editing && isIdDim && levelForIdDim ? (
           <>
             <AddLineIdCell
@@ -2651,11 +2780,13 @@ const ReportRow = memo(function ReportRow({
         className={cn(
           metricColClass(m.id),
           cellModified && "reporting-tab__metric-cell--modified",
+          hasRemoveControl(index) && "reporting-tab__cell--removable",
           dragClass(index)
         )}
         style={columnStyle(columnWidths[m.id])}
         title={cellModified ? `Original: ${rowMetricCell(row, m.id)}` : undefined}
       >
+        {removeControl(index)}
         {cellEditable ? (
           <input
             className={cn(

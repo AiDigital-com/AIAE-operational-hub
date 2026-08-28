@@ -824,6 +824,45 @@
   background: var(--color-success-bg);
   color: color-mix(in srgb, var(--good) 55%, var(--ink));
 }
+/* The ✕ that removes a manually-added row (D1). Sits in the row's leading cell rather than a table
+   column of its own, so it is sized and colored as a small inline affordance, not a header-bearing cell.
+
+   Taken out of the content flow and dropped into the padding the cell already reserves on its left,
+   rather than rendered inline ahead of the cell's content. A body cell clips its overflow, so an
+   inline button pushes the neighbouring `width: 100%` input right by the button's own width and the
+   input loses that much off its right edge. The leading column is the date - the first of the
+   required adjustment key dimensions - so what got clipped was a native date input's calendar icon
+   and year segment, i.e. the ability to enter the date at all. */
+.reporting-tab__cell--removable {
+  position: relative;
+}
+.reporting-tab__row-remove {
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.reporting-tab__row-remove svg {
+  width: 12px;
+  height: 12px;
+}
+.reporting-tab__row-remove:hover {
+  color: var(--bad);
+}
+.reporting-tab__row-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-focus);
+}
 .reporting-tab__metric-cell--modified {
   background: var(--color-success-bg);
 }
