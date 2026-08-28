@@ -2169,6 +2169,244 @@ describe("ReportingTab editing", () => {
     expect(screen.getByRole("textbox", { name: "DSP Cost for LI-1" })).toHaveValue("500");
   });
 
+  it("should remove a manually added line when its cross is clicked", async () => {
+    // Given: a pristine added line, untouched since Add line
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    expect(screen.getByLabelText("Date for new line")).toBeInTheDocument();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Remove new line" }));
+
+    // Then: gone at once - a pristine row needs no confirmation
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Date for new line")).not.toBeInTheDocument();
+  });
+
+  it("should keep an added line's date editable, with the remove control out of the cell's flow", async () => {
+    // Given: a fresh added line. Its leading cell is the date - the first required adjustment key
+    // dimension - and that cell clips its overflow, so a remove button rendered inline ahead of the
+    // date input would push the input's right edge (calendar icon, year segment) out of sight.
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+
+    // When: the date is entered
+    const dateInput = screen.getByLabelText("Date for new line");
+    fireEvent.change(dateInput, { target: { value: "2026-03-04" } });
+
+    // Then: the value lands, and the ✕ shares that cell from outside its content flow. jsdom does no
+    // layout, so the class is the guard: it is what makes the button absolutely positioned in the
+    // padding the cell already reserves, instead of taking width away from the input.
+    expect(dateInput).toHaveValue("2026-03-04");
+    const dateCell = dateInput.closest("td");
+    expect(dateCell).toHaveClass("reporting-tab__cell--removable");
+    expect(dateCell).toContainElement(screen.getByRole("button", { name: "Remove new line" }));
+  });
+
+  it("should not offer a remove control on an existing report row", async () => {
+    // Given: two existing server rows
+    vi.mocked(listCampaignReportRows).mockResolvedValue(
+      aPage({ content: [aRow(), aRow({ line_item_id: "LI-2" })] })
+    );
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+
+    // When: one manual line is added alongside the two server rows
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+
+    // Then: exactly one remove control - the added row's, not either existing row's (D1)
+    expect(screen.getAllByRole("button", { name: "Remove new line" })).toHaveLength(1);
+  });
+
+  it("should confirm before removing an added line that has values typed into it", async () => {
+    // Given: an added line with a typed metric value
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Impressions for new line" }), "2000");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Remove new line" }));
+
+    // Then: a confirmation dialog appears, and the row stays until it is confirmed
+    const dialog = await screen.findByRole("dialog", { name: "Remove this line?" });
+    expect(screen.getByLabelText("Date for new line")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove line" }));
+
+    // Then: removed once confirmed
+    expect(screen.queryByLabelText("Date for new line")).not.toBeInTheDocument();
+  });
+
+  it("should keep the added line when its removal is cancelled", async () => {
+    // Given: an added line with a typed metric value, mid-removal
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Impressions for new line" }), "2000");
+    await userEvent.click(screen.getByRole("button", { name: "Remove new line" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove this line?" });
+
+    // When:
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    // Then: still there, value intact
+    expect(screen.getByRole("textbox", { name: "Impressions for new line" })).toHaveValue("2000");
+  });
+
+  it("should stop blocking save on an invalid metric that belonged to a removed line", async () => {
+    // Given: a valid edit already staged on the existing row, plus an added line whose metric is
+    // unparsable - the exact combination that used to leave a stale invalidCells entry behind (D3).
+    // An unparsable value parses to `undefined`, the same as a cleared cell, so the row still counts
+    // as pristine and its removal needs no confirmation (D5) - only the stale flag itself is at issue.
+    vi.mocked(saveReportRowAdjustments).mockResolvedValue(undefined);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    const spendInput = screen.getByRole("textbox", { name: /Cost for/ });
+    await userEvent.clear(spendInput);
+    await userEvent.type(spendInput, "500");
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    // fireEvent.change, not userEvent.type: the point is the invalid value landing, not how it's typed
+    fireEvent.change(screen.getByRole("textbox", { name: "Impressions for new line" }), { target: { value: "abc" } });
+    expect(screen.getByText("Not a number")).toBeInTheDocument();
+
+    // When: the invalid line is removed and the batch is saved
+    await userEvent.click(screen.getByRole("button", { name: "Remove new line" }));
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+
+    // Then: the removed row's stale invalid flag no longer blocks the save of the surviving edit
+    await waitFor(() => expect(saveReportRowAdjustments).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Fix the invalid metric values before saving.")).not.toBeInTheDocument();
+  });
+
+  it("should not bring a removed line back when Undo is pressed", async () => {
+    // Given: a line added FIRST, then an edit staged on the existing row. The order matters: that
+    // edit's undo snapshot is taken while the added row is already in the batch, so it carries a copy
+    // of it. Staging the edit before the add would leave a snapshot with an empty `added` and the test
+    // would pass whether or not removal prunes the history at all (D4).
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    // Named in full, not /Cost for/: with a line added, that pattern also matches the new row's own
+    // cost cell.
+    const spendInput = screen.getByRole("textbox", { name: "DSP Cost for LI-1" });
+    await userEvent.clear(spendInput);
+    await userEvent.type(spendInput, "500");
+    await userEvent.click(screen.getByRole("button", { name: "Remove new line" }));
+    expect(screen.queryByLabelText("Date for new line")).not.toBeInTheDocument();
+
+    // When: Undo rewinds the spend edit - removal is not itself undoable (D4), so that edit is the
+    // only history entry left
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    // Then: the spend edit is rewound, and the removed row is NOT resurrected out of its snapshot
+    expect(screen.getByRole("textbox", { name: "DSP Cost for LI-1" })).not.toHaveValue("500");
+    expect(screen.queryByLabelText("Date for new line")).not.toBeInTheDocument();
+  });
+
+  it("should keep the other staged edits when one added line is removed", async () => {
+    // Given: an edited existing row and two added lines, each with its own impressions value
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+    const spendInput = screen.getByRole("textbox", { name: /Cost for/ });
+    await userEvent.clear(spendInput);
+    await userEvent.type(spendInput, "500");
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    const impressionsInputs = screen.getAllByRole("textbox", { name: "Impressions for new line" });
+    await userEvent.type(impressionsInputs[0], "1000");
+    await userEvent.type(impressionsInputs[1], "2000");
+    expect(screen.getByRole("button", { name: "Save changes (3)" })).toBeInTheDocument();
+
+    // When: the first (most recently added) line is removed
+    const removeButtons = screen.getAllByRole("button", { name: "Remove new line" });
+    await userEvent.click(removeButtons[0]);
+    const dialog = await screen.findByRole("dialog", { name: "Remove this line?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove line" }));
+
+    // Then: the other added line and the existing row's edit both survive, count drops by exactly one
+    expect(screen.getByRole("button", { name: "Save changes (2)" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "DSP Cost for LI-1" })).toHaveValue("500");
+    expect(screen.getAllByRole("textbox", { name: "Impressions for new line" })).toHaveLength(1);
+    expect(screen.getByRole("textbox", { name: "Impressions for new line" })).toHaveValue("2000");
+  });
+
+  it("should exclude a removed line from the save payload", async () => {
+    // Given: one added line filled in completely (identity resolved through the PDI_117 id flow), and a
+    // second one carrying only a stray metric value that is never meant to be saved
+    vi.mocked(saveReportRowAdjustments).mockResolvedValue(undefined);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    fireEvent.change(screen.getByLabelText("Date for new line"), { target: { value: "2026-03-11" } });
+    const survivorFields: [string, string][] = [
+      ["Impressions for new line", "777"],
+      ["Platform for new line", "DV360"],
+      ["Account for new line", "Proxim Agency"],
+      ["Account id for new line", "12345"],
+      ["Constructed name L1 for new line", "ProximAgency_FPCU_12"],
+      ["Constructed name L2 for new line", "IO-1"],
+      ["Constructed name L3 for new line", "Whitelist"],
+    ];
+    for (const [name, value] of survivorFields) {
+      fireEvent.change(screen.getByRole("textbox", { name }), { target: { value } });
+    }
+    // Each level independently resolves to nothing and must be confirmed as new before it generates
+    for (const level of ["LVL1", "LVL2", "LVL3"]) {
+      const confirmButton = await screen.findByRole(
+        "button", { name: `${level} id - no match, create it as new?` }
+      );
+      await userEvent.click(confirmButton);
+    }
+    await waitFor(
+      () => {
+        expect(screen.getByText("OPH_defaultlevel1")).toBeInTheDocument();
+        expect(screen.getByText("OPH_defaultlevel2")).toBeInTheDocument();
+        expect(screen.getByText("OPH_defaultlevel3")).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+
+    // The second line: never filled in beyond one metric - it is removed before Save ever sees it, so
+    // its missing identity must not matter
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Impressions for new line" }), { target: { value: "999" } });
+
+    // When: the unfinished line is removed and the batch is saved
+    await userEvent.click(screen.getAllByRole("button", { name: "Remove new line" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "Remove this line?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove line" }));
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+
+    // Then: the payload carries only the surviving row - if the wrong row were purged, this save would
+    // instead fail on the survivor's own missing required fields rather than silently posting both/neither
+    await waitFor(() => expect(saveReportRowAdjustments).toHaveBeenCalledTimes(1));
+    const calls = vi.mocked(saveReportRowAdjustments).mock.calls[0];
+    const sent = (calls[calls.length - 1] as { adjustments: Record<string, unknown>[] }).adjustments;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ added: true, impressions: 777 });
+  }, 20_000);
+
   it("should trim a typed key before writing it, as every spreadsheet comparison does", async () => {
     // Given: an added line whose Level 1 name arrived with a stray space around it, as a paste does.
     // PDI_117: the three constructed ids are never typed and resolution is per level (D2) - the default
