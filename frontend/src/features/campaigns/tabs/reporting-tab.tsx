@@ -6,15 +6,17 @@ import { useDebounce } from "../../../shared/hooks/use-debounce";
 import { cn } from "../../../shared/style/cn";
 import {
   DataTable,
-  DataTableChips,
   DataTableViewControls,
   columnDragCellClass,
   columnDropCellClass,
   columnStyle,
 } from "../../../shared/ui/data-table/data-table";
 import type { DataTableColumn, DataTableColumnReorder } from "../../../shared/ui/data-table/data-table";
+import { DataTableFilterBar } from "../../../shared/ui/data-table/data-table-filter-bar";
+import type { AppliedFilter } from "../../../shared/ui/data-table/data-table-filter-bar-model";
 import {
   DataTableDateFilterPopover,
+  DataTableFieldPickerPopover,
   DataTableValueFilterPopover,
 } from "../../../shared/ui/data-table/data-table-popover";
 import { insertAtBoundary, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
@@ -66,6 +68,7 @@ import type { DateWindow } from "../hooks";
 import type { CampaignTabContext } from "../campaign-workspace";
 import { AddLineIdCell } from "./add-line-id-cell";
 import type { AddLineLevel } from "../model/add-line";
+import type { FilterPopover } from "../model/reporting-filters";
 import type {
   DirectionEnumV1,
   ReportConfig,
@@ -443,20 +446,16 @@ function hydrateFilters(filters: ReportRowFilterV1[] | undefined): HydratedFilte
  *
  * Date is held outside {@code activeFilters} because live row reads use the dedicated dateFrom/dateTo
  * request fields. Report views only persist filter arrays today, so the saved view carries Date as a
- * two-value filter: [from, to].
+ * two-value filter: [from, to] - written whenever the window is set (PDI_115 D2), regardless of
+ * whether the Date dimension is one of the report's displayed columns.
  *
- * @param config        the report config being saved
  * @param activeFilters value-list filters currently applied
  * @param dateWindow    current delivery-date window
  * @returns filters for the saved report view
  */
-function savedReportFilters(
-  config: ReportConfig,
-  activeFilters: ReportRowFilterV1[],
-  dateWindow: DateWindow
-): ReportRowFilterV1[] {
+function savedReportFilters(activeFilters: ReportRowFilterV1[], dateWindow: DateWindow): ReportRowFilterV1[] {
   const filters = activeFilters.filter((filter) => filter.field !== "DATE");
-  if (!config.dimensions.includes(DATE_DIM_ID) || (dateWindow.from === "" && dateWindow.to === "")) {
+  if (dateWindow.from === "" && dateWindow.to === "") {
     return filters;
   }
   return [...filters, { field: "DATE", values: [dateWindow.from, dateWindow.to] }];
@@ -540,13 +539,10 @@ function stagedTotals(
   return shifted as ReportRowTotalsV1;
 }
 
-/** One narrowing in force on the table, named and clearable independently of its column. */
-interface Narrowing {
-  id: string;
-  /** The dimension's own label, as its column header would read it. */
-  label: string;
-  summary: string;
-  clear: () => void;
+/** A filter's applied values, in as few words as it takes: the single value, both values joined, or a
+ *  count once there are more than that to name (PDI_115 - matches the mock's own chip-text thresholds). */
+function filterSummary(values: readonly string[]): string {
+  return values.length <= 2 ? values.join(", ") : `${values.length} selected`;
 }
 
 /** States a delivery-date window in words, including the open-ended halves. */
@@ -734,8 +730,9 @@ export function ReportingTab() {
     setNameDraft(selected.name);
     setNameError(null);
     // Same reason as on Apply: the newly opened report need not show the column the table is currently
-    // sorted or filtered by, and neither can be reached once its header is gone.
-    dropStateForDeselectedColumns(selected.config);
+    // sorted by, and a grouped read cannot order by a dimension it does not group by. Filters/date are
+    // unaffected either way (D3) - this only ever drops a stale sort.
+    dropSortForDeselectedColumns(selected.config);
   }
 
   const activeFilters = useMemo<ReportRowFilterV1[]>(
@@ -745,31 +742,25 @@ export function ReportingTab() {
         .map(([id, values]) => ({ field: id.toUpperCase() as ReportRowFilterFieldEnumV1, values })),
     [filterState]
   );
-  // Every narrowing currently in force, listed above the table rather than only inside the column
-  // header it was set from - so what the rows have been reduced to is legible without opening three
-  // popovers to find out, and clearable without opening them either.
-  const narrowings = useMemo<Narrowing[]>(() => {
-    const applied: Narrowing[] = [];
-    if (dateWindow.from !== "" || dateWindow.to !== "") {
-      applied.push({
-        id: "date-window",
-        label: "Date",
-        summary: dateWindowSummary(dateWindow),
-        clear: () => setDateWindow(NO_DATE_WINDOW),
-      });
-    }
-    for (const def of DIM_DEFS) {
-      const values = filterState[def.id];
-      if (values == null || values.length === 0) continue;
-      applied.push({
+  // Every dimension filter currently in force, listed on the Filters bar rather than only inside the
+  // column header it used to open from (PDI_115) - so what the rows have been reduced to is legible
+  // without opening a popover to find out, and clearable without opening one either. Date is not among
+  // these: the bar's own persistent pill owns it (D2), so it is never pruned here on a column change.
+  const filterChips = useMemo<AppliedFilter[]>(
+    () =>
+      DIM_DEFS.filter((def) => (filterState[def.id]?.length ?? 0) > 0).map((def) => ({
         id: def.id,
         label: def.label,
-        summary: values.length === 1 ? values[0] : `${values.length} values`,
+        summary: filterSummary(filterState[def.id] ?? []),
+        // Dashed and explained on the bar rather than pruned away (D3/D4): a filter surviving its
+        // dimension's column leaving the report is exactly what this ticket asks for, so the bar has to
+        // say so instead of the old code deleting the filter to avoid saying so.
+        hiddenColumn: !appliedConfig.dimensions.includes(def.id),
+        edit: (anchor: HTMLElement) => openValueFilter(def.id, anchor),
         clear: () => setFilterState((current) => ({ ...current, [def.id]: [] })),
-      });
-    }
-    return applied;
-  }, [dateWindow, filterState]);
+      })),
+    [filterState, appliedConfig.dimensions]
+  );
   // The applied dimensions ARE the aggregation key (US-027/US-028): the server returns one row per
   // distinct combination with every metric aggregated over it, so narrowing the selection genuinely
   // re-reads coarser rows instead of just hiding columns of an already-loaded raw read. Ordered by
@@ -812,7 +803,10 @@ export function ReportingTab() {
   const [createNote, setCreateNote] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
-  const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);
+  // Which of the Filters bar's popovers is open - the field picker, a dimension's value popover, or
+  // the Date pill's own window popover - and where it hangs from. Replaces the funnel-era
+  // `openFilterFor`/`filterAnchor` pair (PDI_115: the funnel itself is gone).
+  const [filterPopover, setFilterPopover] = useState<FilterPopover | null>(null);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [editMenuOpen, setEditMenuOpen] = useState(false);
@@ -839,7 +833,7 @@ export function ReportingTab() {
   }
 
   useEffect(() => {
-    if (!menuFor && !createMenuOpen && !openFilterFor && !downloadMenuOpen && !editMenuOpen) return undefined;
+    if (!menuFor && !createMenuOpen && !filterPopover && !downloadMenuOpen && !editMenuOpen) return undefined;
     const onDown = (event: globalThis.PointerEvent) => {
       const target = event.target as HTMLElement;
       if (!target.closest(".reporting-tab__menu-wrap")) {
@@ -849,16 +843,16 @@ export function ReportingTab() {
         setDownloadMenuOpen(false);
         setEditMenuOpen(false);
       }
-      // The wrapper is the shared table's, the popover is still this page's. Missing the wrapper here
-      // does not just fail to close - it closes on pointerdown so the button's own click reopens, and
-      // the popover can never be dismissed by the control that opened it.
-      if (!target.closest(".data-table__filter-wrap") && !target.closest(".data-table__pop")) {
-        setOpenFilterFor(null);
+      // The Filters bar is this page's own, the popover it opens is too - but missing either here does
+      // not just fail to close - it closes on pointerdown so the button's own click reopens, and the
+      // popover can never be dismissed by the control that opened it.
+      if (!target.closest(".data-table__filter-bar") && !target.closest(".data-table__pop")) {
+        setFilterPopover(null);
       }
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
-  }, [menuFor, createMenuOpen, openFilterFor, downloadMenuOpen, editMenuOpen]);
+  }, [menuFor, createMenuOpen, filterPopover, downloadMenuOpen, editMenuOpen]);
 
   useEffect(() => {
     if (!menuFor) return undefined;
@@ -1168,6 +1162,9 @@ export function ReportingTab() {
   // The single interleaved list as the table sees them, each carrying the class that sizes and aligns
   // it. Memoized because the table re-measures its header whenever this array's identity changes, and
   // because a fresh array every render would defeat the row memo below.
+  // No `filterable`/`filtered` on either branch (PDI_115): filters and the date window are reachable
+  // from the Filters bar now, not from a column header's funnel, and the bar draws its own state from
+  // `filterChips` below rather than lighting up a header button.
   const columns = useMemo<DataTableColumn[]>(
     () =>
       orderedColumns.map((col) =>
@@ -1178,13 +1175,6 @@ export function ReportingTab() {
               title: col.dim.description ? `${col.dim.label} — ${col.dim.description}` : col.dim.label,
               className: dimColClass(col.dim.id),
               sortable: true,
-              filterable: true,
-              // The date window is its own state, not a value list, so its column's filter icon lights up
-              // from the window instead of from `filterState`.
-              filtered:
-                col.dim.id === DATE_DIM_ID
-                  ? dateWindow.from !== "" || dateWindow.to !== ""
-                  : (filterState[col.dim.id] ?? []).length > 0,
             }
           : {
               id: col.met.id,
@@ -1195,7 +1185,7 @@ export function ReportingTab() {
               sortable: true,
             }
       ),
-    [orderedColumns, dateWindow, filterState]
+    [orderedColumns]
   );
 
   const reportViewsSentinelRef = useRef<HTMLTableRowElement>(null);
@@ -1325,39 +1315,32 @@ export function ReportingTab() {
   }
 
   /**
-   * Drops every sort and filter the applied view can no longer express, because the column it named is
-   * no longer in the report.
+   * Drops the sort the applied view can no longer express, because the column it named is no longer in
+   * the report. Sorting is reached through the column header's chevron, so a column that leaves the
+   * report takes the only handle on its sort with it, and a report ordered by a dimension/metric nobody
+   * selected comes back in an order that cannot be explained from what is visible. A grouped read cannot
+   * even order by a dimension it does not group by - that half of the drop is a server constraint, not
+   * a UI one.
    *
-   * <p>Sorts and filters are reached through the column header - the chevron and the funnel - so a
-   * column that leaves the report takes the only handle on them with it. What stays behind keeps acting
-   * on the rows with nothing on screen to say so: a report narrowed to one delivery date shows a single
-   * day of a campaign and looks like the whole of it, and a report ordered by a metric nobody selected
-   * comes back in an order that cannot be explained from what is visible. A grouped read cannot even
-   * order by a dimension it does not group by.
+   * <p>Filters and the delivery-date window deliberately survive: PDI_115 made them independent of the
+   * displayed columns, and the Filters bar above the table keeps every one of them visible and
+   * clearable whether or not its dimension is on screen (see D3/D4 in PDI_115-PLAN.md).
    *
    * @param config the selection about to be applied
    */
-  function dropStateForDeselectedColumns(config: ReportConfig) {
+  function dropSortForDeselectedColumns(config: ReportConfig) {
     const shown = new Set([...config.dimensions, ...config.metrics].map((id) => id.toUpperCase()));
     if (sortField != null && !shown.has(sortField)) {
       setSortField(null);
       setSortDirection("ASC");
     }
-    const dimensions = new Set(config.dimensions);
-    if (!dimensions.has(DATE_DIM_ID) && (dateWindow.from !== "" || dateWindow.to !== "")) {
-      setDateWindow(NO_DATE_WINDOW);
-    }
-    setFilterState((current) => {
-      const kept = Object.entries(current).filter(([id]) => dimensions.has(id));
-      return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
-    });
   }
 
   /** Commits the staged dimensions/metrics. The dimensions are the aggregation key, so this re-reads
    * the table at the new grain rather than only re-rendering columns of an already-loaded page. */
   function apply() {
     setAppliedConfig(draftConfig);
-    dropStateForDeselectedColumns(draftConfig);
+    dropSortForDeselectedColumns(draftConfig);
     toast.showSuccess("Changes applied to report view.");
   }
 
@@ -1365,7 +1348,7 @@ export function ReportingTab() {
     if (!selected) return;
     const name = normalizeSelectedName();
     if (!name) return;
-    const filters = savedReportFilters(draftConfig, activeFilters, dateWindow);
+    const filters = savedReportFilters(activeFilters, dateWindow);
     reports
       .saveReport(selected.id, { ...draftConfig, filters }, name)
       .then(() => {
@@ -1375,12 +1358,41 @@ export function ReportingTab() {
       .catch(reportError);
   }
 
-  const openFilterDef = dims.find((d) => d.id === openFilterFor);
+  // Looked up against every dimension, not only `dims` (the currently displayed ones): PDI_115 lets a
+  // filter's value popover open on a dimension the table is not showing as a column at all.
+  const openFilterDef =
+    filterPopover?.stage === "values" ? DIM_DEFS.find((d) => d.id === filterPopover.fieldId) : undefined;
+
+  /** Opens a dimension's value popover, staged with its current selection - the field picker's own
+   * handoff after a field is picked, and a chip's label click (D5), both funnel through here. */
+  function openValueFilter(fieldId: string, anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover({ stage: "values", fieldId });
+  }
+
+  /** Opens the `+ Filter` field picker (stage 1), toggling it closed on a second click of the same
+   * button - the same toggle the funnel-era filter button offered. */
+  function openFieldPicker(anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover((current) => (current?.stage === "fields" ? null : { stage: "fields" }));
+  }
+
+  /** Opens the persistent Date pill's own window popover, toggling closed on a second click. */
+  function openDateFilter(anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover((current) => (current?.stage === "date" ? null : { stage: "date" }));
+  }
+
+  /** Drops every dimension filter. The date window is not one of them (D2) and survives - pinning that
+   * distinction is the point of the dedicated test for it. */
+  function clearAllFilters() {
+    setFilterState({});
+  }
 
   /** Enters Edit data mode in the given sub-mode - "lines" for per-row inline edits, "bulk" for the
    * offline delivery spreadsheet, "conversions" for the offline conversions spreadsheet. */
   function enterEditMode(mode: EditMode) {
-    setOpenFilterFor(null);
+    setFilterPopover(null);
     setFilterAnchor(null);
     setEditMode(mode);
     setEditing(true);
@@ -2284,7 +2296,7 @@ export function ReportingTab() {
               <div className="reporting-tab__bulk-text">
                 Conversions live at their own grain - one row per day, line item and conversion action - so
                 they are adjusted in a spreadsheet of their own. Download it, edit the conversions column,
-                then re-upload. Only the date window narrows it; the table's column filters do not apply.
+                then re-upload. Only the date window narrows it; the report's dimension filters do not apply.
               </div>
               <div className="reporting-tab__bulk-actions">
                 <button
@@ -2315,7 +2327,14 @@ export function ReportingTab() {
             </div>
           )}
 
-          <DataTableChips chips={narrowings} disabled={editing} />
+          <DataTableFilterBar
+            dateLabel={dateWindow.from === "" && dateWindow.to === "" ? "All dates" : dateWindowSummary(dateWindow)}
+            onOpenDate={openDateFilter}
+            filters={filterChips}
+            onOpenFieldPicker={openFieldPicker}
+            onClearAll={clearAllFilters}
+            disabled={editing}
+          />
 
           <DataTable
             columns={columns}
@@ -2383,12 +2402,6 @@ export function ReportingTab() {
             sortDirection={sortDirection.toLowerCase() as "asc" | "desc"}
             onSort={toggleSort}
             sortDisabled={isReloading || editing}
-            onOpenFilter={(columnId, anchor) => {
-              setFilterAnchor(anchor);
-              setOpenFilterFor((current) => (current === columnId ? null : columnId));
-            }}
-            openFilterColumnId={openFilterFor}
-            filterDisabled={editing}
             columnReorder={columnReorder}
             hasNextPage={reportRows.hasNextPage}
             isFetchingNextPage={reportRows.isFetchingNextPage}
@@ -2407,7 +2420,7 @@ export function ReportingTab() {
             <p className="form-error reporting-tab__table-error">{formatError(reportRows.error)}</p>
           )}
 
-          {openFilterDef?.id === "date" ? (
+          {filterPopover?.stage === "date" && (
             <DataTableDateFilterPopover
               range={dateWindow}
               hint={
@@ -2420,20 +2433,27 @@ export function ReportingTab() {
               }
               anchor={filterAnchor}
               onApply={setDateWindow}
-              onClose={() => setOpenFilterFor(null)}
+              onClose={() => setFilterPopover(null)}
             />
-          ) : (
-            openFilterDef && (
-              <ReportFilterPopover
-                campaignId={campaign.id}
-                field={openFilterDef.id.toUpperCase() as ReportRowFilterFieldEnumV1}
-                label={openFilterDef.label}
-                initialSelected={filterState[openFilterDef.id] ?? []}
-                anchor={filterAnchor}
-                onApply={(values) => setFilterState((current) => ({ ...current, [openFilterDef.id]: values }))}
-                onClose={() => setOpenFilterFor(null)}
-              />
-            )
+          )}
+          {filterPopover?.stage === "fields" && (
+            <DataTableFieldPickerPopover
+              fields={DIM_DEFS.filter((d) => d.id !== DATE_DIM_ID)}
+              filteredIds={filterChips.map((filter) => filter.id)}
+              anchor={filterAnchor}
+              onPick={(fieldId) => setFilterPopover({ stage: "values", fieldId })}
+            />
+          )}
+          {openFilterDef && (
+            <ReportFilterPopover
+              campaignId={campaign.id}
+              field={openFilterDef.id.toUpperCase() as ReportRowFilterFieldEnumV1}
+              label={openFilterDef.label}
+              initialSelected={filterState[openFilterDef.id] ?? []}
+              anchor={filterAnchor}
+              onApply={(values) => setFilterState((current) => ({ ...current, [openFilterDef.id]: values }))}
+              onClose={() => setFilterPopover(null)}
+            />
           )}
         </div>
       )}

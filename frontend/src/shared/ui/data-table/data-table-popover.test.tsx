@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { DataTableDateFilterPopover, DataTableValueFilterPopover } from "./data-table-popover";
+import { DataTableDateFilterPopover, DataTableFieldPickerPopover, DataTableValueFilterPopover } from "./data-table-popover";
+import type { FilterField } from "./data-table-filter-bar-model";
 
 /** A `<th>`-shaped anchor, since that is what a column filter is opened out of. */
 function anAnchor(): HTMLElement {
@@ -280,5 +281,146 @@ describe("DataTableDateFilterPopover", () => {
 
     // Then: the dialog is named for that column
     expect(screen.getByRole("dialog", { name: "Filter — Week (Mon start)" })).toBeInTheDocument();
+  });
+});
+
+function aField(overrides: Partial<FilterField> = {}): FilterField {
+  return { id: "channel", label: "Channel", ...overrides };
+}
+
+describe("DataTableFieldPickerPopover", () => {
+  it("should name itself 'Add filter' rather than naming a column", () => {
+    // Given / When: stage 1 of the Filters bar's + Filter control is not filtering any one column yet
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField()]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // Then:
+    expect(screen.getByRole("dialog", { name: "Add filter" })).toBeInTheDocument();
+  });
+
+  it("should list every field sorted by label", () => {
+    // Given / When: fields given out of alphabetical order
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField({ id: "platform", label: "Platform" }), aField({ id: "channel", label: "Channel" })]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // Then: scoped to the dialog itself - the anchor fixture is its own button in the document
+    const rows = within(screen.getByRole("dialog")).getAllByRole("button");
+    expect(rows[0]).toHaveTextContent("Channel");
+    expect(rows[1]).toHaveTextContent("Platform");
+  });
+
+  it("should show a field's description as secondary text when present", () => {
+    // Given / When: a dimension meaningless without its own hint
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField({ id: "line_item_id", label: "Constructed id L1", description: "Per-platform meaning" })]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // Then:
+    expect(screen.getByText("Constructed id L1")).toBeInTheDocument();
+    expect(screen.getByText("Per-platform meaning")).toBeInTheDocument();
+  });
+
+  it("should mark an already-filtered field with a Filtered badge", () => {
+    // Given / When: the picker doubles as an editor for a field already carrying a filter
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField()]}
+        filteredIds={["channel"]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // Then:
+    expect(screen.getByText("Filtered")).toBeInTheDocument();
+  });
+
+  it("should not badge a field that carries no filter", () => {
+    // Given / When:
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField()]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // Then:
+    expect(screen.queryByText("Filtered")).not.toBeInTheDocument();
+  });
+
+  it("should narrow the list to what the search matches", async () => {
+    // Given: two fields, only one containing "chan"
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField({ id: "platform", label: "Platform" }), aField({ id: "channel", label: "Channel" })]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // When:
+    await userEvent.type(screen.getByRole("textbox", { name: "Search fields" }), "chan");
+
+    // Then: once the search settles, only the match is listed
+    await waitFor(() => expect(screen.queryByText("Platform")).not.toBeInTheDocument());
+    expect(screen.getByText("Channel")).toBeInTheDocument();
+  });
+
+  it("should say so when the search matches no field", async () => {
+    // Given:
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField()]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={vi.fn()}
+      />
+    );
+
+    // When:
+    await userEvent.type(screen.getByRole("textbox", { name: "Search fields" }), "zzz");
+
+    // Then:
+    expect(await screen.findByText(/No matches for/)).toBeInTheDocument();
+  });
+
+  it("should call onPick with the clicked field's id", async () => {
+    // Given: picking a field hands off to stage 2 (the value popover) - this popover has no Done of
+    // its own to commit
+    const onPick = vi.fn();
+    render(
+      <DataTableFieldPickerPopover
+        fields={[aField({ id: "channel", label: "Channel" })]}
+        filteredIds={[]}
+        anchor={anAnchor()}
+        onPick={onPick}
+      />
+    );
+
+    // When:
+    await userEvent.click(screen.getByText("Channel"));
+
+    // Then:
+    expect(onPick).toHaveBeenCalledWith("channel");
   });
 });

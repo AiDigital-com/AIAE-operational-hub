@@ -59,6 +59,147 @@
   opacity: .5;
 }
 
+/* ── filters bar (PDI_115) ── */
+/* Replaces `.data-table__chips` for a consumer that must let a filter be added independently of the
+   displayed columns: it renders even with zero filters, because the Date pill and `+ Filter` are its
+   only entry points now that the column header's own funnel is gone. */
+.data-table__filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.data-table__filter-bar-lead {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.data-table__date-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  font-size: 0.78125rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--surface);
+  border: 0.0625rem solid var(--border-strong);
+  border-radius: var(--pill);
+  padding: 0.3125rem 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.data-table__date-pill:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.data-table__date-pill:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.data-table__date-pill-icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 0.75rem;
+}
+
+.data-table__date-pill-caret {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 0.75rem;
+}
+
+/* A filter chip's value comes straight from the data mart and can be arbitrarily long, so unlike
+   `.data-table__chips-lead`'s siblings above, this one has to be able to shrink and wrap. */
+.data-table__filter-bar .data-table__chip {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.data-table__chip-label {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.data-table__chip-label:disabled {
+  cursor: not-allowed;
+}
+
+/* A filter on a dimension the table is not currently showing as a column - signposted, not hidden, so
+   an applied narrowing is never invisible (see reporting-tab.tsx's dropSortForDeselectedColumns doc). */
+.data-table__chip--hidden {
+  border: 0.0625rem dashed color-mix(in srgb, var(--primary) 40%, transparent);
+  background: transparent;
+}
+
+.data-table__add-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.78125rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: transparent;
+  border: 0.0625rem dashed color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: var(--pill);
+  padding: 0.3125rem 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.data-table__add-filter:hover:not(:disabled) {
+  background: var(--primary-soft);
+}
+
+.data-table__add-filter:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.data-table__add-filter svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  flex: 0 0 0.8125rem;
+}
+
+.data-table__filter-clear-all {
+  font-size: 0.78125rem;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: none;
+  border: none;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.3125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.data-table__filter-clear-all:hover:not(:disabled) {
+  background: var(--n-100);
+  color: var(--bad);
+}
+
+.data-table__filter-clear-all:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
 /* ── row count + view controls ── */
 /* The controls lead their row, opposite whatever the page puts at the right end - `margin-right: auto`
    rather than a spacer, so the row keeps its flex-end alignment. */
@@ -594,6 +735,59 @@
   font-size: 13px;
   color: var(--muted);
   padding: 10px 4px;
+}
+
+/* ── field picker (PDI_115 `+ Filter`, stage 1) ── */
+.data-table__pop-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.625rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.125rem;
+  border: none;
+  border-radius: 0.3125rem;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.data-table__pop-field-row:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.data-table__pop-field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.data-table__pop-field-label {
+  font-size: 0.84375rem;
+  font-weight: 600;
+}
+
+.data-table__pop-field-desc {
+  font-size: 0.71875rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.data-table__pop-field-badge {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--pill);
+  padding: 0.125rem 0.4375rem;
 }
 
 /* Holds the list's own height while the values are still being read, so opening the popover does not
