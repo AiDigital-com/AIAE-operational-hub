@@ -135,6 +135,16 @@ export function PlusIcon({ className }: IconProps) {
   );
 }
 
+/** Calendar glyph for date-range controls. */
+export function CalendarIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4M16 2v4M3 10h18" />
+    </svg>
+  );
+}
+
 /** Tray-with-arrow glyph for actions that push data out of the Hub (writing a ClicData data source). */
 export function UploadIcon({ className }: IconProps) {
   return (

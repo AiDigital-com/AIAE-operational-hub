@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ADJUSTMENT_KEY_DIM_IDS, DEFAULT_DIMS, DEFAULT_METRICS } from "../../pacing/mock/reports";
+import { ADJUSTMENT_KEY_DIM_IDS, DEFAULT_DIMS, DEFAULT_METRICS, DIM_DEFS } from "../../pacing/mock/reports";
 import { ToastProvider } from "../../../shared/ui/toast/toast";
 import { SidebarCollapseContext } from "../../layout/app-shell/sidebar-collapse";
 import type { SidebarCollapse } from "../../layout/app-shell/sidebar-collapse";
@@ -960,13 +960,21 @@ describe("ReportingTab filtering", () => {
     vi.mocked(listReportRowDistinctValues).mockResolvedValue(["Display", "Video"]);
   });
 
+  /** Opens a dimension's value popover via `+ Filter`'s field picker - the only path to a dimension's
+   *  filter now that the column header's funnel is gone (PDI_115). */
+  async function openDimensionFilter(label: string) {
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const picker = await screen.findByRole("dialog", { name: "Add filter" });
+    await userEvent.click(within(picker).getByText(label));
+  }
+
   it("should open a dimension's filter popover showing its distinct values as checkboxes", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
 
     // Then:
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
@@ -975,27 +983,27 @@ describe("ReportingTab filtering", () => {
     expect(listReportRowDistinctValues).toHaveBeenCalledWith(42, "LINE_ITEM_ID");
   });
 
-  it("should close the filter popover when its own button is clicked again", async () => {
+  it("should close the field picker when + Filter is clicked again", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    const filterButton = screen.getByRole("button", { name: "Filter Constructed id L1" });
-    await userEvent.click(filterButton);
-    await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
+    const addFilterButton = screen.getByRole("button", { name: "Filter" });
+    await userEvent.click(addFilterButton);
+    await screen.findByRole("dialog", { name: "Add filter" });
 
     // When:
-    await userEvent.click(filterButton);
+    await userEvent.click(addFilterButton);
 
-    // Then: the outside-click handler must recognise the header's own filter wrapper and leave the
-    // toggle to the button, or the pointerdown closes the popover and the click reopens it.
-    expect(screen.queryByRole("dialog", { name: "Filter — Constructed id L1" })).not.toBeInTheDocument();
+    // Then: the outside-click handler must recognise the bar's own wrapper and leave the toggle to the
+    // button, or the pointerdown closes the popover and the click reopens it.
+    expect(screen.queryByRole("dialog", { name: "Add filter" })).not.toBeInTheDocument();
   });
 
   it("should apply the checked values on Done, restarting the table from page one", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
     vi.mocked(listCampaignReportRows).mockClear();
 
@@ -1021,7 +1029,7 @@ describe("ReportingTab filtering", () => {
     vi.mocked(updateReportView).mockResolvedValue({ ...SAVED_VIEW_DTO, status: "saved" });
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
     await userEvent.click(within(popover).getByText("Display"));
     await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
@@ -1050,7 +1058,7 @@ describe("ReportingTab filtering", () => {
     vi.mocked(updateReportView).mockResolvedValue({ ...SAVED_VIEW_DTO, status: "saved" });
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
     await userEvent.type(within(popover).getByLabelText("To"), "2026-03-20");
@@ -1082,7 +1090,7 @@ describe("ReportingTab filtering", () => {
     vi.mocked(updateReportView).mockResolvedValue({ ...SAVED_VIEW_DTO, status: "saved" });
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
     await userEvent.type(within(popover).getByLabelText("To"), "2026-03-10");
@@ -1116,7 +1124,7 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.getByRole("button", { name: "Filter Constructed id L1" })).toHaveClass("data-table__filter-btn--active");
+    expect(screen.getByText("Constructed id L1: Display")).toBeInTheDocument();
   });
 
   it("should clear saved filters when switching to a report without filters", async () => {
@@ -1144,7 +1152,7 @@ describe("ReportingTab filtering", () => {
     // Then: the active filter state is cleared. The unfiltered rows may come from React Query's
     // already-warm filters:[] cache, so this should not require a duplicate network call.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Filter Constructed id L1" })).not.toHaveClass("data-table__filter-btn--active")
+      expect(screen.queryByText("Constructed id L1: Display")).not.toBeInTheDocument()
     );
   });
 
@@ -1152,7 +1160,7 @@ describe("ReportingTab filtering", () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
     await userEvent.click(within(popover).getByText("Display"));
     vi.mocked(listCampaignReportRows).mockClear();
@@ -1163,19 +1171,19 @@ describe("ReportingTab filtering", () => {
     // Then: no new fetch, and reopening shows no value checked
     expect(screen.queryByRole("dialog", { name: "Filter — Constructed id L1" })).not.toBeInTheDocument();
     expect(listCampaignReportRows).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const reopened = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
     expect((within(reopened).getByText("Display").closest("label") as HTMLLabelElement).querySelector("input")).not.toBeChecked();
   });
 
   it("should filter dates by a range instead of a value per date", async () => {
-    // Given: the Date column's filter, which is a window rather than a checkbox list - a quarter would
-    // be ninety checkboxes, and the distinct-value list a picker draws from is capped server-side
+    // Given: the Date pill's own filter, which is a window rather than a checkbox list - a quarter
+    // would be ninety checkboxes, and the distinct-value list a picker draws from is capped server-side
     renderReportingTab();
     await screen.findByText("LI-1");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
     await userEvent.type(within(popover).getByLabelText("To"), "2026-03-20");
@@ -1192,14 +1200,14 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.getByRole("button", { name: "Filter Date" })).toHaveClass("data-table__filter-btn--active");
+    expect(screen.getByRole("button", { name: "Mar 10, 2026 — Mar 20, 2026" })).toBeInTheDocument();
   });
 
   it("should refuse to apply a date window whose start is after its end", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     const from = within(popover).getByLabelText("From");
     const to = within(popover).getByLabelText("To");
@@ -1231,7 +1239,7 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.queryByText(/^Date: /)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All dates" })).toBeInTheDocument();
   });
 
   it("should hydrate a saved date-window filter when opening a saved report", async () => {
@@ -1251,7 +1259,7 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.getByText("Date: Mar 10, 2026 — Mar 20, 2026")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mar 10, 2026 — Mar 20, 2026" })).toBeInTheDocument();
   });
 
   it("should drop a report's saved multi-date filter rather than widen it into a range", async () => {
@@ -1274,7 +1282,7 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.queryByText(/^Date: /)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All dates" })).toBeInTheDocument();
   });
 
   it("should keep a saved filter on any other dimension as a value list", async () => {
@@ -1297,20 +1305,21 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.getByText("Platform: 2 values")).toBeInTheDocument();
+    // Two values are joined rather than counted (the mock's own chip-text thresholds - PDI_115 4a)
+    expect(screen.getByText("Platform: dv_360_dlv, TTD")).toBeInTheDocument();
   });
 
-  it("should list every narrowing above the table, and clear one on demand", async () => {
-    // Given: a report narrowed to one delivery date
+  it("should apply a date window from the pill and clear it from the popover's own Clear button", async () => {
+    // Given: a report narrowed to one delivery window
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
     await userEvent.type(within(popover).getByLabelText("To"), "2026-03-20");
     await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
 
-    // Then: what the rows have been reduced to is legible without reopening the popover it came from
+    // Then: what the rows have been reduced to is legible on the pill itself, without reopening it
     await waitFor(() =>
       expect(listCampaignReportRows).toHaveBeenLastCalledWith(42, 1, 25, {
         filters: [],
@@ -1321,48 +1330,17 @@ describe("ReportingTab filtering", () => {
         sortDirection: undefined,
       })
     );
-    expect(screen.getByText("Date: Mar 10, 2026 — Mar 20, 2026")).toBeInTheDocument();
+    const pill = screen.getByRole("button", { name: "Mar 10, 2026 — Mar 20, 2026" });
 
-    // When: cleared from the chip rather than from the column header
-    await userEvent.click(screen.getByRole("button", { name: "Clear the Date filter" }));
+    // When: reopened and cleared from the popover's own Clear button, rather than a header funnel or
+    // a removable chip - the pill is persistent (D2)
+    await userEvent.click(pill);
+    const reopened = await screen.findByRole("dialog", { name: "Filter — Date" });
+    await userEvent.click(within(reopened).getByRole("button", { name: "Clear" }));
 
     // Then: gone, and the unwindowed view is back - no new request, since that view is the one already
     // in the cache from before the window was applied
-    await waitFor(() => expect(screen.queryByText(/^Date: /)).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Filter Date" }))
-      .not.toHaveClass("data-table__filter-btn--active");
-  });
-
-  it("should drop a dimension's filter when Apply stops showing that dimension", async () => {
-    // Given: a report narrowed to one delivery date
-    renderReportingTab();
-    await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
-    const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
-    await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
-    await userEvent.type(within(popover).getByLabelText("To"), "2026-03-10");
-    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(screen.getByText("Date: Mar 10, 2026 — Mar 10, 2026")).toBeInTheDocument());
-    vi.mocked(listCampaignReportRows).mockClear();
-
-    // When: the Date dimension is dropped from the report, taking its column and filter icon with it
-    const dimensions = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
-    await userEvent.click(dimensions.getByRole("checkbox", { name: "Date" }));
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-
-    // Then: the window goes with the column - it could not be reached or undone once its header was
-    // gone, and would have kept the report on a single day of a campaign
-    await waitFor(() =>
-      expect(listCampaignReportRows).toHaveBeenLastCalledWith(42, 1, 25, {
-        filters: [],
-        groupBy: ["LINE_ITEM_ID"],
-        dateFrom: undefined,
-        dateTo: undefined,
-        sortField: undefined,
-        sortDirection: undefined,
-      })
-    );
-    expect(screen.queryByText(/^Date: /)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "All dates" })).toBeInTheDocument());
   });
 
   it("should state the dates the campaign has without clamping the pickers to them", async () => {
@@ -1371,7 +1349,7 @@ describe("ReportingTab filtering", () => {
     await screen.findByText("LI-1");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
 
     // Then: the range is stated, not enforced - min/max clamped to a one-day dataset leaves a picker
@@ -1383,23 +1361,23 @@ describe("ReportingTab filtering", () => {
     expect(within(popover).getByLabelText("To")).not.toHaveAttribute("max");
   });
 
-  it("should keep the date filter popover under its column's filter icon while the page scrolls", async () => {
-    // Given: an open Date filter, anchored under the header's filter button
+  it("should keep the date filter popover under its pill while the page scrolls", async () => {
+    // Given: an open Date filter, anchored under the pill
     renderReportingTab();
     await screen.findByText("LI-1");
-    const trigger = screen.getByRole("button", { name: "Filter Date" });
+    const trigger = screen.getByRole("button", { name: "All dates" });
     trigger.getBoundingClientRect = () => ({ left: 120, bottom: 300, top: 280, right: 140,
       width: 20, height: 20, x: 120, y: 280, toJSON: () => ({}) }) as DOMRect;
     await userEvent.click(trigger);
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     expect(popover).toHaveStyle({ left: "120px", top: "306px" });
 
-    // When: the table scrolls, taking the header - and the button - with it
+    // When: the page scrolls, taking the pill with it
     trigger.getBoundingClientRect = () => ({ left: 120, bottom: 90, top: 70, right: 140,
       width: 20, height: 20, x: 120, y: 70, toJSON: () => ({}) }) as DOMRect;
     fireEvent.scroll(document);
 
-    // Then: the popover followed rather than staying behind, detached from its column
+    // Then: the popover followed rather than staying behind, detached from its pill
     await waitFor(() => expect(popover).toHaveStyle({ left: "120px", top: "96px" }));
   });
 
@@ -1409,7 +1387,7 @@ describe("ReportingTab filtering", () => {
     await screen.findByText("LI-1");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
     await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
@@ -1427,11 +1405,11 @@ describe("ReportingTab filtering", () => {
     );
   });
 
-  it("should mark the filter icon active once a filter is applied", async () => {
+  it("should show a chip once a filter is applied", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
     await userEvent.click(within(popover).getByText("Display"));
 
@@ -1439,14 +1417,14 @@ describe("ReportingTab filtering", () => {
     await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
 
     // Then:
-    expect(screen.getByRole("button", { name: "Filter Constructed id L1" })).toHaveClass("data-table__filter-btn--active");
+    expect(screen.getByText("Constructed id L1: Display")).toBeInTheDocument();
   });
 
   it("should select all and clear values within the popover", async () => {
     // Given:
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Constructed id L1" }));
+    await openDimensionFilter("Constructed id L1");
     const popover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
 
     // When:
@@ -1462,6 +1440,230 @@ describe("ReportingTab filtering", () => {
     // Then:
     expect((within(popover).getByText("Display").closest("label") as HTMLLabelElement).querySelector("input")).not.toBeChecked();
     expect((within(popover).getByText("Video").closest("label") as HTMLLabelElement).querySelector("input")).not.toBeChecked();
+  });
+
+  it("should filter by a dimension that is not a selected column", async () => {
+    // Given: a report whose dimensions exclude Channel
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Channel is added as a filter via + Filter, never as a column
+    await openDimensionFilter("Channel");
+    const popover = await screen.findByRole("dialog", { name: "Filter — Channel" });
+    await userEvent.click(within(popover).getByText("Display"));
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+
+    // Then: the rows are narrowed by Channel, but the grouping (and the table's columns) never
+    // included it - this is the ticket
+    await waitFor(() =>
+      expect(listCampaignReportRows).toHaveBeenCalledWith(42, 1, 25, {
+        filters: [{ field: "CHANNEL", values: ["Display"] }],
+        groupBy: DEFAULT_GROUP_BY,
+        sortField: undefined,
+        sortDirection: undefined,
+      })
+    );
+    expect(screen.queryByRole("columnheader", { name: /Channel/ })).not.toBeInTheDocument();
+  });
+
+  it("should keep an active filter when its dimension is deselected and applied", async () => {
+    // Given: a report with Channel as a displayed column, filtered by it
+    mockReportViews([aReportView({ dimensions: ["date", "line_item_id", "channel"] })]);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await openDimensionFilter("Channel");
+    const popover = await screen.findByRole("dialog", { name: "Filter — Channel" });
+    await userEvent.click(within(popover).getByText("Display"));
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Channel: Display")).toBeInTheDocument());
+    vi.mocked(listCampaignReportRows).mockClear();
+
+    // When: Channel is deselected from Dimensions and applied - the direct inverse of the old
+    // pruning behaviour this ticket removes
+    const dimensions = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+    await userEvent.click(dimensions.getByRole("checkbox", { name: "Channel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the filter survives even though its column is gone
+    await waitFor(() =>
+      expect(listCampaignReportRows).toHaveBeenLastCalledWith(42, 1, 25, {
+        filters: [{ field: "CHANNEL", values: ["Display"] }],
+        groupBy: ["DATE", "LINE_ITEM_ID"],
+        sortField: undefined,
+        sortDirection: undefined,
+      })
+    );
+    expect(screen.getByText("Channel: Display")).toBeInTheDocument();
+  });
+
+  it("should keep the date window when the Date column is deselected", async () => {
+    // Given: a date window applied while Date is a displayed column
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
+    const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
+    await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Mar 10, 2026/ })).toBeInTheDocument()
+    );
+    vi.mocked(listCampaignReportRows).mockClear();
+
+    // When: the Date dimension is dropped from the report and applied
+    const dimensions = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+    await userEvent.click(dimensions.getByRole("checkbox", { name: "Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the window survives - it is not reached through the Date column at all anymore (D2/D3)
+    await waitFor(() =>
+      expect(listCampaignReportRows).toHaveBeenLastCalledWith(42, 1, 25, {
+        filters: [],
+        groupBy: ["LINE_ITEM_ID"],
+        dateFrom: "2026-03-10",
+        dateTo: undefined,
+        sortField: undefined,
+        sortDirection: undefined,
+      })
+    );
+    expect(screen.getByRole("button", { name: /Mar 10, 2026/ })).toBeInTheDocument();
+  });
+
+  it("should mark a filter on a non-displayed dimension as hidden", async () => {
+    // Given: a report whose dimensions do not include Channel
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When: Channel is filtered without ever being added as a column
+    await openDimensionFilter("Channel");
+    const popover = await screen.findByRole("dialog", { name: "Filter — Channel" });
+    await userEvent.click(within(popover).getByText("Display"));
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+
+    // Then: the chip says so, dashed and explained, not silently hidden (D4)
+    const chip = await screen.findByRole("button", { name: /Filtered on a column that is not displayed/ });
+    expect(chip).toHaveAttribute("title", "Filtered on a column that is not displayed");
+    expect(chip.closest(".data-table__chip")).toHaveClass("data-table__chip--hidden");
+  });
+
+  it("should list every dimension except Date in the field picker", async () => {
+    // Given:
+    renderReportingTab();
+    await screen.findByText("LI-1");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const picker = await screen.findByRole("dialog", { name: "Add filter" });
+
+    // Then: every dimension the backend can filter by except Date, whose persistent pill already owns
+    // it - counted against DIM_DEFS.length so a dimension added later is covered automatically
+    expect(within(picker).getAllByRole("button")).toHaveLength(DIM_DEFS.length - 1);
+    expect(within(picker).queryByText("Date")).not.toBeInTheDocument();
+  });
+
+  it("should reopen a filter's value popover from its chip", async () => {
+    // Given: a report already filtered to one value
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await openDimensionFilter("Constructed id L1");
+    const first = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
+    await userEvent.click(within(first).getByText("Display"));
+    await userEvent.click(within(first).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Constructed id L1: Display")).toBeInTheDocument());
+
+    // When: the chip's own label is clicked, not its ×
+    await userEvent.click(screen.getByText("Constructed id L1: Display"));
+
+    // Then: the value popover reopens, staged with what is already applied (D5)
+    const reopened = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
+    expect((within(reopened).getByText("Display").closest("label") as HTMLLabelElement).querySelector("input")).toBeChecked();
+  });
+
+  it("should clear every filter but keep the date window when Clear all is used", async () => {
+    // Given: a dimension filter and a date window both applied
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await openDimensionFilter("Constructed id L1");
+    const valuePopover = await screen.findByRole("dialog", { name: "Filter — Constructed id L1" });
+    await userEvent.click(within(valuePopover).getByText("Display"));
+    await userEvent.click(within(valuePopover).getByRole("button", { name: "Done" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
+    const datePopover = await screen.findByRole("dialog", { name: "Filter — Date" });
+    await userEvent.type(within(datePopover).getByLabelText("From"), "2026-03-10");
+    await userEvent.click(within(datePopover).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Constructed id L1: Display")).toBeInTheDocument());
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+    // Then: the dimension filter is gone; the persistent Date pill is not touched by Clear all
+    await waitFor(() =>
+      expect(screen.queryByText("Constructed id L1: Display")).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole("button", { name: /Mar 10, 2026/ })).toBeInTheDocument();
+  });
+
+  it("should drop the sort but keep the filter when a sorted, filtered dimension is deselected", async () => {
+    // Given: a report with Channel added as a dimension, sorted and filtered by it
+    mockReportViews([aReportView({ dimensions: ["date", "line_item_id", "channel"] })]);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Channel" }));
+    await waitFor(() =>
+      expect(listCampaignReportRows).toHaveBeenCalledWith(42, 1, 25, {
+        filters: [],
+        groupBy: ["DATE", "LINE_ITEM_ID", "CHANNEL"],
+        sortField: "CHANNEL",
+        sortDirection: "ASC",
+      })
+    );
+    await openDimensionFilter("Channel");
+    const popover = await screen.findByRole("dialog", { name: "Filter — Channel" });
+    await userEvent.click(within(popover).getByText("Display"));
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Channel: Display")).toBeInTheDocument());
+    vi.mocked(listCampaignReportRows).mockClear();
+
+    // When: Channel is deselected from Dimensions and applied
+    const dimensions = within(screen.getByText("Dimensions").closest(".reporting-tab__picker") as HTMLElement);
+    await userEvent.click(dimensions.getByRole("checkbox", { name: "Channel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Then: the sort is gone (a grouped read cannot order by an ungrouped column, D3) but the filter,
+    // reached independently of the column now, survives
+    await waitFor(() =>
+      expect(listCampaignReportRows).toHaveBeenLastCalledWith(42, 1, 25, {
+        filters: [{ field: "CHANNEL", values: ["Display"] }],
+        groupBy: ["DATE", "LINE_ITEM_ID"],
+        sortField: undefined,
+        sortDirection: undefined,
+      })
+    );
+    expect(screen.getByText("Channel: Display")).toBeInTheDocument();
+  });
+
+  it("should save a date window on a report whose Date column is not selected", async () => {
+    // Given: a report that does not display Date as a column
+    mockReportViews([aReportView({ dimensions: ["line_item_id"] })]);
+    vi.mocked(updateReportView).mockResolvedValue({ ...SAVED_VIEW_DTO, status: "saved" });
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
+    const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
+    await userEvent.type(within(popover).getByLabelText("From"), "2026-03-10");
+    await userEvent.type(within(popover).getByLabelText("To"), "2026-03-20");
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Mar 10, 2026/ })).toBeInTheDocument()
+    );
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Save report" }));
+
+    // Then: the window is written even though Date is not a displayed column (D2/5f)
+    await waitFor(() => expect(updateReportView).toHaveBeenCalledTimes(1));
+    expect(updateReportView).toHaveBeenCalledWith(42, 1, expect.objectContaining({
+      filters: [{ field: "DATE", values: ["2026-03-10", "2026-03-20"] }],
+    }));
   });
 });
 
@@ -1863,7 +2065,8 @@ describe("ReportingTab editing", () => {
     expect(screen.getByRole("textbox", { name: "Search dimensions" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Search metrics" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Date" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Filter Constructed id L1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "All dates" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeDisabled();
   });
 
   it("should leave cpm alone while Cost is edited, since cpm is not built on Cost", async () => {
@@ -2658,7 +2861,7 @@ describe("ReportingTab editing", () => {
     vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
     renderReportingTab();
     await screen.findByText("LI-1");
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     const popover = await screen.findByRole("dialog", { name: "Filter — Date" });
     await userEvent.type(within(popover).getByLabelText("From"), "2026-08-01");
     await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
@@ -2709,7 +2912,7 @@ describe("ReportingTab editing", () => {
     await act(async () => backgroundReload.resolve(aPage()));
   });
 
-  it("should download the conversions template with the date window and no column filters", async () => {
+  it("should download the conversions template with the date window and no dimension filters", async () => {
     // Given:
     const blob = new Blob(["fake xlsx bytes"], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3416,6 +3619,40 @@ describe("ReportingTab download", () => {
     expect(createObjectURL).toHaveBeenCalledWith(blob);
     expect(createdLink?.download).toBe("Ourisman Ford 2026 - All data.xlsx");
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url"));
+  });
+
+  it("should export the current view with a filter on a non-displayed dimension", async () => {
+    // Given: a report filtered by Channel without Channel ever being a displayed column (PDI_115)
+    vi.mocked(listReportRowDistinctValues).mockResolvedValue(["Display", "Video"]);
+    vi.mocked(exportReportRows).mockResolvedValue({
+      blob: new Blob(["fake xlsx bytes"], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      truncated: false,
+    });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const picker = await screen.findByRole("dialog", { name: "Add filter" });
+    await userEvent.click(within(picker).getByText("Channel"));
+    const popover = await screen.findByRole("dialog", { name: "Filter — Channel" });
+    await userEvent.click(within(popover).getByText("Display"));
+    await userEvent.click(within(popover).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Channel: Display")).toBeInTheDocument());
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then: the filter travels to the export even though Channel is not one of the exported columns
+    await waitFor(() =>
+      expect(exportReportRows).toHaveBeenCalledWith(42, expect.objectContaining({
+        filters: [{ field: "CHANNEL", values: ["Display"] }],
+        groupBy: DEFAULT_GROUP_BY,
+        dimensions: ["date", "line_item_id"],
+      }))
+    );
   });
 
   it("should download current view columns in the saved visible order", async () => {

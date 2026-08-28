@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useDebounce } from "../../hooks/use-debounce";
 import { SearchIcon } from "../icons/icons";
 import { LoadingSpinner } from "../loading-spinner/loading-spinner";
+import type { DataTableFieldPickerProps } from "./data-table-filter-bar-model";
 
 /**
  * How long the value search waits before it filters the list.
@@ -70,29 +71,36 @@ export function popoverPosition(anchorRect: DOMRect | null) {
 }
 
 interface DataTablePopoverProps {
-  /** The column being filtered; titles the popover and names it to assistive technology. */
+  /** The column being filtered; titles the popover and names it to assistive technology, unless
+   *  `title` overrides that heading. */
   label: string;
+  /** Overrides the default "Filter — {label}" heading - the field picker's stage-1 popover (PDI_115)
+   *  is not filtering any one column yet, so it reads "Add filter" instead. */
+  title?: string;
   anchor: HTMLElement | null;
   children: ReactNode;
-  footer: ReactNode;
+  /** Commit controls under the content. Omitted entirely (no footer strip at all) when the popover has
+   *  nothing to commit - the field picker acts the moment a row is picked, with no Done to press. */
+  footer?: ReactNode;
 }
 
 /**
  * The shell every column filter is drawn in: a fixed-position card under its header cell, with a title
- * naming the column and a footer holding the commit controls.
+ * naming the column and, usually, a footer holding the commit controls.
  *
- * A shell rather than a base class, because the two filters that exist have nothing in common inside it -
- * one is a checkbox list, the other two date fields - and the only thing worth sharing is that they are
- * the same object on screen.
+ * A shell rather than a base class, because the filters drawn in it have little in common inside it - a
+ * checkbox list, two date fields, a searchable field list (PDI_115) - and the only thing worth sharing
+ * is that they are the same object on screen.
  */
-export function DataTablePopover({ label, anchor, children, footer }: DataTablePopoverProps) {
+export function DataTablePopover({ label, title, anchor, children, footer }: DataTablePopoverProps) {
   const { left, top } = popoverPosition(useAnchorRect(anchor));
+  const heading = title ?? `Filter — ${label}`;
 
   return (
-    <div className="data-table__pop" role="dialog" aria-label={`Filter — ${label}`} style={{ left, top }}>
-      <h4 className="data-table__pop-title">Filter — {label}</h4>
+    <div className="data-table__pop" role="dialog" aria-label={heading} style={{ left, top }}>
+      <h4 className="data-table__pop-title">{heading}</h4>
       {children}
-      <div className="data-table__pop-footer">{footer}</div>
+      {footer != null && <div className="data-table__pop-footer">{footer}</div>}
     </div>
   );
 }
@@ -287,6 +295,56 @@ export function DataTableDateFilterPopover({
         </label>
         {hint != null && <p className="data-table__pop-hint">{hint}</p>}
         {inverted && <p className="form-error">The start date is after the end date.</p>}
+      </div>
+    </DataTablePopover>
+  );
+}
+
+/**
+ * Stage 1 of the Filters bar's `+ Filter` control (PDI_115): a searchable list of every dimension,
+ * shown or not. Picking one hands off to {@link DataTableValueFilterPopover} for stage 2 via `onPick`
+ * alone - the consumer swaps popover state, so this popover never calls a separate close and never
+ * shows both stages at once. It commits nothing itself, so it has no footer/Done of its own; dismissing
+ * it without picking anything is the same outside-click handling every other popover here relies on.
+ */
+export function DataTableFieldPickerPopover({ fields, filteredIds, anchor, onPick }: DataTableFieldPickerProps) {
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebounce(query, VALUE_SEARCH_DEBOUNCE_MS);
+  const needle = debouncedQuery.trim().toLowerCase();
+  const items = fields
+    .filter((field) => field.label.toLowerCase().includes(needle))
+    .slice()
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return (
+    <DataTablePopover label="Add filter" title="Add filter" anchor={anchor}>
+      <div className="data-table__pop-search">
+        <SearchIcon />
+        <input
+          placeholder="Search fields…"
+          aria-label="Search fields"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      <div className="data-table__pop-list">
+        {items.length === 0 && <div className="data-table__pop-empty">No matches for &ldquo;{query}&rdquo;.</div>}
+        {items.map((field) => (
+          <button
+            key={field.id}
+            type="button"
+            className="data-table__pop-field-row"
+            onClick={() => onPick(field.id)}
+          >
+            <span className="data-table__pop-field-text">
+              <span className="data-table__pop-field-label">{field.label}</span>
+              {field.description != null && (
+                <span className="data-table__pop-field-desc">{field.description}</span>
+              )}
+            </span>
+            {filteredIds.includes(field.id) && <span className="data-table__pop-field-badge">Filtered</span>}
+          </button>
+        ))}
       </div>
     </DataTablePopover>
   );
