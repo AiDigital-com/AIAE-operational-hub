@@ -228,7 +228,22 @@ public final class BigQueryAdjustmentsViewColumns {
 	public static final String LINK_CLICKS = "link_clicks";
 
 	/**
-	 * BigQuery column holding a marker of which metrics were manually adjusted.
+	 * BigQuery column holding a marker of which metrics were manually adjusted, comma-joined.
+	 *
+	 * <p>Computed by the view, not stored - the same as its conversions-side twin (see
+	 * {@code BigQueryConversionsViewColumns#ADJUSTED_METRICS}). The write table has a column of this name
+	 * and the Hub fills it, but nothing written there is ever read back: the view's {@code
+	 * unified_adjustments} CTE does select it, and then both downstream branches overwrite it.
+	 *
+	 * <p>A row that matched a base mart row (an ordinary override) gets the marker recomputed by diffing
+	 * each of the twelve adjustment metrics against the mart's own value and joining the names that
+	 * differ, so a metric restated at its existing value is not listed. A row that matched nothing (a
+	 * manually added line - the view's {@code added_rows} CTE, {@code RIGHT JOIN ... WHERE pm.platform IS
+	 * NULL}) is given the literal {@code 'Non-existent data'} regardless of what was written.
+	 *
+	 * <p>So a value written here is a record of what the Hub did, readable by anyone querying the write
+	 * table directly, and never a report value. Writing it honestly still matters for that reason - see
+	 * {@code AdjustedMetricsMarker}, which derives it server-side - but no report reading depends on it.
 	 */
 	public static final String ADJUSTED_METRICS = "adjusted_metrics";
 

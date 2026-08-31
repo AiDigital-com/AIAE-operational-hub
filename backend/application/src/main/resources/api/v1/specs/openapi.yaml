@@ -3861,9 +3861,6 @@ components:
           type: integer
           format: int64
           description: Link clicks, or null when not adjusted.
-        adjusted_metrics:
-          type: string
-          description: Marker of which metric names were changed (comma-joined), or null.
       required:
         - added
     ReportRowAdjustmentsRequestV1:

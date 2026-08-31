@@ -223,7 +223,6 @@ class ReportRowContractMapperTest {
 		v1.setChannel("Display");
 		v1.setImpressions(1234L);
 		v1.setSpend(56.7);
-		v1.setAdjustedMetrics("impressions,spend");
 
 		// When:
 		AdjustmentRowModel model = mapper.toModel(v1);
@@ -235,7 +234,6 @@ class ReportRowContractMapperTest {
 		assertThat(model.channel()).isEqualTo("Display");
 		assertThat(model.impressions()).isEqualTo(1234L);
 		assertThat(model.spend()).isEqualTo(56.7);
-		assertThat(model.adjustedMetrics()).isEqualTo("impressions,spend");
 	}
 
 	@Test

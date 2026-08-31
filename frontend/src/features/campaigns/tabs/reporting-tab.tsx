@@ -55,7 +55,12 @@ import {
   downloadConversionAdjustmentTemplate,
   exportReportRows,
 } from "../api";
-import { ADD_LINE_ID_DIM_IDS, ADD_LINE_LEVEL_ID_DIM_ID, ADD_LINE_LEVEL_NAME_DIM_ID } from "../constants/add-line";
+import {
+  ADD_LINE_ID_DIM_IDS,
+  ADD_LINE_LEVEL_ID_DIM_ID,
+  ADD_LINE_LEVEL_NAME_DIM_ID,
+  ADD_LINE_SERVER_OWNED_DIM_IDS,
+} from "../constants/add-line";
 import {
   useReportRowDistinctValues,
   useReportRows,
@@ -259,8 +264,9 @@ function editableMetricDisplay(value: unknown): string {
 }
 
 /** The identity (non-metric) fields an adjustment carries - everything ReportRowAdjustmentV1 accepts
- * except the metrics themselves; client/campaign identity is sent from the mart row, while audit stamps
- * are server-owned and never sent.
+ * except the metrics themselves; client/campaign identity is sent from the mart row, while the four audit
+ * stamps and `adjusted_metrics` are server-owned and never sent - none of the five are even fields of
+ * ReportRowAdjustmentV1, so there is nothing here for a client value to overwrite.
  * rate_type/line_item_description are read-only display columns (not in ReportRowAdjustmentV1) for the
  * same reason the metrics above are excluded - no column for them on the write table.
  *
@@ -340,6 +346,11 @@ const CAMPAIGN_LEVEL_CONVERSION_CHANNELS = new Set(["Google SEM", "Google Search
 const NAME_DERIVED_DIMS = new Set<string>(CONSTRUCTED_NAME_PART_IDS);
 /** The three constructed-id dimensions an added row never lets the user type (PDI_117 D1). */
 const ID_DERIVED_DIMS = new Set<string>(ADD_LINE_ID_DIM_IDS);
+/** The five server-owned dimensions an added row never lets the user type (PDI_116): the four audit
+ * stamps are bound server-side at write time, and `adjusted_metrics` is derived server-side from which
+ * metrics an adjustment actually carries a value for (see the backend's `AdjustedMetricsMarker`) - none
+ * of the five are even fields of the request contract, so a typed value in any of them is dropped. */
+const SERVER_OWNED_DIMS = new Set<string>(ADD_LINE_SERVER_OWNED_DIM_IDS);
 
 /**
  * Puts a report's columns in the order it was saved with, for one group of them (dimensions or metrics).
@@ -1637,17 +1648,17 @@ export function ReportingTab() {
       if (!base) continue;
       const { values, changed } = stagedMetrics(changes);
       if (changed.length === 0) continue;
-      adjustments.push({ added: false, ...identityFields(base), ...values, adjusted_metrics: changed.join(",") });
+      adjustments.push({ added: false, ...identityFields(base), ...values });
     }
     for (const row of staged.added) {
-      const { values, changed } = stagedMetrics(row);
+      const { values } = stagedMetrics(row);
       // Send the CNB_* split the view will derive from the name anyway, rather than whatever the row
       // object happens to hold - so the write table records the row the report will actually show.
       const identity = {
         ...typedIdentityFields(row),
         ...constructedNameParts(String(row.line_item_name ?? "").trim()),
       };
-      adjustments.push({ added: true, ...identity, ...values, adjusted_metrics: changed.join(",") });
+      adjustments.push({ added: true, ...identity, ...values });
     }
     if (adjustments.length === 0) {
       setEditing(false);
@@ -2739,12 +2750,15 @@ const ReportRow = memo(function ReportRow({
     const levelForIdDim: AddLineLevel | null =
       d.id === "line_item_id" ? "LVL1" : d.id === "insertion_order_id" ? "LVL2"
         : d.id === "campaign_constructed_id" ? "LVL3" : null;
+    // PDI_116: the four audit stamps and the adjusted_metrics marker are written by the server on
+    // save, never by the user - an added row renders them read-only, like the id/name-derived cells.
+    const isServerOwned = isAdded && SERVER_OWNED_DIMS.has(d.id);
     return (
       <td
         key={d.id}
         className={cn(
           dimColClass(d.id),
-          (isFromName || isIdDim) && editing && "reporting-tab__cell--derived",
+          (isFromName || isIdDim || isServerOwned) && editing && "reporting-tab__cell--derived",
           hasRemoveControl(index) && "reporting-tab__cell--removable",
           dragClass(index)
         )}
@@ -2754,9 +2768,11 @@ const ReportRow = memo(function ReportRow({
             ? "Selected or generated automatically — never typed"
             : editing && isFromName
               ? "Read from the constructed name — edit the name to change it"
-              : editing && isInherited
-                ? "Inherited from this campaign"
-                : undefined
+              : editing && isServerOwned
+                ? "Written by the server on save — never typed"
+                : editing && isInherited
+                  ? "Inherited from this campaign"
+                  : undefined
         }
       >
         {removeControl(index)}
@@ -2779,6 +2795,11 @@ const ReportRow = memo(function ReportRow({
         ) : editing && isAdded && isFromName ? (
           <>
             {nameParts?.[d.id] || "—"}
+            {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
+          </>
+        ) : editing && isAdded && isServerOwned ? (
+          <>
+            {dimCell(d.id, merged)}
             {isRequiredInvalid && <span className="reporting-tab__cell-error">Required</span>}
           </>
         ) : editing && isAdded && !isInherited ? (

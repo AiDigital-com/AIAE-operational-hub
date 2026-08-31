@@ -133,7 +133,8 @@ class BigQueryReportRowServiceTest {
 				addedRowValidator,
 				constructedEntityLookup,
 				constructedIdGenerator,
-				rollbackWriter);
+				rollbackWriter,
+				new AdjustedMetricsMarker());
 		lenientAdjustmentsView();
 		// Default pass-through: every pre-existing test that writes an added row built its
 		// AdjustmentRowModel as the value it expects to see written. PDI_117 inserts AddedRowValidator
@@ -1549,8 +1550,7 @@ class BigQueryReportRowServiceTest {
 				null, null,
 				impressions, null, null, null, null,
 				null, null, null, null,
-				null,
-				"impressions");
+				null);
 	}
 
 	private AdjustmentRowModel addedAdjustment() {
@@ -1566,8 +1566,7 @@ class BigQueryReportRowServiceTest {
 				null, null,
 				1000L, null, null, null, null,
 				null, null, null,
-				null, null,
-				null);
+				null, null);
 	}
 
 	private AdjustmentRowModel adjustmentWithRequiredFields(
@@ -1584,8 +1583,7 @@ class BigQueryReportRowServiceTest {
 				null, null,
 				null, null, null, null, null,
 				null, null, null,
-				null, null,
-				null);
+				null, null);
 	}
 
 	private AdjustmentRowModel overrideAdjustmentWithConstructedName(String constructedName) {
@@ -1601,8 +1599,7 @@ class BigQueryReportRowServiceTest {
 				null, null,
 				100L, null, null, null, null,
 				null, null, null, null,
-				null,
-				"impressions");
+				null);
 	}
 
 	@Test
@@ -1781,6 +1778,25 @@ class BigQueryReportRowServiceTest {
 		verify(bigQueryWriteClient).execute(sql.capture());
 		assertThat(sql.getValue()).contains("resolved-name").contains("OPH_resolvedid0000");
 		assertThat(sql.getValue()).doesNotContain("typed-name").doesNotContain("typed-id");
+	}
+
+	@Test
+	void shouldDeriveAdjustedMetricsFromTheMetricsAnInlineAdjustmentCarriesTest() {
+		// Given: an inline override carrying impressions and nothing else. adjusted_metrics is no longer a
+		// field of the request contract at all (it used to be taken verbatim from the client, letting any
+		// caller write arbitrary text into that BigQuery column) - the marker is derived at the write point.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		givenCampaign();
+		when(bigQueryWriteClient.execute(anyString())).thenReturn(1L);
+
+		// When:
+		service.saveAdjustments(user, 42L, List.of(overrideAdjustment(1234L)));
+
+		// Then: the written marker names the one metric the row actually carries, and no other
+		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+		verify(bigQueryWriteClient).execute(sql.capture());
+		assertThat(sql.getValue()).contains("'impressions'");
+		assertThat(sql.getValue()).doesNotContain("'impressions,");
 	}
 
 	@Test

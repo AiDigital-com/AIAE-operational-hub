@@ -178,7 +178,11 @@ public class ReportRowContractMapper {
 	 * field on {@link ReportRowAdjustmentV1} at all, so there is nothing to reject here - the contract
 	 * itself makes them unsettable. Likewise for {@code rate_type}/{@code dynamic_rate}/{@code
 	 * avg_dynamic_rate_by_date_tactic}/{@code line_item_description}: the write table has no columns for
-	 * them, so the contract does not accept them either (see {@link AdjustmentRowModel}).
+	 * them, so the contract does not accept them either (see {@link AdjustmentRowModel}). {@code
+	 * adjusted_metrics} is absent for a different reason: it is a machine-readable marker of which
+	 * metrics were changed, and a client-supplied value would let any caller write arbitrary text into
+	 * that BigQuery column - so the contract has no field for it either, and the service derives it
+	 * itself from which metrics actually carry a value (see {@code AdjustedMetricsMarker}).
 	 *
 	 * @param v1 the adjustment DTO
 	 * @return the mapped adjustment model
@@ -197,8 +201,7 @@ public class ReportRowContractMapper {
 				v1.getFlightIdentifier(), v1.getLanguage(),
 				v1.getImpressions(), v1.getClicks(), v1.getSpend(), v1.getStarts(), v1.getFirstQuartiles(),
 				v1.getMidpoints(), v1.getThirdQuartiles(), v1.getCompletes(),
-				v1.getDynamicCost(), v1.getLinkClicks(),
-				v1.getAdjustedMetrics());
+				v1.getDynamicCost(), v1.getLinkClicks());
 	}
 
 	/**

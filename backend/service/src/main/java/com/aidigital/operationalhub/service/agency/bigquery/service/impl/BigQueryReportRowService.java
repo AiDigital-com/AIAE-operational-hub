@@ -184,6 +184,7 @@ public class BigQueryReportRowService implements ReportRowService {
 	private final ConstructedEntityLookup constructedEntityLookup;
 	private final ConstructedIdGenerator constructedIdGenerator;
 	private final AdjustmentRollbackWriter rollbackWriter;
+	private final AdjustedMetricsMarker adjustedMetricsMarker;
 
 	@Override
 	public ReportRowPageModel findReportRows(
@@ -1205,8 +1206,7 @@ public class BigQueryReportRowService implements ReportRowService {
 				base.geo(), base.creativeTag(), base.message(), base.keywordGroup(),
 				base.flightIdentifier(), base.language(),
 				impressions, clicks, spend, starts, firstQuartiles,
-				midpoints, thirdQuartiles, completes, dynamicCost, linkClicks,
-				String.join(",", changed));
+				midpoints, thirdQuartiles, completes, dynamicCost, linkClicks);
 	}
 
 	/**
@@ -1394,7 +1394,9 @@ public class BigQueryReportRowService implements ReportRowService {
 	 * resolved campaign still scopes the read/write operation; these values only preserve the mart identity
 	 * that the adjustments view expects. The created/last-modified stamps are the current user's email and a
 	 * server-evaluated {@code CURRENT_DATETIME()} (DATETIME, matching the write table's audit columns - see
-	 * {@link BqInsert#currentTimestamp()}), never a client-supplied timestamp.
+	 * {@link BqInsert#currentTimestamp()}), never a client-supplied timestamp - and so is the
+	 * {@code adjusted_metrics} marker, derived by {@link AdjustedMetricsMarker} from which metric components
+	 * the adjustment actually carries a value for, never taken from the request.
 	 *
 	 * @param campaign   the resolved campaign the adjustment belongs to
 	 * @param user       the current user
@@ -1443,7 +1445,7 @@ public class BigQueryReportRowService implements ReportRowService {
 				BqInsert.numberValue(adjustment.completes()),
 				BqInsert.numberValue(adjustment.dynamicCost()),
 				BqInsert.numberValue(adjustment.linkClicks()),
-				BqInsert.stringValue(adjustment.adjustedMetrics()),
+				BqInsert.stringValue(adjustedMetricsMarker.derive(adjustment)),
 				now,
 				userEmail,
 				now,

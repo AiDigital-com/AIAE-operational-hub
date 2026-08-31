@@ -188,6 +188,27 @@ class CampaignControllerMvcTest {
 	}
 
 	@Test
+	void shouldIgnoreAClientSuppliedAdjustedMetricsPropertyOnSaveReportRowAdjustmentsTest() throws Exception {
+		// Given: adjusted_metrics was removed from ReportRowAdjustmentV1 (it is now derived server-side -
+		// see AdjustedMetricsMarker) - a request body that still carries the property must be accepted and
+		// the property silently ignored by the generated DTO's Jackson deserialization, not rejected
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		List<AdjustmentRowModel> mappedAdjustments = List.of(Instancio.create(AdjustmentRowModel.class));
+		lenient().doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		lenient().doReturn(mappedAdjustments).when(reportRowMapper).toAdjustmentModels(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When/Then:
+		mockMvc.perform(post("/api/v1/campaigns/42/report-rows/adjustments")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"adjustments\":[{\"added\":false,\"date\":\"2026-03-10\","
+								+ "\"impressions\":100,\"adjusted_metrics\":\"malicious,injected\"}]}"))
+				.andExpect(status().isNoContent());
+	}
+
+	@Test
 	void shouldRejectPreviewAdjustmentRollbackWhenTheSelectionIsEmptyTest() throws Exception {
 		// Given: campaignConstructedNames has minItems: 1
 		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);

@@ -36,3 +36,20 @@ export const ADD_LINE_LEVEL_ENUM: Record<AddLineLevel, ConstructedEntityLevelEnu
  * either resolved from the typed name or generated server-side, and always rendered read-only.
  */
 export const ADD_LINE_ID_DIM_IDS: string[] = Object.values(ADD_LINE_LEVEL_ID_DIM_ID);
+
+/**
+ * Dimension ids an added row never offers as an input (PDI_116): `adjusted_metrics` is a marker
+ * derived from the metrics that were actually filled, and the four audit stamps are written by the
+ * server on save. A typed value in any of them is dropped, so offering the box is a lie.
+ *
+ * `adjusted_metrics` is doubly not an input: the adjustments view does not read the written marker back
+ * at all, and stamps every manually added line with the literal `Non-existent data` instead - which is
+ * what this column reads once the row is saved, and is the view's behaviour, not a Hub bug.
+ */
+export const ADD_LINE_SERVER_OWNED_DIM_IDS: string[] = [
+  "adjusted_metrics",
+  "created_at",
+  "created_by",
+  "last_modified_at",
+  "last_modified_by",
+];
