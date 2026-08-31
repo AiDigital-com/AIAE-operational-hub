@@ -21,9 +21,11 @@ import {
   listDashboards,
   listReportRowDistinctValues,
   listReportViews,
+  previewAdjustmentRollback,
   previewConstructedIds,
   previewDashboardDataset,
   removeDashboardDataSource,
+  rollbackAdjustments,
   saveReportRowAdjustments,
   updateDashboard,
   updateReportView,
@@ -176,6 +178,71 @@ export function useSaveReportRowAdjustments(campaignId: number | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: ReportRowAdjustmentsRequestV1) => saveReportRowAdjustments(campaignId as number, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["campaigns", "report-rows", campaignId] });
+    },
+  });
+}
+
+/**
+ * How many Hub-owned adjustment overlay rows a "Roll back adjustments" call would remove for the given
+ * level-1 campaigns and date window, without deleting anything. Disabled until the caller has a complete
+ * scope (at least one campaign name, both date bounds) - a rollback is never previewed, let alone run,
+ * for an unbounded selection.
+ *
+ * @param campaignId               the campaign id
+ * @param campaignConstructedNames the level-1 campaigns currently in scope
+ * @param dateWindow               the inclusive date window currently in scope
+ * @param enabled                  whether the owning modal is open
+ */
+export function useAdjustmentRollbackPreview(
+  campaignId: number | undefined,
+  campaignConstructedNames: string[],
+  dateWindow: DateWindow,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: [
+      "campaigns", "adjustment-rollback-preview", campaignId, campaignConstructedNames,
+      dateWindow.from, dateWindow.to,
+    ],
+    queryFn: () =>
+      previewAdjustmentRollback(campaignId as number, {
+        campaignConstructedNames,
+        dateFrom: dateWindow.from,
+        dateTo: dateWindow.to,
+      }),
+    enabled:
+      enabled && campaignId != null && campaignConstructedNames.length > 0
+      && dateWindow.from !== "" && dateWindow.to !== "",
+    staleTime: 0,
+  });
+}
+
+/**
+ * Removes the Hub's own manual adjustments for the given level-1 campaigns and date window. No
+ * optimistic update - the operation is server-side and irreversible from the Hub, so the UI shows only
+ * what the server reports actually happened. On success, invalidates this campaign's report-rows queries
+ * the same way {@link useSaveReportRowAdjustments} does, so the table re-reads the rows the rollback
+ * affected.
+ *
+ * @param campaignId the campaign the rows belong to
+ */
+export function useRollbackAdjustments(campaignId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      campaignConstructedNames,
+      dateWindow,
+    }: {
+      campaignConstructedNames: string[];
+      dateWindow: DateWindow;
+    }) =>
+      rollbackAdjustments(campaignId as number, {
+        campaignConstructedNames,
+        dateFrom: dateWindow.from,
+        dateTo: dateWindow.to,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["campaigns", "report-rows", campaignId] });
     },

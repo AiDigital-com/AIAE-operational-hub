@@ -374,6 +374,27 @@ public record BqRequest(String sql) {
 		}
 
 		/**
+		 * Adds a {@code LOWER(TRIM(`column`)) IN (...)} predicate over normalized string values; a
+		 * no-op when empty. The positive counterpart of {@link #whereNormalizedNotInStrings}, for a
+		 * caller that already validated a requested name against a case-insensitively resolved scope
+		 * (e.g. the MDA spreadsheet tool's own {@code LOWER(...)} matching) and now needs the same
+		 * comparison in the read/delete predicate itself.
+		 *
+		 * @param column the column
+		 * @param values the normalized values to match
+		 * @return this builder
+		 */
+		public Builder whereNormalizedInStrings(String column, List<String> values) {
+			if (values != null && !values.isEmpty()) {
+				String literals = values.stream()
+						.map(value -> "'" + escapeLiteral(value.trim().toLowerCase()) + "'")
+						.collect(Collectors.joining(", "));
+				predicates.add(BqSql.normalized(BqSql.col(column)) + " IN (" + literals + ")");
+			}
+			return this;
+		}
+
+		/**
 		 * Adds a {@code TRIM(`column`) != ''} predicate, keeping rows whose string column has real
 		 * content after whitespace is removed.
 		 *

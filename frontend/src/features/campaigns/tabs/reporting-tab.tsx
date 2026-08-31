@@ -82,6 +82,7 @@ import type {
   ReportRowV1,
 } from "../types";
 import { ConversionsBreakdown, type ConversionBreakdownTarget } from "./conversions-breakdown";
+import { RollbackAdjustmentsModal } from "./rollback-adjustments-modal";
 import "./reporting-tab.css";
 
 /** A report row with a stable identity key. A single line item can appear several times on the same date
@@ -834,6 +835,12 @@ export function ReportingTab() {
   const [editMenuOpen, setEditMenuOpen] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>("lines");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [rollbackModalOpen, setRollbackModalOpen] = useState(false);
+  // The level-1 campaigns a rollback would touch: the report's own line_item_name filter values - the
+  // same names saveReportRowAdjustments writes and rollbackAdjustments deletes by. Not a picker of its
+  // own; asking the user to filter by the dimension they mean to roll back keeps this destructive action
+  // from ever defaulting to "every campaign in the report".
+  const rollbackScopeNames = filterState.line_item_name ?? [];
   const { columnWidths, resizeColumn } = useColumnWidths();
   // Expanding hides everything above the table - the reports list, the builder, the controls - and
   // collapsing puts it all back, which moves the table a screenful or two down the page while the
@@ -2295,6 +2302,17 @@ export function ReportingTab() {
                       >
                         Bulk conversions adjustment
                       </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="reporting-tab__menu-danger"
+                        onClick={() => {
+                          setEditMenuOpen(false);
+                          setRollbackModalOpen(true);
+                        }}
+                      >
+                        Roll back adjustments
+                      </button>
                     </div>
                   )}
                 </div>
@@ -2382,6 +2400,22 @@ export function ReportingTab() {
               }
             />
           )}
+
+          <RollbackAdjustmentsModal
+            open={rollbackModalOpen}
+            campaignId={campaign.id}
+            campaignConstructedNames={rollbackScopeNames}
+            dateWindow={dateWindow}
+            onClose={() => setRollbackModalOpen(false)}
+            onRolledBack={(result) => {
+              setRollbackModalOpen(false);
+              toast.showSuccess(
+                `Rolled back ${result.deliveryRowsRemoved} delivery and `
+                  + `${result.conversionRowsRemoved} conversions adjustment row`
+                  + `${result.deliveryRowsRemoved + result.conversionRowsRemoved === 1 ? "" : "s"}.`
+              );
+            }}
+          />
 
           {editing && editMode === "conversions" && (
             <div className="reporting-tab__bulk-panel">
