@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.application.mapper;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.DirectionEnumV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowFilterFieldEnumV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowFilterV1;
@@ -9,6 +10,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRow
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowTotalsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowsPageResponseV1;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowDateRangeModel;
 import com.aidigital.operationalhub.service.agency.model.ReportRowFilterModel;
@@ -128,6 +130,19 @@ public class ReportRowContractMapper {
 	public ReportRowDateRangeModel toDateRange(LocalDate from, LocalDate to) {
 		return new ReportRowDateRangeModel(
 				from == null ? null : from.toString(), to == null ? null : to.toString());
+	}
+
+	/**
+	 * Maps an adjustment-rollback outcome (or preview) into the generated contract.
+	 *
+	 * @param model the rollback result/preview
+	 * @return the generated rollback result V1
+	 */
+	public ReportRowAdjustmentRollbackResultV1 toRollbackResult(AdjustmentRollbackResultModel model) {
+		ReportRowAdjustmentRollbackResultV1 v1 = new ReportRowAdjustmentRollbackResultV1();
+		v1.setDeliveryRowsRemoved(model.deliveryRowsRemoved());
+		v1.setConversionRowsRemoved(model.conversionRowsRemoved());
+		return v1;
 	}
 
 	/**

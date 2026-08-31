@@ -7,6 +7,7 @@ import type {
   ConversionAdjustmentRequestV1,
   ConversionBreakdownRequestV1,
   ConversionRowSearchRequestV1,
+  ReportRowAdjustmentRollbackRequestV1,
   ReportRowAdjustmentsRequestV1,
   ReportRowFilterFieldEnumV1,
   ReportRowSearchRequestV1,
@@ -131,6 +132,29 @@ export async function previewConstructedIds(
 export async function saveReportRowAdjustments(campaignId: number, body: ReportRowAdjustmentsRequestV1) {
   requireOk(
     await apiClient.POST("/api/v1/campaigns/{campaignId}/report-rows/adjustments", {
+      params: { path: { campaignId } },
+      body,
+    })
+  );
+}
+
+/** Reports how many Hub-owned adjustment overlay rows a rollback of this scope would remove. */
+export async function previewAdjustmentRollback(
+  campaignId: number,
+  body: ReportRowAdjustmentRollbackRequestV1
+) {
+  return requireData(
+    await apiClient.POST("/api/v1/campaigns/{campaignId}/report-rows/adjustments/rollback/preview", {
+      params: { path: { campaignId } },
+      body,
+    })
+  );
+}
+
+/** Removes the Hub's own manual adjustments for the given level-1 campaigns and date window. */
+export async function rollbackAdjustments(campaignId: number, body: ReportRowAdjustmentRollbackRequestV1) {
+  return requireData(
+    await apiClient.POST("/api/v1/campaigns/{campaignId}/report-rows/adjustments/rollback", {
       params: { path: { campaignId } },
       body,
     })

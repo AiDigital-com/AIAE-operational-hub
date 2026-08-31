@@ -21,6 +21,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Conversio
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionBreakdownV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionRowSearchRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.InsertionOrderV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentsRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowBulkAdjustmentResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowFilterFieldEnumV1;
@@ -49,6 +51,7 @@ import com.aidigital.operationalhub.service.agency.ConversionAdjustmentService;
 import com.aidigital.operationalhub.service.agency.InsertionOrderService;
 import com.aidigital.operationalhub.service.agency.ReportRowService;
 import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
@@ -181,6 +184,30 @@ public class CampaignController implements CampaignsApi {
 				reportRowMapper.toAdjustmentModels(reportRowAdjustmentsRequestV1.getAdjustments());
 		reportRowService.saveAdjustments(currentUser, campaignId, adjustments);
 		return ResponseEntity.noContent().build();
+	}
+
+	@Override
+	public ResponseEntity<ReportRowAdjustmentRollbackResultV1> previewAdjustmentRollback(
+			Long campaignId, ReportRowAdjustmentRollbackRequestV1 reportRowAdjustmentRollbackRequestV1) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		AdjustmentRollbackResultModel preview = reportRowService.previewAdjustmentRollback(
+				currentUser, campaignId,
+				reportRowAdjustmentRollbackRequestV1.getCampaignConstructedNames(),
+				reportRowAdjustmentRollbackRequestV1.getDateFrom().toString(),
+				reportRowAdjustmentRollbackRequestV1.getDateTo().toString());
+		return ResponseEntity.ok(reportRowMapper.toRollbackResult(preview));
+	}
+
+	@Override
+	public ResponseEntity<ReportRowAdjustmentRollbackResultV1> rollbackAdjustments(
+			Long campaignId, ReportRowAdjustmentRollbackRequestV1 reportRowAdjustmentRollbackRequestV1) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		AdjustmentRollbackResultModel result = reportRowService.rollbackAdjustments(
+				currentUser, campaignId,
+				reportRowAdjustmentRollbackRequestV1.getCampaignConstructedNames(),
+				reportRowAdjustmentRollbackRequestV1.getDateFrom().toString(),
+				reportRowAdjustmentRollbackRequestV1.getDateTo().toString());
+		return ResponseEntity.ok(reportRowMapper.toRollbackResult(result));
 	}
 
 	@Override

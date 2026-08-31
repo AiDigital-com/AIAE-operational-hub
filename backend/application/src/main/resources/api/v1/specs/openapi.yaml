@@ -1027,6 +1027,129 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/adjustments/rollback/preview:
+    post:
+      tags:
+        - campaigns
+      operationId: previewAdjustmentRollback
+      description: >
+        Reports how many Hub-owned adjustment overlay rows (delivery and conversions) would be removed
+        by POST .../adjustments/rollback for the given level-1 campaign names and date window, without
+        deleting anything. The requested names are validated against the campaign's own resolved
+        delivery scope the same way the rollback itself validates them, so a preview can never claim a
+        larger or different scope than the rollback it previews.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The level-1 campaign names and date window to preview a rollback for.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowAdjustmentRollbackRequestV1'
+      responses:
+        '200':
+          description: The preview counts were computed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowAdjustmentRollbackResultV1'
+        '400':
+          description: The request body failed validation, or a requested name is outside this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading adjustments from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/report-rows/adjustments/rollback:
+    post:
+      tags:
+        - campaigns
+      operationId: rollbackAdjustments
+      description: >
+        Removes the Operational Hub's own manual adjustments (delivery and conversions) for the given
+        level-1 campaign names, confined to the given inclusive date window - never all-time. An
+        adjustment is a separate overlay row over the immutable platform_mart/conversions_mart facts, so
+        a rollback deletes the overlay row and restores nothing: the read view falls back to the
+        underlying mart figure on its own once the overlay is gone. The MDA spreadsheet tool's own
+        adjustment tables are never touched, so a row it adjusted keeps showing after this call. POST
+        (not DELETE) because the scope travels in the body and DELETE-with-body is handled inconsistently
+        by proxies and generators. Requested names are matched case-insensitively (as the MDA tool does)
+        against the campaign's resolved delivery scope; a name outside that scope fails the whole
+        request rather than being silently skipped.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: The level-1 campaign names and date window to roll back adjustments for.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRowAdjustmentRollbackRequestV1'
+      responses:
+        '200':
+          description: The adjustments were removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRowAdjustmentRollbackResultV1'
+        '400':
+          description: The request body failed validation, or a requested name is outside this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while deleting adjustments from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/campaigns/{campaignId}/conversions/adjustments/template:
     post:
       tags:
@@ -3764,6 +3887,59 @@ components:
           description: The number of override rows written (0 when the upload changed nothing).
       required:
         - applied
+    ReportRowAdjustmentRollbackRequestV1:
+      type: object
+      description: >
+        The scope of a "Roll back adjustments" preview or rollback: which level-1 campaigns, within
+        which inclusive delivery-date window. Never all-time - a rollback always names both bounds.
+      properties:
+        campaignConstructedNames:
+          type: array
+          description: >
+            The level-1 constructed names (see ReportRowV1.line_item_name) to roll back adjustments for.
+            Matched case-insensitively against the campaign's own resolved delivery scope; a name
+            outside that scope fails the whole request. An empty selection is rejected rather than
+            treated as "every campaign".
+          minItems: 1
+          # Kept equal to AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES (service module) by hand - the same
+          # 500-value ceiling the report's own line_item_name dimension picker already enforces
+          # (BigQueryReportRowService.DISTINCT_VALUES_LIMIT), so a rollback can never legitimately name
+          # more level-1 campaigns than that picker could ever offer to select from.
+          maxItems: 500
+          items:
+            type: string
+            minLength: 1
+        dateFrom:
+          type: string
+          format: date
+          description: The inclusive first delivery/conversion date to roll back adjustments for.
+        dateTo:
+          type: string
+          format: date
+          description: The inclusive last delivery/conversion date to roll back adjustments for.
+      required:
+        - campaignConstructedNames
+        - dateFrom
+        - dateTo
+    ReportRowAdjustmentRollbackResultV1:
+      type: object
+      description: >
+        How many Hub-owned adjustment overlay rows a rollback removed (or, for a preview, would remove)
+        from each of the two adjustment tables. A row counted here that has no matching base mart row
+        (a manually-added line) disappears from the report entirely once removed, rather than falling
+        back to a raw figure.
+      properties:
+        deliveryRowsRemoved:
+          type: integer
+          format: int64
+          description: The number of delivery adjustment overlay rows removed (or that would be removed).
+        conversionRowsRemoved:
+          type: integer
+          format: int64
+          description: The number of conversions adjustment overlay rows removed (or that would be removed).
+      required:
+        - deliveryRowsRemoved
+        - conversionRowsRemoved
     ConstructedEntityLevelEnumV1:
       type: string
       description: >

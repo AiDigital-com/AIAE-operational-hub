@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.agency;
 
 import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
 import com.aidigital.operationalhub.service.agency.model.ConstructedIdsPreviewModel;
@@ -177,4 +178,53 @@ public interface ReportRowService {
 	 */
 	ConstructedIdsPreviewModel previewConstructedIds(
 			CurrentUserModel user, long campaignId, String name, String nameLvl2, String nameLvl3);
+
+	/**
+	 * Reports how many Hub-owned adjustment overlay rows (delivery and conversions) a rollback of the
+	 * given level-1 campaign names and date window would remove, without deleting anything. The requested
+	 * names are validated against the campaign's own resolved delivery scope the same way
+	 * {@link #rollbackAdjustments} validates them.
+	 *
+	 * @param user                     the current user
+	 * @param campaignId               the campaign id
+	 * @param campaignConstructedNames the level-1 constructed names to preview a rollback for; must be
+	 *                                 non-empty
+	 * @param dateFrom                 the inclusive first date, as {@code yyyy-MM-dd}
+	 * @param dateTo                   the inclusive last date, as {@code yyyy-MM-dd}
+	 * @return the counts a rollback of this scope would remove
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException OPH_025 unknown/invisible
+	 *                                                                          campaign, OPH_027 empty/blank
+	 *                                                                          selection, OPH_050
+	 *                                                                          out-of-scope name, OPH_018
+	 *                                                                          if the BigQuery read fails
+	 */
+	AdjustmentRollbackResultModel previewAdjustmentRollback(
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
+			String dateTo);
+
+	/**
+	 * Removes the Hub's own manual adjustments (delivery and conversions) for the given level-1 campaign
+	 * names, confined to the given inclusive date window. An adjustment is a separate overlay row over the
+	 * immutable platform_mart/conversions_mart facts, so this deletes the overlay row and restores
+	 * nothing - the read view falls back to the underlying mart figure on its own once the overlay is
+	 * gone. Requested names are matched case-insensitively against the campaign's resolved delivery scope;
+	 * a name outside that scope fails the whole request rather than being silently skipped.
+	 *
+	 * @param user                     the current user
+	 * @param campaignId               the campaign id
+	 * @param campaignConstructedNames the level-1 constructed names to roll back adjustments for; must be
+	 *                                 non-empty
+	 * @param dateFrom                 the inclusive first date, as {@code yyyy-MM-dd}
+	 * @param dateTo                   the inclusive last date, as {@code yyyy-MM-dd}
+	 * @return the counts actually removed
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException OPH_025 unknown/invisible
+	 *                                                                          campaign, OPH_027 empty/blank
+	 *                                                                          selection, OPH_050
+	 *                                                                          out-of-scope name, OPH_033
+	 *                                                                          lock contention, OPH_026 if
+	 *                                                                          the BigQuery delete fails
+	 */
+	AdjustmentRollbackResultModel rollbackAdjustments(
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
+			String dateTo);
 }

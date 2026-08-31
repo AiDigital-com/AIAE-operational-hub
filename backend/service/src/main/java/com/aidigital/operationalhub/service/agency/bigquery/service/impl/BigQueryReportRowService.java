@@ -15,6 +15,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.model.ReportRowMetri
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQueryWriteGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.ReportQueryExecutor;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
@@ -34,6 +35,7 @@ import com.aidigital.operationalhub.service.common.search.SortCriterion;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
+import com.aidigital.operationalhub.usagelogging.LogUsage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
@@ -181,6 +183,7 @@ public class BigQueryReportRowService implements ReportRowService {
 	private final AddedRowValidator addedRowValidator;
 	private final ConstructedEntityLookup constructedEntityLookup;
 	private final ConstructedIdGenerator constructedIdGenerator;
+	private final AdjustmentRollbackWriter rollbackWriter;
 
 	@Override
 	public ReportRowPageModel findReportRows(
@@ -966,6 +969,23 @@ public class BigQueryReportRowService implements ReportRowService {
 				.map(id -> new ResolvedConstructedId(id, ConstructedIdOrigin.EXISTING))
 				.orElseGet(() -> new ResolvedConstructedId(
 						constructedIdGenerator.generate(hashComponents), ConstructedIdOrigin.GENERATED));
+	}
+
+	@Override
+	public AdjustmentRollbackResultModel previewAdjustmentRollback(
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
+			String dateTo) {
+		CampaignDeliveryScope scope = resolveScope(user, campaignId);
+		return rollbackWriter.preview(scope, campaignConstructedNames, dateFrom, dateTo);
+	}
+
+	@Override
+	@LogUsage(action = "adjustment.rollback")
+	public AdjustmentRollbackResultModel rollbackAdjustments(
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
+			String dateTo) {
+		CampaignDeliveryScope scope = resolveScope(user, campaignId);
+		return rollbackWriter.rollback(scope, campaignConstructedNames, dateFrom, dateTo);
 	}
 
 	@Override

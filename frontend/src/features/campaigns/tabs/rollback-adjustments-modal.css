@@ -1,0 +1,58 @@
+.rollback-adjustments-modal {
+  max-width: 480px;
+}
+.rollback-adjustments-modal__hint {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.rollback-adjustments-modal__scope {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--n-100);
+  border-radius: var(--radius);
+}
+.rollback-adjustments-modal__scope-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.rollback-adjustments-modal__scope-row dt {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rollback-adjustments-modal__scope-row dd {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.rollback-adjustments-modal__scope-note {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--muted);
+}
+.rollback-adjustments-modal__state {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rollback-adjustments-modal__counts {
+  margin: 12px 0 0;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.rollback-adjustments-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}

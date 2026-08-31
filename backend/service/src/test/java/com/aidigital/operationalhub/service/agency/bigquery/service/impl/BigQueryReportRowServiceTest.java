@@ -16,6 +16,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySear
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQueryWriteGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.CachedBigQuerySearchExecutor;
 import com.aidigital.operationalhub.service.agency.bigquery.service.ReportQueryExecutor;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
@@ -110,6 +111,9 @@ class BigQueryReportRowServiceTest {
 	@Mock
 	private ConstructedIdGenerator constructedIdGenerator;
 
+	@Mock
+	private AdjustmentRollbackWriter rollbackWriter;
+
 	private BigQuerySearchGateway searchGateway;
 	private BigQueryReportRowService service;
 	private ReportQueryExecutor reportQueryExecutor;
@@ -128,7 +132,8 @@ class BigQueryReportRowServiceTest {
 				reportQueryExecutor,
 				addedRowValidator,
 				constructedEntityLookup,
-				constructedIdGenerator);
+				constructedIdGenerator,
+				rollbackWriter);
 		lenientAdjustmentsView();
 		// Default pass-through: every pre-existing test that writes an added row built its
 		// AdjustmentRowModel as the value it expects to see written. PDI_117 inserts AddedRowValidator
@@ -2267,5 +2272,45 @@ class BigQueryReportRowServiceTest {
 		assertThat(preview.level2()).isEqualTo(new ResolvedConstructedId("OPH_ioid00000000", ConstructedIdOrigin.GENERATED));
 		assertThat(preview.level3())
 				.isEqualTo(new ResolvedConstructedId("OPH_creativeid000", ConstructedIdOrigin.GENERATED));
+	}
+
+	@Test
+	void shouldDelegateAdjustmentRollbackPreviewToTheResolvedCampaignScopeTest() {
+		// Given:
+		CampaignModel campaign = campaign(42L, "Ourisman Ford 2026", "Ourisman Ford");
+		when(campaignService.getVisibleCampaignIdentity(any(), anyLong())).thenReturn(campaign);
+		CampaignDeliveryScope scope = scope(campaign);
+		when(scopeResolver.forCampaign(campaign)).thenReturn(scope);
+		List<String> names = List.of("Retargeting");
+		AdjustmentRollbackResultModel expected = new AdjustmentRollbackResultModel(3L, 1L);
+		when(rollbackWriter.preview(scope, names, "2026-01-01", "2026-01-31")).thenReturn(expected);
+
+		// When:
+		AdjustmentRollbackResultModel result =
+				service.previewAdjustmentRollback(null, 42L, names, "2026-01-01", "2026-01-31");
+
+		// Then:
+		assertThat(result).isEqualTo(expected);
+		verify(rollbackWriter).preview(scope, names, "2026-01-01", "2026-01-31");
+	}
+
+	@Test
+	void shouldDelegateAdjustmentRollbackToTheResolvedCampaignScopeTest() {
+		// Given:
+		CampaignModel campaign = campaign(42L, "Ourisman Ford 2026", "Ourisman Ford");
+		when(campaignService.getVisibleCampaignIdentity(any(), anyLong())).thenReturn(campaign);
+		CampaignDeliveryScope scope = scope(campaign);
+		when(scopeResolver.forCampaign(campaign)).thenReturn(scope);
+		List<String> names = List.of("Retargeting");
+		AdjustmentRollbackResultModel expected = new AdjustmentRollbackResultModel(3L, 1L);
+		when(rollbackWriter.rollback(scope, names, "2026-01-01", "2026-01-31")).thenReturn(expected);
+
+		// When:
+		AdjustmentRollbackResultModel result =
+				service.rollbackAdjustments(null, 42L, names, "2026-01-01", "2026-01-31");
+
+		// Then:
+		assertThat(result).isEqualTo(expected);
+		verify(rollbackWriter).rollback(scope, names, "2026-01-01", "2026-01-31");
 	}
 }

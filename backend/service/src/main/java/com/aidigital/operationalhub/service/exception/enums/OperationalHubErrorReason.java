@@ -260,7 +260,14 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * Add Line V8: a level was submitted for generation, but its name already matches real mart data.
 	 */
 	OPH_049("OPH_049",
-			"This line already exists in platform data - select it instead of creating a new one.");
+			"This line already exists in platform data - select it instead of creating a new one."),
+
+	/**
+	 * A requested adjustment-rollback campaign name is outside the campaign's own resolved delivery
+	 * scope - rejected rather than silently skipped, so a crafted request cannot delete outside the
+	 * caller's visibility.
+	 */
+	OPH_050("OPH_050", "'%s' does not belong to this campaign.");
 
 	private final String code;
 	private final String description;

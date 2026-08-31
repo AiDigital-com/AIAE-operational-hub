@@ -12,6 +12,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Conversio
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionRowSearchRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.DirectionEnumV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.InsertionOrderV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentsRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowFilterFieldEnumV1;
@@ -55,6 +57,7 @@ import com.aidigital.operationalhub.service.agency.ConversionAdjustmentService;
 import com.aidigital.operationalhub.service.agency.InsertionOrderService;
 import com.aidigital.operationalhub.service.agency.ReportRowService;
 import com.aidigital.operationalhub.service.agency.bigquery.model.ConstructedEntityLevel;
+import com.aidigital.operationalhub.service.agency.model.AdjustmentRollbackResultModel;
 import com.aidigital.operationalhub.service.agency.model.AdjustmentRowModel;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.agency.model.ConstructedEntity;
@@ -403,6 +406,56 @@ class CampaignControllerTest {
 		// Then:
 		assertThat(result.getStatusCode().value()).isEqualTo(204);
 		verify(reportRowService).saveAdjustments(currentUser, 42L, List.of(model));
+	}
+
+	@Test
+	void shouldPreviewAdjustmentRollbackForCurrentUserTest() {
+		// Given:
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		ReportRowAdjustmentRollbackRequestV1 request = new ReportRowAdjustmentRollbackRequestV1();
+		request.setCampaignConstructedNames(List.of("Retargeting"));
+		request.setDateFrom(LocalDate.of(2026, 1, 1));
+		request.setDateTo(LocalDate.of(2026, 1, 31));
+		AdjustmentRollbackResultModel preview = new AdjustmentRollbackResultModel(3L, 1L);
+		ReportRowAdjustmentRollbackResultV1 responseBody = new ReportRowAdjustmentRollbackResultV1();
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(preview).when(reportRowService).previewAdjustmentRollback(
+				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		doReturn(responseBody).when(reportRowMapper).toRollbackResult(preview);
+
+		// When:
+		var result = controller.previewAdjustmentRollback(42L, request);
+
+		// Then:
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(responseBody);
+		verify(reportRowService).previewAdjustmentRollback(
+				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+	}
+
+	@Test
+	void shouldRollbackAdjustmentsForCurrentUserTest() {
+		// Given:
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		ReportRowAdjustmentRollbackRequestV1 request = new ReportRowAdjustmentRollbackRequestV1();
+		request.setCampaignConstructedNames(List.of("Retargeting"));
+		request.setDateFrom(LocalDate.of(2026, 1, 1));
+		request.setDateTo(LocalDate.of(2026, 1, 31));
+		AdjustmentRollbackResultModel outcome = new AdjustmentRollbackResultModel(3L, 1L);
+		ReportRowAdjustmentRollbackResultV1 responseBody = new ReportRowAdjustmentRollbackResultV1();
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(outcome).when(reportRowService).rollbackAdjustments(
+				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		doReturn(responseBody).when(reportRowMapper).toRollbackResult(outcome);
+
+		// When:
+		var result = controller.rollbackAdjustments(42L, request);
+
+		// Then:
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(responseBody);
+		verify(reportRowService).rollbackAdjustments(
+				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
 	}
 
 	@Test

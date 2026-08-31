@@ -186,4 +186,37 @@ class CampaignControllerMvcTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("OPH_049"));
 	}
+
+	@Test
+	void shouldRejectPreviewAdjustmentRollbackWhenTheSelectionIsEmptyTest() throws Exception {
+		// Given: campaignConstructedNames has minItems: 1
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		lenient().doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When/Then:
+		mockMvc.perform(post("/api/v1/campaigns/42/report-rows/adjustments/rollback/preview")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"campaignConstructedNames\":[],\"dateFrom\":\"2026-01-01\","
+								+ "\"dateTo\":\"2026-01-31\"}"))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void shouldRejectRollbackAdjustmentsWhenTheDateWindowIsMissingTest() throws Exception {
+		// Given: dateFrom/dateTo are both required
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		lenient().doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When/Then:
+		mockMvc.perform(post("/api/v1/campaigns/42/report-rows/adjustments/rollback")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"campaignConstructedNames\":[\"Retargeting\"]}"))
+				.andExpect(status().isBadRequest());
+	}
 }
