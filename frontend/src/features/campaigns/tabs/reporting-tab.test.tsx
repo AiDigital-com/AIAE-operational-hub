@@ -2307,6 +2307,73 @@ describe("ReportingTab editing", () => {
     expect(screen.getAllByText("FPCU")).toHaveLength(3);
   });
 
+  it("should not offer an input for Adjusted metrics on a new line", async () => {
+    // Given: a view showing the server-derived adjusted-metrics marker (PDI_116) alongside the raw grain
+    mockReportViews([
+      aReportView({ dimensions: [...RAW_GRAIN_DIMS, "adjusted_metrics"], metrics: ["spend"] }),
+    ]);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+
+    // Then: no box to type into - the save payload derives the marker from the metrics actually
+    // filled, so any typed value would be silently overwritten
+    expect(screen.queryByRole("textbox", { name: "Adjusted metrics for new line" })).not.toBeInTheDocument();
+    const newLineRow = screen.getByLabelText("Date for new line").closest("tr") as HTMLElement;
+    expect(within(newLineRow).getByText("—")).toBeInTheDocument();
+  });
+
+  it("should not offer inputs for the four audit stamps on a new line", async () => {
+    // Given: a view showing every audit stamp (PDI_116) - all four are bound server-side at write time
+    // and are not even fields of the request contract, so a typed value would be dropped
+    mockReportViews([
+      aReportView({
+        dimensions: [...RAW_GRAIN_DIMS, "created_at", "created_by", "last_modified_at", "last_modified_by"],
+        metrics: ["spend"],
+      }),
+    ]);
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+
+    // Then: no box for any of the four, and all four cells fall back to the empty-value dash
+    expect(screen.queryByRole("textbox", { name: "Created at for new line" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Created by for new line" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Last modified at for new line" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Last modified by for new line" })).not.toBeInTheDocument();
+    const newLineRow = screen.getByLabelText("Date for new line").closest("tr") as HTMLElement;
+    expect(within(newLineRow).getAllByText("—")).toHaveLength(4);
+  });
+
+  it("should still render an input for the dimensions a new line does own", async () => {
+    // Given: the raw-grain view every editable report shows - date, platform, account, account_id and
+    // the three constructed-name levels are all typed by the user, unlike the server-owned dimensions
+    renderReportingTab();
+    await screen.findByText("LI-1");
+    await userEvent.click(screen.getByRole("button", { name: "Edit data" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Adjust individual lines" }));
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Add line" }));
+
+    // Then: the date cell is a date input, not a textbox, but every other owned field renders one
+    expect(screen.getByLabelText("Date for new line")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Platform for new line" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Account for new line" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Account id for new line" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /Constructed name L1 for new line/ })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Constructed name L2 for new line" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Constructed name L3 for new line" })).toBeInTheDocument();
+  });
+
   it("should read an added line's naming-convention fields out of the constructed name as it is typed", async () => {
     // Given: an added line whose channel and tactic are segments 5 and 6 of the name
     mockReportViews([
@@ -2753,7 +2820,8 @@ describe("ReportingTab editing", () => {
     // When:
     await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
 
-    // Then: exactly one batch call, carrying the edited value + which metric changed
+    // Then: exactly one batch call, carrying the edited value. adjusted_metrics is not a request field at
+    // all (PDI_116 hardening) - the server derives it from which metrics the request actually carries.
     await waitFor(() => expect(saveReportRowAdjustments).toHaveBeenCalledTimes(1));
     expect(saveReportRowAdjustments).toHaveBeenCalledWith(42, {
       adjustments: [
@@ -2762,7 +2830,6 @@ describe("ReportingTab editing", () => {
           date: "2026-03-10",
           line_item_id: "LI-1",
           spend: 500,
-          adjusted_metrics: "spend",
         }),
       ],
     });

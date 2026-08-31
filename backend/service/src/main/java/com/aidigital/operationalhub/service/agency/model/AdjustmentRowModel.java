@@ -50,7 +50,6 @@ package com.aidigital.operationalhub.service.agency.model;
  * @param completes               video completions, or {@code null} when not adjusted
  * @param dynamicCost             rate-card (dynamic) cost, or {@code null} when not adjusted
  * @param linkClicks              link clicks, or {@code null} when not adjusted
- * @param adjustedMetrics         marker of which metric names were changed (comma-joined)
  */
 public record AdjustmentRowModel(
 		boolean added,
@@ -63,6 +62,5 @@ public record AdjustmentRowModel(
 		String geo, String creativeTag, String message, String keywordGroup,
 		String flightIdentifier, String language,
 		Long impressions, Long clicks, Double spend, Long starts, Long firstQuartiles,
-		Long midpoints, Long thirdQuartiles, Long completes, Double dynamicCost, Long linkClicks,
-		String adjustedMetrics) {
+		Long midpoints, Long thirdQuartiles, Long completes, Double dynamicCost, Long linkClicks) {
 }

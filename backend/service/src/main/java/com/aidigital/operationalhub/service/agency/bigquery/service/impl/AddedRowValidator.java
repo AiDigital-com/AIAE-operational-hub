@@ -500,8 +500,7 @@ class AddedRowValidator {
 				adjustment.message(), adjustment.keywordGroup(), adjustment.flightIdentifier(), adjustment.language(),
 				adjustment.impressions(), adjustment.clicks(), adjustment.spend(), adjustment.starts(),
 				adjustment.firstQuartiles(), adjustment.midpoints(), adjustment.thirdQuartiles(),
-				adjustment.completes(), adjustment.dynamicCost(), adjustment.linkClicks(),
-				adjustment.adjustedMetrics());
+				adjustment.completes(), adjustment.dynamicCost(), adjustment.linkClicks());
 	}
 
 	/**
