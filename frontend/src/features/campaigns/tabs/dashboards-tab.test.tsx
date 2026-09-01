@@ -30,6 +30,7 @@ const SOON_TYPES = [
   "Device",
   "Genre",
   "Demographics",
+  "Placements",
 ];
 
 vi.mock("../api", () => ({
@@ -270,11 +271,11 @@ describe("DashboardsTab", () => {
     await screen.findByText("Create your first dashboard");
 
     // When:
-    await userEvent.click(screen.getAllByRole("button", { name: "Create dashboard" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "Create dashboard source" })[0]);
 
     // Then: every other type is listed as coming soon, so nothing can be created that has no schema
     expect(await screen.findByRole("menuitem", { name: "Basic" })).toBeEnabled();
-    expect(screen.getAllByText("Coming soon")).toHaveLength(8);
+    expect(screen.getAllByText("Coming soon")).toHaveLength(9);
     SOON_TYPES.forEach((label) =>
       expect(screen.getByRole("menuitem", { name: new RegExp(`^${label}`) })).toBeDisabled()
     );
@@ -286,7 +287,7 @@ describe("DashboardsTab", () => {
     vi.mocked(createDashboard).mockResolvedValue(aDashboard());
     renderTab();
     await screen.findByText("Create your first dashboard");
-    await userEvent.click(screen.getAllByRole("button", { name: "Create dashboard" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "Create dashboard source" })[0]);
 
     // When:
     await userEvent.click(await screen.findByRole("menuitem", { name: "Basic" }));
@@ -309,7 +310,7 @@ describe("DashboardsTab", () => {
     vi.mocked(createDashboard).mockResolvedValue(aDashboard({ id: 9, name: "Untitled Basic dashboard (2)" }));
     renderTab();
     await screen.findByRole("button", { name: "Apply" });
-    await userEvent.click(screen.getByRole("button", { name: "Create dashboard" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create dashboard source" }));
 
     // When:
     await userEvent.click(await screen.findByRole("menuitem", { name: "Basic" }));
@@ -347,7 +348,7 @@ describe("DashboardsTab", () => {
 
     // Then:
     await openDatasetHint();
-    expect(await screen.findByText(/12,345 rows · 18 dimensions · 12 metrics/)).toBeInTheDocument();
+    expect(await screen.findByText(/12,345 rows · 17 dimensions · 12 metrics/)).toBeInTheDocument();
     expect(previewDashboardDataset).toHaveBeenCalledTimes(1);
   });
 
@@ -726,7 +727,7 @@ describe("DashboardsTab", () => {
 
     // Then: 12 metrics minus CPA, and the checkbox reflects it
     await openDatasetHint();
-    expect(await screen.findByText(/18 dimensions · 11 metrics/)).toBeInTheDocument();
+    expect(await screen.findByText(/17 dimensions · 11 metrics/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /CPA/ })).not.toBeChecked();
   });
 
@@ -742,9 +743,9 @@ describe("DashboardsTab", () => {
 
     // Then: the panel's count follows the checkbox at once, while the row count keeps describing the dataset
     // that exists - it was measured under the saved selection, not the one being considered
-    expect(await screen.findByRole("heading", { level: 4, name: /Dimensions 17/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 4, name: /Dimensions 16/ })).toBeInTheDocument();
     await openDatasetHint();
-    expect(screen.getByText(/18 dimensions · 12 metrics/)).toBeInTheDocument();
+    expect(screen.getByText(/17 dimensions · 12 metrics/)).toBeInTheDocument();
     expect(updateDashboard).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
   });

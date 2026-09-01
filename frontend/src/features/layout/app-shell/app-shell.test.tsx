@@ -140,7 +140,7 @@ describe("AppShell", () => {
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 
-  it("should show Team and Admin nav items for admins", async () => {
+  it("should show the Team nav item for admins", async () => {
     // Given: a signed-in admin user
     mockAuth("jwt-token");
     vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"], hub_user_id: 5 }));
@@ -148,14 +148,13 @@ describe("AppShell", () => {
     // When: the shell renders
     renderShell();
 
-    // Then: admin sees Overview link, Team link, Admin button, and the operational overview heading
+    // Then: admin sees Overview link, Team link, and the operational overview heading
     expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Team" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Admin" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   });
 
-  it("should hide Team and Admin nav for non-admins", async () => {
+  it("should hide the Team nav item for non-admins", async () => {
     // Given: a signed-in non-admin user
     mockAuth("jwt-token");
     vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["USER"], hub_user_id: 6 }));
@@ -163,9 +162,8 @@ describe("AppShell", () => {
     // When: the shell renders
     renderShell();
 
-    // Then: only the Overview link is in the nav; Team and Admin are hidden
+    // Then: only the Overview link is in the nav; Team is hidden
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Team" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Admin" })).not.toBeInTheDocument();
   });
 });

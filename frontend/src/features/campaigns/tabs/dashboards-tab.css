@@ -146,8 +146,15 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.dashboards-tab__menu button:hover {
+.dashboards-tab__menu button:hover:not(:disabled) {
   background: var(--n-100);
+}
+/* Keyed off :disabled, not off the --disabled modifier: a one-class selector loses to
+   `.dashboards-tab__menu button`, so the modifier's grey ink and not-allowed cursor never applied and a
+   coming-soon type looked and hovered exactly like a creatable one. Matches the Reporting menu. */
+.dashboards-tab__menu button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 .dashboards-tab__menu-danger {
   color: var(--bad);
@@ -165,13 +172,16 @@
   color: var(--muted);
   cursor: not-allowed;
 }
-.dashboards-tab__menu-item--disabled:hover {
-  background: none;
-}
+/* Same pill as the Reporting tab's own coming-soon badge (.reporting-tab__soon): bare uppercase text read
+   as a second label rather than a badge, which made the two menus look inconsistent side by side. */
 .dashboards-tab__soon {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  background: var(--n-100);
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: .06em;
+  letter-spacing: .04em;
   text-transform: uppercase;
   color: var(--muted);
 }
