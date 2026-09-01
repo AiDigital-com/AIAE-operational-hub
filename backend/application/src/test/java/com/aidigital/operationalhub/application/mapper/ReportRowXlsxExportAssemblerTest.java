@@ -11,10 +11,18 @@ import org.instancio.Instancio;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Base64;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,6 +52,40 @@ class ReportRowXlsxExportAssemblerTest {
 				5000L, 12L, 92.5, null, null, null, null, null, null, null, null, null, null,
 				null, null, null, null, null, null, null, null, null, null,
 				cpm, null, null, ctr, null);
+	}
+
+	/**
+	 * Reads an xlsx byte array as a zip and returns a map of entry name to Base64-encoded entry
+	 * content, excluding {@code docProps/core.xml}. That entry holds POI's
+	 * {@code dcterms:created}/{@code dcterms:modified} timestamps at second granularity, so two
+	 * workbooks generated a moment apart - straddling a second boundary - differ there even when every
+	 * sheet, style, and shared string is identical. Comparing every other entry keeps the assertion's
+	 * strength (it still catches any data, styling, ordering, or sheet-structure regression) without
+	 * being sensitive to wall-clock timing. Do not restore a raw byte comparison that includes this
+	 * entry - it is the sole source of the flake this helper exists to remove. Values are encoded as
+	 * Base64 strings rather than kept as {@code byte[]}, because {@link Map#equals} delegates to
+	 * {@code byte[].equals}, which compares array identity, not content - a raw
+	 * {@code Map<String, byte[]>} comparison would silently never catch a real difference either.
+	 */
+	private Map<String, String> workbookEntriesExcludingCreationTimestamp(byte[] xlsxBytes) throws IOException {
+		File tempFile = File.createTempFile("workbook-under-test", ".xlsx");
+		try {
+			Files.write(tempFile.toPath(), xlsxBytes);
+			Map<String, String> entries = new TreeMap<>();
+			try (ZipFile zipFile = new ZipFile(tempFile)) {
+				Enumeration<? extends ZipEntry> zipEntries = zipFile.entries();
+				while (zipEntries.hasMoreElements()) {
+					ZipEntry entry = zipEntries.nextElement();
+					if (!"docProps/core.xml".equals(entry.getName())) {
+						byte[] content = zipFile.getInputStream(entry).readAllBytes();
+						entries.put(entry.getName(), Base64.getEncoder().encodeToString(content));
+					}
+				}
+			}
+			return entries;
+		} finally {
+			Files.deleteIfExists(tempFile.toPath());
+		}
 	}
 
 	@Test
@@ -373,8 +415,10 @@ class ReportRowXlsxExportAssemblerTest {
 		byte[] withoutOrderOverload = assembler.toWorkbook(List.of(model), columns, null);
 		byte[] withNullOrder = assembler.toWorkbook(List.of(model), columns, null, null);
 
-		// Verification: byte-identical to the pre-existing 3-arg call
-		assertThat(withNullOrder).isEqualTo(withoutOrderOverload);
+		// Verification: identical to the pre-existing 3-arg call in every zip entry except the
+		// creation-timestamp entry, which ticks with wall-clock time between the two calls
+		assertThat(workbookEntriesExcludingCreationTimestamp(withNullOrder))
+				.isEqualTo(workbookEntriesExcludingCreationTimestamp(withoutOrderOverload));
 		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(withNullOrder))) {
 			Row header = workbook.getSheetAt(0).getRow(0);
 			List<String> headerNames = StreamSupport.stream(header.spliterator(), false)
@@ -387,7 +431,8 @@ class ReportRowXlsxExportAssemblerTest {
 	@Test
 	void shouldLeaveTheFullSchemaExportUnchangedWhenColumnOrderIsEmptyTest() throws IOException {
 		// Given: the full-schema export, once through the pre-existing no-arg convenience and once
-		// through the columnOrder overload with an empty order - both must be byte-identical
+		// through the columnOrder overload with an empty order - both must be identical apart from the
+		// creation timestamp
 		ReportRowModel model = row("Ourisman Main", null, 5000L, 12L, 92.5);
 
 		// Execution:
@@ -395,7 +440,8 @@ class ReportRowXlsxExportAssemblerTest {
 		byte[] withEmptyOrder = assembler.toWorkbook(List.of(model), List.of(), List.of(), null);
 
 		// Verification:
-		assertThat(withEmptyOrder).isEqualTo(preExisting);
+		assertThat(workbookEntriesExcludingCreationTimestamp(withEmptyOrder))
+				.isEqualTo(workbookEntriesExcludingCreationTimestamp(preExisting));
 	}
 
 	@Test
