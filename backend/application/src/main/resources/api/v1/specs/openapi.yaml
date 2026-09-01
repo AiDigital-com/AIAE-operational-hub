@@ -2160,6 +2160,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/dataset-rows/export:
+    post:
+      tags:
+        - campaigns
+      operationId: exportDashboardDatasetRows
+      description: >
+        Returns the dashboard's dataset as an .xlsx spreadsheet, capped at a fixed row count (no
+        pagination), for the dataset preview's "Download" action. POST (not GET) because it carries the
+        same variable-length filter body as the dataset-rows listing - an empty body reads the dashboard's
+        whole delivery history with no filters and no date window, for a "download everything" action
+        distinct from the currently-applied preview.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: dashboardId
+          in: path
+          required: true
+          description: The dashboard id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        description: >
+          Optional dataset filters and date window; omit or send an empty body for the dashboard's whole,
+          unfiltered delivery history.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardDatasetRowsSearchRequestV1'
+      responses:
+        '200':
+          description: The .xlsx export was generated.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The filter/date-range criteria failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubValidationExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or dashboard was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading the dashboard dataset from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/data-source:
     post:
       tags:

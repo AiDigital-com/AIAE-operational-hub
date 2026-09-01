@@ -2257,9 +2257,43 @@ export function ReportingTab() {
               </div>
             ) : (
               <>
-                {/* Sits with Edit data rather than with Expand on the left: the levels it explains are
-                    dimension columns, which is what Edit data is about to write to. */}
+                {/* Leads the data actions rather than sitting with Expand on the left: the levels it
+                    explains are dimension columns, which Download writes out and Edit data writes to. */}
                 <LevelsHint />
+                <div className="reporting-tab__menu-wrap">
+                  <button
+                    type="button"
+                    className="button button--secondary reporting-tab__dropdown-btn"
+                    onClick={() => setDownloadMenuOpen((open) => !open)}
+                    disabled={downloading}
+                  >
+                    {downloading ? "Downloading…" : "Download"}
+                  </button>
+                  {downloadMenuOpen && (
+                    <div className="reporting-tab__menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setDownloadMenuOpen(false);
+                          downloadReport("current");
+                        }}
+                      >
+                        Current view
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setDownloadMenuOpen(false);
+                          downloadReport("all");
+                        }}
+                      >
+                        All data
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {/* The reason sits on the wrapper, not on the items: a disabled button gets no hover
                     events, so its own title would never show, and the open menu is inside this wrapper. */}
                 <div className="reporting-tab__menu-wrap" title={editBlockedReason}>
@@ -2323,40 +2357,6 @@ export function ReportingTab() {
                         }}
                       >
                         Roll back adjustments
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="reporting-tab__menu-wrap">
-                  <button
-                    type="button"
-                    className="button button--secondary reporting-tab__dropdown-btn"
-                    onClick={() => setDownloadMenuOpen((open) => !open)}
-                    disabled={downloading}
-                  >
-                    {downloading ? "Downloading…" : "Download"}
-                  </button>
-                  {downloadMenuOpen && (
-                    <div className="reporting-tab__menu" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setDownloadMenuOpen(false);
-                          downloadReport("current");
-                        }}
-                      >
-                        Current view
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setDownloadMenuOpen(false);
-                          downloadReport("all");
-                        }}
-                      >
-                        All data
                       </button>
                     </div>
                   )}

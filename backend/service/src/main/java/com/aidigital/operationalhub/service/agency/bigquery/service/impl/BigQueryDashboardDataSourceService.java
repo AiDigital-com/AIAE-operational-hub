@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.service.agency.bigquery.service.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubDashboard;
 import com.aidigital.operationalhub.externalservices.bigquery.config.BigQueryProperties;
+import com.aidigital.operationalhub.service.agency.AdjustmentRoundTripLimits;
 import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqRow;
 import com.aidigital.operationalhub.service.agency.bigquery.model.BqSql;
@@ -14,6 +15,7 @@ import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.dashboard.DashboardDataSourceService;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardColumnChoice;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetCriteria;
+import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetFilter;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetPage;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetRow;
@@ -69,6 +71,9 @@ public class BigQueryDashboardDataSourceService implements DashboardDataSourceSe
 
 	/** How many values a single filter picker may list before search should narrow the report instead. */
 	private static final int DISTINCT_VALUE_LIMIT = 500;
+
+	/** The most rows a dataset export may render - the same round-trip ceiling the report-rows export uses. */
+	private static final int EXPORT_ROW_CAP = AdjustmentRoundTripLimits.MAX_ROWS;
 	/** The length the spreadsheet truncates a dashboard's table name to, kept so both tools name it alike. */
 	private static final int MAX_TABLE_NAME_LENGTH = 180;
 	private static final TypeReference<List<DashboardDatasetFilter>> FILTERS_TYPE = new TypeReference<>() {
@@ -129,6 +134,26 @@ public class BigQueryDashboardDataSourceService implements DashboardDataSourceSe
 			totalFuture.cancel(true);
 			throw exception;
 		}
+	}
+
+	@Override
+	public DashboardDatasetExportModel exportRows(
+			CurrentUserModel user, long campaignId, long dashboardId, DashboardDatasetCriteria criteria) {
+		CampaignModel campaign = campaignService.getVisibleCampaignIdentity(user, campaignId);
+		CampaignDeliveryScope scope = scopeResolver.forCampaign(campaign);
+		HubDashboard dashboard = dashboardService.getByCampaignAndId(campaignId, dashboardId);
+		DashboardColumnChoice choice = columnChoice(dashboard);
+		List<String> columns = DashboardBasicSql.outputColumnNames(choice.cpa());
+		DashboardDatasetCriteria activeCriteria = activeCriteria(criteria, columns);
+		String sql = query(scope, choice, activeCriteria);
+		// Uncached and unpaged, like the report-rows export: a full read is not the kind of small, repeated
+		// question fetchSqlCachedUntilWrite exists for, and every row has to come back at once for a download.
+		List<DashboardDatasetRow> fetched = searchGateway.fetchSql(
+				pageOf(sql, activeCriteria, 1, EXPORT_ROW_CAP + 1), row -> toDatasetRow(row, columns));
+		boolean truncated = fetched.size() > EXPORT_ROW_CAP;
+		List<DashboardDatasetRow> rows = truncated ? fetched.subList(0, EXPORT_ROW_CAP) : fetched;
+		return new DashboardDatasetExportModel(
+				rows, truncated, campaign.name(), dashboard.getName(), choice, columnOrder(dashboard));
 	}
 
 	@Override
@@ -448,6 +473,23 @@ public class BigQueryDashboardDataSourceService implements DashboardDataSourceSe
 				.map(String::trim)
 				.filter(id -> !id.isEmpty())
 				.collect(Collectors.toSet());
+	}
+
+	/**
+	 * Reads the dashboard's saved on-screen column arrangement.
+	 *
+	 * @param dashboard the dashboard
+	 * @return the saved column ids, in order; empty when the dashboard has never been rearranged
+	 */
+	List<String> columnOrder(HubDashboard dashboard) {
+		String csv = dashboard.getColumnOrder();
+		if (csv == null || csv.isBlank()) {
+			return List.of();
+		}
+		return Arrays.stream(csv.split(","))
+				.map(String::trim)
+				.filter(id -> !id.isEmpty())
+				.toList();
 	}
 
 	/**

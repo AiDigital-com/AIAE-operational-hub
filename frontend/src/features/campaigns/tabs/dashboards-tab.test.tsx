@@ -9,6 +9,7 @@ import {
   createDashboardDataSource,
   deleteDashboard,
   duplicateDashboard,
+  exportDashboardDatasetRows,
   listDashboardDatasetDistinctValues,
   listDashboardDatasetRows,
   listDashboards,
@@ -42,6 +43,7 @@ vi.mock("../api", () => ({
   previewDashboardDataset: vi.fn(),
   listDashboardDatasetRows: vi.fn(),
   listDashboardDatasetDistinctValues: vi.fn(),
+  exportDashboardDatasetRows: vi.fn(),
   createDashboardDataSource: vi.fn(),
   removeDashboardDataSource: vi.fn(),
 }));
@@ -140,6 +142,14 @@ async function openDatasetHint() {
 /** Opens the published source's menu, which is where its actions live. */
 async function openSourceMenu() {
   await userEvent.click(await screen.findByRole("button", { name: /ClicData source/ }));
+}
+
+/** Opens a column's filter popover via `+ Filter`'s field picker - the only path to a column's filter now
+ *  that the header's funnel is gone (PDI_125, mirroring Reporting's own PDI_115 model). */
+async function openColumnFilter(label: string) {
+  await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+  const picker = await screen.findByRole("dialog", { name: "Add filter" });
+  await userEvent.click(within(picker).getByText(label));
 }
 
 /** The dataset table's own header cells. The dashboards list above it is a table too, so a query by role
@@ -379,7 +389,7 @@ describe("DashboardsTab", () => {
     expect(screen.getByText("$56.78")).toBeInTheDocument();
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Channel" }));
+    await openColumnFilter("Channel");
     await userEvent.click(await screen.findByRole("checkbox", { name: "Meta" }));
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -429,7 +439,7 @@ describe("DashboardsTab", () => {
         release = resolve;
       })
     );
-    await userEvent.click(screen.getByRole("button", { name: "Filter Channel" }));
+    await openColumnFilter("Channel");
     await userEvent.click(await screen.findByRole("checkbox", { name: "Meta" }));
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -447,7 +457,7 @@ describe("DashboardsTab", () => {
     // When:
     renderTab();
 
-    // Then: the funnel icon is not the only sign the rows have been reduced.
+    // Then: the Filters bar's own chip says so, with no column-header funnel needed to notice it (PDI_125).
     expect(await screen.findByText("Channel: Meta")).toBeInTheDocument();
 
     // When:
@@ -462,7 +472,7 @@ describe("DashboardsTab", () => {
     }));
   });
 
-  it("should state the date window that is narrowing the preview", async () => {
+  it("should state the date window that is narrowing the preview on the bar's own persistent pill", async () => {
     // Given:
     vi.mocked(listDashboards).mockResolvedValue(
       aPage([aDashboard({ dateFrom: "2026-03-10", dateTo: "2026-03-20" })])
@@ -471,8 +481,105 @@ describe("DashboardsTab", () => {
     // When:
     renderTab();
 
+    // Then: the pill itself, not a chip - Date is never one of the removable chips (mirrors Reporting's
+    // own persistent Date pill, PDI_115/PDI_125).
+    expect(await screen.findByRole("button", { name: "Mar 10, 2026 — Mar 20, 2026" })).toBeInTheDocument();
+  });
+
+  it("should show 'All dates' on the pill when no date window is applied", async () => {
+    // Given: a dashboard with no saved date window
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard()]));
+
+    // When:
+    renderTab();
+    await screen.findByText("Prospecting");
+
     // Then:
-    expect(await screen.findByText("Date: Mar 10, 2026 — Mar 20, 2026")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All dates" })).toBeInTheDocument();
+  });
+
+  it("should render the Filters bar's Date pill and + Filter button even with zero filters applied", async () => {
+    // Given: a dashboard with no filters and no date window at all
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard()]));
+
+    // When:
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // Then: unlike the old read-only chip strip, the bar itself is always there - it is how a filter
+    // gets applied in the first place now that the column header's funnel is gone.
+    expect(screen.getByRole("button", { name: "All dates" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear all" })).not.toBeInTheDocument();
+  });
+
+  it("should offer every filterable dataset column in the field picker, not only the displayed ones", async () => {
+    // Given: a dashboard with the optional Creative column switched off
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard({ optionalColumns: ["cpa"] })]));
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const picker = await screen.findByRole("dialog", { name: "Add filter" });
+
+    // Then: Creative is offered even though it is not a displayed column right now (PDI_125's whole
+    // point), and Date is not - its persistent pill already owns it.
+    expect(within(picker).getByText("Creative")).toBeInTheDocument();
+    expect(within(picker).getByText("Channel")).toBeInTheDocument();
+    expect(within(picker).queryByText("Date")).not.toBeInTheDocument();
+  });
+
+  it("should mark a filter on a column that is not displayed as hidden", async () => {
+    // Given: Creative is switched off, but a filter still names it - a column left over from before it
+    // was switched off, exactly what PDI_125 asks the bar to keep visible rather than silently drop
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard({
+      optionalColumns: ["cpa"],
+      filters: [{ field: "Creative", values: ["Creative A"] }],
+    })]));
+
+    // When:
+    renderTab();
+
+    // Then: the chip says so, dashed and explained, not silently hidden
+    const chip = await screen.findByRole("button", { name: /Filtered on a column that is not displayed/ });
+    expect(chip).toHaveAttribute("title", "Filtered on a column that is not displayed");
+    expect(chip.closest(".data-table__chip")).toHaveClass("data-table__chip--hidden");
+  });
+
+  it("should clear every filter but keep the date window when Clear all is used", async () => {
+    // Given: a value filter and a date window both applied
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard({
+      filters: [{ field: "Channel", values: ["Meta"] }],
+      dateFrom: "2026-03-10",
+      dateTo: "2026-03-20",
+    })]));
+    vi.mocked(updateDashboard).mockResolvedValue(aDashboard());
+    renderTab();
+    await screen.findByText("Channel: Meta");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+    // Then: the value filter is gone; the persistent Date pill is not touched by Clear all, and the
+    // clear goes through the same auto-save path as every other filter gesture.
+    await waitFor(() => expect(screen.queryByText("Channel: Meta")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Mar 10, 2026 — Mar 20, 2026" })).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(updateDashboard).mock.calls[0][2]).toMatchObject({ filters: [] }));
+  });
+
+  it("should not render a filter funnel on any dataset column header", async () => {
+    // Given:
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard()]));
+
+    // When:
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // Then: filtering is reached only through the Filters bar now (PDI_125) - no per-column funnel button
+    // survives in any header.
+    expect(document.querySelector(".data-table__filter-btn")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Filter Channel" })).not.toBeInTheDocument();
   });
 
   it("should state how each metric aggregates in its header", async () => {
@@ -667,7 +774,7 @@ describe("DashboardsTab", () => {
     await screen.findByText("Prospecting");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Channel" }));
+    await openColumnFilter("Channel");
     await userEvent.click(await screen.findByRole("checkbox", { name: "Meta" }));
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -687,7 +794,7 @@ describe("DashboardsTab", () => {
     await screen.findByText("Prospecting");
 
     // When:
-    await userEvent.click(screen.getByRole("button", { name: "Filter Date" }));
+    await userEvent.click(screen.getByRole("button", { name: "All dates" }));
     fireEvent.change(await screen.findByLabelText("From"), { target: { value: "2026-03-10" } });
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -814,9 +921,12 @@ describe("DashboardsTab", () => {
 
     // And the menu carries the detail and every action
     await openSourceMenu();
-    expect(screen.getByText("p.gs_templates.acme_7_report_basic")).toBeInTheDocument();
+    expect(
+      screen.getByText("SELECT * FROM `p.gs_templates.acme_7_report_basic`")
+    ).toBeInTheDocument();
     expect(screen.getByText(/18 rows written/)).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Copy table name/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy query" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy table name only" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Update data source" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Remove data source" })).toBeInTheDocument();
   });
@@ -839,7 +949,7 @@ describe("DashboardsTab", () => {
     expect(screen.getByRole("menuitem", { name: "Update data source" })).toBeInTheDocument();
   });
 
-  it("should offer the table name for copying once the source is live", async () => {
+  it("should offer the table name alone for copying once the source is live", async () => {
     // Given:
     const clipboard = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText: clipboard } });
@@ -850,14 +960,14 @@ describe("DashboardsTab", () => {
 
     // When:
     await openSourceMenu();
-    await userEvent.click(screen.getByRole("menuitem", { name: /Copy table name/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy table name only" }));
 
     // Then: the fully-qualified name, which is what ClicData needs - not the short one shown in the list
     expect(clipboard).toHaveBeenCalledWith("p.gs_templates.acme_7_report_basic");
     expect(await screen.findByRole("menuitem", { name: "Copied!" })).toBeInTheDocument();
   });
 
-  it("should say so when the clipboard refuses rather than claiming a copy", async () => {
+  it("should say so when the clipboard refuses to copy the table name rather than claiming a copy", async () => {
     // Given: an insecure context or a denied permission
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
     vi.mocked(listDashboards).mockResolvedValue(
@@ -867,11 +977,67 @@ describe("DashboardsTab", () => {
 
     // When:
     await openSourceMenu();
-    await userEvent.click(screen.getByRole("menuitem", { name: /Copy table name/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy table name only" }));
 
     // Then: a silent "Copied!" would have the user paste their previous clipboard into ClicData
     expect(await screen.findByText(/Could not copy the table name/)).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Copied!" })).not.toBeInTheDocument();
+  });
+
+  it("should offer the ready-to-run query for copying once the source is live", async () => {
+    // Given:
+    const clipboard = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText: clipboard } });
+    vi.mocked(listDashboards).mockResolvedValue(
+      aPage([aDashboard({ status: "live", sourceTable: "p.gs_templates.acme_7_report_basic" })])
+    );
+    renderTab();
+
+    // When:
+    await openSourceMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy query" }));
+
+    // Then: the backticked query, exactly what the info block shows - never the bare table name, since
+    // the unquoted project id (hyphenated) would be a BigQuery syntax error
+    expect(clipboard).toHaveBeenCalledWith("SELECT * FROM `p.gs_templates.acme_7_report_basic`");
+    expect(await screen.findByRole("menuitem", { name: "Copied!" })).toBeInTheDocument();
+  });
+
+  it("should say so when the clipboard refuses to copy the query rather than claiming a copy", async () => {
+    // Given: an insecure context or a denied permission
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    vi.mocked(listDashboards).mockResolvedValue(
+      aPage([aDashboard({ status: "live", sourceTable: "p.gs_templates.acme_7_report_basic" })])
+    );
+    renderTab();
+
+    // When:
+    await openSourceMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy query" }));
+
+    // Then: the failure names the query, not the table name, so the message stays truthful about what
+    // was being copied
+    expect(await screen.findByText(/Could not copy the query/)).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Copied!" })).not.toBeInTheDocument();
+  });
+
+  it("should show Copied! only on the copy action that was pressed", async () => {
+    // Given:
+    const clipboard = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText: clipboard } });
+    vi.mocked(listDashboards).mockResolvedValue(
+      aPage([aDashboard({ status: "live", sourceTable: "p.gs_templates.acme_7_report_basic" })])
+    );
+    renderTab();
+
+    // When: only "Copy query" is pressed
+    await openSourceMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy query" }));
+
+    // Then: the query button confirms, the table-name button stays quiet
+    expect(await screen.findByRole("menuitem", { name: "Copied!" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy table name only" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("menuitem", { name: "Copied!" })).toHaveLength(1);
   });
 
   it("should warn that the ClicData dashboard stops updating before removing a source", async () => {
@@ -992,5 +1158,236 @@ describe("DashboardsTab", () => {
 
     // Then:
     expect(await screen.findByRole("button", { name: /expand table/i })).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("Dashboards dataset download", () => {
+  beforeEach(() => {
+    intersectionCallbacks = [];
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    vi.clearAllMocks();
+    vi.mocked(previewDashboardDataset).mockResolvedValue({
+      rowCount: 12345,
+      optionalColumns: ["creative", "cpa"],
+      sourceTable: "silken-quasar-376417.gs_templates.ourisman_ford_2026_report_basic_dash_client_dashboard",
+    });
+    vi.mocked(listDashboardDatasetRows).mockResolvedValue(aDatasetPage());
+    vi.mocked(listDashboardDatasetDistinctValues).mockResolvedValue(["Meta", "Google Search"]);
+    vi.mocked(listDashboards).mockResolvedValue(aPage([aDashboard()]));
+  });
+
+  it("should offer Current view and All data in the Download menu", async () => {
+    // Given:
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+
+    // Then:
+    expect(screen.getByRole("menuitem", { name: "Current view" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "All data" })).toBeInTheDocument();
+  });
+
+  it("should export the dashboard's currently applied filters and date window for Current view", async () => {
+    // Given: a dashboard whose filters/date window are already saved (they auto-save, so what is on
+    // screen and what is saved are the same thing)
+    vi.mocked(listDashboards).mockResolvedValue(aPage([
+      aDashboard({
+        filters: [{ field: "Channel", values: ["Meta"] }],
+        dateFrom: "2026-03-10",
+        dateTo: "2026-03-20",
+      }),
+    ]));
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportDashboardDatasetRows).mockResolvedValue({ blob, truncated: false });
+    const createObjectURL = vi.fn(() => "blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    let createdLink: HTMLAnchorElement | null = null;
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName, options) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        createdLink = element as HTMLAnchorElement;
+        vi.spyOn(element as HTMLAnchorElement, "click").mockImplementation(vi.fn());
+      }
+      return element;
+    });
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then: the same request body the preview table's own read sends, minus paging
+    await waitFor(() =>
+      expect(exportDashboardDatasetRows).toHaveBeenCalledWith(42, 7, {
+        filters: [{ field: "Channel", values: ["Meta"] }],
+        dateFrom: "2026-03-10",
+        dateTo: "2026-03-20",
+      })
+    );
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(createdLink?.download).toBe("Ourisman Ford 2026 - Client dashboard.xlsx");
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url"));
+  });
+
+  it("should send an empty body for All data, ignoring the dashboard's own saved filters and date window", async () => {
+    // Given:
+    vi.mocked(listDashboards).mockResolvedValue(aPage([
+      aDashboard({
+        filters: [{ field: "Channel", values: ["Meta"] }],
+        dateFrom: "2026-03-10",
+        dateTo: "2026-03-20",
+      }),
+    ]));
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportDashboardDatasetRows).mockResolvedValue({ blob, truncated: false });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "All data" }));
+
+    // Then: no filters/date window are sent, regardless of what the dashboard currently has saved
+    await waitFor(() => expect(exportDashboardDatasetRows).toHaveBeenCalledWith(42, 7, {}));
+  });
+
+  it("should name the downloaded file with an 'all' suffix for All data", async () => {
+    // Given:
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportDashboardDatasetRows).mockResolvedValue({ blob, truncated: false });
+    let createdLink: HTMLAnchorElement | null = null;
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName, options) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        createdLink = element as HTMLAnchorElement;
+        vi.spyOn(element as HTMLAnchorElement, "click").mockImplementation(vi.fn());
+      }
+      return element;
+    });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "All data" }));
+
+    // Then:
+    await waitFor(() => expect(createdLink?.download).toBe("Ourisman Ford 2026 - Client dashboard - all.xlsx"));
+  });
+
+  it("should warn when the export was truncated at the row cap", async () => {
+    // Given:
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportDashboardDatasetRows).mockResolvedValue({ blob, truncated: true });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then:
+    expect(await screen.findByText(/more rows than one download can carry/)).toBeInTheDocument();
+  });
+
+  it("should not warn about truncation when the whole dataset fits in the download", async () => {
+    // Given:
+    const blob = new Blob(["fake xlsx bytes"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    vi.mocked(exportDashboardDatasetRows).mockResolvedValue({ blob, truncated: false });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then:
+    await waitFor(() => expect(exportDashboardDatasetRows).toHaveBeenCalled());
+    expect(screen.queryByText(/more rows than one download can carry/)).not.toBeInTheDocument();
+  });
+
+  it("should show a toast rather than a silent success when the export fails", async () => {
+    // Given:
+    vi.mocked(exportDashboardDatasetRows).mockRejectedValue(new Error("export failed"));
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then: the button re-enables once the failed download settles, and the failure is not silent
+    expect(await screen.findByText("export failed")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Download" })).not.toBeDisabled());
+  });
+
+  it("should show a Downloading… state while the export is in flight", async () => {
+    // Given: a download that has not answered yet
+    let release: (value: { blob: Blob; truncated: boolean }) => void = () => {};
+    vi.mocked(exportDashboardDatasetRows).mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock-url"), revokeObjectURL: vi.fn() });
+    renderTab();
+    await screen.findByText("Prospecting");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Current view" }));
+
+    // Then:
+    expect(await screen.findByRole("button", { name: "Downloading…" })).toBeDisabled();
+
+    // When: the download settles
+    release({
+      blob: new Blob(["x"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      truncated: false,
+    });
+
+    // Then:
+    expect(await screen.findByRole("button", { name: "Download" })).not.toBeDisabled();
+  });
+
+  it("should close the download menu on click outside and on Escape", async () => {
+    // Given:
+    renderTab();
+    await screen.findByText("Prospecting");
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(screen.getByRole("menuitem", { name: "Current view" })).toBeInTheDocument();
+
+    // When: Escape
+    await userEvent.keyboard("{Escape}");
+
+    // Then:
+    expect(screen.queryByRole("menuitem", { name: "Current view" })).not.toBeInTheDocument();
+
+    // When: reopened, then a click lands outside the menu
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    await userEvent.click(document.body);
+
+    // Then:
+    expect(screen.queryByRole("menuitem", { name: "Current view" })).not.toBeInTheDocument();
   });
 });

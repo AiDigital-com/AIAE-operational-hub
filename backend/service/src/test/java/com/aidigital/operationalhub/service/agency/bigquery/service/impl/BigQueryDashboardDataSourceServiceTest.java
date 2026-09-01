@@ -13,6 +13,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.service.ReportQueryE
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardColumnChoice;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetCriteria;
+import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetFilter;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetPage;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetRow;
@@ -36,6 +37,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -290,6 +292,144 @@ class BigQueryDashboardDataSourceServiceTest {
 		// Then:
 		assertThat(page.totalElements()).isEqualTo(12L);
 		assertThat(page.content()).hasSize(1);
+	}
+
+	@Test
+	void shouldExportTheFilteredDashboardDatasetTest() {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		CampaignModel campaign = Instancio.of(CampaignModel.class)
+				.set(field(CampaignModel::name), "Acme - Summer")
+				.set(field(CampaignModel::clientName), "Acme")
+				.create();
+		HubDashboard dashboard = Instancio.of(HubDashboard.class)
+				.set(field(HubDashboard::getName), "Client dashboard")
+				.set(field(HubDashboard::getOptionalColumns), "creative,cpa")
+				.set(field(HubDashboard::getColumnOrder), "impressions,date")
+				.set(field(HubDashboard::getFilters), null)
+				.set(field(HubDashboard::getDateFrom), null)
+				.set(field(HubDashboard::getDateTo), null)
+				.create();
+		DashboardDatasetRow row = new DashboardDatasetRow(Map.of("Date", "2026-08-01"));
+		doReturn(campaign).when(campaignService).getVisibleCampaignIdentity(user, CAMPAIGN_ID);
+		givenScope(campaign);
+		doReturn(dashboard).when(dashboardService).getByCampaignAndId(CAMPAIGN_ID, DASHBOARD_ID);
+		doReturn(List.of(row)).when(searchGateway).fetchSql(anyString(), any());
+
+		// When:
+		DashboardDatasetExportModel export = service.exportRows(
+				user,
+				CAMPAIGN_ID,
+				DASHBOARD_ID,
+				new DashboardDatasetCriteria(
+						List.of(new DashboardDatasetFilter("Channel", List.of("Display"))), "2026-08-01", "2026-08-10"));
+
+		// Then: a full, unpaged, uncached read - capped, not paged - carrying what the workbook needs
+		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+		verify(searchGateway).fetchSql(sql.capture(), any());
+		assertThat(sql.getValue())
+				.contains("WHERE CAST(`Channel` AS STRING) IN ('Display')")
+				.contains("CAST(`Date` AS DATE) >= DATE '2026-08-01'")
+				.endsWith("LIMIT 100001 OFFSET 0");
+		assertThat(export.rows()).containsExactly(row);
+		assertThat(export.truncated()).isFalse();
+		assertThat(export.campaignName()).isEqualTo("Acme - Summer");
+		assertThat(export.dashboardName()).isEqualTo("Client dashboard");
+		assertThat(export.columns()).isEqualTo(new DashboardColumnChoice(true, true));
+		assertThat(export.columnOrder()).containsExactly("impressions", "date");
+	}
+
+	@Test
+	void shouldTruncateTheExportAtTheRowCapTest() {
+		// Given: one row more than the cap allows
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		CampaignModel campaign = Instancio.of(CampaignModel.class)
+				.set(field(CampaignModel::name), "Acme")
+				.set(field(CampaignModel::clientName), "Acme")
+				.create();
+		HubDashboard dashboard = Instancio.of(HubDashboard.class)
+				.set(field(HubDashboard::getName), "Dashboard")
+				.set(field(HubDashboard::getOptionalColumns), "")
+				.set(field(HubDashboard::getColumnOrder), null)
+				.set(field(HubDashboard::getFilters), null)
+				.set(field(HubDashboard::getDateFrom), null)
+				.set(field(HubDashboard::getDateTo), null)
+				.create();
+		List<DashboardDatasetRow> overCap = new ArrayList<>();
+		for (int i = 0; i < 100_001; i++) {
+			overCap.add(new DashboardDatasetRow(Map.of("Date", "2026-08-01")));
+		}
+		doReturn(campaign).when(campaignService).getVisibleCampaignIdentity(user, CAMPAIGN_ID);
+		givenScope(campaign);
+		doReturn(dashboard).when(dashboardService).getByCampaignAndId(CAMPAIGN_ID, DASHBOARD_ID);
+		doReturn(overCap).when(searchGateway).fetchSql(anyString(), any());
+
+		// When:
+		DashboardDatasetExportModel export =
+				service.exportRows(user, CAMPAIGN_ID, DASHBOARD_ID, DashboardDatasetCriteria.none());
+
+		// Then: the caller is told the workbook is short of rows rather than silently handed a partial one
+		assertThat(export.truncated()).isTrue();
+		assertThat(export.rows()).hasSize(100_000);
+	}
+
+	@Test
+	void shouldNotReadAnythingWhenTheCampaignIsNotVisibleForExportTest() {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		doThrow(new BusinessException(OperationalHubErrorReason.OPH_025, CAMPAIGN_ID))
+				.when(campaignService).getVisibleCampaignIdentity(user, CAMPAIGN_ID);
+
+		// When-Then: visibility is checked before anything is read
+		assertThatThrownBy(() -> service.exportRows(user, CAMPAIGN_ID, DASHBOARD_ID, DashboardDatasetCriteria.none()))
+				.isInstanceOf(BusinessException.class)
+				.hasFieldOrPropertyWithValue("code", "OPH_025");
+		verifyNoInteractions(searchGateway);
+	}
+
+	@Test
+	void shouldFailWhenTheDashboardDoesNotExistForExportTest() {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		CampaignModel campaign = Instancio.create(CampaignModel.class);
+		doReturn(campaign).when(campaignService).getVisibleCampaignIdentity(user, CAMPAIGN_ID);
+		givenScope(campaign);
+		doThrow(new BusinessException(OperationalHubErrorReason.OPH_034, DASHBOARD_ID))
+				.when(dashboardService).getByCampaignAndId(CAMPAIGN_ID, DASHBOARD_ID);
+
+		// When-Then:
+		assertThatThrownBy(() -> service.exportRows(user, CAMPAIGN_ID, DASHBOARD_ID, DashboardDatasetCriteria.none()))
+				.isInstanceOf(BusinessException.class)
+				.hasFieldOrPropertyWithValue("code", "OPH_034");
+		verifyNoInteractions(searchGateway);
+	}
+
+	@Test
+	void shouldReadAnUnarrangedColumnOrderAsEmptyTest() {
+		// Given: a dashboard never dragged into a custom arrangement
+		HubDashboard dashboard = Instancio.of(HubDashboard.class)
+				.set(field(HubDashboard::getColumnOrder), null)
+				.create();
+
+		// When:
+		List<String> order = service.columnOrder(dashboard);
+
+		// Then:
+		assertThat(order).isEmpty();
+	}
+
+	@Test
+	void shouldSplitTheDashboardsSavedColumnOrderTest() {
+		// Given:
+		HubDashboard dashboard = Instancio.of(HubDashboard.class)
+				.set(field(HubDashboard::getColumnOrder), "impressions, date ,channel")
+				.create();
+
+		// When:
+		List<String> order = service.columnOrder(dashboard);
+
+		// Then:
+		assertThat(order).containsExactly("impressions", "date", "channel");
 	}
 
 	@Test

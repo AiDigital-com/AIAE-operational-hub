@@ -47,6 +47,7 @@ import com.aidigital.operationalhub.application.mapper.ReportRowSearchCommand;
 import com.aidigital.operationalhub.application.mapper.ReportRowXlsxAssembler;
 import com.aidigital.operationalhub.application.mapper.ReportRowXlsxExportAssembler;
 import com.aidigital.operationalhub.application.mapper.DashboardContractMapper;
+import com.aidigital.operationalhub.application.mapper.DashboardDatasetXlsxExportAssembler;
 import com.aidigital.operationalhub.application.mapper.ReportViewContractMapper;
 import com.aidigital.operationalhub.application.mapper.XlsxDownloadResponder;
 import com.aidigital.operationalhub.application.mapper.XlsxWriter;
@@ -79,6 +80,7 @@ import com.aidigital.operationalhub.service.common.search.SortDirection;
 import com.aidigital.operationalhub.service.dashboard.DashboardDataSourceService;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardColumnChoice;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetCriteria;
+import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetFilter;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetPage;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardPreview;
@@ -179,6 +181,9 @@ class CampaignControllerTest {
 
 	@Mock
 	private DashboardContractMapper dashboardMapper;
+
+	@Mock
+	private DashboardDatasetXlsxExportAssembler dashboardDatasetXlsxExportAssembler;
 
 	@Mock
 	private DashboardDataSourceService dashboardDataSourceService;
@@ -1007,6 +1012,63 @@ class CampaignControllerTest {
 		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
 		assertThat(result.getBody()).containsExactly("Display", "Video");
 		verify(dashboardDataSourceService).distinctValues(currentUser, 42L, 7L, "Channel");
+	}
+
+	@Test
+	void shouldExportDashboardDatasetRowsAsXlsxTest() throws Exception {
+		// Given:
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		DashboardDatasetRowsSearchRequestV1 request = new DashboardDatasetRowsSearchRequestV1();
+		DashboardDatasetCriteria criteria = new DashboardDatasetCriteria(
+				List.of(new DashboardDatasetFilter("Channel", List.of("Display"))), null, null);
+		DashboardDatasetExportModel export = new DashboardDatasetExportModel(
+				List.of(), false, "Q1 Launch/Promo", "Client dashboard",
+				new DashboardColumnChoice(true, false), List.of("impressions", "date"));
+		Resource streamedResource = new ByteArrayResource(new byte[] {1, 2, 3});
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(criteria).when(dashboardMapper).toCriteria(request);
+		doReturn(export).when(dashboardDataSourceService).exportRows(currentUser, 42L, 7L, criteria);
+		doReturn("Client dashboard").when(reportRowFileSupport).fileSafe("Client dashboard");
+		doReturn(ResponseEntity.ok(streamedResource)).when(xlsxDownloadResponder)
+				.respond(eq("Q1 Launch/Promo"), eq("Client dashboard"), eq(false), any(XlsxWriter.class));
+
+		// When:
+		var result = controller.exportDashboardDatasetRows(42L, 7L, request);
+
+		// Then: the dashboard's own name (sanitised) names the file, not a fixed word like "report"
+		assertThat(result.getStatusCode().value()).isEqualTo(200);
+		assertThat(result.getBody()).isSameAs(streamedResource);
+
+		// The controller hands the responder a writer closure - invoke it here to verify it delegates to
+		// the dashboard export assembler with the resolved rows, column choice and saved column order.
+		ArgumentCaptor<XlsxWriter> writerCaptor = ArgumentCaptor.forClass(XlsxWriter.class);
+		verify(xlsxDownloadResponder)
+				.respond(eq("Q1 Launch/Promo"), eq("Client dashboard"), eq(false), writerCaptor.capture());
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		writerCaptor.getValue().write(out);
+		verify(dashboardDatasetXlsxExportAssembler).writeWorkbook(
+				out, export.rows(), export.columns(), export.columnOrder());
+	}
+
+	@Test
+	void shouldReportATruncatedDashboardExportToTheResponderTest() {
+		// Given: more rows matched than the export cap allows
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		DashboardDatasetCriteria criteria = DashboardDatasetCriteria.none();
+		DashboardDatasetExportModel export = new DashboardDatasetExportModel(
+				List.of(), true, "Acme", "Dashboard", new DashboardColumnChoice(false, false), List.of());
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(criteria).when(dashboardMapper).toCriteria(null);
+		doReturn(export).when(dashboardDataSourceService).exportRows(currentUser, 42L, 7L, criteria);
+		doReturn("Dashboard").when(reportRowFileSupport).fileSafe("Dashboard");
+		doReturn(ResponseEntity.ok((Resource) new ByteArrayResource(new byte[] {1})))
+				.when(xlsxDownloadResponder).respond(eq("Acme"), eq("Dashboard"), eq(true), any(XlsxWriter.class));
+
+		// When:
+		controller.exportDashboardDatasetRows(42L, 7L, null);
+
+		// Then: the truncation flag reaches the responder exactly as the service reported it
+		verify(xlsxDownloadResponder).respond(eq("Acme"), eq("Dashboard"), eq(true), any(XlsxWriter.class));
 	}
 
 	@Test
