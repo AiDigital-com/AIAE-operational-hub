@@ -196,6 +196,8 @@ public class CampaignController implements CampaignsApi {
 		AdjustmentRollbackResultModel preview = reportRowService.previewAdjustmentRollback(
 				currentUser, campaignId,
 				reportRowAdjustmentRollbackRequestV1.getCampaignConstructedNames(),
+				reportRowAdjustmentRollbackRequestV1.getConstructedNamesLvl2(),
+				reportRowAdjustmentRollbackRequestV1.getConstructedNamesLvl3(),
 				reportRowAdjustmentRollbackRequestV1.getDateFrom().toString(),
 				reportRowAdjustmentRollbackRequestV1.getDateTo().toString());
 		return ResponseEntity.ok(reportRowMapper.toRollbackResult(preview));
@@ -208,6 +210,8 @@ public class CampaignController implements CampaignsApi {
 		AdjustmentRollbackResultModel result = reportRowService.rollbackAdjustments(
 				currentUser, campaignId,
 				reportRowAdjustmentRollbackRequestV1.getCampaignConstructedNames(),
+				reportRowAdjustmentRollbackRequestV1.getConstructedNamesLvl2(),
+				reportRowAdjustmentRollbackRequestV1.getConstructedNamesLvl3(),
 				reportRowAdjustmentRollbackRequestV1.getDateFrom().toString(),
 				reportRowAdjustmentRollbackRequestV1.getDateTo().toString());
 		return ResponseEntity.ok(reportRowMapper.toRollbackResult(result));

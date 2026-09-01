@@ -974,19 +974,21 @@ public class BigQueryReportRowService implements ReportRowService {
 
 	@Override
 	public AdjustmentRollbackResultModel previewAdjustmentRollback(
-			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
-			String dateTo) {
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames,
+			List<String> constructedNamesLvl2, List<String> constructedNamesLvl3, String dateFrom, String dateTo) {
 		CampaignDeliveryScope scope = resolveScope(user, campaignId);
-		return rollbackWriter.preview(scope, campaignConstructedNames, dateFrom, dateTo);
+		return rollbackWriter.preview(
+				scope, campaignConstructedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom, dateTo);
 	}
 
 	@Override
 	@LogUsage(action = "adjustment.rollback")
 	public AdjustmentRollbackResultModel rollbackAdjustments(
-			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
-			String dateTo) {
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames,
+			List<String> constructedNamesLvl2, List<String> constructedNamesLvl3, String dateFrom, String dateTo) {
 		CampaignDeliveryScope scope = resolveScope(user, campaignId);
-		return rollbackWriter.rollback(scope, campaignConstructedNames, dateFrom, dateTo);
+		return rollbackWriter.rollback(
+				scope, campaignConstructedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom, dateTo);
 	}
 
 	@Override

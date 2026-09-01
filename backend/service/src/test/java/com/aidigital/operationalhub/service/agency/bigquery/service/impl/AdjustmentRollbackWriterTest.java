@@ -136,7 +136,7 @@ class AdjustmentRollbackWriterTest {
 		givenScopeAllows("Retargeting");
 
 		// When/Then:
-		assertThatThrownBy(() -> writer.preview(scope(), List.of("Prospecting"), "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.preview(scope(), List.of("Prospecting"), List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_050.getCode());
@@ -152,7 +152,7 @@ class AdjustmentRollbackWriterTest {
 
 		// When:
 		AdjustmentRollbackResultModel result =
-				writer.preview(scope(), List.of("RETARGETING"), "2026-01-01", "2026-01-31");
+				writer.preview(scope(), List.of("RETARGETING"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then:
 		assertThat(result).isEqualTo(new AdjustmentRollbackResultModel(0, 0));
@@ -161,7 +161,7 @@ class AdjustmentRollbackWriterTest {
 	@Test
 	void shouldRejectAnEmptySelectionTest() {
 		// When/Then:
-		assertThatThrownBy(() -> writer.preview(scope(), List.of(), "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.preview(scope(), List.of(), List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_027.getCode());
@@ -170,7 +170,7 @@ class AdjustmentRollbackWriterTest {
 	@Test
 	void shouldRejectABlankNameInTheSelectionTest() {
 		// When/Then:
-		assertThatThrownBy(() -> writer.preview(scope(), List.of(" "), "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.preview(scope(), List.of(" "), List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_027.getCode());
@@ -186,7 +186,7 @@ class AdjustmentRollbackWriterTest {
 		}
 
 		// When/Then:
-		assertThatThrownBy(() -> writer.preview(scope(), tooMany, "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.preview(scope(), tooMany, List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_027.getCode());
@@ -203,12 +203,174 @@ class AdjustmentRollbackWriterTest {
 
 		// When:
 		AdjustmentRollbackResultModel result =
-				writer.preview(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				writer.preview(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then: the key-set sizes are reported, but nothing is deleted and no lock is touched
 		assertThat(result).isEqualTo(new AdjustmentRollbackResultModel(1, 1));
 		verify(writeGateway, never()).delete(any());
 		verify(syncLockService, never()).tryAcquire(any());
+	}
+
+	@Test
+	void shouldNotNarrowEitherTableWhenNeitherOptionalLevelIsGivenTest() {
+		// Given: PDI_125's optional levels are both left empty - unchanged pre-PDI_125 behaviour
+		givenScopeAllows("Retargeting");
+		givenTables();
+		givenDeliveryKeys(List.of(deliveryKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1")));
+		givenConversionKeys(List.of(
+				conversionKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1", "Purchase", "Sale")));
+		ArgumentCaptor<BqRequest> captor = ArgumentCaptor.forClass(BqRequest.class);
+
+		// When:
+		writer.preview(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
+
+		// Then: neither table's read carries a level-2 or level-3 predicate
+		verify(gateway, atLeast(2)).fetch(captor.capture(), any());
+		String deliverySql = readSql(captor, DELIVERY_TABLE);
+		String conversionsSql = readSql(captor, CONVERSIONS_TABLE);
+		assertThat(deliverySql).doesNotContain("constructed_name_lvl2").doesNotContain("constructed_name_lvl3");
+		assertThat(conversionsSql).doesNotContain("constructed_name_lvl2").doesNotContain("constructed_name_lvl3");
+	}
+
+	@Test
+	void shouldNarrowBothTablesByLevel2OnlyTest() {
+		// Given: only level 2 is given
+		givenScopeAllows("Retargeting");
+		givenTables();
+		givenDeliveryKeys(List.of(deliveryKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1")));
+		givenConversionKeys(List.of(
+				conversionKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1", "Purchase", "Sale")));
+		ArgumentCaptor<BqRequest> captor = ArgumentCaptor.forClass(BqRequest.class);
+
+		// When:
+		writer.preview(
+				scope(), List.of("Retargeting"), List.of("IO 1"), List.of(), "2026-01-01", "2026-01-31");
+
+		// Then: both tables narrow by the level-2 name and neither carries a level-3 predicate
+		verify(gateway, atLeast(2)).fetch(captor.capture(), any());
+		String deliverySql = readSql(captor, DELIVERY_TABLE);
+		String conversionsSql = readSql(captor, CONVERSIONS_TABLE);
+		assertThat(deliverySql).contains("LOWER(TRIM(`constructed_name_lvl2`)) IN ('io 1')")
+				.doesNotContain("constructed_name_lvl3");
+		assertThat(conversionsSql).contains("LOWER(TRIM(`constructed_name_lvl2`)) IN ('io 1')")
+				.doesNotContain("constructed_name_lvl3");
+	}
+
+	@Test
+	void shouldNarrowBothTablesByLevel3OnlyProvingLevel3IsIndependentOfLevel2Test() {
+		// Given: only level 3 is given, with no level-2 selection at all
+		givenScopeAllows("Retargeting");
+		givenTables();
+		givenDeliveryKeys(List.of(deliveryKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1")));
+		givenConversionKeys(List.of(
+				conversionKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1", "Purchase", "Sale")));
+		ArgumentCaptor<BqRequest> captor = ArgumentCaptor.forClass(BqRequest.class);
+
+		// When:
+		writer.preview(
+				scope(), List.of("Retargeting"), List.of(), List.of("Creative 1"), "2026-01-01", "2026-01-31");
+
+		// Then: both tables narrow by the level-3 name and neither carries a level-2 predicate
+		verify(gateway, atLeast(2)).fetch(captor.capture(), any());
+		String deliverySql = readSql(captor, DELIVERY_TABLE);
+		String conversionsSql = readSql(captor, CONVERSIONS_TABLE);
+		assertThat(deliverySql).contains("LOWER(TRIM(`constructed_name_lvl3`)) IN ('creative 1')")
+				.doesNotContain("constructed_name_lvl2");
+		assertThat(conversionsSql).contains("LOWER(TRIM(`constructed_name_lvl3`)) IN ('creative 1')")
+				.doesNotContain("constructed_name_lvl2");
+	}
+
+	@Test
+	void shouldNarrowBothTablesByBothLevelsWhenBothAreGivenTest() {
+		// Given: both level 2 and level 3 are given together
+		givenScopeAllows("Retargeting");
+		givenTables();
+		givenDeliveryKeys(List.of(deliveryKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1")));
+		givenConversionKeys(List.of(
+				conversionKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1", "Purchase", "Sale")));
+		ArgumentCaptor<BqRequest> captor = ArgumentCaptor.forClass(BqRequest.class);
+
+		// When:
+		writer.preview(scope(), List.of("Retargeting"), List.of("IO 1"), List.of("Creative 1"),
+				"2026-01-01", "2026-01-31");
+
+		// Then: both tables carry identical level-2 and level-3 predicates - neither is narrowed more
+		// broadly than the other
+		verify(gateway, atLeast(2)).fetch(captor.capture(), any());
+		String deliverySql = readSql(captor, DELIVERY_TABLE);
+		String conversionsSql = readSql(captor, CONVERSIONS_TABLE);
+		assertThat(deliverySql).contains("LOWER(TRIM(`constructed_name_lvl2`)) IN ('io 1')")
+				.contains("LOWER(TRIM(`constructed_name_lvl3`)) IN ('creative 1')");
+		assertThat(conversionsSql).contains("LOWER(TRIM(`constructed_name_lvl2`)) IN ('io 1')")
+				.contains("LOWER(TRIM(`constructed_name_lvl3`)) IN ('creative 1')");
+	}
+
+	@Test
+	void shouldRejectABlankLevel2EntryTest() {
+		// Given: the level-1 selection itself is in scope, so the failure isolates to level 2
+		givenScopeAllows("Retargeting");
+
+		// When/Then: the same non-blank sanity rule the required level-1 array already has
+		assertThatThrownBy(() -> writer.preview(
+				scope(), List.of("Retargeting"), List.of(" "), List.of(), "2026-01-01", "2026-01-31"))
+				.isInstanceOf(BusinessException.class)
+				.extracting(ex -> ((BusinessException) ex).getCode())
+				.isEqualTo(OperationalHubErrorReason.OPH_027.getCode());
+	}
+
+	@Test
+	void shouldRejectALevel3SelectionOverTheMaxCampaignNamesLimitTest() {
+		// Given: the level-1 selection itself is in scope, and one more level-3 name than
+		// AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES allows
+		givenScopeAllows("Retargeting");
+		List<String> tooMany = new ArrayList<>();
+		for (int i = 0; i <= AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES; i++) {
+			tooMany.add("Creative " + i);
+		}
+
+		// When/Then:
+		assertThatThrownBy(() -> writer.preview(
+				scope(), List.of("Retargeting"), List.of(), tooMany, "2026-01-01", "2026-01-31"))
+				.isInstanceOf(BusinessException.class)
+				.extracting(ex -> ((BusinessException) ex).getCode())
+				.isEqualTo(OperationalHubErrorReason.OPH_027.getCode());
+	}
+
+	@Test
+	void shouldPreviewAndRollbackProduceTheSameKeySetWhenNarrowedByBothOptionalLevelsTest() {
+		// Given: the same scope and narrowing given to both a preview and a subsequent rollback
+		givenScopeAllows("Retargeting");
+		givenTables();
+		givenDeliveryKeys(List.of(deliveryKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1")));
+		givenConversionKeys(List.of(
+				conversionKeyRow("2026-01-05", "acct-1", "cid-1", "cid2-1", "cid3-1", "Purchase", "Sale")));
+		when(syncLockService.tryAcquire(any())).thenReturn(true);
+		when(writeGateway.delete(any(BqDelete.class))).thenReturn(1L);
+
+		// When:
+		AdjustmentRollbackResultModel previewResult = writer.preview(
+				scope(), List.of("Retargeting"), List.of("IO 1"), List.of("Creative 1"),
+				"2026-01-01", "2026-01-31");
+		AdjustmentRollbackResultModel rollbackResult = writer.rollback(
+				scope(), List.of("Retargeting"), List.of("IO 1"), List.of("Creative 1"),
+				"2026-01-01", "2026-01-31");
+
+		// Then: the preview's counted key set matches what the rollback actually reports removed
+		assertThat(previewResult).isEqualTo(new AdjustmentRollbackResultModel(1, 1));
+		assertThat(rollbackResult).isEqualTo(new AdjustmentRollbackResultModel(1, 1));
+	}
+
+	/**
+	 * Finds the SQL text of the one captured {@link BqRequest} whose text mentions {@code tableMarker} -
+	 * shared by the level-2/level-3 narrowing tests to pull out one table's rendered read.
+	 *
+	 * @param captor      the captor every read call was recorded into
+	 * @param tableMarker a substring unique to the table under test (its qualified name)
+	 * @return the first captured request's SQL containing {@code tableMarker}
+	 */
+	private String readSql(ArgumentCaptor<BqRequest> captor, String tableMarker) {
+		return captor.getAllValues().stream().map(BqRequest::sql).filter(sql -> sql.contains(tableMarker))
+				.findFirst().orElseThrow();
 	}
 
 	@Test
@@ -218,7 +380,7 @@ class AdjustmentRollbackWriterTest {
 		when(syncLockService.tryAcquire(any())).thenReturn(false);
 
 		// When/Then:
-		assertThatThrownBy(() -> writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_033.getCode());
@@ -237,7 +399,7 @@ class AdjustmentRollbackWriterTest {
 		when(writeGateway.delete(any(BqDelete.class))).thenReturn(1L);
 
 		// When:
-		writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then: acquired before, released after, in that order
 		var order = inOrder(syncLockService, writeGateway);
@@ -258,7 +420,7 @@ class AdjustmentRollbackWriterTest {
 				.thenThrow(new BusinessException(OperationalHubErrorReason.OPH_026, "boom"));
 
 		// When/Then:
-		assertThatThrownBy(() -> writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31"))
+		assertThatThrownBy(() -> writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31"))
 				.isInstanceOf(BusinessException.class)
 				.extracting(ex -> ((BusinessException) ex).getCode())
 				.isEqualTo(OperationalHubErrorReason.OPH_026.getCode());
@@ -285,7 +447,7 @@ class AdjustmentRollbackWriterTest {
 
 		// When:
 		AdjustmentRollbackResultModel result =
-				writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then: the counts are the sums BigQueryWriteGateway reported, not the number of distinct keys
 		assertThat(result).isEqualTo(new AdjustmentRollbackResultModel(2, 1));
@@ -302,7 +464,7 @@ class AdjustmentRollbackWriterTest {
 		when(syncLockService.tryAcquire(any())).thenReturn(true);
 
 		// When:
-		writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then:
 		verify(gateway).evictSearchCache();
@@ -325,7 +487,7 @@ class AdjustmentRollbackWriterTest {
 		ArgumentCaptor<BqDelete> captor = ArgumentCaptor.forClass(BqDelete.class);
 
 		// When:
-		writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then:
 		verify(writeGateway, times(2)).delete(captor.capture());
@@ -363,7 +525,7 @@ class AdjustmentRollbackWriterTest {
 		when(writeGateway.delete(any(BqDelete.class))).thenReturn(1L);
 
 		// When:
-		writer.rollback(scope(), List.of("Retargeting"), "2026-01-01", "2026-01-31");
+		writer.rollback(scope(), List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 
 		// Then: split across more than one DELETE batch for the delivery table
 		ArgumentCaptor<BqDelete> captor = ArgumentCaptor.forClass(BqDelete.class);

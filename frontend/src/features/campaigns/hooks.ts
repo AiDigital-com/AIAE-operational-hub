@@ -186,29 +186,37 @@ export function useSaveReportRowAdjustments(campaignId: number | undefined) {
 
 /**
  * How many Hub-owned adjustment overlay rows a "Roll back adjustments" call would remove for the given
- * level-1 campaigns and date window, without deleting anything. Disabled until the caller has a complete
- * scope (at least one campaign name, both date bounds) - a rollback is never previewed, let alone run,
- * for an unbounded selection.
+ * level-1 campaigns and date window, optionally narrowed further by level-2 and/or level-3 constructed
+ * names, without deleting anything. Disabled until the caller has a complete scope (at least one
+ * campaign name, both date bounds) - a rollback is never previewed, let alone run, for an unbounded
+ * selection. The optional levels are part of the query key so a narrower/wider selection always refetches
+ * rather than serving a stale count from a different scope.
  *
  * @param campaignId               the campaign id
  * @param campaignConstructedNames the level-1 campaigns currently in scope
+ * @param constructedNamesLvl2     the optional level-2 names to further narrow the preview to
+ * @param constructedNamesLvl3     the optional level-3 names to further narrow the preview to
  * @param dateWindow               the inclusive date window currently in scope
  * @param enabled                  whether the owning modal is open
  */
 export function useAdjustmentRollbackPreview(
   campaignId: number | undefined,
   campaignConstructedNames: string[],
+  constructedNamesLvl2: string[],
+  constructedNamesLvl3: string[],
   dateWindow: DateWindow,
   enabled: boolean
 ) {
   return useQuery({
     queryKey: [
       "campaigns", "adjustment-rollback-preview", campaignId, campaignConstructedNames,
-      dateWindow.from, dateWindow.to,
+      constructedNamesLvl2, constructedNamesLvl3, dateWindow.from, dateWindow.to,
     ],
     queryFn: () =>
       previewAdjustmentRollback(campaignId as number, {
         campaignConstructedNames,
+        constructedNamesLvl2,
+        constructedNamesLvl3,
         dateFrom: dateWindow.from,
         dateTo: dateWindow.to,
       }),
@@ -220,11 +228,11 @@ export function useAdjustmentRollbackPreview(
 }
 
 /**
- * Removes the Hub's own manual adjustments for the given level-1 campaigns and date window. No
- * optimistic update - the operation is server-side and irreversible from the Hub, so the UI shows only
- * what the server reports actually happened. On success, invalidates this campaign's report-rows queries
- * the same way {@link useSaveReportRowAdjustments} does, so the table re-reads the rows the rollback
- * affected.
+ * Removes the Hub's own manual adjustments for the given level-1 campaigns and date window, optionally
+ * narrowed further by level-2 and/or level-3 constructed names. No optimistic update - the operation is
+ * server-side and irreversible from the Hub, so the UI shows only what the server reports actually
+ * happened. On success, invalidates this campaign's report-rows queries the same way
+ * {@link useSaveReportRowAdjustments} does, so the table re-reads the rows the rollback affected.
  *
  * @param campaignId the campaign the rows belong to
  */
@@ -233,13 +241,19 @@ export function useRollbackAdjustments(campaignId: number | undefined) {
   return useMutation({
     mutationFn: ({
       campaignConstructedNames,
+      constructedNamesLvl2,
+      constructedNamesLvl3,
       dateWindow,
     }: {
       campaignConstructedNames: string[];
+      constructedNamesLvl2: string[];
+      constructedNamesLvl3: string[];
       dateWindow: DateWindow;
     }) =>
       rollbackAdjustments(campaignId as number, {
         campaignConstructedNames,
+        constructedNamesLvl2,
+        constructedNamesLvl3,
         dateFrom: dateWindow.from,
         dateTo: dateWindow.to,
       }),

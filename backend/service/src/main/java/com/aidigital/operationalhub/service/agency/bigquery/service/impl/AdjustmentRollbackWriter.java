@@ -87,22 +87,35 @@ public class AdjustmentRollbackWriter {
 	 *
 	 * @param scope                     the resolved campaign delivery scope
 	 * @param campaignConstructedNames  the requested level-1 constructed names
+	 * @param constructedNamesLvl2      the optional level-2 constructed names to further narrow by, or
+	 *                                  empty/{@code null} to not narrow by level 2
+	 * @param constructedNamesLvl3      the optional level-3 constructed names to further narrow by,
+	 *                                  independent of {@code constructedNamesLvl2}, or empty/{@code null}
+	 *                                  to not narrow by level 3
 	 * @param dateFrom                  the inclusive first date, as {@code yyyy-MM-dd}
 	 * @param dateTo                    the inclusive last date, as {@code yyyy-MM-dd}
 	 * @return the counts a rollback of this scope would remove
-	 * @throws BusinessException OPH_027 on an empty/blank selection or a selection over
-	 *                           {@link AdjustmentRollbackLimits#MAX_CAMPAIGN_NAMES}, OPH_050 on an
-	 *                           out-of-scope name
+	 * @throws BusinessException OPH_027 on an empty/blank level-1 selection, a level-1 selection over
+	 *                           {@link AdjustmentRollbackLimits#MAX_CAMPAIGN_NAMES}, a blank level-2/3
+	 *                           entry, or a level-2/3 selection over the same size limit; OPH_050 on an
+	 *                           out-of-scope level-1 name
 	 */
 	AdjustmentRollbackResultModel preview(
-			CampaignDeliveryScope scope, List<String> campaignConstructedNames, String dateFrom, String dateTo) {
+			CampaignDeliveryScope scope, List<String> campaignConstructedNames, List<String> constructedNamesLvl2,
+			List<String> constructedNamesLvl3, String dateFrom, String dateTo) {
 		List<String> resolvedNames = resolveScopedNames(scope, campaignConstructedNames);
+		requireValidOptionalNames(constructedNamesLvl2);
+		requireValidOptionalNames(constructedNamesLvl3);
 		List<List<String>> deliveryKeys = readKeys(
 				writeGateway.writeTable(), BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME,
-				BigQueryAdjustmentsViewColumns.DATE, DELIVERY_KEY_COLUMNS, resolvedNames, dateFrom, dateTo);
+				BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME_LVL2,
+				BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME_LVL3, BigQueryAdjustmentsViewColumns.DATE,
+				DELIVERY_KEY_COLUMNS, resolvedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom, dateTo);
 		List<List<String>> conversionKeys = readKeys(
 				writeGateway.conversionsWriteTable(), BigQueryConversionsViewColumns.CONSTRUCTED_NAME,
-				BigQueryConversionsViewColumns.DATE, CONVERSION_KEY_COLUMNS, resolvedNames, dateFrom, dateTo);
+				BigQueryConversionsViewColumns.CONSTRUCTED_NAME_LVL2,
+				BigQueryConversionsViewColumns.CONSTRUCTED_NAME_LVL3, BigQueryConversionsViewColumns.DATE,
+				CONVERSION_KEY_COLUMNS, resolvedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom, dateTo);
 		return new AdjustmentRollbackResultModel(deliveryKeys.size(), conversionKeys.size());
 	}
 
@@ -115,17 +128,26 @@ public class AdjustmentRollbackWriter {
 	 *
 	 * @param scope                    the resolved campaign delivery scope
 	 * @param campaignConstructedNames the requested level-1 constructed names
+	 * @param constructedNamesLvl2     the optional level-2 constructed names to further narrow by, or
+	 *                                 empty/{@code null} to not narrow by level 2
+	 * @param constructedNamesLvl3     the optional level-3 constructed names to further narrow by,
+	 *                                 independent of {@code constructedNamesLvl2}, or empty/{@code null}
+	 *                                 to not narrow by level 3
 	 * @param dateFrom                 the inclusive first date, as {@code yyyy-MM-dd}
 	 * @param dateTo                   the inclusive last date, as {@code yyyy-MM-dd}
 	 * @return the counts actually removed
-	 * @throws BusinessException OPH_027 on an empty/blank selection or a selection over
-	 *                           {@link AdjustmentRollbackLimits#MAX_CAMPAIGN_NAMES}, OPH_050 on an
-	 *                           out-of-scope name, OPH_033 on lock contention, OPH_026 when the BigQuery
-	 *                           delete fails
+	 * @throws BusinessException OPH_027 on an empty/blank level-1 selection, a level-1 selection over
+	 *                           {@link AdjustmentRollbackLimits#MAX_CAMPAIGN_NAMES}, a blank level-2/3
+	 *                           entry, or a level-2/3 selection over the same size limit; OPH_050 on an
+	 *                           out-of-scope level-1 name, OPH_033 on lock contention, OPH_026 when the
+	 *                           BigQuery delete fails
 	 */
 	AdjustmentRollbackResultModel rollback(
-			CampaignDeliveryScope scope, List<String> campaignConstructedNames, String dateFrom, String dateTo) {
+			CampaignDeliveryScope scope, List<String> campaignConstructedNames, List<String> constructedNamesLvl2,
+			List<String> constructedNamesLvl3, String dateFrom, String dateTo) {
 		List<String> resolvedNames = resolveScopedNames(scope, campaignConstructedNames);
+		requireValidOptionalNames(constructedNamesLvl2);
+		requireValidOptionalNames(constructedNamesLvl3);
 		String lockName = lockName(scope.campaign().id());
 		if (!syncLockService.tryAcquire(lockName)) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_033);
@@ -133,10 +155,16 @@ public class AdjustmentRollbackWriter {
 		try {
 			List<List<String>> deliveryKeys = readKeys(
 					writeGateway.writeTable(), BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME,
-					BigQueryAdjustmentsViewColumns.DATE, DELIVERY_KEY_COLUMNS, resolvedNames, dateFrom, dateTo);
+					BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME_LVL2,
+					BigQueryAdjustmentsViewColumns.CONSTRUCTED_NAME_LVL3, BigQueryAdjustmentsViewColumns.DATE,
+					DELIVERY_KEY_COLUMNS, resolvedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom,
+					dateTo);
 			List<List<String>> conversionKeys = readKeys(
 					writeGateway.conversionsWriteTable(), BigQueryConversionsViewColumns.CONSTRUCTED_NAME,
-					BigQueryConversionsViewColumns.DATE, CONVERSION_KEY_COLUMNS, resolvedNames, dateFrom, dateTo);
+					BigQueryConversionsViewColumns.CONSTRUCTED_NAME_LVL2,
+					BigQueryConversionsViewColumns.CONSTRUCTED_NAME_LVL3, BigQueryConversionsViewColumns.DATE,
+					CONVERSION_KEY_COLUMNS, resolvedNames, constructedNamesLvl2, constructedNamesLvl3, dateFrom,
+					dateTo);
 			long deliveryRemoved = deleteKeys(writeGateway.writeTable(), DELIVERY_KEY_COLUMNS, deliveryKeys);
 			long conversionRemoved =
 					deleteKeys(writeGateway.conversionsWriteTable(), CONVERSION_KEY_COLUMNS, conversionKeys);
@@ -240,31 +268,69 @@ public class AdjustmentRollbackWriter {
 	}
 
 	/**
+	 * Rejects an optional level-2/level-3 narrowing selection that contains a blank entry or names more
+	 * than {@link AdjustmentRollbackLimits#MAX_CAMPAIGN_NAMES} values - the same sanity ceiling the
+	 * required level-1 selection enforces in {@link #requireNonBlankNames}. Unlike that method, an
+	 * empty or {@code null} selection is valid here: it means "do not narrow by this level", not "every
+	 * value". No scope membership check applies either - {@link #resolveScopedNames} is the security
+	 * boundary for level 1, and levels 2/3 can only narrow an already-bounded level-1 selection, never
+	 * escape it, so a name that matches nothing simply yields zero keys.
+	 *
+	 * @param names the optional level-2 or level-3 constructed names to validate
+	 * @throws BusinessException OPH_027 on a blank entry, or a selection over the size limit
+	 */
+	void requireValidOptionalNames(List<String> names) {
+		if (names == null || names.isEmpty()) {
+			return;
+		}
+		if (names.size() > AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES) {
+			throw new BusinessException(
+					OperationalHubErrorReason.OPH_027,
+					"at most " + AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES + " names may be named");
+		}
+		for (String name : names) {
+			if (name == null || name.isBlank()) {
+				throw new BusinessException(OperationalHubErrorReason.OPH_027, "a name must not be blank");
+			}
+		}
+	}
+
+	/**
 	 * Reads the distinct rollback keys already-validated names and a date window match in one Hub adjustment
 	 * table - the exact keys {@link #deleteKeys} then removes. Read from the table itself, never the view,
 	 * so an absent value here is a real stored {@code NULL} rather than a view-level
 	 * {@code COALESCE(col, 'not set')} placeholder - which is why no {@link BqDelete.Builder#absentAs} is
 	 * needed downstream.
 	 *
-	 * @param table                 the qualified Hub adjustment table to read
-	 * @param constructedNameColumn the table's level-1 constructed-name column
-	 * @param dateColumn            the table's date column - named explicitly rather than assumed from
-	 *                              {@code keyColumns}' own order, so reordering either key-column list can
-	 *                              never silently point the date filter at a different column
-	 * @param keyColumns            the rollback key's columns, in order
-	 * @param resolvedNames         the validated level-1 constructed names to match, case-insensitively
-	 * @param dateFrom              the inclusive first date, as {@code yyyy-MM-dd}
-	 * @param dateTo                the inclusive last date, as {@code yyyy-MM-dd}
+	 * @param table                     the qualified Hub adjustment table to read
+	 * @param constructedNameColumn     the table's level-1 constructed-name column
+	 * @param constructedNameLvl2Column the table's level-2 constructed-name column
+	 * @param constructedNameLvl3Column the table's level-3 constructed-name column
+	 * @param dateColumn                the table's date column - named explicitly rather than assumed from
+	 *                                  {@code keyColumns}' own order, so reordering either key-column list
+	 *                                  can never silently point the date filter at a different column
+	 * @param keyColumns                the rollback key's columns, in order
+	 * @param resolvedNames             the validated level-1 constructed names to match, case-insensitively
+	 * @param namesLvl2                 the optional level-2 constructed names to further match by, or
+	 *                                  empty/{@code null} to not narrow by level 2
+	 * @param namesLvl3                 the optional level-3 constructed names to further match by, or
+	 *                                  empty/{@code null} to not narrow by level 3
+	 * @param dateFrom                  the inclusive first date, as {@code yyyy-MM-dd}
+	 * @param dateTo                    the inclusive last date, as {@code yyyy-MM-dd}
 	 * @return the distinct key tuples found, each aligned to {@code keyColumns}, nulls preserved
 	 */
 	List<List<String>> readKeys(
-			String table, String constructedNameColumn, String dateColumn, List<String> keyColumns,
-			List<String> resolvedNames, String dateFrom, String dateTo) {
+			String table, String constructedNameColumn, String constructedNameLvl2Column,
+			String constructedNameLvl3Column, String dateColumn, List<String> keyColumns,
+			List<String> resolvedNames, List<String> namesLvl2, List<String> namesLvl3, String dateFrom,
+			String dateTo) {
 		BqRequest.Builder builder = new BqRequest.Builder().distinct().from(table);
 		for (String column : keyColumns) {
 			builder.select(column);
 		}
 		builder.whereNormalizedInStrings(constructedNameColumn, resolvedNames);
+		builder.whereNormalizedInStrings(constructedNameLvl2Column, namesLvl2);
+		builder.whereNormalizedInStrings(constructedNameLvl3Column, namesLvl3);
 		builder.whereDateBetween(dateColumn, dateFrom, dateTo);
 		BqRequest request = builder.build();
 		return gateway.fetch(request, row -> keyColumns.stream().map(row::getString).toList());
