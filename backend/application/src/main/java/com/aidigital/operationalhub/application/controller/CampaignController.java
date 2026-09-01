@@ -36,6 +36,7 @@ import com.aidigital.operationalhub.application.mapper.ConstructedEntityContract
 import com.aidigital.operationalhub.application.mapper.ConversionAdjustmentXlsxAssembler;
 import com.aidigital.operationalhub.application.mapper.ConversionBreakdownContractMapper;
 import com.aidigital.operationalhub.application.mapper.DashboardContractMapper;
+import com.aidigital.operationalhub.application.mapper.DashboardDatasetXlsxExportAssembler;
 import com.aidigital.operationalhub.application.mapper.InsertionOrderContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowFileSupport;
@@ -65,6 +66,7 @@ import com.aidigital.operationalhub.service.agency.search.CampaignField;
 import com.aidigital.operationalhub.service.agency.search.ReportRowSortField;
 import com.aidigital.operationalhub.service.common.search.SearchCriteria;
 import com.aidigital.operationalhub.service.dashboard.DashboardDataSourceService;
+import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.entity.HubDashboardService;
 import com.aidigital.operationalhub.service.entity.HubReportViewService;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -110,6 +112,7 @@ public class CampaignController implements CampaignsApi {
 	private final XlsxDownloadResponder xlsxDownloadResponder;
 	private final ReportViewContractMapper reportViewMapper;
 	private final DashboardContractMapper dashboardMapper;
+	private final DashboardDatasetXlsxExportAssembler dashboardDatasetXlsxExportAssembler;
 	private final ConstructedEntityContractMapper constructedEntityMapper;
 
 	@Override
@@ -406,6 +409,21 @@ public class CampaignController implements CampaignsApi {
 		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
 		return ResponseEntity.ok(dashboardDataSourceService.distinctValues(
 				currentUser, campaignId, dashboardId, field));
+	}
+
+	@Override
+	public ResponseEntity<Resource> exportDashboardDatasetRows(
+			Long campaignId,
+			Long dashboardId,
+			DashboardDatasetRowsSearchRequestV1 dashboardDatasetRowsSearchRequestV1) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		DashboardDatasetExportModel export = dashboardDataSourceService.exportRows(
+				currentUser, campaignId, dashboardId,
+				dashboardMapper.toCriteria(dashboardDatasetRowsSearchRequestV1));
+		String fileSuffix = reportRowFileSupport.fileSafe(export.dashboardName());
+		return xlsxDownloadResponder.respond(export.campaignName(), fileSuffix, export.truncated(),
+				out -> dashboardDatasetXlsxExportAssembler.writeWorkbook(
+						out, export.rows(), export.columns(), export.columnOrder()));
 	}
 
 	@Override

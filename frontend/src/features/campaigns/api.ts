@@ -367,6 +367,20 @@ export async function listDashboardDatasetRows(
   );
 }
 
+export async function exportDashboardDatasetRows(
+  campaignId: number,
+  dashboardId: number,
+  body: DashboardDatasetRowsSearchRequestV1
+) {
+  return requireFile(
+    await apiClient.POST("/api/v1/campaigns/{campaignId}/dashboards/{dashboardId}/dataset-rows/export", {
+      params: { path: { campaignId, dashboardId } },
+      body,
+      parseAs: "blob",
+    })
+  );
+}
+
 export async function listDashboardDatasetDistinctValues(
   campaignId: number,
   dashboardId: number,

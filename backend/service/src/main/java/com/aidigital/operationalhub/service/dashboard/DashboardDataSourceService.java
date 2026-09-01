@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.service.dashboard;
 
 import com.aidigital.operationalhub.domain.entity.HubDashboard;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetCriteria;
+import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetPage;
 import com.aidigital.operationalhub.service.dashboard.model.DashboardPreview;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -50,6 +51,21 @@ public interface DashboardDataSourceService {
 			int pageNumber,
 			int pageSize,
 			DashboardDatasetCriteria criteria);
+
+	/**
+	 * Reads the full (capped) result of the dashboard's dataset for its "Download" action - the same
+	 * query {@link #previewRows} pages, read here without pagination and bounded by a fixed row cap
+	 * instead.
+	 *
+	 * @param user        the current user, whose visibility decides whether the campaign resolves
+	 * @param campaignId  the campaign id
+	 * @param dashboardId the dashboard id
+	 * @param criteria    additive column filters and date range; {@link DashboardDatasetCriteria#none()}
+	 *                    reads the dashboard's whole delivery history with no narrowing at all
+	 * @return the matching dataset rows, capped, plus everything needed to name and shape the workbook
+	 */
+	DashboardDatasetExportModel exportRows(
+			CurrentUserModel user, long campaignId, long dashboardId, DashboardDatasetCriteria criteria);
 
 	/**
 	 * Reads the distinct values of one dashboard dataset column for a filter picker.

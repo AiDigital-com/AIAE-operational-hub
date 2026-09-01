@@ -7,16 +7,18 @@ import { cn } from "../../../shared/style/cn";
 import { useSidebarCollapse } from "../../layout/app-shell/sidebar-collapse";
 import {
   DataTable,
-  DataTableChips,
   DataTableViewControls,
   columnDragCellClass,
   columnDropCellClass,
   columnStyle,
 } from "../../../shared/ui/data-table/data-table";
-import type { DataTableChip, DataTableColumn, DataTableColumnReorder } from "../../../shared/ui/data-table/data-table";
+import type { DataTableColumn, DataTableColumnReorder } from "../../../shared/ui/data-table/data-table";
+import { DataTableFilterBar } from "../../../shared/ui/data-table/data-table-filter-bar";
+import type { AppliedFilter, FilterField } from "../../../shared/ui/data-table/data-table-filter-bar-model";
 import { insertAtBoundary, withShownColumns, useColumnWidths, useTableExpand } from "../../../shared/ui/data-table/data-table-hooks";
 import {
   DataTableDateFilterPopover,
+  DataTableFieldPickerPopover,
   DataTableValueFilterPopover,
 } from "../../../shared/ui/data-table/data-table-popover";
 import {
@@ -30,15 +32,16 @@ import {
 import { LoadingBlock, LoadingOverlay, LoadingSpinner } from "../../../shared/ui/loading-spinner/loading-spinner";
 import { Modal } from "../../../shared/ui/modal/modal";
 import { useToast } from "../../../shared/ui/toast/toast";
+import { exportDashboardDatasetRows } from "../api";
 import type { CampaignTabContext } from "../campaign-workspace";
 import {
-  NO_DATE_WINDOW,
   useDashboardDatasetDistinctValues,
   useDashboardDatasetRows,
   useDashboardPreview,
   useDashboards,
 } from "../hooks";
 import type { DateWindow } from "../hooks";
+import type { DashboardFilterPopover } from "../model/dashboard-filters";
 import type { DashboardDatasetFilterV1, DashboardV1 } from "../types";
 import "./reporting-tab.css";
 import "./dashboards-tab.css";
@@ -123,6 +126,25 @@ const ALL_OPTIONAL_COLUMNS = [...BASIC_DIMENSIONS, ...BASIC_METRICS]
   .filter((column) => column.optional)
   .map((column) => column.id);
 
+/** Every column of the fixed schema, dimensions then metrics - the full vocabulary a filter can be put on,
+ *  independent of which of them the preview currently shows (PDI_125, mirroring PDI_115). */
+const ALL_COLUMNS: SchemaColumn[] = [...BASIC_DIMENSIONS, ...BASIC_METRICS];
+
+/** The columns the Filters bar can actually filter by: those with a BigQuery field behind them (CPA is
+ *  calculated from two others and has nothing the server could filter on), minus Date - whose persistent
+ *  pill already owns it, the same reason Reporting's field picker excludes its own Date dimension. */
+const FILTERABLE_COLUMNS: SchemaColumn[] = ALL_COLUMNS.filter(
+  (column) => column.field != null && column.id !== "date"
+);
+
+/** `FILTERABLE_COLUMNS`, keyed by id - how a chip's `edit`/a field-picker pick/a value popover all find
+ *  their way back to the schema column (and its BigQuery field) they mean. */
+const FILTERABLE_COLUMN_BY_ID = new Map(FILTERABLE_COLUMNS.map((column) => [column.id, column] as const));
+
+/** The field picker's vocabulary, offered whether or not the column is one of the preview's currently
+ *  displayed ones (PDI_125's whole point, per the `FilterField` JSDoc). */
+const FILTER_FIELDS: FilterField[] = FILTERABLE_COLUMNS.map((column) => ({ id: column.id, label: column.label }));
+
 /**
  * Why a cell in the preview can be empty, in the order a reader meets them.
  *
@@ -192,10 +214,23 @@ function dashboardDateWindow(dashboard: DashboardV1): DateWindow {
   return { from: dashboard.dateFrom ?? "", to: dashboard.dateTo ?? "" };
 }
 
+/** Replaces characters that are unsafe in a downloaded filename with a hyphen - same rule Reporting's own
+ *  download uses, kept local because the two tabs do not share a module to declare it in once. */
+function fileSafe(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "-");
+}
+
 /** The table's own name, without the project and dataset in front of it. */
 function shortTable(table: string): string {
   const parts = table.split(".");
   return parts[parts.length - 1];
+}
+
+/** The ready-to-run query ClicData is pointed at. Backticks are mandatory, not a style choice: the project
+ *  id carries hyphens (e.g. `silken-quasar-376417`), so an unquoted or single-quoted identifier is a
+ *  BigQuery syntax error. */
+function clicDataQuery(sourceTable: string): string {
+  return `SELECT * FROM \`${sourceTable}\``;
 }
 
 /**
@@ -215,7 +250,9 @@ export function DashboardsTab() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<DashboardV1 | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<DashboardV1 | null>(null);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
+  // Tracks the dashboard id alongside which copy action fired, so two copy buttons on the same source
+  // menu never both light up "Copied!" for a click on just one of them.
+  const [copiedAction, setCopiedAction] = useState<{ id: number; action: "table" | "query" } | null>(null);
   const [openMenuFor, setOpenMenuFor] = useState<number | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number } | null>(null);
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -235,12 +272,12 @@ export function DashboardsTab() {
   );
 
   useEffect(() => {
-    if (copiedId == null) {
+    if (copiedAction == null) {
       return undefined;
     }
-    const timer = window.setTimeout(() => setCopiedId(null), COPIED_FEEDBACK_MS);
+    const timer = window.setTimeout(() => setCopiedAction(null), COPIED_FEEDBACK_MS);
     return () => window.clearTimeout(timer);
-  }, [copiedId]);
+  }, [copiedAction]);
 
   useEffect(() => {
     if (!createMenuAt && openMenuFor == null) {
@@ -404,11 +441,26 @@ export function DashboardsTab() {
     }
     try {
       await navigator.clipboard.writeText(dashboard.sourceTable);
-      setCopiedId(dashboard.id);
+      setCopiedAction({ id: dashboard.id, action: "table" });
     } catch {
       // Clipboard access can be refused (an insecure context, or a denied permission). Saying so beats a
       // "Copied!" that did not happen - the user would paste the previous clipboard into ClicData.
       toast.showError("Could not copy the table name. Select it and copy manually.");
+    }
+  }
+
+  async function copyQuery(dashboard: DashboardV1) {
+    setOpenMenuFor(null);
+    if (!dashboard.sourceTable) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(clicDataQuery(dashboard.sourceTable));
+      setCopiedAction({ id: dashboard.id, action: "query" });
+    } catch {
+      // Same reasoning as copyTable: a silent "Copied!" would leave the user pasting a stale clipboard
+      // into ClicData instead of the query they just tried to copy.
+      toast.showError("Could not copy the query. Select it and copy manually.");
     }
   }
 
@@ -630,13 +682,16 @@ export function DashboardsTab() {
       {selected && (
         <DashboardDetail
           campaignId={campaign.id}
+          campaignName={campaign.name}
           dashboard={selected}
-          copied={copiedId === selected.id}
+          copiedTable={copiedAction?.id === selected.id && copiedAction.action === "table"}
+          copiedQuery={copiedAction?.id === selected.id && copiedAction.action === "query"}
           onRename={(name) => rename(selected, name)}
           onApplyDashboard={(kept) => saveDashboard(selected, { kept }, true)}
           onSaveFilters={(filters, dateWindow) => saveDashboard(selected, { filters, dateWindow }, false)}
           onSaveColumnOrder={(columnOrder) => saveDashboard(selected, { columnOrder }, false)}
           onCopyTable={() => copyTable(selected)}
+          onCopyQuery={() => copyQuery(selected)}
           onCreateSource={() => setPublishOpen(true)}
           onRemoveSource={() => setConfirmRemove(selected)}
           expanded={expanded}
@@ -750,8 +805,11 @@ function TypeMenu({ onPick }: TypeMenuProps) {
 
 interface DashboardDetailProps {
   campaignId: number;
+  /** The owning campaign's own name, used only to build the dataset download's filename. */
+  campaignName: string;
   dashboard: DashboardV1;
-  copied: boolean;
+  copiedTable: boolean;
+  copiedQuery: boolean;
   onRename: (name: string) => void;
   /** Saves the on-screen column selection. Awaited, because the write reads what was saved, not what is
    *  shown. Filters and column order do not go through here - they save on the gesture itself. */
@@ -762,6 +820,7 @@ interface DashboardDetailProps {
   /** Saves the arrangement of the preview's columns at once, for the same reason. */
   onSaveColumnOrder: (columnOrder: string[]) => Promise<void>;
   onCopyTable: () => void;
+  onCopyQuery: () => void;
   onCreateSource: () => void;
   onRemoveSource: () => void;
   expanded: boolean;
@@ -773,13 +832,16 @@ interface DashboardDetailProps {
 /** The selected dashboard's fixed schema, its live row count, and its data-source actions. */
 function DashboardDetail({
   campaignId,
+  campaignName,
   dashboard,
-  copied,
+  copiedTable,
+  copiedQuery,
   onRename,
   onApplyDashboard,
   onSaveFilters,
   onSaveColumnOrder,
   onCopyTable,
+  onCopyQuery,
   onCreateSource,
   onRemoveSource,
   expanded,
@@ -899,6 +961,7 @@ function DashboardDetail({
 
       <DashboardDatasetTable
         campaignId={campaignId}
+        campaignName={campaignName}
         dashboard={dashboard}
         columns={savedPreviewColumns}
         filters={draftFilters}
@@ -936,8 +999,10 @@ function DashboardDetail({
           dashboard.sourceTable ? (
             <SourceMenu
               dashboard={dashboard}
-              copied={copied}
+              copiedTable={copiedTable}
+              copiedQuery={copiedQuery}
               onCopyTable={onCopyTable}
+              onCopyQuery={onCopyQuery}
               onWriteSource={writeSource}
               onRemoveSource={onRemoveSource}
             />
@@ -955,6 +1020,8 @@ function DashboardDetail({
 
 interface DashboardDatasetTableProps {
   campaignId: number;
+  /** The owning campaign's own name, used only to build the dataset download's filename. */
+  campaignName: string;
   dashboard: DashboardV1;
   columns: SchemaColumn[];
   filters: DashboardDatasetFilterV1[];
@@ -972,13 +1039,15 @@ interface DashboardDatasetTableProps {
   sourceActions?: ReactNode;
 }
 
-interface DatasetFilterState {
-  column: SchemaColumn;
-  anchor: HTMLElement;
-}
-
 function filterValues(filters: DashboardDatasetFilterV1[], field: string): string[] {
   return filters.find((filter) => filter.field === field)?.values ?? [];
+}
+
+/** A filter's applied values, in as few words as it takes - the chip strip's own threshold, kept as it
+ *  was rather than adopted from Reporting's (which joins up to two values): a dataset column can carry
+ *  many more distinct values than a report dimension, so naming even two of them read as arbitrary. */
+function filterSummary(values: readonly string[]): string {
+  return values.length === 1 ? values[0] : `${values.length} values`;
 }
 
 function applyFilter(filters: DashboardDatasetFilterV1[], field: string, values: string[]) {
@@ -1052,6 +1121,7 @@ function formatDatasetValue(column: SchemaColumn, values: Record<string, unknown
  */
 function DashboardDatasetTable({
   campaignId,
+  campaignName,
   dashboard,
   columns,
   filters,
@@ -1065,7 +1135,12 @@ function DashboardDatasetTable({
   datasetHint,
   sourceActions,
 }: DashboardDatasetTableProps) {
-  const [openFilter, setOpenFilter] = useState<DatasetFilterState | null>(null);
+  // Which of the Filters bar's popovers is open - the field picker, a column's value popover, or the
+  // Date pill's own window popover - and where it hangs from (PDI_125, mirroring PDI_115's Reporting
+  // model). Replaces the funnel-era per-column `openFilter` state, which paired one column with one
+  // anchor and had no notion of a field-picker stage at all.
+  const [filterPopover, setFilterPopover] = useState<DashboardFilterPopover | null>(null);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const { columnWidths, resizeColumn } = useColumnWidths();
   // Shown from local state and written through on every change: the drag has to land instantly, and it has
   // to still be there after a reload. It is deliberately not part of `unapplied` - rearranging the preview
@@ -1142,6 +1217,9 @@ function DashboardDatasetTable({
     return [...columns].sort((left, right) => at(left.id) - at(right.id));
   }, [columns, columnOrder]);
 
+  // No `filterable`/`filtered` on the column objects (PDI_125, mirroring PDI_115): filters and the date
+  // window are reachable from the Filters bar now, not from a column header's funnel, and the bar draws
+  // its own state from `filterChips` below rather than lighting up a header button.
   const tableColumns = useMemo<DataTableColumn[]>(
     () =>
       orderedColumns.map((column) => ({
@@ -1151,60 +1229,53 @@ function DashboardDatasetTable({
         // a dashboard's reader needs to know a rate is averaged and not summed before they read a week of it.
         agg: column.agg,
         className: numericFormat(column) ? "reporting-tab__num" : undefined,
-        // Only the columns with a BigQuery field behind them can be filtered; CPA is calculated from two
-        // others and has nothing the server could filter on.
-        filterable: column.field != null,
-        filtered:
-          column.id === "date"
-            ? dateWindow.from !== "" || dateWindow.to !== ""
-            : (column.field ? filterValues(filters, column.field) : []).length > 0,
       })),
-    [orderedColumns, filters, dateWindow]
+    [orderedColumns]
   );
 
-  // What the preview has been narrowed to, said above it rather than only as a lit funnel icon in each
-  // header - and clearable without reopening the popover that set it.
-  const chips = useMemo<DataTableChip[]>(() => {
-    const applied: DataTableChip[] = [];
-    if (dateWindow.from !== "" || dateWindow.to !== "") {
-      applied.push({
-        id: "date-window",
-        label: "Date",
-        summary: datasetDateSummary(dateWindow),
-        clear: () => onDateWindowChange(NO_DATE_WINDOW),
-      });
-    }
-    for (const column of columns) {
-      if (!column.field || column.id === "date") continue;
-      const values = filterValues(filters, column.field);
-      if (values.length === 0) continue;
-      applied.push({
-        id: column.id,
-        label: column.label,
-        summary: values.length === 1 ? values[0] : `${values.length} values`,
-        clear: () => onFiltersChange(applyFilter(filters, column.field as string, [])),
-      });
-    }
-    return applied;
-  }, [columns, filters, dateWindow, onFiltersChange, onDateWindowChange]);
+  // Every value filter currently in force, listed on the Filters bar rather than only inside the column
+  // header it used to open from (PDI_125) - so what the preview has been narrowed to is legible without
+  // opening a popover to find out, and clearable without opening one either. Built from the full schema
+  // (`FILTERABLE_COLUMNS`), not just `columns` (the preview's currently displayed ones): a filter on an
+  // optional column switched off since is exactly what `hiddenColumn` exists to keep visible. Date is not
+  // among these - the bar's own persistent pill owns it, so it is never pruned here on a column change.
+  const filterChips = useMemo<AppliedFilter[]>(
+    () =>
+      FILTERABLE_COLUMNS.filter((column) => filterValues(filters, column.field as string).length > 0).map(
+        (column) => ({
+          id: column.id,
+          label: column.label,
+          summary: filterSummary(filterValues(filters, column.field as string)),
+          // Dashed and explained on the bar rather than pruned away: a filter surviving its column
+          // leaving the preview's displayed set is exactly what PDI_125 asks for.
+          hiddenColumn: !columns.some((displayed) => displayed.id === column.id),
+          edit: (anchor: HTMLElement) => openValueFilter(column.id, anchor),
+          clear: () => onFiltersChange(applyFilter(filters, column.field as string, [])),
+        })
+      ),
+    [filters, columns, onFiltersChange]
+  );
 
   useEffect(() => {
-    setOpenFilter(null);
+    setFilterPopover(null);
   }, [dashboard.id, dashboard.optionalColumns.join(",")]);
 
   useEffect(() => {
-    if (!openFilter) {
+    if (!filterPopover) {
       return undefined;
     }
     function close(event: MouseEvent) {
       const target = event.target as Element | null;
-      if (!target?.closest(".data-table__filter-wrap, .data-table__pop")) {
-        setOpenFilter(null);
+      // The Filters bar is this table's own, the popover it opens is too - but missing either here does
+      // not just fail to close - it closes on the same mousedown that opened it, so the button's own
+      // click reopens and the popover can never be dismissed by the control that opened it.
+      if (!target?.closest(".data-table__filter-bar") && !target?.closest(".data-table__pop")) {
+        setFilterPopover(null);
       }
     }
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
-  }, [openFilter]);
+  }, [filterPopover]);
 
   function updateFilter(field: string, values: string[]) {
     onFiltersChange(applyFilter(filters, field, values));
@@ -1213,6 +1284,36 @@ function DashboardDatasetTable({
   function updateDateWindow(window: DateWindow) {
     onDateWindowChange(window);
   }
+
+  /** Opens a column's value popover, staged with its current selection - the field picker's own handoff
+   *  after a column is picked, and a chip's label click, both funnel through here. */
+  function openValueFilter(columnId: string, anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover({ stage: "values", columnId });
+  }
+
+  /** Opens the `+ Filter` field picker (stage 1), toggling it closed on a second click of the same
+   *  button - the same toggle the funnel-era filter button offered. */
+  function openFieldPicker(anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover((current) => (current?.stage === "fields" ? null : { stage: "fields" }));
+  }
+
+  /** Opens the persistent Date pill's own window popover, toggling closed on a second click. */
+  function openDateFilter(anchor: HTMLElement) {
+    setFilterAnchor(anchor);
+    setFilterPopover((current) => (current?.stage === "date" ? null : { stage: "date" }));
+  }
+
+  /** Drops every value filter at once. The date window is not one of them and survives, same as
+   *  Reporting's own Clear all - pinning that distinction is the point of the dedicated test for it.
+   *  Goes through `onFiltersChange`, so it auto-saves exactly like every other gesture on this bar. */
+  function clearAllFilters() {
+    onFiltersChange([]);
+  }
+
+  const selectedFilterColumn =
+    filterPopover?.stage === "values" ? FILTERABLE_COLUMN_BY_ID.get(filterPopover.columnId) : undefined;
 
   const content = rows.data?.pages.flatMap((datasetPage) => datasetPage.content) ?? [];
   const totalRows = rows.data?.pages[0]?.totalElements ?? 0;
@@ -1230,9 +1331,22 @@ function DashboardDatasetTable({
           onToggleExpanded={onToggleExpanded}
         />
         {datasetHint}
+        <DatasetDownloadMenu
+          campaignId={campaignId}
+          campaignName={campaignName}
+          dashboard={dashboard}
+          filters={filters}
+          dateWindow={dateWindow}
+        />
         {sourceActions}
       </div>
-      <DataTableChips chips={chips} />
+      <DataTableFilterBar
+        dateLabel={dateWindow.from === "" && dateWindow.to === "" ? "All dates" : datasetDateSummary(dateWindow)}
+        onOpenDate={openDateFilter}
+        filters={filterChips}
+        onOpenFieldPicker={openFieldPicker}
+        onClearAll={clearAllFilters}
+      />
       <DataTable
         columns={tableColumns}
         rows={content}
@@ -1257,12 +1371,6 @@ function DashboardDatasetTable({
         )}
         columnWidths={columnWidths}
         onResizeColumn={resizeColumn}
-        onOpenFilter={(columnId, anchor) => {
-          const column = orderedColumns.find((candidate) => candidate.id === columnId);
-          if (!column) return;
-          setOpenFilter((current) => (current?.column.id === columnId ? null : { column, anchor }));
-        }}
-        openFilterColumnId={openFilter?.column.id ?? null}
         columnReorder={columnReorder}
         hasNextPage={rows.hasNextPage}
         isFetchingNextPage={rows.isFetchingNextPage}
@@ -1278,24 +1386,139 @@ function DashboardDatasetTable({
       />
       {rows.isError && <p className="form-error dashboards-tab__dataset-error">{formatError(rows.error)}</p>}
 
-      {openFilter?.column.id === "date" ? (
+      {filterPopover?.stage === "date" && (
         <DataTableDateFilterPopover
           range={dateWindow}
-          anchor={openFilter.anchor}
+          anchor={filterAnchor}
           onApply={updateDateWindow}
-          onClose={() => setOpenFilter(null)}
+          onClose={() => setFilterPopover(null)}
         />
-      ) : openFilter?.column.field ? (
+      )}
+      {filterPopover?.stage === "fields" && (
+        <DataTableFieldPickerPopover
+          fields={FILTER_FIELDS}
+          filteredIds={filterChips.map((filter) => filter.id)}
+          anchor={filterAnchor}
+          onPick={(columnId) => setFilterPopover({ stage: "values", columnId })}
+        />
+      )}
+      {selectedFilterColumn && (
         <DashboardDatasetFilterPopover
           campaignId={campaignId}
           dashboardId={dashboard.id}
-          column={openFilter.column}
-          initialSelected={filterValues(filters, openFilter.column.field)}
-          anchor={openFilter.anchor}
-          onApply={(values) => updateFilter(openFilter.column.field as string, values)}
-          onClose={() => setOpenFilter(null)}
+          column={selectedFilterColumn}
+          initialSelected={filterValues(filters, selectedFilterColumn.field as string)}
+          anchor={filterAnchor}
+          onApply={(values) => updateFilter(selectedFilterColumn.field as string, values)}
+          onClose={() => setFilterPopover(null)}
         />
-      ) : null}
+      )}
+    </div>
+  );
+}
+
+interface DatasetDownloadMenuProps {
+  campaignId: number;
+  /** The owning campaign's own name, used only to build the download's filename. */
+  campaignName: string;
+  dashboard: DashboardV1;
+  /** The preview table's currently-applied filters - what "Current view" downloads. */
+  filters: DashboardDatasetFilterV1[];
+  /** The preview table's currently-applied date window - what "Current view" downloads. */
+  dateWindow: DateWindow;
+}
+
+/**
+ * The dataset preview's "Download" action: everything the on-screen table currently shows, or the
+ * dashboard's whole unfiltered delivery history, as an .xlsx - mirroring Reporting's own Download menu in
+ * shape and behaviour (US-019's read-only preview gets the same download the Reporting table already has).
+ *
+ * Unlike Reporting, a dashboard has only one filter layer: filters and the date window save the moment
+ * they change (see `unapplied` in `DashboardDetail` above), so what is on screen and what is saved are
+ * the same thing - "Current view" is simply the request the preview table itself is already sending,
+ * minus paging.
+ */
+function DatasetDownloadMenu({ campaignId, campaignName, dashboard, filters, dateWindow }: DatasetDownloadMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function onPointerDown(event: MouseEvent) {
+      if (!wrapRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  /** Downloads the dataset as .xlsx - "current" honors the preview table's active filters/date window,
+   *  "all" exports the dashboard's whole delivery history regardless of what's currently applied. */
+  async function download(scope: "current" | "all") {
+    setOpen(false);
+    setDownloading(true);
+    try {
+      const { blob, truncated } = await exportDashboardDatasetRows(
+        campaignId,
+        dashboard.id,
+        scope === "current"
+          ? { filters, dateFrom: dateWindow.from || undefined, dateTo: dateWindow.to || undefined }
+          : {}
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        `${fileSafe(campaignName)} - ${fileSafe(dashboard.name)}${scope === "all" ? " - all" : ""}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      if (truncated) {
+        toast.showError(
+          "This dataset has more rows than one download can carry, so the file is missing some. Narrow " +
+            "the date range to get a complete file."
+        );
+      }
+    } catch (error) {
+      toast.showError(formatError(error));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="reporting-tab__menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="button button--secondary reporting-tab__dropdown-btn"
+        onClick={() => setOpen((current) => !current)}
+        disabled={downloading}
+      >
+        {downloading ? "Downloading…" : "Download"}
+      </button>
+      {open && (
+        <div className="reporting-tab__menu" role="menu">
+          <button type="button" role="menuitem" onClick={() => download("current")}>
+            Current view
+          </button>
+          <button type="button" role="menuitem" onClick={() => download("all")}>
+            All data
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1407,8 +1630,10 @@ function DatasetHint({ rowCount, dimensions, metrics }: DatasetHintProps) {
 
 interface SourceMenuProps {
   dashboard: DashboardV1;
-  copied: boolean;
+  copiedTable: boolean;
+  copiedQuery: boolean;
   onCopyTable: () => void;
+  onCopyQuery: () => void;
   onWriteSource: () => void;
   onRemoveSource: () => void;
 }
@@ -1424,7 +1649,15 @@ interface SourceMenuProps {
  * carries the detail, which is also where the rewrite lives: a source that is in step with its definition
  * has nothing pending, and a permanent button says otherwise.
  */
-function SourceMenu({ dashboard, copied, onCopyTable, onWriteSource, onRemoveSource }: SourceMenuProps) {
+function SourceMenu({
+  dashboard,
+  copiedTable,
+  copiedQuery,
+  onCopyTable,
+  onCopyQuery,
+  onWriteSource,
+  onRemoveSource,
+}: SourceMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -1465,15 +1698,19 @@ function SourceMenu({ dashboard, copied, onCopyTable, onWriteSource, onRemoveSou
       {open && (
         <div className="dashboards-tab__source-menu" role="menu">
           <div className="dashboards-tab__source-table">
-            <span className="dashboards-tab__source-label">BQ table</span>
-            <code>{dashboard.sourceTable}</code>
+            <span className="dashboards-tab__source-label">ClicData query</span>
+            <code>{clicDataQuery(dashboard.sourceTable ?? "")}</code>
             <p className="dashboards-tab__source-meta">
               {fmtCount(dashboard.sourceRowCount ?? undefined)} rows written{" "}
               {fmtDashboardDate(dashboard.sourceCreated ?? undefined)}
             </p>
           </div>
+          <button type="button" role="menuitem" onClick={onCopyQuery}>
+            {copiedQuery ? "Copied!" : "Copy query"}
+            <CopyIcon />
+          </button>
           <button type="button" role="menuitem" onClick={onCopyTable}>
-            {copied ? "Copied!" : "Copy table name"}
+            {copiedTable ? "Copied!" : "Copy table name only"}
             <CopyIcon />
           </button>
           {/* Here rather than as a standing button: the definition has not changed, so this rewrites the
