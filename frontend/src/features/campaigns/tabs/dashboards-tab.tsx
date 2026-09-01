@@ -59,10 +59,12 @@ interface SchemaColumn {
 }
 
 /**
- * The Basic type's 18 dimensions, in the order the written table carries them.
+ * 17 of the Basic type's dimensions, in the order the written table carries them.
  *
  * Fixed, and not by our choice: the ClicData template reads these columns by name. Creative is the one a
- * user may drop, which collapses the rows across creatives rather than removing the column.
+ * user may drop, which collapses the rows across creatives rather than removing the column. This is not a
+ * complete mirror of the written table: `Goal` and `Campaign_Short_Name` are written to BigQuery but are
+ * deliberately not surfaced here as UI dimensions.
  */
 const BASIC_DIMENSIONS: SchemaColumn[] = [
   { id: "date", label: "Date", field: "Date", format: "date" },
@@ -73,7 +75,6 @@ const BASIC_DIMENSIONS: SchemaColumn[] = [
   { id: "channel", label: "Channel", field: "Channel" },
   { id: "channel_short", label: "Channel (short)", field: "Channel_Short_Name" },
   { id: "level1", label: "Level 1 naming", field: "lvl1" },
-  { id: "campaign_short", label: "Campaign (short)", field: "Campaign_Short_Name" },
   { id: "creative", label: "Creative", field: "Creative", optional: true },
   { id: "audience", label: "Audience", field: "CNB_audience" },
   { id: "geo", label: "Geo", field: "CNB_geo" },
@@ -111,6 +112,7 @@ const SOON_TYPES = [
   "Device",
   "Genre",
   "Demographics",
+  "Placements",
 ];
 
 /**
@@ -436,7 +438,7 @@ export function DashboardsTab() {
               onClick={() => setCreateMenuAt((open) => (open === "head" ? null : "head"))}
             >
               <PlusIcon />
-              Create dashboard
+              Create dashboard source
             </button>
             {createMenuAt === "head" && <TypeMenu onPick={create} />}
           </div>
@@ -461,7 +463,7 @@ export function DashboardsTab() {
               className="button button--primary dashboards-tab__dropdown-btn"
               onClick={() => setCreateMenuAt((open) => (open === "empty" ? null : "empty"))}
             >
-              Create dashboard
+              Create dashboard source
             </button>
             {createMenuAt === "empty" && <TypeMenu onPick={create} />}
           </div>
@@ -861,7 +863,7 @@ function DashboardDetail({
         />
         <span className="reporting-tab__type-badge">Basic</span>
         {dashboard.status === "live" ? (
-          <span className="dashboards-tab__chip dashboards-tab__chip--live">Live in ClicData</span>
+          <span className="dashboards-tab__chip dashboards-tab__chip--live">Live in BigQuery</span>
         ) : (
           <span className="dashboards-tab__chip">Draft</span>
         )}

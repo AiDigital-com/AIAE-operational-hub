@@ -12,8 +12,9 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* exact gradient from reference HTML */
-  background: radial-gradient(1200px 380px at 70% -120px, #eef6ee 0%, transparent 60%), var(--bg);
+  /* Faint ambient wash, not a bright spot: --surface-glow is a translucent, theme-aware tint (see
+     tokens.css) instead of a hardcoded opaque color, and the softer/wider falloff keeps the edge diffuse. */
+  background: radial-gradient(1200px 380px at 70% -160px, var(--surface-glow) 0%, transparent 75%), var(--bg);
 }
 
 /* ── topbar ── */

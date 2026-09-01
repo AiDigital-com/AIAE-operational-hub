@@ -38,6 +38,10 @@
   --bg: #f7f8fc;
   --surface: var(--white);
   --sidebar-bg: #ffffff;
+  /* Ambient top-of-screen wash on .app__main. A translucent tint (not an opaque hex) so it blends with
+     whatever surface color sits underneath instead of reading as a hardcoded light patch; kept faint so
+     it stays a calm gradient rather than a distinct glowing spot. */
+  --surface-glow: color-mix(in srgb, var(--good) 12%, transparent);
 
   /* shape */
   --radius: 5px;
@@ -181,6 +185,9 @@
   --shadow-sm: var(--shadow-soft);
   --shadow: 0 6px 24px hsl(0 0% 0% / 40%);
   --shadow-lg: 0 18px 50px hsl(0 0% 0% / 55%);
+  /* Much lower alpha than the light theme: the same tint reads far brighter against a dark surface, which
+     is what made the untinted #eef6ee glow look like a display defect in dark mode. */
+  --surface-glow: color-mix(in srgb, var(--good) 5%, transparent);
   --color-accent-contrast: var(--text-on-accent);
   --color-lime-text: var(--text-on-accent);
   --color-cta-text: var(--text-on-accent);

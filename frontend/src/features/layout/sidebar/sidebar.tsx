@@ -16,12 +16,10 @@ import {
   HomeIcon,
   MoonIcon,
   SearchIcon,
-  SettingsIcon,
   SunIcon,
   TeamIcon,
 } from "../../../shared/ui/icons/icons";
 import { LoadingSpinner } from "../../../shared/ui/loading-spinner/loading-spinner";
-import { useToast } from "../../../shared/ui/toast/toast";
 import type { UserV1 } from "../../rbac/types";
 import "./sidebar.css";
 
@@ -78,7 +76,6 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 // and a useCallback-memoized `onToggleCollapsed`, so this memo is effective.
 export const Sidebar = memo(function Sidebar({ isAdmin, user, collapsed, onToggleCollapsed }: SidebarProps) {
   const { theme, setTheme } = useTheme();
-  const toast = useToast();
 
   const agencyMatch = useMatch("/agencies/:agencyId");
   const nestedClientMatch = useMatch("/agencies/:agencyId/clients/:clientId");
@@ -222,16 +219,6 @@ function hideExtraAgencies() {
             <span className="sidebar__nav-icon" aria-hidden="true"><TeamIcon /></span>
             <span className="sidebar__nav-label">Team</span>
           </NavLink>
-        )}
-        {isAdmin && (
-          <button
-            type="button"
-            className="sidebar__nav-item"
-            onClick={() => toast.showError("Admin — out of scope for this phase.")}
-          >
-            <span className="sidebar__nav-icon" aria-hidden="true"><SettingsIcon /></span>
-            <span className="sidebar__nav-label">Admin</span>
-          </button>
         )}
       </nav>
 
