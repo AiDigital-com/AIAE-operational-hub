@@ -2298,16 +2298,19 @@ class BigQueryReportRowServiceTest {
 		CampaignDeliveryScope scope = scope(campaign);
 		when(scopeResolver.forCampaign(campaign)).thenReturn(scope);
 		List<String> names = List.of("Retargeting");
+		List<String> namesLvl2 = List.of("IO 1");
+		List<String> namesLvl3 = List.of("Creative 1");
 		AdjustmentRollbackResultModel expected = new AdjustmentRollbackResultModel(3L, 1L);
-		when(rollbackWriter.preview(scope, names, "2026-01-01", "2026-01-31")).thenReturn(expected);
+		when(rollbackWriter.preview(scope, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31"))
+				.thenReturn(expected);
 
 		// When:
-		AdjustmentRollbackResultModel result =
-				service.previewAdjustmentRollback(null, 42L, names, "2026-01-01", "2026-01-31");
+		AdjustmentRollbackResultModel result = service.previewAdjustmentRollback(
+				null, 42L, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31");
 
 		// Then:
 		assertThat(result).isEqualTo(expected);
-		verify(rollbackWriter).preview(scope, names, "2026-01-01", "2026-01-31");
+		verify(rollbackWriter).preview(scope, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31");
 	}
 
 	@Test
@@ -2318,15 +2321,18 @@ class BigQueryReportRowServiceTest {
 		CampaignDeliveryScope scope = scope(campaign);
 		when(scopeResolver.forCampaign(campaign)).thenReturn(scope);
 		List<String> names = List.of("Retargeting");
+		List<String> namesLvl2 = List.of("IO 1");
+		List<String> namesLvl3 = List.of("Creative 1");
 		AdjustmentRollbackResultModel expected = new AdjustmentRollbackResultModel(3L, 1L);
-		when(rollbackWriter.rollback(scope, names, "2026-01-01", "2026-01-31")).thenReturn(expected);
+		when(rollbackWriter.rollback(scope, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31"))
+				.thenReturn(expected);
 
 		// When:
-		AdjustmentRollbackResultModel result =
-				service.rollbackAdjustments(null, 42L, names, "2026-01-01", "2026-01-31");
+		AdjustmentRollbackResultModel result = service.rollbackAdjustments(
+				null, 42L, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31");
 
 		// Then:
 		assertThat(result).isEqualTo(expected);
-		verify(rollbackWriter).rollback(scope, names, "2026-01-01", "2026-01-31");
+		verify(rollbackWriter).rollback(scope, names, namesLvl2, namesLvl3, "2026-01-01", "2026-01-31");
 	}
 }

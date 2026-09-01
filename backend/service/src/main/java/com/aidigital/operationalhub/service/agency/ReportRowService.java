@@ -182,13 +182,19 @@ public interface ReportRowService {
 	/**
 	 * Reports how many Hub-owned adjustment overlay rows (delivery and conversions) a rollback of the
 	 * given level-1 campaign names and date window would remove, without deleting anything. The requested
-	 * names are validated against the campaign's own resolved delivery scope the same way
-	 * {@link #rollbackAdjustments} validates them.
+	 * level-1 names are validated against the campaign's own resolved delivery scope the same way
+	 * {@link #rollbackAdjustments} validates them; the optional level-2/level-3 narrowing is not.
 	 *
 	 * @param user                     the current user
 	 * @param campaignId               the campaign id
 	 * @param campaignConstructedNames the level-1 constructed names to preview a rollback for; must be
 	 *                                 non-empty
+	 * @param constructedNamesLvl2     the optional level-2 constructed names to further narrow the
+	 *                                 preview to, independent of {@code constructedNamesLvl3}, or
+	 *                                 empty/{@code null} to not narrow by level 2
+	 * @param constructedNamesLvl3     the optional level-3 constructed names to further narrow the
+	 *                                 preview to, independent of {@code constructedNamesLvl2}, or
+	 *                                 empty/{@code null} to not narrow by level 3
 	 * @param dateFrom                 the inclusive first date, as {@code yyyy-MM-dd}
 	 * @param dateTo                   the inclusive last date, as {@code yyyy-MM-dd}
 	 * @return the counts a rollback of this scope would remove
@@ -199,21 +205,30 @@ public interface ReportRowService {
 	 *                                                                          if the BigQuery read fails
 	 */
 	AdjustmentRollbackResultModel previewAdjustmentRollback(
-			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
-			String dateTo);
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames,
+			List<String> constructedNamesLvl2, List<String> constructedNamesLvl3, String dateFrom, String dateTo);
 
 	/**
 	 * Removes the Hub's own manual adjustments (delivery and conversions) for the given level-1 campaign
-	 * names, confined to the given inclusive date window. An adjustment is a separate overlay row over the
-	 * immutable platform_mart/conversions_mart facts, so this deletes the overlay row and restores
-	 * nothing - the read view falls back to the underlying mart figure on its own once the overlay is
-	 * gone. Requested names are matched case-insensitively against the campaign's resolved delivery scope;
-	 * a name outside that scope fails the whole request rather than being silently skipped.
+	 * names, confined to the given inclusive date window, and optionally narrowed further by level-2
+	 * and/or level-3 constructed names. An adjustment is a separate overlay row over the immutable
+	 * platform_mart/conversions_mart facts, so this deletes the overlay row and restores nothing - the
+	 * read view falls back to the underlying mart figure on its own once the overlay is gone. The
+	 * requested level-1 names are matched case-insensitively against the campaign's resolved delivery
+	 * scope; a name outside that scope fails the whole request rather than being silently skipped. The
+	 * optional level-2/level-3 names are not scope-checked - they can only narrow an already-bounded
+	 * level-1 selection, never escape it.
 	 *
 	 * @param user                     the current user
 	 * @param campaignId               the campaign id
 	 * @param campaignConstructedNames the level-1 constructed names to roll back adjustments for; must be
 	 *                                 non-empty
+	 * @param constructedNamesLvl2     the optional level-2 constructed names to further narrow the
+	 *                                 rollback to, independent of {@code constructedNamesLvl3}, or
+	 *                                 empty/{@code null} to not narrow by level 2
+	 * @param constructedNamesLvl3     the optional level-3 constructed names to further narrow the
+	 *                                 rollback to, independent of {@code constructedNamesLvl2}, or
+	 *                                 empty/{@code null} to not narrow by level 3
 	 * @param dateFrom                 the inclusive first date, as {@code yyyy-MM-dd}
 	 * @param dateTo                   the inclusive last date, as {@code yyyy-MM-dd}
 	 * @return the counts actually removed
@@ -225,6 +240,6 @@ public interface ReportRowService {
 	 *                                                                          the BigQuery delete fails
 	 */
 	AdjustmentRollbackResultModel rollbackAdjustments(
-			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames, String dateFrom,
-			String dateTo);
+			CurrentUserModel user, long campaignId, List<String> campaignConstructedNames,
+			List<String> constructedNamesLvl2, List<String> constructedNamesLvl3, String dateFrom, String dateTo);
 }

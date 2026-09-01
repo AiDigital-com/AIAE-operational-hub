@@ -425,7 +425,7 @@ class CampaignControllerTest {
 		ReportRowAdjustmentRollbackResultV1 responseBody = new ReportRowAdjustmentRollbackResultV1();
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(preview).when(reportRowService).previewAdjustmentRollback(
-				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				currentUser, 42L, List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 		doReturn(responseBody).when(reportRowMapper).toRollbackResult(preview);
 
 		// When:
@@ -435,7 +435,7 @@ class CampaignControllerTest {
 		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
 		assertThat(result.getBody()).isSameAs(responseBody);
 		verify(reportRowService).previewAdjustmentRollback(
-				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				currentUser, 42L, List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 	}
 
 	@Test
@@ -450,7 +450,7 @@ class CampaignControllerTest {
 		ReportRowAdjustmentRollbackResultV1 responseBody = new ReportRowAdjustmentRollbackResultV1();
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(outcome).when(reportRowService).rollbackAdjustments(
-				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				currentUser, 42L, List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
 		doReturn(responseBody).when(reportRowMapper).toRollbackResult(outcome);
 
 		// When:
@@ -460,7 +460,35 @@ class CampaignControllerTest {
 		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
 		assertThat(result.getBody()).isSameAs(responseBody);
 		verify(reportRowService).rollbackAdjustments(
-				currentUser, 42L, List.of("Retargeting"), "2026-01-01", "2026-01-31");
+				currentUser, 42L, List.of("Retargeting"), List.of(), List.of(), "2026-01-01", "2026-01-31");
+	}
+
+	@Test
+	void shouldForwardOptionalLevel2AndLevel3NarrowingWhenRollingBackAdjustmentsTest() {
+		// Given: a request that additionally narrows by level-2 and level-3 constructed names
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		ReportRowAdjustmentRollbackRequestV1 request = new ReportRowAdjustmentRollbackRequestV1();
+		request.setCampaignConstructedNames(List.of("Retargeting"));
+		request.setConstructedNamesLvl2(List.of("IO 1"));
+		request.setConstructedNamesLvl3(List.of("Creative 1"));
+		request.setDateFrom(LocalDate.of(2026, 1, 1));
+		request.setDateTo(LocalDate.of(2026, 1, 31));
+		AdjustmentRollbackResultModel outcome = new AdjustmentRollbackResultModel(1L, 0L);
+		ReportRowAdjustmentRollbackResultV1 responseBody = new ReportRowAdjustmentRollbackResultV1();
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(outcome).when(reportRowService).rollbackAdjustments(
+				currentUser, 42L, List.of("Retargeting"), List.of("IO 1"), List.of("Creative 1"),
+				"2026-01-01", "2026-01-31");
+		doReturn(responseBody).when(reportRowMapper).toRollbackResult(outcome);
+
+		// When:
+		var result = controller.rollbackAdjustments(42L, request);
+
+		// Then:
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		verify(reportRowService).rollbackAdjustments(
+				currentUser, 42L, List.of("Retargeting"), List.of("IO 1"), List.of("Creative 1"),
+				"2026-01-01", "2026-01-31");
 	}
 
 	@Test

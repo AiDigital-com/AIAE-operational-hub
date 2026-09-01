@@ -3957,7 +3957,8 @@ components:
       type: object
       description: >
         The scope of a "Roll back adjustments" preview or rollback: which level-1 campaigns, within
-        which inclusive delivery-date window. Never all-time - a rollback always names both bounds.
+        which inclusive delivery-date window, optionally narrowed further by level-2 and/or level-3
+        constructed names. Never all-time - a rollback always names both bounds.
       properties:
         campaignConstructedNames:
           type: array
@@ -3971,6 +3972,36 @@ components:
           # 500-value ceiling the report's own line_item_name dimension picker already enforces
           # (BigQueryReportRowService.DISTINCT_VALUES_LIMIT), so a rollback can never legitimately name
           # more level-1 campaigns than that picker could ever offer to select from.
+          maxItems: 500
+          items:
+            type: string
+            minLength: 1
+        constructedNamesLvl2:
+          type: array
+          description: >
+            The optional level-2 constructed names (see ReportRowV1.insertion_order_name) to further
+            narrow the rollback to, independent of constructedNamesLvl3 - either may be given without the
+            other. Matched directly against the Hub's own adjustment tables, which store the level-2 name
+            alongside its id; no scope validation applies, since this can only narrow an already-scoped
+            level-1 selection and can never escape it. An empty or absent selection means "do not narrow
+            by level 2".
+          # Kept equal to AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES (service module) by hand - the same
+          # ceiling campaignConstructedNames above uses.
+          maxItems: 500
+          items:
+            type: string
+            minLength: 1
+        constructedNamesLvl3:
+          type: array
+          description: >
+            The optional level-3 constructed names (see ReportRowV1.campaign_constructed_name) to further
+            narrow the rollback to, independent of constructedNamesLvl2 - either may be given without the
+            other. Matched directly against the Hub's own adjustment tables, which store the level-3 name
+            alongside its id; no scope validation applies, since this can only narrow an already-scoped
+            level-1 selection and can never escape it. An empty or absent selection means "do not narrow
+            by level 3".
+          # Kept equal to AdjustmentRollbackLimits.MAX_CAMPAIGN_NAMES (service module) by hand - the same
+          # ceiling campaignConstructedNames above uses.
           maxItems: 500
           items:
             type: string

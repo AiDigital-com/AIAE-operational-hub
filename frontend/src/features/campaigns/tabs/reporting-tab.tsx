@@ -850,8 +850,14 @@ export function ReportingTab() {
   // The level-1 campaigns a rollback would touch: the report's own line_item_name filter values - the
   // same names saveReportRowAdjustments writes and rollbackAdjustments deletes by. Not a picker of its
   // own; asking the user to filter by the dimension they mean to roll back keeps this destructive action
-  // from ever defaulting to "every campaign in the report".
+  // from ever defaulting to "every campaign in the report". PDI_125 extends the same "filter by the
+  // dimension you mean" design to the two narrower levels, each independently optional: MDA additionally
+  // accepts constructed_name_lvl2/lvl3 to narrow a rollback below the whole level-1 line item, so the
+  // report's own insertion_order_name/campaign_constructed_name filters (still no pickers of their own)
+  // fill that gap here.
   const rollbackScopeNames = filterState.line_item_name ?? [];
+  const rollbackScopeNamesLvl2 = filterState.insertion_order_name ?? [];
+  const rollbackScopeNamesLvl3 = filterState.campaign_constructed_name ?? [];
   const { columnWidths, resizeColumn } = useColumnWidths();
   // Expanding hides everything above the table - the reports list, the builder, the controls - and
   // collapsing puts it all back, which moves the table a screenful or two down the page while the
@@ -2416,6 +2422,10 @@ export function ReportingTab() {
             open={rollbackModalOpen}
             campaignId={campaign.id}
             campaignConstructedNames={rollbackScopeNames}
+            constructedNamesLvl2={rollbackScopeNamesLvl2}
+            constructedNamesLvl3={rollbackScopeNamesLvl3}
+            level2Label={levelDimLabel("insertion_order_name", "Constructed name L2", levelTerms)}
+            level3Label={levelDimLabel("campaign_constructed_name", "Constructed name L3", levelTerms)}
             dateWindow={dateWindow}
             onClose={() => setRollbackModalOpen(false)}
             onRolledBack={(result) => {

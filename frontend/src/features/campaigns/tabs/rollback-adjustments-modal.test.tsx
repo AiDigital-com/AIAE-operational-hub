@@ -17,6 +17,10 @@ const DATE_WINDOW: DateWindow = { from: "2026-01-01", to: "2026-01-31" };
 function renderModal(
   overrides: {
     campaignConstructedNames?: string[];
+    constructedNamesLvl2?: string[];
+    constructedNamesLvl3?: string[];
+    level2Label?: string;
+    level3Label?: string;
     dateWindow?: DateWindow;
     onClose?: () => void;
     onRolledBack?: (result: { deliveryRowsRemoved: number; conversionRowsRemoved: number }) => void;
@@ -32,6 +36,10 @@ function renderModal(
         open
         campaignId={42}
         campaignConstructedNames={overrides.campaignConstructedNames ?? SCOPE_NAMES}
+        constructedNamesLvl2={overrides.constructedNamesLvl2 ?? []}
+        constructedNamesLvl3={overrides.constructedNamesLvl3 ?? []}
+        level2Label={overrides.level2Label ?? "Insertion order name"}
+        level3Label={overrides.level3Label ?? "Creative name"}
         dateWindow={overrides.dateWindow ?? DATE_WINDOW}
         onClose={onClose}
         onRolledBack={onRolledBack}
@@ -116,6 +124,8 @@ describe("RollbackAdjustmentsModal", () => {
     expect(countsText(container)).toContain("1");
     expect(previewAdjustmentRollback).toHaveBeenCalledWith(42, {
       campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl2: [],
+      constructedNamesLvl3: [],
       dateFrom: "2026-01-01",
       dateTo: "2026-01-31",
     });
@@ -190,6 +200,8 @@ describe("RollbackAdjustmentsModal", () => {
     );
     expect(rollbackAdjustments).toHaveBeenCalledWith(42, {
       campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl2: [],
+      constructedNamesLvl3: [],
       dateFrom: "2026-01-01",
       dateTo: "2026-01-31",
     });
@@ -238,5 +250,135 @@ describe("RollbackAdjustmentsModal", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("rollback failed");
     expect(onRolledBack).not.toHaveBeenCalled();
+  });
+
+  it("should forward both optional levels to the preview and rollback calls when both are narrowed", async () => {
+    // Given: both level-2 and level-3 narrowing are set
+    vi.mocked(previewAdjustmentRollback).mockResolvedValue({ deliveryRowsRemoved: 2, conversionRowsRemoved: 0 });
+    vi.mocked(rollbackAdjustments).mockResolvedValue({ deliveryRowsRemoved: 2, conversionRowsRemoved: 0 });
+    const user = userEvent.setup();
+    renderModal({ constructedNamesLvl2: ["IO 1"], constructedNamesLvl3: ["Creative 1"] });
+    await screen.findByText(/delivery adjustment row/i);
+
+    // Then: the preview call carried both narrowing levels
+    expect(previewAdjustmentRollback).toHaveBeenCalledWith(42, {
+      campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl2: ["IO 1"],
+      constructedNamesLvl3: ["Creative 1"],
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
+    });
+
+    // When:
+    await user.click(screen.getByRole("button", { name: /roll back adjustments/i }));
+
+    // Then: the rollback call carried the same narrowing
+    await waitFor(() =>
+      expect(rollbackAdjustments).toHaveBeenCalledWith(42, {
+        campaignConstructedNames: SCOPE_NAMES,
+        constructedNamesLvl2: ["IO 1"],
+        constructedNamesLvl3: ["Creative 1"],
+        dateFrom: "2026-01-01",
+        dateTo: "2026-01-31",
+      })
+    );
+  });
+
+  it("should forward level 3 alone when level 2 is not narrowed, proving the two levels are independent", async () => {
+    // Given: only level 3 is narrowed
+    vi.mocked(previewAdjustmentRollback).mockResolvedValue({ deliveryRowsRemoved: 1, conversionRowsRemoved: 0 });
+
+    // When:
+    renderModal({ constructedNamesLvl3: ["Creative 1"] });
+    await screen.findByText(/delivery adjustment row/i);
+
+    // Then:
+    expect(previewAdjustmentRollback).toHaveBeenCalledWith(42, {
+      campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl2: [],
+      constructedNamesLvl3: ["Creative 1"],
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
+    });
+  });
+
+  it("should show a scope row only for a level that is actually narrowed", async () => {
+    // Given: only level 2 is narrowed
+    vi.mocked(previewAdjustmentRollback).mockResolvedValue({ deliveryRowsRemoved: 1, conversionRowsRemoved: 0 });
+
+    // When:
+    renderModal({ constructedNamesLvl2: ["IO 1"] });
+    await screen.findByText(/delivery adjustment row/i);
+
+    // Then:
+    expect(screen.getByText("Insertion order name")).toBeInTheDocument();
+    expect(screen.getByText("IO 1")).toBeInTheDocument();
+    expect(screen.queryByText("Creative name")).not.toBeInTheDocument();
+  });
+
+  it("should not show either optional level's scope row when neither is narrowed", async () => {
+    // Given/When: no optional narrowing at all
+    vi.mocked(previewAdjustmentRollback).mockResolvedValue({ deliveryRowsRemoved: 1, conversionRowsRemoved: 0 });
+    renderModal();
+    await screen.findByText(/delivery adjustment row/i);
+
+    // Then:
+    expect(screen.queryByText("Insertion order name")).not.toBeInTheDocument();
+    expect(screen.queryByText("Creative name")).not.toBeInTheDocument();
+  });
+
+  it("should state the narrowed dimension in the warning once a level is narrowed", () => {
+    // Given: level 2 is narrowed, so the warning must no longer claim "every other dimension"
+    vi.mocked(previewAdjustmentRollback).mockReturnValue(new Promise(() => {}));
+
+    // When:
+    renderModal({ constructedNamesLvl2: ["IO 1"] });
+
+    // Then:
+    expect(
+      screen.getByText(/every platform and every dimension other than insertion order name/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/every platform and every other dimension/i)).not.toBeInTheDocument();
+  });
+
+  it("should refetch the preview when the level-2 narrowing changes", async () => {
+    // Given: the modal is open with no level-2 narrowing yet
+    vi.mocked(previewAdjustmentRollback).mockResolvedValue({ deliveryRowsRemoved: 1, conversionRowsRemoved: 0 });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const props = {
+      open: true,
+      campaignId: 42,
+      campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl3: [] as string[],
+      level2Label: "Insertion order name",
+      level3Label: "Creative name",
+      dateWindow: DATE_WINDOW,
+      onClose: vi.fn(),
+      onRolledBack: vi.fn(),
+    };
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <RollbackAdjustmentsModal {...props} constructedNamesLvl2={[]} />
+      </QueryClientProvider>
+    );
+    await screen.findByText(/delivery adjustment row/i);
+    expect(previewAdjustmentRollback).toHaveBeenCalledTimes(1);
+
+    // When: the level-2 narrowing changes
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <RollbackAdjustmentsModal {...props} constructedNamesLvl2={["IO 1"]} />
+      </QueryClientProvider>
+    );
+
+    // Then: a second preview call is issued for the narrowed scope, not served from the earlier cache entry
+    await waitFor(() => expect(previewAdjustmentRollback).toHaveBeenCalledTimes(2));
+    expect(previewAdjustmentRollback).toHaveBeenLastCalledWith(42, {
+      campaignConstructedNames: SCOPE_NAMES,
+      constructedNamesLvl2: ["IO 1"],
+      constructedNamesLvl3: [],
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
+    });
   });
 });
