@@ -7,6 +7,45 @@ spring:
   liquibase:
     enabled: false
 
+  datasource:
+    # Database credentials come from the RDS-managed master user secret, which
+    # AWS owns and rotates every seven days, and nothing copies them anywhere
+    # else. The AWS Advanced JDBC Wrapper's awsSecretsManager plugin reads that
+    # secret through the pod's IRSA role when it opens a connection, and when
+    # PostgreSQL rejects a login it refetches the secret and retries, so the
+    # rotation never surfaces.
+    #
+    # Reading the password from an environment variable cannot survive a
+    # rotation, whatever populates the variable: it is fixed for the lifetime of
+    # the container, while the pool retires connections within a minute
+    # (hikari.idle-timeout in application.yml). On 3 September 2026 that left
+    # this application failing every login until the password was copied by hand
+    # and the pods restarted.
+    url: jdbc:aws-wrapper:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+    driver-class-name: software.amazon.jdbc.Driver
+
+    # Deliberately empty: the plugin supplies both from the secret's username
+    # and password fields. Inheriting the base profile's POSTGRES_USER and
+    # POSTGRES_PASSWORD instead would let a misconfigured plugin connect with
+    # stale or default credentials and hide the misconfiguration; an empty
+    # credential fails the connection loudly, which is what this profile wants.
+    username: ""
+    password: ""
+
+    hikari:
+      # Forwarded to the driver as connection properties, which is how the
+      # wrapper is configured.
+      data-source-properties:
+        # This plugin only. The wrapper's default plugin list targets Aurora
+        # failover topology, which a single-instance RDS deployment has not got.
+        wrapperPlugins: awsSecretsManager
+        wrapperDialect: rds-pg
+        # ARN of the RDS-managed secret, supplied by the chart's ConfigMap from
+        # the Terraform output rds_master_user_secret_arn. An ARN is not itself
+        # a secret.
+        secretsManagerSecretId: ${DB_MASTER_SECRET_ID}
+        secretsManagerRegion: ${AWS_REGION:us-east-1}
+
 management:
   health:
     probes:
