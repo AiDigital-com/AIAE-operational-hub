@@ -2737,10 +2737,14 @@ describe("ReportingTab editing", () => {
     expect(sent.account).toBe("Proxim Agency");
     // This runs in ~525ms locally, so the ceiling below is not a duration - a passing run never spends
     // it. It exists because the test waits out three debounced resolutions plus the id preview, and a
-    // CI runner measured ~2.6x slower turns that wait into seconds. The default 5s budget is shared
-    // with the waitFor above, so the two starve each other exactly when the machine is loaded.
-    // If this ever times out again, the cause is no longer a tight budget: do not raise this further,
-    // find out why the third level's generated id never renders.
+    // CI runner measured ~2.6x slower turns that wait into seconds.
+    // It did once time out on the third level's id, and not because the budget was tight: the cell used
+    // to render "no match - create it as new?" during the resolve debounce window as well, before that
+    // level's own lookup had answered, and then unmounted it once the request started. The L3 name is
+    // typed last above, so that window lined up with the confirm loop on a loaded runner - findByRole
+    // handed back the premature prompt, the click landed on a button React had already unmounted (a
+    // silent no-op), so LVL3 was never confirmed and its id never generated. The cell now stays
+    // "Resolving" until the lookup answers, so the only prompt a click can reach is the settled one.
   }, 20_000);
 
   it("should block save and keep editing when an added line is missing required write-table fields", async () => {

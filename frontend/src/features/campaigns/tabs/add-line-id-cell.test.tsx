@@ -86,6 +86,59 @@ describe("AddLineIdCell", () => {
     expect(await screen.findByRole("status", { name: /Resolving LVL1 id/ })).toBeInTheDocument();
   });
 
+  it("should keep resolving, not offer to create as new, until that name's own lookup has answered", async () => {
+    // Given: a cell whose name arrives after it mounts, the way an added report row's does. The resolve
+    // read is debounced, so for that window the query still answers for the previous name - and there is
+    // no previous name here, so its answer is "nothing matched"
+    vi.mocked(listConstructedEntities).mockResolvedValue(emptyPage());
+    vi.mocked(previewConstructedIds).mockResolvedValue(generatedPreview());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    function LateNameHarness() {
+      const [typedName, setTypedName] = useState("");
+      const [currentId, setCurrentId] = useState("");
+      return (
+        <>
+          <button type="button" onClick={() => setTypedName("Retargeting")}>fill the name</button>
+          <AddLineIdCell
+            campaignId={42}
+            level="LVL1"
+            platform=""
+            accountId=""
+            typedName={typedName}
+            currentId={currentId}
+            nameLvl1={typedName}
+            nameLvl2="Insertion Order 1"
+            nameLvl3="Creative 1"
+            onResolved={(_level, id) => setCurrentId(id)}
+          />
+        </>
+      );
+    }
+
+    // When: the name lands in the cell
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LateNameHarness />
+      </QueryClientProvider>
+    );
+    await userEvent.click(screen.getByRole("button", { name: "fill the name" }));
+
+    // Then: still resolving - offering to create this name as new before anything has looked it up would
+    // invite the user to generate a second id for an entity the mart may already have
+    expect(screen.getByRole("status", { name: /Resolving LVL1 id/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "LVL1 id - no match, create it as new?" })
+    ).not.toBeInTheDocument();
+
+    // And: the offer is made once, on a settled answer, and stays put - the click on it is what generates
+    // the id, so an offer torn down again the moment the request starts would swallow that click and
+    // leave the row with no id at all
+    const confirmButton = await screen.findByRole("button", { name: "LVL1 id - no match, create it as new?" });
+    await userEvent.click(confirmButton);
+    expect(await screen.findByTitle("origin: GENERATED")).toHaveTextContent("OPH_generatedlevel1");
+  });
+
   it("should silently fill the id when the typed name resolves to exactly one entity", async () => {
     // Given:
     vi.mocked(listConstructedEntities).mockResolvedValue(
