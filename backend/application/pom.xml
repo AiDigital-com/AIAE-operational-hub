@@ -74,6 +74,47 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- AWS Advanced JDBC Wrapper, used only by the eks profile. There the JDBC
+			 URL is jdbc:aws-wrapper:postgresql://... with the awsSecretsManager
+			 plugin, which reads the database username and password from the
+			 RDS-managed master user secret through the pod's IRSA role. AWS rotates
+			 that password every seven days and the schedule cannot be turned off
+			 while RDS manages it; when PostgreSQL then rejects a login, the plugin
+			 refetches the secret and retries the connection, so a rotation never
+			 reaches the application.
+			 A copy of the password in an environment variable cannot do that: the
+			 variable is fixed for the lifetime of the container, while the pool
+			 retires connections within a minute (hikari.idle-timeout in
+			 application.yml). That is what took this application down on
+			 3 September 2026.
+			 Runtime scope, like the driver above: no Java class refers to either,
+			 both are found through JDBC driver discovery. -->
+		<dependency>
+			<groupId>software.amazon.jdbc</groupId>
+			<artifactId>aws-advanced-jdbc-wrapper</artifactId>
+			<version>2.6.0</version>
+			<scope>runtime</scope>
+		</dependency>
+		<!-- The wrapper declares the Secrets Manager SDK as optional, so the
+			 awsSecretsManager plugin cannot fetch anything without it. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>secretsmanager</artifactId>
+			<version>2.29.45</version>
+			<scope>runtime</scope>
+		</dependency>
+		<!-- Required for IRSA, and easy to miss: DefaultCredentialsProvider can
+			 only exchange the projected web-identity token for credentials when the
+			 STS module is on the classpath. Without it the Secrets Manager client
+			 fails to authenticate and the pod cannot reach the database at all.
+			 The sibling application hit exactly this. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>sts</artifactId>
+			<version>2.29.45</version>
+			<scope>runtime</scope>
+		</dependency>
+
 		<!-- Cache: -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

@@ -270,6 +270,12 @@ export function useRollbackAdjustments(campaignId: number | undefined) {
  * ({@link ADD_LINE_RESOLVE_DEBOUNCE_MS}) so settling on a value issues one request, not one per keystroke,
  * and the query key carries the debounced term, so re-rendering mid-type does not refetch.
  *
+ * Because of that debounce the query lags the typed name: for {@link ADD_LINE_RESOLVE_DEBOUNCE_MS} after
+ * a keystroke it still holds the previous name's answer, or none at all for a name typed into a cell that
+ * started empty. `isDebouncing` marks that window so a caller can keep showing "resolving" rather than an
+ * outcome for a name nothing has looked up yet - and the outcome it would show there is the "no match"
+ * one that offers to create a new entity.
+ *
  * @param campaignId the campaign id
  * @param level      the constructed-name level to resolve at
  * @param platform   the row's current platform, or empty for every platform
@@ -286,7 +292,7 @@ export function useResolveConstructedName(
   enabled: boolean
 ) {
   const debouncedName = useDebounce(name, ADD_LINE_RESOLVE_DEBOUNCE_MS);
-  return useQuery({
+  const query = useQuery({
     queryKey: ["campaigns", "constructed-entities", campaignId, level, platform, accountId, debouncedName],
     queryFn: ({ signal }) =>
       listConstructedEntities(
@@ -296,6 +302,7 @@ export function useResolveConstructedName(
     enabled: enabled && campaignId != null && debouncedName !== "",
     staleTime: 60_000,
   });
+  return { ...query, isDebouncing: debouncedName !== name };
 }
 
 /**

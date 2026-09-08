@@ -79,7 +79,12 @@ export function AddLineIdCell({
     return <div className="add-line-id"><span className="add-line-id__value">-</span></div>;
   }
 
-  if (resolveQuery.isFetching) {
+  // `isDebouncing` counts as resolving, not as resolved-to-nothing: for the debounce window after a
+  // keystroke the query still answers for the previous name, and with no previous name it answers with
+  // no matches at all - which renders as "no match - create it as new?", an offer to create an entity
+  // whose name has not been looked up yet. It also unmounts that offer the moment the request starts, so
+  // a click aimed at it can land on a button that is no longer in the document and be lost silently.
+  if (resolveQuery.isDebouncing || resolveQuery.isFetching) {
     return <div className="add-line-id"><LoadingSpinner label={`Resolving ${level} id`} size="sm" /></div>;
   }
 
