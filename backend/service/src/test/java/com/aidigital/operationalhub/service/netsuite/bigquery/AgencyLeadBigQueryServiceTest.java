@@ -42,7 +42,7 @@ class AgencyLeadBigQueryServiceTest {
 	}
 
 	@Test
-	void shouldLoadOneLeadPerAgencyTest() {
+	void shouldLoadDistinctAgencyLeadPairsTest() {
 		// Given:
 		when(bigQueryProperties.getIoLinesTable()).thenReturn("proj.ds.io_lines");
 		when(bigQueryClient.query(any())).thenReturn(List.of(
@@ -59,9 +59,30 @@ class AgencyLeadBigQueryServiceTest {
 		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
 		verify(bigQueryClient).query(sql.capture());
 		assertThat(sql.getValue())
+				.contains("SELECT DISTINCT")
 				.contains("FROM `proj.ds.io_lines`")
-				.contains("ANY_VALUE(`mpo_team_lead`)")
+				.contains("`agency_id` AS agency_id")
+				.contains("`mpo_team_lead` AS mpo_team_lead")
 				.contains("`agency_id` IS NOT NULL")
-				.contains("GROUP BY `agency_id`");
+				.doesNotContain("ANY_VALUE")
+				.doesNotContain("GROUP BY");
+	}
+
+	@Test
+	void shouldReturnTwoLeadsForACoOwnedAgencyTest() {
+		// Given: the same agency appears twice, once per owning team - the co-owned-agency case this
+		// change exists to preserve instead of collapsing via ANY_VALUE
+		when(bigQueryProperties.getIoLinesTable()).thenReturn("proj.ds.io_lines");
+		when(bigQueryClient.query(any())).thenReturn(List.of(
+				Map.of("agency_id", 500L, "mpo_team_lead", "Jane Lead"),
+				Map.of("agency_id", 500L, "mpo_team_lead", "John Owner")));
+
+		// When:
+		List<AgencyLead> result = service.loadAgencyLeads();
+
+		// Verification:
+		assertThat(result).hasSize(2);
+		assertThat(result).extracting(AgencyLead::agencyId).containsExactly(500L, 500L);
+		assertThat(result).extracting(AgencyLead::mpoTeamLead).containsExactly("Jane Lead", "John Owner");
 	}
 }
