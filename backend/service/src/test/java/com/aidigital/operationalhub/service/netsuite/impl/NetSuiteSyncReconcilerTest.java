@@ -624,7 +624,10 @@ class NetSuiteSyncReconcilerTest {
 
 	@Test
 	void shouldRemoveStaleAndRetargetAgencyMappingsTest() {
-		// Given: agency AGENCY_ID is mapped to the wrong team, and agency 999 is no longer backed by a lead
+		// Given: agency AGENCY_ID is mapped to the wrong team, and agency 999 is no longer backed by a lead.
+		// Retargeting is now a delete of the wrongly-targeted (agency_id, team_id) row plus an insert of the
+		// correct one - hub_team_agencies is keyed by (team_id, agency_id) together, so both AGENCY_ID's old
+		// row and 999's stale row are deleted, not just 999's.
 		stubDictionaries();
 		OrgResolution resolution = new OrgResolution(
 				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE")),
@@ -646,12 +649,47 @@ class NetSuiteSyncReconcilerTest {
 		@SuppressWarnings("unchecked")
 		ArgumentCaptor<Collection<HubTeamAgency>> deleteCaptor = ArgumentCaptor.forClass(Collection.class);
 		verify(teamAgencyService).deleteAll(deleteCaptor.capture());
-		assertThat(deleteCaptor.getValue()).extracting(HubTeamAgency::getAgencyId).containsExactly(999L);
+		assertThat(deleteCaptor.getValue())
+				.extracting(HubTeamAgency::getAgencyId).containsExactlyInAnyOrder(AGENCY_ID, 999L);
 
 		ArgumentCaptor<HubTeamAgency> saveCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
 		verify(teamAgencyService).save(saveCaptor.capture());
 		assertThat(saveCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
 		assertThat(saveCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
+	}
+
+	@Test
+	void shouldMapAgencyToBothOwningTeamsWithNoDeleteTest() {
+		// Given: agency AGENCY_ID is co-owned by two Team Leads and has no existing mapping; the sync must
+		// write one row per owning team instead of collapsing to a single winner
+		stubDictionaries();
+		String otherLeadEmail = "other@example.com";
+		String otherLeadName = "Other Lead";
+		Long otherTeamId = 20L;
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE"), resolvedTeamLead(otherLeadEmail, otherLeadName, "HOUSE")),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE"),
+						resolvedTeam(otherLeadEmail, otherLeadName, "Media Optimization: Other", "HOUSE")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(teamService.create(any())).thenReturn(team(otherTeamId));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID, EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When: the same agency has two IO Lines rows, one per owning team lead
+		SyncSummary summary = reconciler().reconcile(resolution,
+				List.of(new AgencyLead(AGENCY_ID, LEAD_NAME), new AgencyLead(AGENCY_ID, otherLeadName)));
+
+		// Verification: one distinct agency mapped, two rows saved (one per team), no delete
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		ArgumentCaptor<HubTeamAgency> saveCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService, times(2)).save(saveCaptor.capture());
+		assertThat(saveCaptor.getAllValues())
+				.extracting(HubTeamAgency::getAgencyId).containsExactly(AGENCY_ID, AGENCY_ID);
+		assertThat(saveCaptor.getAllValues())
+				.extracting(HubTeamAgency::getTeamId).containsExactlyInAnyOrder(TEAM_ID, otherTeamId);
+		verify(teamAgencyService, never()).deleteAll(any());
 	}
 
 	@Test

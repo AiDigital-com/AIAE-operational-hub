@@ -17,6 +17,7 @@ import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.entity.HubTeamService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.netsuite.model.AgencyLead;
+import com.aidigital.operationalhub.service.netsuite.model.AgencyTeam;
 import com.aidigital.operationalhub.service.netsuite.model.SyncSummary;
 import com.aidigital.operationalhub.service.netsuite.org.NameNormalizer;
 import com.aidigital.operationalhub.service.netsuite.org.OrgResolution;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -405,11 +407,15 @@ public class NetSuiteSyncReconciler {
 	}
 
 	/**
-	 * Counts the agencies whose IO Lines owner name matches an active override, i.e. how many entries
-	 * {@link #reconcileAgencyMappings}'s override attempt (attempt zero) resolves, reported as
+	 * Counts the distinct agencies whose IO Lines owner name matches an active override, i.e. how many
+	 * agencies {@link #reconcileAgencyMappings}'s override attempt (attempt zero) resolves, reported as
 	 * {@link SyncSummary#overridesApplied()}. Counted in a separate pass so
 	 * {@link #reconcileAgencyMappings} keeps returning a single {@code agenciesMapped} count, like every
 	 * other reconcile helper.
+	 *
+	 * <p>Counted by distinct {@code agencyId} rather than by matching row, since {@code agencyLeads} now
+	 * carries one row per (agency, owner) pair: a co-owned agency with two owners who both match an
+	 * override would otherwise be counted twice.
 	 *
 	 * <p><strong>Keep in step with {@link #reconcileAgencyMappings}.</strong> This method re-derives which
 	 * agencies the override attempt claims rather than observing what that method actually decided, so the
@@ -421,33 +427,40 @@ public class NetSuiteSyncReconciler {
 	 * @param agencyLeads               the agency-to-lead pairs from IO Lines
 	 * @param teamByOverriddenOwnerName the team each normalized override owner name maps to (see
 	 *                                  {@link #resolveOwnerOverrides})
-	 * @return the number of agencies whose owner matched an active override
+	 * @return the number of distinct agencies whose owner matched an active override
 	 */
 	int countOverrideMatches(List<AgencyLead> agencyLeads, Map<String, HubTeam> teamByOverriddenOwnerName) {
-		int count = 0;
+		Set<Long> matchedAgencyIds = new HashSet<>();
 		for (AgencyLead lead : agencyLeads) {
 			if (lead.agencyId() == null || lead.mpoTeamLead() == null) {
 				continue;
 			}
 			if (teamByOverriddenOwnerName.containsKey(nameNormalizer.normalize(lead.mpoTeamLead()))) {
-				count++;
+				matchedAgencyIds.add(lead.agencyId());
 			}
 		}
-		return count;
+		return matchedAgencyIds.size();
 	}
 
 	/**
-	 * Mirrors the {@code hub_team_agencies} table against the IO Lines agency-to-lead pairs: each agency
-	 * is mapped to the team of its MPO team lead. An active {@code hub_agency_owner_overrides} row for
-	 * that owner name is tried first (attempt zero) - a deliberate human decision that must also be able
-	 * to correct a wrong automatic match, not only fill a gap left by one - before falling back to the
-	 * synced Team Leads themselves. A lead name with no exact match falls back to a derived-email match
-	 * (see
+	 * Mirrors the {@code hub_team_agencies} table against the IO Lines agency-to-lead pairs: each
+	 * (agency, owner) pair is mapped to the owner's team, and an agency co-owned by several teams
+	 * therefore yields several {@code hub_team_agencies} rows - one per owning team - rather than one row
+	 * per agency. An active {@code hub_agency_owner_overrides} row for that owner name is tried first
+	 * (attempt zero) - a deliberate human decision that must also be able to correct a wrong automatic
+	 * match, not only fill a gap left by one - before falling back to the synced Team Leads themselves. A
+	 * lead name with no exact match falls back to a derived-email match (see
 	 * {@link #deriveEmailLocalPart(String)}), then to a first-name local-part match (see
 	 * {@link #deriveFirstNameEmailLocalPart(String)}), since a synced employee's email local part can
 	 * outlive a later display-name change (e.g. a handed-down mailbox) while IO Lines keeps recording the
 	 * original name or a shortened legacy alias. Agencies still unresolved after these attempts are
 	 * skipped; mappings no longer backed by a pair are removed.
+	 *
+	 * <p>Retargeting an existing mapping to a different team is a delete of the old
+	 * {@code (agency_id, team_id)} row plus an insert of the new one, not an in-place {@code team_id}
+	 * update: {@code hub_team_agencies} is now keyed by {@code (team_id, agency_id)} together (see
+	 * {@code 0016-team-agency-multi-team.xml}), so the pair itself is the identity of a mapping, and there
+	 * is no single existing row to update onto a new team id without first knowing there is only one.
 	 *
 	 * <p>The three automatic attempts below are deliberately left exactly as they were when the override
 	 * layer was added, rather than widened to match against the whole roster. Roughly a dozen display-name
@@ -470,14 +483,14 @@ public class NetSuiteSyncReconciler {
 	 * @param teamByEmployeeName           the team each (normalized) Team Lead name leads
 	 * @param teamByEmployeeEmailLocalPart the team each Team Lead's email local part leads, used as a
 	 *                                     fallback when the name match misses
-	 * @return the number of agencies mapped to a team
+	 * @return the number of distinct agencies mapped to at least one team
 	 */
 	int reconcileAgencyMappings(
 			List<AgencyLead> agencyLeads,
 			Map<String, HubTeam> teamByOverriddenOwnerName,
 			Map<String, HubTeam> teamByEmployeeName,
 			Map<String, HubTeam> teamByEmployeeEmailLocalPart) {
-		Map<Long, Long> desired = new HashMap<>();
+		Set<AgencyTeam> desired = new HashSet<>();
 		for (AgencyLead lead : agencyLeads) {
 			if (lead.agencyId() == null || lead.mpoTeamLead() == null) {
 				continue;
@@ -494,7 +507,7 @@ public class NetSuiteSyncReconciler {
 				team = teamByEmployeeEmailLocalPart.get(deriveFirstNameEmailLocalPart(lead.mpoTeamLead()));
 			}
 			if (team != null) {
-				desired.put(lead.agencyId(), team.getId());
+				desired.add(new AgencyTeam(lead.agencyId(), team.getId()));
 			} else {
 				log.warn("Agency MPO team lead did not resolve to a synced Team Lead: agencyId={}, mpoTeamLead={}",
 						lead.agencyId(), lead.mpoTeamLead());
@@ -502,30 +515,27 @@ public class NetSuiteSyncReconciler {
 		}
 
 		List<HubTeamAgency> existing = teamAgencyService.findAll();
-		Map<Long, HubTeamAgency> existingByAgency = existing.stream()
-				.collect(Collectors.toMap(HubTeamAgency::getAgencyId, mapping -> mapping, (first, second) -> first));
+		Set<AgencyTeam> existingPairs = existing.stream()
+				.map(mapping -> new AgencyTeam(mapping.getAgencyId(), mapping.getTeamId()))
+				.collect(Collectors.toSet());
 
 		List<HubTeamAgency> stale = existing.stream()
-				.filter(mapping -> !desired.containsKey(mapping.getAgencyId()))
+				.filter(mapping -> !desired.contains(new AgencyTeam(mapping.getAgencyId(), mapping.getTeamId())))
 				.toList();
 		if (!stale.isEmpty()) {
 			teamAgencyService.deleteAll(stale);
 		}
 
-		for (Map.Entry<Long, Long> entry : desired.entrySet()) {
-			HubTeamAgency mapping = existingByAgency.get(entry.getKey());
-			if (mapping == null) {
-				mapping = new HubTeamAgency();
-				mapping.setAgencyId(entry.getKey());
-				mapping.setTeamId(entry.getValue());
-				teamAgencyService.save(mapping);
-			} else if (!entry.getValue().equals(mapping.getTeamId())) {
-				mapping.setTeamId(entry.getValue());
+		for (AgencyTeam pair : desired) {
+			if (!existingPairs.contains(pair)) {
+				HubTeamAgency mapping = new HubTeamAgency();
+				mapping.setAgencyId(pair.agencyId());
+				mapping.setTeamId(pair.teamId());
 				teamAgencyService.save(mapping);
 			}
 		}
 
-		return desired.size();
+		return (int) desired.stream().map(AgencyTeam::agencyId).distinct().count();
 	}
 
 	/**

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<!-- hub_team_agencies previously carried UNIQUE (agency_id), so an agency could belong to only one
+	     team; NetSuite's sync had to collapse every co-owning team down to one via ANY_VALUE, and every
+	     other owning team silently lost visibility into that agency. NetSuite records ownership per line
+	     item, not per agency, and large accounts are genuinely run jointly by several teams, so an agency
+	     can be co-owned. Replace the single-team unique key with UNIQUE (team_id, agency_id), so the sync
+	     can write one row per owning team instead of picking a winner. -->
+
+	<changeSet id="drop-uq-hub_team_agencies-agency" author="claude">
+		<preConditions onFail="MARK_RAN">
+			<indexExists tableName="hub_team_agencies" indexName="uq_hub_team_agencies_agency"/>
+		</preConditions>
+		<dropUniqueConstraint tableName="hub_team_agencies" constraintName="uq_hub_team_agencies_agency"/>
+		<rollback>
+			<addUniqueConstraint tableName="hub_team_agencies" columnNames="agency_id"
+					constraintName="uq_hub_team_agencies_agency"/>
+		</rollback>
+	</changeSet>
+
+	<changeSet id="add-uq-hub_team_agencies-team-agency" author="claude">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<indexExists tableName="hub_team_agencies" indexName="uq_hub_team_agencies_team_agency"/>
+			</not>
+		</preConditions>
+		<addUniqueConstraint tableName="hub_team_agencies" columnNames="team_id, agency_id"
+				constraintName="uq_hub_team_agencies_team_agency"/>
+		<rollback>
+			<dropUniqueConstraint tableName="hub_team_agencies" constraintName="uq_hub_team_agencies_team_agency"/>
+		</rollback>
+	</changeSet>
+
+</databaseChangeLog>

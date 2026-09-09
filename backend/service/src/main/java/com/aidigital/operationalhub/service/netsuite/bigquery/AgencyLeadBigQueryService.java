@@ -11,9 +11,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Reads the agency-to-lead pairs from the IO Lines BigQuery table — one row per agency, choosing a
- * single MPO team lead per agency (as the agency aggregation does for the agency name) — using
- * {@link BqRequest.Builder} and the shared {@link BigQuerySearchGateway}.
+ * Reads the agency-to-lead pairs from the IO Lines BigQuery table — one row per distinct
+ * (agency, MPO team lead) pair, since NetSuite records ownership per line item and an agency can be
+ * genuinely co-owned by several teams — using {@link BqRequest.Builder} and the shared
+ * {@link BigQuerySearchGateway}.
  */
 @Service
 @RequiredArgsConstructor
@@ -25,7 +26,8 @@ public class AgencyLeadBigQueryService {
 	private final BigQuerySearchGateway gateway;
 
 	/**
-	 * Loads the agency-to-lead pairs, one row per agency.
+	 * Loads the agency-to-lead pairs, one row per distinct (agency, MPO team lead) pair - several rows
+	 * per agency when it is co-owned by more than one team.
 	 *
 	 * @return the agency leads, never {@code null}
 	 * @throws com.aidigital.operationalhub.service.exception.BusinessException when the BigQuery read fails
@@ -33,10 +35,10 @@ public class AgencyLeadBigQueryService {
 	public List<AgencyLead> loadAgencyLeads() {
 		BqRequest request = new BqRequest.Builder()
 				.from(gateway.table())
+				.distinct()
 				.select(AGENCY_ID)
-				.selectAnyValue(MPO_TEAM_LEAD)
+				.select(MPO_TEAM_LEAD)
 				.whereNotNull(AGENCY_ID)
-				.groupBy(AGENCY_ID)
 				.build();
 		return gateway.fetch(request, this::toAgencyLead);
 	}
