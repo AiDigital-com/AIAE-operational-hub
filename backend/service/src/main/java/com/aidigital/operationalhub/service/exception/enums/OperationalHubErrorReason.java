@@ -267,7 +267,38 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * scope - rejected rather than silently skipped, so a crafted request cannot delete outside the
 	 * caller's visibility.
 	 */
-	OPH_050("OPH_050", "'%s' does not belong to this campaign.");
+	OPH_050("OPH_050", "'%s' does not belong to this campaign."),
+
+	/**
+	 * The Pacing service could not be reached at all (connection refused, or a connect/read timeout).
+	 */
+	OPH_051("OPH_051", "The Pacing service is currently unreachable. Please try again shortly."),
+
+	/**
+	 * Pacing rejected the Hub's assertion (HTTP 401): the two services' shared secrets disagree. A
+	 * server misconfiguration, never something the calling user did - deliberately not exposed as an
+	 * authentication failure of the caller's own session.
+	 */
+	OPH_052("OPH_052", "The Pacing service rejected the Hub's request. This is a server-side "
+			+ "configuration issue; contact your administrator."),
+
+	/**
+	 * Pacing answered 403/{@code unknown_user}: the Hub recognizes this user, but Pacing's own user
+	 * mirror does not yet. A sync gap, not an authorization decision - the caller should be told to
+	 * wait for sync or contact an administrator, not that they are forbidden.
+	 */
+	OPH_053("OPH_053", "Your account has not synced to the Pacing service yet. "
+			+ "Contact your administrator if this persists."),
+
+	/**
+	 * Pacing answered 404 for the requested resource.
+	 */
+	OPH_054("OPH_054", "The requested Pacing resource was not found."),
+
+	/**
+	 * Pacing answered with some other, unrecognized non-2xx status.
+	 */
+	OPH_055("OPH_055", "The Pacing service request failed unexpectedly.");
 
 	private final String code;
 	private final String description;

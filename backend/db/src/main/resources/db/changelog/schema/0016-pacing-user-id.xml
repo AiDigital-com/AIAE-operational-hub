@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<changeSet id="add-column-hub_users-pacing_user_id" author="claude">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<columnExists tableName="hub_users" columnName="pacing_user_id"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/addColumnHubUsersPacingUserId.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+</databaseChangeLog>

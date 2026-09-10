@@ -110,6 +110,33 @@ class HubRoleAssignmentServiceImplTest {
 	}
 
 	@Test
+	void shouldFindActiveAssignmentsByScopeTypeCodeAndScopeIdsTest() {
+		// Given:
+		HubRoleAssignment assignment = Instancio.create(HubRoleAssignment.class);
+		List<Long> teamIds = List.of(130L, 131L);
+		ArgumentCaptor<String> statusCaptor = ArgumentCaptor.forClass(String.class);
+		when(assignmentRepository.findAllByScopeTypeCodeAndScopeIdInAndStatus(
+				eq("TEAM"), eq(teamIds), statusCaptor.capture()))
+				.thenReturn(List.of(assignment));
+
+		// When:
+		List<HubRoleAssignment> result = service.findActiveByScopeTypeCodeAndScopeIds("TEAM", teamIds);
+
+		// Then:
+		assertThat(statusCaptor.getValue()).isEqualTo(HubStatus.ACTIVE.getCode());
+		assertThat(result).containsExactly(assignment);
+	}
+
+	@Test
+	void shouldReturnEmptyWithoutQueryingWhenScopeIdsIsEmptyTest() {
+		// When:
+		List<HubRoleAssignment> result = service.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of());
+
+		// Then:
+		assertThat(result).isEmpty();
+	}
+
+	@Test
 	void shouldSaveAssignmentTest() {
 		// Given:
 		HubRoleAssignment assignment = Instancio.create(HubRoleAssignment.class);

@@ -58,4 +58,17 @@ public class HubUserServiceImpl implements HubUserService {
 	public List<HubUser> findAllByEmailIgnoreCaseIn(Collection<String> lowerCaseEmails) {
 		return userRepository.findAllByEmailIgnoreCaseIn(lowerCaseEmails);
 	}
+
+	@Override
+	public List<HubUser> findAllByIds(Collection<Long> ids) {
+		if (ids.isEmpty()) {
+			return List.of();
+		}
+		return userRepository.findAllById(ids);
+	}
+
+	@Override
+	public List<HubUser> findAll() {
+		return userRepository.findAll();
+	}
 }

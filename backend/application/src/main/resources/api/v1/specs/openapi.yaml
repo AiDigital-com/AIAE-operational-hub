@@ -26,6 +26,17 @@ tags:
     description: Read-only access to campaigns sourced from BigQuery, optionally filtered by client or agency.
   - name: teams
     description: Admin-only management of Hub teams.
+  - name: pacing
+    description: Live pacing data fetched from the Pacing service, filtered by the caller's resolved Hub RBAC scope.
+  - name: pacingUserSync
+    description: Admin-triggered sync of Hub employees into Pacing's user mirror (a separate tag/interface
+      from "sync", which is the pre-existing NetSuite/Rippling sync — kept apart so each admin trigger
+      is its own generated API interface and controller).
+  - name: pacingDrift
+    description: >
+      Admin-only read of where the Hub roster and Pacing's user mirror disagree (US-106): employees
+      missing in Pacing, users in Pacing with no matching Hub employee, and name/active mismatches.
+      Read-only - never writes to either side.
 paths:
   /api/v1/auth/me:
     get:
@@ -2538,6 +2549,142 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/sync/pacing-users:
+    post:
+      tags:
+        - pacingUserSync
+      operationId: syncPacingUsers
+      description: >
+        Eagerly synchronizes Hub employees into Pacing's user mirror (POST
+        /api/internal/users/sync on the Pacing side), writing back each returned
+        pacing_user_id onto the matching hub_users row. Requires manage-roles permission.
+      responses:
+        '200':
+          description: The sync completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingUserSyncSummaryV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Syncing to Pacing failed. Also returned, deliberately, when Pacing answers 401 (the
+            two services' shared HMAC secrets disagree - a server misconfiguration) rather than
+            passing that 401 through, for the same reason as GET /api/v1/pacing/pacings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings:
+    get:
+      tags:
+        - pacing
+      operationId: listPacings
+      description: >
+        Resolves the current user's Hub RBAC role assignments into a Pacing scope assertion
+        (X-Hub-Assertion, HMAC-signed), then fetches the pacings that scope entitles them to from the
+        Pacing service. The resolved scope is included in the response so a caller can see why the
+        returned pacing list looks the way it does.
+      responses:
+        '200':
+          description: Pacings were fetched from the Pacing service successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingListResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The Pacing service answered the request with a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (it answered 403/unknown_user): the Hub
+            knows this user, but Pacing's user mirror does not yet. A sync gap, not an authorization
+            decision - see the distinct `OPH_053` error code in the response body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching pacings from the Pacing service failed. Also returned, deliberately, when Pacing
+            answers 401 (the two services' shared HMAC secrets disagree - a server misconfiguration,
+            never something the calling user did) rather than passing that 401 through: the Hub's own
+            frontend logs a user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/drift:
+    get:
+      tags:
+        - pacingDrift
+      operationId: getPacingDrift
+      description: >
+        Admin-only (US-106). Fetches the full Hub roster and Pacing's full user mirror (GET
+        /api/internal/users on the Pacing side) and diffs them, so drift is visible instead of being
+        discovered by accident - in particular, a user who exists in Pacing but has no matching Hub
+        employee is never touched by the sync (it only ever visits emails it sends) and would
+        otherwise stay however Pacing last left it, active flag included, forever.
+      responses:
+        '200':
+          description: The drift comparison completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDriftReportV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching Pacing's user mirror failed. Also returned, deliberately, when Pacing answers 401
+            (the two services' shared HMAC secrets disagree - a server misconfiguration) rather than
+            passing that 401 through, for the same reason as GET /api/v1/pacing/pacings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
 components:
   securitySchemes:
     bearerAuth:
@@ -2593,6 +2740,103 @@ components:
         - users
         - assignmentsUpdated
         - agenciesMapped
+    PacingUserSyncSummaryV1:
+      type: object
+      description: >
+        Summary of a Pacing user sync run. createdInPacing/activated/deactivated/unchanged are Pacing's
+        own account of what the upsert did (only Pacing sees a row's previous state), not the Hub's
+        guess from what it sent - re-running the same batch twice reports 0 for all four on the second
+        run unless something actually changed on Pacing's side in between.
+      properties:
+        usersSent:
+          type: integer
+          format: int32
+          description: Number of Hub employees included in the batch sent to Pacing.
+        createdInPacing:
+          type: integer
+          format: int32
+          description: Number of rows Pacing had never seen before this run.
+        activated:
+          type: integer
+          format: int32
+          description: Number of rows Pacing flipped from inactive to active this run.
+        deactivated:
+          type: integer
+          format: int32
+          description: Number of rows Pacing flipped from active to inactive this run.
+        unchanged:
+          type: integer
+          format: int32
+          description: Number of rows that matched an existing Pacing row and did not change.
+        idsWritten:
+          type: integer
+          format: int32
+          description: Number of hub_users rows whose pacing_user_id was created or corrected this run.
+      required:
+        - usersSent
+        - createdInPacing
+        - activated
+        - deactivated
+        - unchanged
+        - idsWritten
+    PacingDriftRowV1:
+      type: object
+      description: >
+        One disagreement between the Hub roster and Pacing's user mirror (US-106). Every field either
+        system can hold a value for is populated regardless of category, so the row states which system
+        holds which value without a further lookup; the side missing the employee reports null for its
+        name/active fields.
+      properties:
+        email:
+          type: string
+          format: email
+          description: The email address both systems are keyed on.
+        category:
+          type: string
+          description: >
+            MISSING_IN_PACING: the Hub knows this employee, Pacing does not (yet - the sync will create
+            it next run). MISSING_IN_HUB: Pacing has a row, the Hub does not - the gap the sync itself
+            can never close, since it only ever visits emails it sends. NAME_MISMATCH / ACTIVE_MISMATCH:
+            both sides have a row, but the named field differs.
+          enum:
+            - MISSING_IN_PACING
+            - MISSING_IN_HUB
+            - NAME_MISMATCH
+            - ACTIVE_MISMATCH
+        hubName:
+          type: string
+          description: >
+            The Hub's display name for this email; absent/null if the Hub has no row for this email
+            (category=MISSING_IN_HUB).
+        pacingName:
+          type: string
+          description: >
+            Pacing's display name for this email; absent/null if Pacing has no row for this email
+            (category=MISSING_IN_PACING).
+        hubActive:
+          type: boolean
+          description: >
+            Whether the Hub considers this person active; absent/null if the Hub has no row for this
+            email (category=MISSING_IN_HUB).
+        pacingActive:
+          type: boolean
+          description: >
+            Whether Pacing considers this person active; absent/null if Pacing has no row for this
+            email (category=MISSING_IN_PACING).
+      required:
+        - email
+        - category
+    PacingDriftReportV1:
+      type: object
+      description: Outcome of a US-106 drift comparison between the Hub roster and Pacing's user mirror.
+      properties:
+        rows:
+          type: array
+          description: Every disagreement found; empty when both sides fully agree.
+          items:
+            $ref: '#/components/schemas/PacingDriftRowV1'
+      required:
+        - rows
     UserV1:
       type: object
       description: Representation of the authenticated Hub user and effective access.
@@ -4878,3 +5122,54 @@ components:
       required:
         - team_name
         - status
+    PacingScopeV1:
+      type: object
+      description: >
+        The Pacing-service scope resolved from the current user's Hub RBAC role assignments and
+        asserted on the call to Pacing - included so a caller can see why the returned pacing list
+        looks the way it does.
+      properties:
+        kind:
+          type: string
+          description: >
+            Scope kind sent to Pacing: `all` (unfiltered, admin or an ALL-scoped role), `owners`
+            (restricted to a set of owner Pacing user_ids, e.g. a team), or `campaigns` (restricted to
+            a set of NetSuite campaign ids, for Client Services - not produced yet).
+          enum:
+            - all
+            - owners
+            - campaigns
+        ids:
+          type: array
+          description: >
+            Owner Pacing user_ids - UUIDs as text (kind=owners) or NetSuite campaign ids
+            (kind=campaigns) the scope is restricted to; always empty for kind=all, and legitimately
+            empty when the user is entitled to nothing.
+          items:
+            type: string
+        can_create:
+          type: boolean
+          description: Whether the current user may create a pacing, per the resolved entitlement.
+      required:
+        - kind
+        - ids
+        - can_create
+    PacingListResponseV1:
+      type: object
+      description: >
+        Pacings visible to the current user, fetched live from the Pacing service, together with the
+        resolved scope that produced them.
+      properties:
+        scope:
+          $ref: '#/components/schemas/PacingScopeV1'
+        pacings:
+          type: array
+          description: >
+            Pacings returned by the Pacing service, passed through row-for-row; the Hub does not yet
+            interpret individual pacing fields.
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - scope
+        - pacings

@@ -61,6 +61,24 @@ public interface HubRoleAssignmentRepository extends JpaRepository<HubRoleAssign
 	List<HubRoleAssignment> findAllByUserIdIn(Collection<Long> userIds);
 
 	/**
+	 * Finds active assignments scoped to any of the given scope ids under a given scope type, e.g. every
+	 * active assignment scoped to one of a set of teams — used to resolve which Hub users hold an
+	 * active role over those teams (see {@code PacingScopeResolver}, which turns this into the set of
+	 * member emails behind a TEAM-scoped Pacing "owners" scope).
+	 *
+	 * @param scopeCode the scope dictionary code to match (e.g. {@code TEAM})
+	 * @param scopeIds  the scope ids to match (e.g. {@code hub_teams.id} values)
+	 * @param status    the assignment status to match (e.g. {@code ACTIVE})
+	 * @return matching active role assignments across the given scope ids
+	 */
+	@Query("select a from HubRoleAssignment a where a.scopeType.scopeCode = :scopeCode "
+			+ "and a.scopeId in :scopeIds and a.status = :status")
+	List<HubRoleAssignment> findAllByScopeTypeCodeAndScopeIdInAndStatus(
+			@Param("scopeCode") String scopeCode,
+			@Param("scopeIds") Collection<Long> scopeIds,
+			@Param("status") String status);
+
+	/**
 	 * Finds a role assignment by id, acquiring a pessimistic write lock on the row.
 	 *
 	 * <p>The {@code jakarta.persistence.lock.timeout} hint (milliseconds) bounds how long the

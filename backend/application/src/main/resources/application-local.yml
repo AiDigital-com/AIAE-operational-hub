@@ -24,6 +24,12 @@ app:
       issuer-uri: ${AUTH_ISSUER_URI:https://living-insect-60.clerk.accounts.dev}
       jwk-set-uri: ${AUTH_JWKS_URI:https://living-insect-60.clerk.accounts.dev/.well-known/jwks.json}
       audience: ${AUTH_AUDIENCE:}
+  external:
+    pacing:
+      base-url: ${PACING_BASE_URL:http://localhost:3000}
+      # Matches dash-gate's own .env.local.example default (HUB_ASSERTION_SECRET=local-dev-only).
+      # Local-profile-only default: the base config never defaults this secret.
+      assertion-secret: ${PACING_ASSERTION_SECRET:local-dev-only}
 
 logging:
   level:

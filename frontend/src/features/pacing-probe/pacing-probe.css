@@ -1,0 +1,107 @@
+/* TEMPORARY — deleted together with pacing-probe.tsx. */
+
+.pacing-probe {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  max-width: 900px;
+}
+
+.pacing-probe__header h1 {
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+
+.pacing-probe__note {
+  margin: 0;
+  color: var(--muted-strong);
+  max-width: 70ch;
+}
+
+.pacing-probe__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pacing-probe__button {
+  align-self: flex-start;
+  padding: 10px 18px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--primary-fill);
+  color: var(--color-accent-contrast);
+  cursor: pointer;
+}
+
+.pacing-probe__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Secondary: the sync writes to another service, so it should not look like the
+   same weight of action as a read. */
+.pacing-probe__button--secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+.pacing-probe__panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 16px;
+}
+
+.pacing-probe__panel h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.pacing-probe__panel h2 small {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.pacing-probe__panel--bad {
+  border-color: var(--border-strong);
+}
+
+.pacing-probe__panel pre {
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--ink);
+  /* Wide payloads scroll inside the panel rather than widening the page. */
+  overflow-x: auto;
+}
+
+.pacing-probe__hints {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted-strong);
+}
+
+.pacing-probe__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.pacing-probe__table th,
+.pacing-probe__table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.pacing-probe__table th {
+  color: var(--muted-strong);
+  font-weight: 500;
+}

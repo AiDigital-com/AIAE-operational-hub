@@ -29,6 +29,8 @@ const CampaignTabRedirect = lazy(() =>
   import("../../campaigns/campaign-workspace").then((m) => ({ default: m.CampaignTabRedirect }))
 );
 const PacingTab = lazy(() => import("../../campaigns/tabs/pacing-tab").then((m) => ({ default: m.PacingTab })));
+// TEMPORARY (Hub→Pacing probe): delete this line and the /pacing-probe route below.
+const PacingProbe = lazy(() => import("../../pacing-probe/pacing-probe").then((m) => ({ default: m.PacingProbe })));
 const SetupTab = lazy(() => import("../../campaigns/tabs/setup-tab").then((m) => ({ default: m.SetupTab })));
 const ReportingTab = lazy(() =>
   import("../../campaigns/tabs/reporting-tab").then((m) => ({ default: m.ReportingTab }))
@@ -119,6 +121,8 @@ export function AppShell() {
                 <Route path="dashboards" element={<DashboardsTab />} />
               </Route>
               <Route path="/teams" element={admin ? <TeamManagement /> : <Navigate to="/" replace />} />
+              {/* TEMPORARY: hand-check of the Hub→Pacing channel. Delete with the feature folder. */}
+              <Route path="/pacing-probe" element={<PacingProbe />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
