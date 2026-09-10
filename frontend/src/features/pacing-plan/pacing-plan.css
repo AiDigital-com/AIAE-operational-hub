@@ -1,0 +1,342 @@
+/* §9 of the migration plan: the Pacing Settings plan editor. No vertical color stripes anywhere -
+   state is shown with background tints, top-row badges and full-cell fills only. */
+
+.pplan__sheet {
+  width: min(760px, 96vw);
+}
+
+.pplan__hint {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.pplan__hint--warn {
+  color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 10%, transparent);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+}
+
+.pplan__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pplan__badge--new {
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+}
+
+.pplan__icon-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+}
+.pplan__icon-btn:hover {
+  background: var(--n-100);
+  color: var(--bad);
+}
+
+/* ── Line item cards ── */
+
+.pplan__li-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.pplan__li-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 44px 12px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.pplan__li-head:hover {
+  background: var(--n-100);
+}
+.pplan__li-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.pplan__li-id {
+  font-weight: 800;
+  color: var(--ink);
+}
+.pplan__chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+.pplan__chevron--open {
+  transform: rotate(90deg);
+}
+.pplan__li-body {
+  padding: 4px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pplan__field-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pplan__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 140px;
+}
+.pplan__field--grow {
+  flex: 2;
+  min-width: 200px;
+}
+.pplan__field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.pplan__input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  width: 100%;
+}
+.pplan__input--num {
+  text-align: right;
+}
+.pplan__input--name {
+  text-align: left;
+  min-width: 140px;
+}
+
+.pplan__subsection {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pplan__subsection-head {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.pplan__add-btn {
+  align-self: flex-start;
+  border: 1px dashed var(--border);
+  background: none;
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+.pplan__add-btn:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+
+/* ── Container cards (nested one level inside a line item) ── */
+
+.pplan__container-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--n-100);
+  overflow: hidden;
+}
+.pplan__container-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 76px 8px 10px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.pplan__container-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.pplan__container-period {
+  color: var(--muted-strong);
+}
+.pplan__container-units {
+  margin-left: auto;
+  color: var(--muted-strong);
+}
+.pplan__container-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pplan__container-body {
+  padding: 4px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pplan__date-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pplan__date-child .pplan__input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Add line item panel ── */
+
+.pplan__add-li {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--n-100);
+}
+.pplan__add-li-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pplan__tabs {
+  display: flex;
+  gap: 4px;
+}
+.pplan__tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--pill);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+.pplan__tab--active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.pplan__add-li-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.pplan__add-li-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.pplan__add-li-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pplan__add-li-check--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.pplan__add-li-note {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* ── Dialogs (Duplicate container / Remove confirmations) ── */
+
+.pplan__dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 14px 0;
+}
+.pplan__dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ── Sheet footer ── */
+
+.pplan__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.pplan__footer-error {
+  flex: 1;
+}
+.pplan__footer-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ── Status control (dashboard header) ── */
+
+.pplan__status-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pplan__status-select select {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.pplan__status-error {
+  font-size: 11px;
+}

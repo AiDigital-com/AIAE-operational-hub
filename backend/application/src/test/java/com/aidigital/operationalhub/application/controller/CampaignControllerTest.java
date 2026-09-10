@@ -12,6 +12,9 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Conversio
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionRowSearchRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.DirectionEnumV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.InsertionOrderV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingScopeV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentV1;
@@ -41,6 +44,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Conversio
 import com.aidigital.operationalhub.application.mapper.ConversionAdjustmentXlsxAssembler;
 import com.aidigital.operationalhub.application.mapper.ConversionBreakdownContractMapper;
 import com.aidigital.operationalhub.application.mapper.InsertionOrderContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingCreateContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowFileSupport;
 import com.aidigital.operationalhub.application.mapper.ReportRowSearchCommand;
@@ -86,10 +91,17 @@ import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetPage
 import com.aidigital.operationalhub.service.dashboard.model.DashboardPreview;
 import com.aidigital.operationalhub.service.entity.HubDashboardService;
 import com.aidigital.operationalhub.service.entity.HubReportViewService;
+import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
+import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
+import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
+import com.aidigital.operationalhub.service.rbac.model.PacingScope;
 import org.instancio.Instancio;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -120,6 +132,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -191,6 +204,18 @@ class CampaignControllerTest {
 	@Mock
 	private ConstructedEntityContractMapper constructedEntityMapper;
 
+	@Mock
+	private PacingClient pacingClient;
+
+	@Mock
+	private PacingScopeResolver pacingScopeResolver;
+
+	@Mock
+	private PacingContractMapper pacingMapper;
+
+	@Mock
+	private PacingCreateContractMapper pacingCreateMapper;
+
 	@InjectMocks
 	private CampaignController controller;
 
@@ -258,6 +283,60 @@ class CampaignControllerTest {
 		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
 		assertThat(result.getBody()).isSameAs(body);
 		verify(insertionOrderService).findCampaignInsertionOrders(currentUser, 46252L);
+	}
+
+	@Test
+	void shouldReturnCampaignPacingsForTheCurrentUserTest() {
+		// Given: §5 - the campaign's Pacing tab reuses the same Hub RBAC -> Pacing scope resolution
+		// as the Overview (§4), filtered server-side by Pacing to this one campaign
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(currentUser.email(), PacingScope.KIND_ALL, List.of(), true);
+		List<PacingRow> pacings =
+				List.of(new PacingRow("p1", "nike-ss26", "Live", null, null, null, 0, null, null, null, null));
+		PacingListResponseV1 body = new PacingListResponseV1()
+				.scope(new PacingScopeV1().kind(PacingScopeV1.KindEnum.ALL).ids(List.of()).canCreate(true))
+				.pacings(List.of());
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(currentUser);
+		doReturn(assertion).when(pacingMapper).toAssertion(currentUser, entitlement);
+		doReturn(pacings).when(pacingClient).listPacingsForCampaign(assertion, "46252");
+		doReturn(body).when(pacingMapper).toV1(entitlement, pacings);
+
+		// When:
+		var result = controller.listCampaignPacings(46252L);
+
+		// Then: the campaign's own visibility is checked (not skipped just because it calls Pacing)
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(body);
+		verify(campaignService).getVisibleCampaignIdentity(currentUser, 46252L);
+		verify(pacingClient).listPacingsForCampaign(assertion, "46252");
+	}
+
+	@Test
+	void shouldReturnPacingDraftForCurrentUserTest() {
+		// Given: §8 (US-121/122/123) - the same visibility gate + Hub RBAC -> Pacing scope resolution
+		// as listCampaignPacings, then a plain campaign-scoped validate call.
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(currentUser.email(), PacingScope.KIND_ALL, List.of(), true);
+		PacingValidateResult validateResult = new PacingValidateResult(
+				true, null, List.of(), List.of(), "Acme", "MediaCo", "Campaign", null, List.of(), List.of(), List.of(), Map.of());
+		PacingDraftV1 body = new PacingDraftV1().ok(true).lineItems(List.of());
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(currentUser);
+		doReturn(assertion).when(pacingMapper).toAssertion(currentUser, entitlement);
+		doReturn(validateResult).when(pacingClient).validateCampaign(assertion, "46252");
+		doReturn(body).when(pacingCreateMapper).toDraftV1(validateResult);
+
+		// When:
+		var result = controller.getPacingDraft(46252L);
+
+		// Then: the campaign's own visibility is checked (not skipped just because it calls Pacing)
+		assertThat(result.getStatusCode().is2xxSuccessful()).isTrue();
+		assertThat(result.getBody()).isSameAs(body);
+		verify(campaignService).getVisibleCampaignIdentity(currentUser, 46252L);
+		verify(pacingClient).validateCampaign(assertion, "46252");
 	}
 
 	@Test
@@ -1166,5 +1245,21 @@ class CampaignControllerTest {
 		assertThatThrownBy(() -> controller.listReportViews(99L, 1, 25))
 				.isInstanceOf(BusinessException.class)
 				.hasFieldOrPropertyWithValue("code", "OPH_025");
+	}
+
+	@Test
+	void shouldRejectCampaignPacingsAccessWhenCampaignNotVisibleTest() {
+		// Given: §5 - a campaign nobody may see has no Pacing tab to list either. Pacing is never
+		// even asked: the visibility gate runs before the scope is resolved.
+		CurrentUserModel currentUser = Instancio.create(CurrentUserModel.class);
+		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
+		doThrow(new BusinessException(OperationalHubErrorReason.OPH_025, 99L))
+				.when(campaignService).getVisibleCampaignIdentity(currentUser, 99L);
+
+		// When/Then:
+		assertThatThrownBy(() -> controller.listCampaignPacings(99L))
+				.isInstanceOf(BusinessException.class)
+				.hasFieldOrPropertyWithValue("code", "OPH_025");
+		verifyNoInteractions(pacingScopeResolver, pacingClient);
 	}
 }

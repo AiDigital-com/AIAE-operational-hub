@@ -28,10 +28,10 @@ export interface CampaignTabContext {
 
 const TABS = ["setup", "pacing", "reporting", "dashboards"] as const;
 type Tab = (typeof TABS)[number];
-// Pacing is still mock-only data - hidden from the nav for now. Its route/tab still exists (so a stale
-// session-stored tab or a direct link still works), it is just not offered as a place to navigate to.
-// Dashboards was hidden for the same reason and is not any more: it reads and writes real data.
-const HIDDEN_TABS = new Set<Tab>(["pacing"]);
+// Pacing was mock-only data and hidden from the nav; it is not any more (§5 of the migration plan
+// wired it to real Pacing-service data, same as Dashboards before it). No tab is hidden today - the
+// set (and VISIBLE_TABS below) is kept so a future mock-only tab has somewhere to register itself.
+const HIDDEN_TABS = new Set<Tab>([]);
 const VISIBLE_TABS = TABS.filter((tab) => !HIDDEN_TABS.has(tab));
 const DEFAULT_TAB: Tab = "reporting";
 

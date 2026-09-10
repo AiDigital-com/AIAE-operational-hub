@@ -15,7 +15,9 @@ import {
   ChevronRightIcon,
   HomeIcon,
   MoonIcon,
+  PacingIcon,
   SearchIcon,
+  SettingsIcon,
   SunIcon,
   TeamIcon,
 } from "../../../shared/ui/icons/icons";
@@ -214,10 +216,20 @@ function hideExtraAgencies() {
           <span className="sidebar__nav-icon" aria-hidden="true"><HomeIcon /></span>
           <span className="sidebar__nav-label">Overview</span>
         </NavLink>
+        <NavLink to="/pacing" className={navLinkClass}>
+          <span className="sidebar__nav-icon" aria-hidden="true"><PacingIcon /></span>
+          <span className="sidebar__nav-label">Pacing</span>
+        </NavLink>
         {isAdmin && (
           <NavLink to="/teams" className={navLinkClass}>
             <span className="sidebar__nav-icon" aria-hidden="true"><TeamIcon /></span>
             <span className="sidebar__nav-label">Team</span>
+          </NavLink>
+        )}
+        {isAdmin && (
+          <NavLink to="/pacing-admin" className={navLinkClass}>
+            <span className="sidebar__nav-icon" aria-hidden="true"><SettingsIcon /></span>
+            <span className="sidebar__nav-label">Pacing admin</span>
           </NavLink>
         )}
       </nav>

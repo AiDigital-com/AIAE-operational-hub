@@ -74,4 +74,24 @@ public interface HubUserService {
 	 * @return the matching users, in no guaranteed order; addresses with no matching user are absent
 	 */
 	List<HubUser> findAllByEmailIgnoreCaseIn(Collection<String> lowerCaseEmails);
+
+	/**
+	 * Batch-loads users by id, e.g. to resolve the email addresses behind a set of active role
+	 * assignments (see {@code PacingScopeResolver}, which builds a TEAM-scoped Pacing "owners" scope
+	 * from a team's member ids). Delegates to {@link org.springframework.data.repository.CrudRepository
+	 * #findAllById}, already provided by {@code HubUserRepository extends JpaRepository}.
+	 *
+	 * @param ids the {@code hub_users.id} values to load
+	 * @return the matching users, in no guaranteed order; empty when {@code ids} is empty
+	 */
+	List<HubUser> findAllByIds(Collection<Long> ids);
+
+	/**
+	 * Returns every Hub user, for the Pacing user sync (§2 of the migration plan): the sync's Pacing
+	 * side upserts by email and never deletes, so it needs the whole roster, active and inactive alike,
+	 * to know who to mark inactive there too.
+	 *
+	 * @return every {@code hub_users} row, in no guaranteed order
+	 */
+	List<HubUser> findAll();
 }

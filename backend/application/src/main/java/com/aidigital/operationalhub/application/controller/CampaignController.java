@@ -21,6 +21,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Conversio
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionBreakdownV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ConversionRowSearchRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.InsertionOrderV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackRequestV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentRollbackResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.ReportRowAdjustmentsRequestV1;
@@ -38,6 +40,8 @@ import com.aidigital.operationalhub.application.mapper.ConversionBreakdownContra
 import com.aidigital.operationalhub.application.mapper.DashboardContractMapper;
 import com.aidigital.operationalhub.application.mapper.DashboardDatasetXlsxExportAssembler;
 import com.aidigital.operationalhub.application.mapper.InsertionOrderContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingCreateContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowContractMapper;
 import com.aidigital.operationalhub.application.mapper.ReportRowFileSupport;
 import com.aidigital.operationalhub.application.mapper.ReportRowSearchCommand;
@@ -69,8 +73,14 @@ import com.aidigital.operationalhub.service.dashboard.DashboardDataSourceService
 import com.aidigital.operationalhub.service.dashboard.model.DashboardDatasetExportModel;
 import com.aidigital.operationalhub.service.entity.HubDashboardService;
 import com.aidigital.operationalhub.service.entity.HubReportViewService;
+import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
+import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
+import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
@@ -114,6 +124,10 @@ public class CampaignController implements CampaignsApi {
 	private final DashboardContractMapper dashboardMapper;
 	private final DashboardDatasetXlsxExportAssembler dashboardDatasetXlsxExportAssembler;
 	private final ConstructedEntityContractMapper constructedEntityMapper;
+	private final PacingClient pacingClient;
+	private final PacingScopeResolver pacingScopeResolver;
+	private final PacingContractMapper pacingMapper;
+	private final PacingCreateContractMapper pacingCreateMapper;
 
 	@Override
 	public ResponseEntity<CampaignPageResponseV1> searchCampaigns(
@@ -137,6 +151,37 @@ public class CampaignController implements CampaignsApi {
 		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
 		return ResponseEntity.ok(insertionOrderMapper.toV1(
 				insertionOrderService.findCampaignInsertionOrders(currentUser, campaignId)));
+	}
+
+	@Override
+	public ResponseEntity<PacingListResponseV1> listCampaignPacings(Long campaignId) {
+		// (Campaign → Pacings): same visibility gate as every other nested campaign
+		// resource, then the same Hub RBAC -> Pacing scope resolution §4's overview uses -
+		// this is not a shortcut around scope just because the campaign itself is already
+		// visible; a campaign the caller can see is not the same as a pacing they may see.
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		campaignService.getVisibleCampaignIdentity(currentUser, campaignId);
+		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(currentUser);
+		HubAssertion assertion = pacingMapper.toAssertion(currentUser, entitlement);
+		List<PacingRow> pacings = pacingClient.listPacingsForCampaign(assertion, String.valueOf(campaignId));
+		return ResponseEntity.ok(pacingMapper.toV1(entitlement, pacings));
+	}
+
+	/**
+	 * §8 of the migration plan (US-121/122/123): the campaign's insertion orders and line items for
+	 * the Create Pacing review panel, reached from a campaign already open (no search step). Same
+	 * visibility gate as {@link #listCampaignPacings}, then the same Hub RBAC -> Pacing scope
+	 * resolution, then a plain campaign-scoped validate call - the Hub computes none of the returned
+	 * plan figures itself.
+	 */
+	@Override
+	public ResponseEntity<PacingDraftV1> getPacingDraft(Long campaignId) {
+		CurrentUserModel currentUser = currentUserService.resolveCurrentUser();
+		campaignService.getVisibleCampaignIdentity(currentUser, campaignId);
+		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(currentUser);
+		HubAssertion assertion = pacingMapper.toAssertion(currentUser, entitlement);
+		PacingValidateResult result = pacingClient.validateCampaign(assertion, String.valueOf(campaignId));
+		return ResponseEntity.ok(pacingCreateMapper.toDraftV1(result));
 	}
 
 	@Override

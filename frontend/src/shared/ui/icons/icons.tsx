@@ -117,6 +117,16 @@ export function SettingsIcon({ className }: IconProps) {
   );
 }
 
+/** Pacing / trend glyph — the sidebar's Pacing nav item. */
+export function PacingIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M3 17l5-6 4 3 5-8 4 5" />
+      <path d="M3 21h18" />
+    </svg>
+  );
+}
+
 /** Tree-branch connector glyph, prefixing a line-item row nested under its campaign. */
 export function BranchIcon({ className }: IconProps) {
   return (

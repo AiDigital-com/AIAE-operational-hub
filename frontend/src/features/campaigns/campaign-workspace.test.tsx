@@ -89,21 +89,22 @@ describe("CampaignWorkspace", () => {
     expect(screen.getByRole("link", { name: "Reporting" })).not.toHaveAttribute("aria-current");
   });
 
-  it("should not offer Pacing as a nav tab (hidden for now - mock data only)", () => {
-    // Given/When:
+  it("should offer every tab, including Pacing, now that all of them read real data", () => {
+    // Given/When: §5 of the migration plan wired Pacing to real Pacing-service data, same as
+    // Dashboards before it - no tab is mock-only any more, so none is hidden from the nav.
     renderWorkspace("/campaigns/42/setup", FULL_STATE);
 
-    // Then: Dashboards is offered again now that it reads real data; Pacing still is not
-    expect(screen.queryByRole("link", { name: "Pacing" })).not.toBeInTheDocument();
+    // Then:
+    expect(screen.getByRole("link", { name: "Pacing" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboards" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /^(Setup|Reporting|Dashboards)$/ })).toHaveLength(3);
+    expect(screen.getAllByRole("link", { name: /^(Setup|Pacing|Reporting|Dashboards)$/ })).toHaveLength(4);
   });
 
-  it("should still render a hidden tab reached by a direct link", () => {
-    // Given/When: a bookmark or a tab the session stored before it left the nav
+  it("should render a tab's content reached by a direct link", () => {
+    // Given/When: a bookmark, or a tab the session stored on a prior visit
     renderWorkspace("/campaigns/42/pacing", FULL_STATE);
 
-    // Then: hidden from the nav is not the same as removed
+    // Then:
     expect(screen.getByText("Pacing content")).toBeInTheDocument();
   });
 

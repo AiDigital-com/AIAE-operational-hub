@@ -42,6 +42,17 @@ public interface HubRoleAssignmentService {
 	List<HubRoleAssignment> findAllByUserIds(Collection<Long> userIds);
 
 	/**
+	 * Lists active role assignments scoped to any of the given scope ids under a scope type, e.g. every
+	 * active assignment scoped to one of a set of teams.
+	 *
+	 * @param scopeTypeCode the scope dictionary code to match (e.g. {@code TEAM})
+	 * @param scopeIds      the scope ids to match (e.g. {@code hub_teams.id} values)
+	 * @return matching active role assignments across the given scope ids; empty when {@code scopeIds}
+	 * is empty
+	 */
+	List<HubRoleAssignment> findActiveByScopeTypeCodeAndScopeIds(String scopeTypeCode, Collection<Long> scopeIds);
+
+	/**
 	 * Finds a role assignment by id, acquiring a pessimistic write lock on the row.
 	 *
 	 * <p>Must be called inside an active transaction owned by the caller.

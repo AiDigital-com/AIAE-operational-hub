@@ -16,6 +16,27 @@ import type {
 } from "../features/campaigns/types";
 import type { ClientPageResponseV1, ClientV1 } from "../features/clients/types";
 import type {
+  CampaignRefV1,
+  PacingAlertV1,
+  PacingListResponseV1,
+  PacingRowV1,
+  PacingScopeV1,
+} from "../features/pacing-overview/types";
+import type {
+  PacingDashboardCampaignV1,
+  PacingDashboardV1,
+  PacingJournalEntryV1,
+  PacingLibraryEntryV1,
+  PacingLineItemPlanV1,
+  PacingRefreshStatusV1,
+} from "../features/pacing-dashboard/types";
+import type {
+  PacingCreateResultV1,
+  PacingDraftLineItemV1,
+  PacingDraftV1,
+  PacingInsertionOrderV1,
+} from "../features/pacing-create/types";
+import type {
   AssignRoleRequestV1,
   HubUserSummaryV1,
   RoleAssignmentV1,
@@ -222,6 +243,217 @@ export function aCampaignPageV1(overrides: Partial<CampaignPageResponseV1> = {})
     pageSize: 16,
     totalElements: 1,
     totalPages: 1,
+    ...overrides,
+  };
+}
+
+export function aCampaignRefV1(overrides: Partial<CampaignRefV1> = {}): CampaignRefV1 {
+  return {
+    id: randomString("CAMP"),
+    name: randomString("Campaign"),
+    ...overrides,
+  };
+}
+
+export function aPacingAlertV1(overrides: Partial<PacingAlertV1> = {}): PacingAlertV1 {
+  return {
+    type: "pacing_off_pace",
+    severity: "warning",
+    text: randomString("Pacing off pace"),
+    ...overrides,
+  };
+}
+
+export function aPacingRowV1(overrides: Partial<PacingRowV1> = {}): PacingRowV1 {
+  return {
+    id: randomString("pacing"),
+    dashSlug: randomString("dash-slug"),
+    name: randomString("Pacing"),
+    status: "Live",
+    ownerName: randomString("Owner"),
+    flightStart: "2026-08-01",
+    flightEnd: "2026-09-30",
+    lineItemCount: 3,
+    createdAt: "2026-07-15T09:30:00",
+    campaigns: [aCampaignRefV1()],
+    marginActualPct: 20,
+    marginTargetPct: 25,
+    pacingDeviationPct: 2,
+    paceStatus: "on_pace",
+    budgetTotal: 10000,
+    alerts: [],
+    ...overrides,
+  };
+}
+
+export function aPacingScopeV1(overrides: Partial<PacingScopeV1> = {}): PacingScopeV1 {
+  return {
+    kind: "all",
+    ids: [],
+    // Wire field is `can_create` (PacingScopeV1) - TypeScript never catches a typo of this here
+    // because `src/test/**` is excluded from the project's tsc build (see tsconfig.json), so a
+    // wrong key silently carries no `can_create` at all rather than failing to compile.
+    can_create: false,
+    ...overrides,
+  };
+}
+
+export function aPacingListResponseV1(overrides: Partial<PacingListResponseV1> = {}): PacingListResponseV1 {
+  return {
+    scope: aPacingScopeV1(),
+    pacings: [aPacingRowV1()],
+    ...overrides,
+  };
+}
+
+export function aPacingDashboardCampaignV1(
+  overrides: Partial<PacingDashboardCampaignV1> = {}
+): PacingDashboardCampaignV1 {
+  return {
+    slug: randomString("dash-slug"),
+    pacingId: randomString("pacing"),
+    name: randomString("Campaign"),
+    startDate: "2026-08-01",
+    endDate: "2026-09-30",
+    currency: "USD",
+    status: "Live",
+    orderNumber: randomString("SO"),
+    ...overrides,
+  };
+}
+
+export function aPacingLineItemPlanV1(overrides: Partial<PacingLineItemPlanV1> = {}): PacingLineItemPlanV1 {
+  return {
+    lineItemId: randomString("li"),
+    channel: "Display",
+    dsp: "DV360",
+    rateType: "CPM",
+    clientBudget: 10_000,
+    plannedImpressions: 1_000_000,
+    marginTargetPct: 20,
+    ctrTargetPct: 0.1,
+    vcrTargetPct: null,
+    flightStart: "2026-08-01",
+    flightEnd: "2026-09-30",
+    pauseIntervals: [],
+    containers: [],
+    ...overrides,
+  };
+}
+
+export function aPacingJournalEntryV1(overrides: Partial<PacingJournalEntryV1> = {}): PacingJournalEntryV1 {
+  return {
+    id: randomString("journal"),
+    ts: "2026-08-05",
+    msg: randomString("Note"),
+    uid: "azat@aidigital.com",
+    editedAt: null,
+    ...overrides,
+  };
+}
+
+export function aPacingDashboardV1(overrides: Partial<PacingDashboardV1> = {}): PacingDashboardV1 {
+  const plan = aPacingLineItemPlanV1();
+  return {
+    campaign: aPacingDashboardCampaignV1(),
+    planByLineItem: { [plan.lineItemId]: plan },
+    factsDaily: [],
+    asOf: "2026-08-15",
+    display: { rev: 1, widgets: [] },
+    aggregate: {},
+    libraryEntries: undefined,
+    journal: [],
+    ...overrides,
+  };
+}
+
+export function aPacingRefreshStatusV1(overrides: Partial<PacingRefreshStatusV1> = {}): PacingRefreshStatusV1 {
+  return {
+    exists: true,
+    refreshId: randomString("refresh"),
+    rowCount: 120,
+    latestDate: "2026-08-14",
+    ...overrides,
+  };
+}
+
+export function aPacingDraftLineItemV1(overrides: Partial<PacingDraftLineItemV1> = {}): PacingDraftLineItemV1 {
+  return {
+    lineItemId: randomString("li"),
+    channel: "DOOH",
+    flightStart: "2026-03-01",
+    flightEnd: "2026-03-31",
+    rateType: "CPM",
+    description: randomString("Line item"),
+    nativeBudget: 20633.4,
+    budgetTotal: 20633.4,
+    currency: "USD",
+    exchangeRate: 1,
+    converted: false,
+    plannedUnits: 1432875,
+    targetImpressions: 1432875,
+    marginPercent: 15.5,
+    targetCtr: 0.85,
+    targetVcr: undefined,
+    campaignId: randomString("campaign"),
+    campaignName: randomString("Campaign"),
+    orderNumber: "TM-271064",
+    ...overrides,
+  };
+}
+
+export function aPacingInsertionOrderV1(overrides: Partial<PacingInsertionOrderV1> = {}): PacingInsertionOrderV1 {
+  return {
+    orderId: randomString("order"),
+    orderNumber: "TM-271064",
+    orderName: undefined,
+    orderBudget: 250000,
+    orderStartDate: "2026-01-01",
+    orderEndDate: "2026-03-31",
+    orderStatus: "Active",
+    ...overrides,
+  };
+}
+
+export function aPacingDraftV1(overrides: Partial<PacingDraftV1> = {}): PacingDraftV1 {
+  return {
+    ok: true,
+    client: randomString("Client"),
+    agency: randomString("Agency"),
+    campaign: randomString("Campaign"),
+    orderNumber: "TM-271064",
+    orderNumbers: ["TM-271064"],
+    lineItems: [aPacingDraftLineItemV1()],
+    insertionOrders: [aPacingInsertionOrderV1()],
+    notFoundIds: [],
+    warnings: [],
+    inUse: {},
+    ...overrides,
+  };
+}
+
+export function aPacingCreateResultV1(overrides: Partial<PacingCreateResultV1> = {}): PacingCreateResultV1 {
+  return {
+    pacingId: randomString("pacing"),
+    dashSlug: randomString("dash-slug"),
+    ...overrides,
+  };
+}
+
+export function aPacingLibraryEntryV1(overrides: Partial<PacingLibraryEntryV1> = {}): PacingLibraryEntryV1 {
+  return {
+    id: randomString("entry"),
+    kind: "widget",
+    name: randomString("Widget"),
+    description: null,
+    definition: { id: "w_seed0001", kind: "composite", schemaVersion: 2 },
+    ownerName: "Azat Nabiev",
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-02T00:00:00Z",
+    likes: 0,
+    liked: false,
+    mine: true,
+    usage: 0,
     ...overrides,
   };
 }

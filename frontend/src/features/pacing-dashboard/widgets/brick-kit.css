@@ -1,0 +1,84 @@
+/* Widget brick kit - background tints/top borders only, never a left-rail stripe (project rule). */
+
+.wgt-bigstat__label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+.wgt-bigstat__value { font-size: 22px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wgt-bigstat__caption { margin-top: 2px; font-size: 12px; color: var(--muted-strong); }
+
+.wgt-meter__track { position: relative; height: 8px; border-radius: 6px; background: var(--n-200); }
+.wgt-meter__fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 6px; background: var(--primary); }
+.wgt-meter__target { position: absolute; top: -2px; width: 2px; height: 12px; background: var(--border-strong); }
+.wgt-meter__labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--muted); }
+
+.wgt-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+
+.wgt-delta-chip { font-size: 12px; font-weight: 700; }
+
+.wgt-statrow { display: flex; gap: 12px; flex-wrap: wrap; }
+.wgt-statrow--pair { justify-content: space-between; }
+.wgt-statrow__label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.wgt-statrow__value { font-size: 13.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.wgt-verdict__word { font-size: 20px; font-weight: 800; }
+.wgt-verdict__reason { margin-top: 2px; font-size: 12px; color: var(--muted-strong); }
+
+.wgt-progress__track { position: relative; height: 8px; border-radius: 6px; background: var(--n-200); overflow: visible; }
+.wgt-progress__fill { height: 100%; border-radius: 6px; }
+.wgt-progress__tick { position: absolute; top: -2px; width: 2px; height: 12px; background: var(--border-strong); }
+.wgt-progress__tick-label { margin-top: 4px; font-size: 11px; color: var(--muted); }
+
+.wgt-flight__track { height: 6px; border-radius: 6px; background: var(--n-200); }
+.wgt-flight__fill { height: 100%; border-radius: 6px; background: var(--primary); }
+.wgt-flight__label { margin-top: 6px; font-size: 12px; color: var(--muted-strong); }
+
+.wgt-detail__label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.wgt-detail__value { font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wgt-detail__sub { margin-top: 2px; font-size: 11px; color: var(--muted); }
+
+.wgt-unitbar { display: flex; flex-direction: column; gap: 4px; }
+.wgt-unitbar__head { display: flex; justify-content: space-between; font-size: 12px; }
+.wgt-unitbar__unit { font-weight: 700; color: var(--ink); }
+.wgt-unitbar__actual { color: var(--muted-strong); }
+.wgt-unitbar__track { position: relative; height: 7px; border-radius: 6px; background: var(--n-200); }
+.wgt-unitbar__fill { height: 100%; border-radius: 6px; }
+.wgt-unitbar__mark { position: absolute; top: -2px; width: 2px; height: 11px; background: var(--border-strong); }
+
+.wgt-gauge { display: flex; flex-direction: column; align-items: center; }
+.wgt-gauge__value { font-size: 18px; font-weight: 800; }
+.wgt-gauge__sub { font-size: 11px; color: var(--muted); }
+
+.wgt-money__label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.wgt-money__value { font-size: 16px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wgt-money__note { margin-top: 2px; font-size: 11px; color: var(--muted); }
+
+.wgt-kvrow { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
+.wgt-kvrow__label { color: var(--muted-strong); }
+.wgt-kvrow__value { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wgt-kvrow--strong .wgt-kvrow__value { font-size: 15px; color: var(--primary); }
+.wgt-kvrow--muted .wgt-kvrow__value { color: var(--muted-strong); }
+.wgt-kvrow__sub { color: var(--muted); }
+
+.wgt-note { font-size: 12px; color: var(--muted-strong); }
+.wgt-note--center { text-align: center; }
+.wgt-note--end { text-align: right; }
+
+.wgt-unsupported { padding: 8px 0; }
+.wgt-unsupported__label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.wgt-unsupported__message { font-size: 12px; font-style: italic; color: var(--muted); }
+
+/* ── layout columns: a tint or a top border marks a framed column, never a side rail ── */
+.wgt-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wgt-col--card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.wgt-col--signal {
+  background: var(--n-100);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.wgt-col__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wgt-col__title { font-size: 12px; font-weight: 700; color: var(--ink); }
+.wgt-col__sub { font-size: 11px; color: var(--muted); }
+.wgt-col__body { display: flex; flex-direction: column; gap: 8px; }

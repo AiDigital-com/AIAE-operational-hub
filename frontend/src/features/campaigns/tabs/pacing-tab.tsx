@@ -1,245 +1,272 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useOutletContext } from "react-router-dom";
+import { formatError } from "../../../shared/format/error";
+import { campaignDisplayName } from "../../../shared/format/names";
 import { cn } from "../../../shared/style/cn";
-import { SearchIcon, SettingsIcon } from "../../../shared/ui/icons/icons";
-import { fmtMoney } from "../../pacing/mock/format";
-import { useCampaignPacing } from "../../pacing/mock/hooks";
-import { paceOf, pdCompute } from "../../pacing/mock/pacing";
+import { ChevronDownIcon } from "../../../shared/ui/icons/icons";
+import { LoadingBlock } from "../../../shared/ui/loading-spinner/loading-spinner";
+import { MarginCell } from "../../../shared/ui/margin-cell/margin-cell";
+import { StatusBadge } from "../../../shared/ui/status-badge/status-badge";
+// Money/date string helpers, shared with the Pacing Overview (§4) so the same figures read
+// identically on both screens.
+import { fmtBudget, fmtDate } from "../../pacing/mock/format";
+import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity } from "../../pacing-overview/format";
+import { useCampaignPacings } from "../../pacing-overview/hooks";
+import type { OpenPacingState } from "../../pacing-overview/navigation";
+import { AlertsBlock } from "../../pacing-overview/alerts-block";
+import type { PacingRowV1 } from "../../pacing-overview/types";
+import { PacingDashboard } from "../../pacing-dashboard/pacing-dashboard";
+import { CreatePacingPanel } from "../../pacing-create/create-pacing-panel";
 import type { CampaignTabContext } from "../campaign-workspace";
-import { PacingSettings } from "./pacing-settings";
 import "./pacing-tab.css";
 
-const TIME_SEGMENTS = ["Flight", "30d", "14d", "7d", "Custom"] as const;
-const MARGIN_SCALE_PP = 10;
+/**
+ * One pacing on this campaign's tab. Collapsed, it reads like an Overview row; expanded ("shows its
+ * detail in place", US-112) it adds flight/line-item detail, the full alert text, an "Open full
+ * dashboard" action into §6's detail view, and — when this pacing covers more than one campaign
+ * (US-113) — a notice naming the others, each a link that opens the SAME pacing on that campaign's own
+ * Pacing tab.
+ */
+function PacingListItem({
+  row,
+  currentCampaignId,
+  expanded,
+  onToggle,
+  onOpenDashboard,
+  itemRef,
+}: {
+  row: PacingRowV1;
+  currentCampaignId: number;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpenDashboard: () => void;
+  itemRef?: React.Ref<HTMLLIElement>;
+}) {
+  const statusStyle = PACING_STATUS_STYLE[row.status] ?? { color: "var(--muted)" };
+  const paceStatus = row.paceStatus ?? "no_data";
+  const alerts = row.alerts;
+  const alertsBySeverity = groupAlertsBySeverity(alerts);
+  // "Also covers" is every campaign on this pacing OTHER than the one whose tab we're already on —
+  // not "everything after the first": the pacing can list this campaign in any position.
+  const otherCampaigns = (row.campaigns ?? []).filter((campaign) => Number(campaign.id) !== currentCampaignId);
 
-function nf(n: number): string {
-  return Math.round(n).toLocaleString("en-US");
+  return (
+    <li className={cn("pacing-tab__item", expanded && "pacing-tab__item--open")} ref={itemRef}>
+      <button
+        type="button"
+        className="pacing-tab__item-head"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <ChevronDownIcon className={cn("pacing-tab__chevron", expanded && "pacing-tab__chevron--open")} />
+        <span className="pacing-tab__item-name">
+          {row.name}
+          {otherCampaigns.length > 0 && (
+            <span className="pacing-tab__item-multi">
+              +{otherCampaigns.length} other campaign{otherCampaigns.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </span>
+        <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
+        <span className="pacing-tab__item-owner">{row.ownerName ?? "—"}</span>
+        <MarginCell
+          actual={row.marginActualPct ?? null}
+          target={row.marginTargetPct ?? 0}
+          className="pacing-tab__item-margin"
+        />
+        {row.pacingDeviationPct == null ? (
+          <span className="pacing-tab__item-pace pacing-tab__item-pace--na">—</span>
+        ) : (
+          <span className="pacing-tab__item-pace" style={{ color: PACE_STATUS_COLOR[paceStatus] }}>
+            {row.pacingDeviationPct > 0 ? "+" : ""}
+            {row.pacingDeviationPct.toFixed(1)}pp
+          </span>
+        )}
+        <span className="pacing-tab__item-budget">{fmtBudget(row.budgetTotal ?? 0)}</span>
+        {alerts.length > 0 ? (
+          <span className="pacing-tab__item-alerts">
+            {ALERT_SEVERITY_ORDER.filter((severity) => alertsBySeverity[severity]?.length).map((severity) => (
+              <span
+                key={severity}
+                className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}
+              >
+                {alertsBySeverity[severity].length}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="pacing-tab__item-alerts pacing-tab__item-alerts--none" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="pacing-tab__item-body">
+          <dl className="pacing-tab__detail-grid">
+            <div className="pacing-tab__detail-cell">
+              <dt>Flight</dt>
+              <dd>
+                {row.flightStart ? fmtDate(row.flightStart) : "—"} – {row.flightEnd ? fmtDate(row.flightEnd) : "—"}
+              </dd>
+            </div>
+            <div className="pacing-tab__detail-cell">
+              <dt>Line items</dt>
+              <dd>{row.lineItemCount}</dd>
+            </div>
+            <div className="pacing-tab__detail-cell">
+              <dt>Pace</dt>
+              <dd>{PACE_STATUS_LABEL[paceStatus]}</dd>
+            </div>
+            <div className="pacing-tab__detail-cell">
+              <dt>Margin target</dt>
+              <dd>{row.marginTargetPct != null ? `${row.marginTargetPct}%` : "—"}</dd>
+            </div>
+          </dl>
+
+          {/* §6 of the migration plan: the full health/financial/charts/widget-library view. Only
+              reachable when Pacing has resolved this row's dash_slug (see PacingRowV1.dashSlug's own
+              doc comment on when that can be absent). */}
+          {row.dashSlug && (
+            <button type="button" className="button button--sm pacing-tab__open-dashboard" onClick={onOpenDashboard}>
+              Open full dashboard
+            </button>
+          )}
+
+          <AlertsBlock alerts={alerts} />
+
+          {otherCampaigns.length > 0 && (
+            <p className="pacing-tab__notice">
+              This pacing also covers{" "}
+              {otherCampaigns.map((campaign, index) => {
+                const campaignId = Number(campaign.id);
+                const state: OpenPacingState = { openPacingId: row.id };
+                return (
+                  <span key={campaign.id}>
+                    {index > 0 && ", "}
+                    {Number.isFinite(campaignId) ? (
+                      <Link to={`/campaigns/${campaignId}/pacing`} state={state}>
+                        {campaignDisplayName(campaign.name)}
+                      </Link>
+                    ) : (
+                      campaignDisplayName(campaign.name)
+                    )}
+                  </span>
+                );
+              })}
+              .
+            </p>
+          )}
+        </div>
+      )}
+    </li>
+  );
 }
 
 /**
- * W2 — the mocked stand-in for the real pacing-src dashboard (see 03-REAL-DASHBOARD-INTEGRATION.md).
- * The filter row is visual only this phase (no list to filter against yet); the KPI grid and financial
- * strip are computed from `useCampaignPacing` + `pdCompute`, stable per campaign since pacing is seeded
- * by the real campaign id. "Pacing settings" opens the W6 slide-over (see `./pacing-settings`).
+ * A campaign's Pacing tab (§5 of the migration plan, US-112/US-113): every pacing whose stored
+ * campaign set contains this campaign. Opening one expands it in place; arriving from the Overview
+ * with a specific pacing to open (`location.state.openPacingId`, set by US-113's navigation) expands
+ * and scrolls to that one automatically.
  */
 export function PacingTab() {
-  const { campaign } = useOutletContext<CampaignTabContext>();
-  const pacingQuery = useCampaignPacing(campaign);
-  const [filterText, setFilterText] = useState("");
-  const [timeSegment, setTimeSegment] = useState<(typeof TIME_SEGMENTS)[number]>("Flight");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { campaign, agencyName, clientName } = useOutletContext<CampaignTabContext>();
+  const location = useLocation();
+  const openPacingId = (location.state as OpenPacingState | null)?.openPacingId;
+  const pacingsQuery = useCampaignPacings(campaign.id);
+  const [expandedId, setExpandedId] = useState<string | null>(openPacingId ?? null);
+  const highlightedRef = useRef<HTMLLIElement | null>(null);
 
-  const pacing = pacingQuery.data;
-  if (!pacing) return null;
+  // A fresh navigation (Overview, or an "also covers" link from another campaign's tab) always wins
+  // over whatever was expanded before — including re-opening the SAME pacing after following a link
+  // back and forth between two campaigns it covers.
+  useEffect(() => {
+    if (openPacingId) setExpandedId(openPacingId);
+  }, [openPacingId]);
 
-  // A zero-budget campaign has no meaningful pacing figure to compare against (see Overview/Campaigns'
-  // identical `isNoData` treatment) - margin is nulled out the same way; pp stays numeric (pdCompute's
-  // input requires a number) but its display state is resolved via the same paceOf() used everywhere.
-  const isNoData = pacing.budget === 0;
-  const displayPace = paceOf({ budget: pacing.budget, pp: pacing.pp });
-  const marginA = isNoData ? null : pacing.marginA;
+  useEffect(() => {
+    if (expandedId && highlightedRef.current) {
+      highlightedRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [expandedId, pacingsQuery.data]);
 
-  const k = pdCompute({
-    start: campaign.start_date ?? "",
-    end: campaign.end_date ?? "",
-    budget: pacing.budget,
-    pp: pacing.pp,
-    marginA,
-    marginT: pacing.marginT,
-  });
+  const rows = pacingsQuery.data?.pacings ?? [];
+  const [openDashboardId, setOpenDashboardId] = useState<string | null>(null);
+  const openDashboardRow = rows.find((row) => row.id === openDashboardId);
+  // §8 (Create Pacing): swaps the list for the review/create panel in place, same pattern as
+  // openDashboardRow above - "Back to pacings" returns to exactly the list the user left.
+  const [creating, setCreating] = useState(false);
+  // The pacing just created from this tab, if any. Its first refresh runs fire-and-forget after
+  // create, so its dashboard can open before any data exists and should wait for that first build.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const canCreate = pacingsQuery.data?.scope.can_create ?? false;
 
-  const opRead =
-    displayPace === "over" ? "Ahead of pace"
-      : displayPace === "under" ? "Behind pace"
-      : displayPace === "nodata" ? "No data"
-      : "On pace";
-  const opReadNote =
-    displayPace === "over" ? "Latest day exceeded the daily target. Overall pace is ahead."
-      : displayPace === "under" ? "Delivery is trailing the plan. Consider boosting."
-      : displayPace === "nodata" ? "No delivery recorded yet."
-      : "Delivery is tracking the plan.";
-  const deliveryGood = pacing.pp >= 0;
-  const marginDiff = k.marginDiff;
-  const marginGood = marginDiff != null && marginDiff >= 0;
-  const marginMarkerLeft = 50 + (Math.max(-MARGIN_SCALE_PP, Math.min(MARGIN_SCALE_PP, marginDiff ?? 0)) / MARGIN_SCALE_PP) * 50;
+  // §6: opening a full dashboard replaces this tab's list in place (no route change) - "Back to
+  // pacings" returns to exactly the list/expansion state the user left, since it's all still here.
+  if (openDashboardRow) {
+    return (
+      <PacingDashboard
+        row={openDashboardRow}
+        watchFirstData={openDashboardRow.id === justCreatedId}
+        onBack={() => setOpenDashboardId(null)}
+      />
+    );
+  }
 
-  const cpm = (20 + (pacing.budget % 7)).toFixed(2);
-  const dspFact = pacing.budget * Math.min(1, k.actualPct / 100);
-  const clientFact = dspFact * 1.12;
+  if (creating) {
+    return (
+      <CreatePacingPanel
+        campaignId={campaign.id}
+        campaignName={campaignDisplayName(campaign.name)}
+        agencyName={agencyName ?? campaign.agency_name ?? undefined}
+        clientName={clientName ?? campaign.client_name ?? undefined}
+        onClose={() => setCreating(false)}
+        onCreated={(pacingId) => {
+          setCreating(false);
+          setExpandedId(pacingId);
+          setJustCreatedId(pacingId);
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="pacing-tab">
-      <div className="pacing-tab__filters">
-        <label className="pacing-tab__search">
-          <SearchIcon />
-          <input
-            type="search"
-            placeholder="Filter anything…"
-            aria-label="Filter anything"
-            value={filterText}
-            onChange={(event) => setFilterText(event.target.value)}
-          />
-        </label>
-        <select className="pacing-tab__fsel" aria-label="Filter by channel" defaultValue="">
-          <option value="">All Channels</option>
-          <option>Display</option>
-          <option>Video</option>
-          <option>Search</option>
-          <option>CTV/OTT</option>
-          <option>Audio</option>
-        </select>
-        <select className="pacing-tab__fsel" aria-label="Filter by platform" defaultValue="">
-          <option value="">All Platforms</option>
-          <option>DV360</option>
-          <option>The Trade Desk</option>
-        </select>
-        <div className="pacing-tab__seg" role="group" aria-label="Time range">
-          {TIME_SEGMENTS.map((segment) => (
-            <button
-              key={segment}
-              type="button"
-              className={cn("pacing-tab__seg-btn", timeSegment === segment && "pacing-tab__seg-btn--active")}
-              onClick={() => setTimeSegment(segment)}
-            >
-              {segment}
-            </button>
-          ))}
+    <section className="pacing-tab">
+      {pacingsQuery.isSuccess && canCreate && (
+        <div className="pacing-tab__actions">
+          <button type="button" className="button button--sm" onClick={() => setCreating(true)}>
+            Create Pacing
+          </button>
         </div>
-        <button
-          type="button"
-          className="button button--ghost button--sm pacing-tab__settings-btn"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <SettingsIcon />
-          Pacing settings
-        </button>
-      </div>
+      )}
 
-      <PacingSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {pacingsQuery.isPending && <LoadingBlock label="Loading pacings" />}
 
-      <div className="pacing-tab__grid">
-        <div className="pacing-tab__col">
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Flight Plan units</div>
-            <div className="pacing-tab__val">{nf(k.planUnits)} <span className="pacing-tab__unit">impr</span></div>
-            <div className="pacing-tab__note">Full-flight plan from NetSuite.</div>
-          </div>
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Plan rate on {k.asOf}</div>
-            <div className="pacing-tab__val">
-              {nf(k.planRate)}<span className="pacing-tab__unit">/day</span> <span className="pacing-tab__unit">impr</span>
-            </div>
-            <div className="pacing-tab__note">{nf(k.planUnits)} ÷ {k.flightDays} days.</div>
-          </div>
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Actual by {k.asOf}</div>
-            <div className="pacing-tab__val">{nf(k.actualByDay)} <span className="pacing-tab__unit">impr</span></div>
-            <div className="pacing-tab__note">
-              <b>{nf(k.aboveExpected)} impr</b> {k.aboveExpected >= 0 ? "above" : "below"} expected.
-            </div>
-          </div>
+      {pacingsQuery.isError && <p className="form-error">{formatError(pacingsQuery.error)}</p>}
+
+      {pacingsQuery.isSuccess && rows.length === 0 && (
+        <div className="pacing-tab__empty">
+          <p className="pacing-tab__empty-title">No pacings yet</p>
+          <p className="pacing-tab__empty-body">
+            No pacing has been created for this campaign in Pacing yet.
+            {canCreate && " Use “Create Pacing” above to onboard it."}
+          </p>
         </div>
+      )}
 
-        <div className="pacing-tab__card">
-          <div className="pacing-tab__h">Delivery</div>
-          <div className="pacing-tab__sub">Plan Pace vs Fact Pace</div>
-          <div className="pacing-tab__deliv-row">
-            <span>Impressions</span>
-            <span>Actual <b>{k.actualPct.toFixed(1)}%</b> / Plan {k.planPct.toFixed(1)}%</span>
-          </div>
-          <div className="pacing-tab__progress">
-            <div
-              className="pacing-tab__progress-fill"
-              style={{ width: `${Math.min(100, k.actualPct)}%`, background: deliveryGood ? "var(--good)" : "var(--bad)" }}
+      {pacingsQuery.isSuccess && rows.length > 0 && (
+        <ul className="pacing-tab__list">
+          {rows.map((row) => (
+            <PacingListItem
+              key={row.id}
+              row={row}
+              currentCampaignId={campaign.id}
+              expanded={expandedId === row.id}
+              onToggle={() => setExpandedId((current) => (current === row.id ? null : row.id))}
+              onOpenDashboard={() => setOpenDashboardId(row.id)}
+              itemRef={expandedId === row.id ? highlightedRef : undefined}
             />
-            <div className="pacing-tab__progress-marker" style={{ left: `${Math.min(100, k.planPct)}%` }} />
-          </div>
-          <div className={cn("pacing-tab__delta", deliveryGood ? "pacing-tab__delta--good" : "pacing-tab__delta--bad")}>
-            {pacing.pp > 0 ? "+" : ""}{pacing.pp.toFixed(1)} pp {deliveryGood ? "ahead" : "behind"} of plan · {opRead}
-          </div>
-        </div>
-
-        <div className="pacing-tab__card">
-          <div className="pacing-tab__h">Margin</div>
-          <div className="pacing-tab__sub">Target {pacing.marginT.toFixed(1)}%</div>
-          {marginDiff == null ? (
-            <>
-              <div className="pacing-tab__bignum">—</div>
-              <div className="pacing-tab__delta">No margin data</div>
-            </>
-          ) : (
-            <>
-              <div className={cn("pacing-tab__bignum", marginGood ? "pacing-tab__bignum--good" : "pacing-tab__bignum--bad")}>
-                {marginA?.toFixed(1)}%
-              </div>
-              <div className={cn("pacing-tab__delta", marginGood ? "pacing-tab__delta--good" : "pacing-tab__delta--bad")}>
-                {marginDiff > 0 ? "+" : ""}{marginDiff.toFixed(1)} pp vs target
-              </div>
-              <div className="pacing-tab__scale">
-                <span>−{MARGIN_SCALE_PP}pp</span>
-                <span>Target</span>
-                <span>+{MARGIN_SCALE_PP}pp</span>
-              </div>
-              <div className="pacing-tab__progress">
-                <div
-                  className="pacing-tab__progress-marker pacing-tab__progress-marker--tall"
-                  style={{ left: `${marginMarkerLeft}%`, background: marginGood ? "var(--good)" : "var(--bad)" }}
-                />
-              </div>
-              <span className={cn("pacing-tab__chip", marginGood ? "pacing-tab__chip--good" : "pacing-tab__chip--bad")}>
-                {marginGood ? "On target" : "Below target"}
-              </span>
-            </>
-          )}
-        </div>
-
-        <div className="pacing-tab__col">
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Needed on {k.asOf} to be on pace</div>
-            <div className={cn("pacing-tab__val", k.neededPerDay < 0 && "pacing-tab__val--neg")}>
-              {k.neededPerDay > 0 ? "+" : ""}{nf(k.neededPerDay)}<span className="pacing-tab__unit">/day</span>
-            </div>
-            <div className="pacing-tab__note">{nf(k.neededTotal)} impr ÷ {k.daysLeftN} days.</div>
-          </div>
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Actual on {k.asOf}</div>
-            <div className="pacing-tab__val">{nf(k.actualToday)} <span className="pacing-tab__unit">impr</span></div>
-            <div className="pacing-tab__note">
-              <b>{nf(k.aboveDaily)}</b> {k.aboveDaily >= 0 ? "above" : "below"} daily target · {fmtMoney(k.daySpend)} spend
-            </div>
-          </div>
-          <div className="pacing-tab__card">
-            <div className="pacing-tab__lbl">Operational Read</div>
-            <div className="pacing-tab__read">{opRead}</div>
-            <div className="pacing-tab__note">{opReadNote}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="pacing-tab__daynote">Day {k.dayN} of {k.flightDays} · {k.daysLeftN} days left</div>
-
-      <div className="pacing-tab__fin">
-        <div className="pacing-tab__fincard">
-          <div className="pacing-tab__fin-h">Client Plan <span className="pacing-tab__tag">Client Side</span></div>
-          <div className="pacing-tab__fin-sub">Budget Plan</div>
-          <div className="pacing-tab__fin-val">{fmtMoney(pacing.budget)}</div>
-        </div>
-        <div className="pacing-tab__fincard">
-          <div className="pacing-tab__fin-h">Buying Guardrail <span className="pacing-tab__tag">Rate Ceiling</span></div>
-          <div className="pacing-tab__fin-sub">Our Cost Plan (CPM)</div>
-          <div className="pacing-tab__fin-val">${cpm}</div>
-        </div>
-        <div className="pacing-tab__fincard">
-          <div className="pacing-tab__fin-h">DSP Side <span className="pacing-tab__tag">Actuals</span></div>
-          <div className="pacing-tab__fin-sub">DSP Spend Fact</div>
-          <div className="pacing-tab__fin-val">{fmtMoney(dspFact)}</div>
-        </div>
-        <div className="pacing-tab__fincard">
-          <div className="pacing-tab__fin-h">Client Fact <span className="pacing-tab__tag">Actuals</span></div>
-          <div className="pacing-tab__fin-sub">Client Budget Fact</div>
-          <div className="pacing-tab__fin-val">{fmtMoney(clientFact)}</div>
-        </div>
-      </div>
-    </div>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
