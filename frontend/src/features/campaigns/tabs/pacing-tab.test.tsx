@@ -137,6 +137,24 @@ describe("PacingTab", () => {
     expect(await screen.findByText("No pacings yet")).toBeInTheDocument();
   });
 
+  // Regression: a response whose scope is absent used to throw inside render
+  // ("Cannot read properties of undefined (reading 'can_create')"), and an uncaught
+  // TypeError in render unmounts the tree - the tab went blank instead of showing
+  // anything at all. The tab must degrade to "cannot create" rather than disappear.
+  it("renders without a scope in the response instead of blanking the tab", async () => {
+    // Given: a 200 whose body carries pacings but no scope
+    vi.mocked(listCampaignPacings).mockResolvedValue({
+      pacings: [],
+    } as unknown as Awaited<ReturnType<typeof listCampaignPacings>>);
+
+    // When:
+    renderTab();
+
+    // Then: the empty state renders, and the Create action is simply absent
+    expect(await screen.findByText("No pacings yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Pacing" })).not.toBeInTheDocument();
+  });
+
   it("lists every pacing whose campaign set contains this campaign (US-112)", async () => {
     // Given:
     vi.mocked(listCampaignPacings).mockResolvedValue(

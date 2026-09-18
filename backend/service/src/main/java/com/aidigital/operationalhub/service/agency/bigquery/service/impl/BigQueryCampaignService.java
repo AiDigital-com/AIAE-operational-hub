@@ -20,6 +20,7 @@ import com.aidigital.operationalhub.service.rbac.AgencyVisibilityService;
 import com.aidigital.operationalhub.service.rbac.model.AgencyVisibility;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +42,7 @@ import java.util.Objects;
  * order's own line-item count. Any future rollup of an order-level column over this table must apply
  * the same rule: aggregate the line-item-grained column, or dedup per {@code order_id} first.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BigQueryCampaignService implements CampaignService {
@@ -199,8 +201,20 @@ public class BigQueryCampaignService implements CampaignService {
 		query.filter(CAMPAIGN_ID, true, idFilter);
 		// Cached with the rest of the snapshot reads: the answer changes once a night, and every report and
 		// dashboard interaction on a campaign asks it again.
-		return gateway.fetchCached(query.build(), this::toCampaignIdentity).stream().findFirst()
-				.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_025, campaignId));
+		BqRequest request = query.build();
+		return gateway.fetchCached(request, this::toCampaignIdentity).stream().findFirst()
+				.orElseThrow(() -> {
+					// Read through a cache that keeps empty results for the region's full TTL, so this
+					// can be either "BigQuery has no such row" or "an earlier empty answer is still
+					// cached". The two are indistinguishable from the 404 the caller ends up sending,
+					// and twenty-one call sites turn it into one: every campaign tab, the report rows,
+					// the dashboard data sources, the insertion orders. Pair this line with
+					// CachedBigQuerySearchExecutor's "caching the empty result" entry: if that one is
+					// absent for the same SQL, the answer came from the cache rather than from BigQuery.
+					log.warn("Campaign identity not resolved: campaignId={}, unrestrictedVisibility={}, sql={}",
+							campaignId, visibility.agencyIds().isEmpty(), request.sql());
+					return new BusinessException(OperationalHubErrorReason.OPH_025, campaignId);
+				});
 	}
 
 	/**
