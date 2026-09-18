@@ -197,7 +197,12 @@ export function PacingTab() {
   // The pacing just created from this tab, if any. Its first refresh runs fire-and-forget after
   // create, so its dashboard can open before any data exists and should wait for that first build.
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
-  const canCreate = pacingsQuery.data?.scope.can_create ?? false;
+  // `?.` on scope as well as on data. Optional chaining short-circuits the whole
+  // chain only when the value it is attached to is nullish, so `data?.scope.can_create`
+  // still throws when the response arrives without a scope — and an uncaught
+  // TypeError in render unmounts the tree, which is why a 404 from this endpoint
+  // showed up as a blank page rather than an error state.
+  const canCreate = pacingsQuery.data?.scope?.can_create ?? false;
 
   // §6: opening a full dashboard replaces this tab's list in place (no route change) - "Back to
   // pacings" returns to exactly the list/expansion state the user left, since it's all still here.
