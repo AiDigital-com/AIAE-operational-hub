@@ -2,6 +2,7 @@ import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
   CreateTeamRequestV1,
+  PacingUserSyncSummaryV1,
   SyncSummaryV1,
   TeamPageResponseV1,
   TeamSearchRequestV1,
@@ -50,4 +51,16 @@ export async function updateTeam(teamId: number, body: UpdateTeamRequestV1): Pro
 
 export async function syncNetSuite(): Promise<SyncSummaryV1> {
   return requireData(await apiClient.POST("/api/v1/sync"));
+}
+
+/**
+ * Push every Hub employee into Pacing's user mirror. Pacing keeps that mirror
+ * because ownership, delegations and its journal are foreign-keyed to it, so a
+ * Hub employee who has never been synced cannot own or be assigned anything
+ * there and its API answers 403 for them.
+ *
+ * The nightly scheduler runs this too; the button only avoids waiting for it.
+ */
+export async function syncPacingUsers(): Promise<PacingUserSyncSummaryV1> {
+  return requireData(await apiClient.POST("/api/v1/sync/pacing-users"));
 }

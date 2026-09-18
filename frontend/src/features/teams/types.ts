@@ -6,3 +6,4 @@ export type UpdateTeamRequestV1 = components["schemas"]["UpdateTeamRequestV1"];
 export type TeamSearchRequestV1 = components["schemas"]["TeamSearchRequestV1"];
 export type TeamPageResponseV1 = components["schemas"]["TeamPageResponseV1"];
 export type SyncSummaryV1 = components["schemas"]["SyncSummaryV1"];
+export type PacingUserSyncSummaryV1 = components["schemas"]["PacingUserSyncSummaryV1"];
