@@ -76,7 +76,7 @@ class PacingAdminControllerTest {
 
 		// When / Then:
 		mockMvc.perform(delete("/api/v1/pacing/admin/pacings/p1"))
-				.andExpect(status().isOk());
+				.andExpect(status().isNoContent());
 		verify(rbacAuthorizationService).requireAdmin(user);
 		verify(pacingClient).deletePacing(assertion, "p1");
 	}
