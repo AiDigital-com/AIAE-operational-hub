@@ -7,7 +7,7 @@ import { aHubUserSummaryV1, aRoleAssignmentV1, aRoleV1, aUserV1 } from "@/test/f
 import { ToastProvider } from "../../shared/ui/toast/toast";
 import { assignRole, getCurrentUser, listRoleAssignments, listRoles, revokeRole, searchUsers } from "../rbac/api";
 import type { HubUserPageResponseV1, HubUserSummaryV1 } from "../rbac/types";
-import { createTeam, listTeams, searchTeams, syncNetSuite, updateTeam } from "../teams/api";
+import { createTeam, listTeams, searchTeams, syncNetSuite, syncPacingUsers, updateTeam } from "../teams/api";
 import type { TeamPageResponseV1, TeamV1 } from "../teams/types";
 import { TeamManagement } from "./team-management";
 
@@ -33,6 +33,7 @@ vi.mock("../teams/api", () => ({
   createTeam: vi.fn(),
   updateTeam: vi.fn(),
   syncNetSuite: vi.fn(),
+  syncPacingUsers: vi.fn(),
 }));
 
 function aUserPage(content: HubUserSummaryV1[]): HubUserPageResponseV1 {
@@ -472,5 +473,44 @@ describe("TeamManagement", () => {
     expect(
       await screen.findByText(/Synced 3 teams, 12 users, 5 assignments updated, 8 agencies mapped\./)
     ).toBeInTheDocument();
+  });
+
+  it("should sync users to Pacing and report the summary", async () => {
+    vi.mocked(syncPacingUsers).mockResolvedValue({
+      usersSent: 12,
+      createdInPacing: 4,
+      activated: 1,
+      deactivated: 2,
+      unchanged: 5,
+      idsWritten: 4,
+    });
+
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Sync users to Pacing" }));
+
+    await waitFor(() => expect(syncPacingUsers).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(/Sent 12 users to Pacing: 4 new, 1 activated, 2 deactivated, 5 unchanged\./)
+    ).toBeInTheDocument();
+  });
+
+  it("should report a failed Pacing user sync instead of a success toast", async () => {
+    vi.mocked(syncPacingUsers).mockRejectedValue(new Error("Pacing unreachable"));
+
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Sync users to Pacing" }));
+
+    await waitFor(() => expect(syncPacingUsers).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Pacing unreachable/)).toBeInTheDocument();
+  });
+
+  it("should keep the two sync buttons independent", async () => {
+    renderPage();
+    const bq = await screen.findByRole("button", { name: "Sync from BQ" });
+    const pacing = await screen.findByRole("button", { name: "Sync users to Pacing" });
+
+    expect(bq).toBeEnabled();
+    expect(pacing).toBeEnabled();
+    expect(bq).not.toBe(pacing);
   });
 });

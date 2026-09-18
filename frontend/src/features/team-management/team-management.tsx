@@ -5,7 +5,7 @@ import { cn } from "../../shared/style/cn";
 import { LoadingSpinner } from "../../shared/ui/loading-spinner/loading-spinner";
 import { useToast } from "../../shared/ui/toast/toast";
 import { searchUsers } from "../rbac/api";
-import { searchTeams, syncNetSuite } from "../teams/api";
+import { searchTeams, syncNetSuite, syncPacingUsers } from "../teams/api";
 import { TeamsPanel } from "./teams-panel";
 import { UsersPanel } from "./users-panel";
 import "./team-management.css";
@@ -58,6 +58,26 @@ export function TeamManagement() {
     onError: (error) => toast.showError(formatError(error)),
   });
 
+  /**
+   * Push Hub employees into Pacing's user mirror. Pacing foreign-keys ownership,
+   * delegations and its journal to that mirror, so an employee it has never seen
+   * gets a flat 403 from it — which the Pacing screens surface as "your account
+   * isn't synced yet". The nightly scheduler runs the same job; this button is
+   * what turns "wait until 01:30" into "press once".
+   *
+   * Nothing on this screen displays Pacing state, so there is no query to
+   * invalidate afterwards — the result is reported in the toast and nowhere else.
+   */
+  const pacingUserSyncMutation = useMutation({
+    mutationFn: syncPacingUsers,
+    onSuccess: (summary) =>
+      toast.showSuccess(
+        `Sent ${summary.usersSent} users to Pacing: ${summary.createdInPacing} new, ` +
+          `${summary.activated} activated, ${summary.deactivated} deactivated, ${summary.unchanged} unchanged.`
+      ),
+    onError: (error) => toast.showError(formatError(error)),
+  });
+
   const usersCount = usersCountQuery.data;
   const teamsCount = teamsCountQuery.data;
 
@@ -68,15 +88,26 @@ export function TeamManagement() {
           <h1 className="team-mgmt__title">Users Management</h1>
           <p className="team-mgmt__subtitle">View and manage your organization users and teams.</p>
         </div>
-        <button
-          type="button"
-          className="button button--secondary button--sm"
-          disabled={syncMutation.isPending}
-          onClick={() => syncMutation.mutate()}
-        >
-          {syncMutation.isPending && <LoadingSpinner size="sm" />}
-          Sync from BQ
-        </button>
+        <div className="team-mgmt__actions">
+          <button
+            type="button"
+            className="button button--secondary button--sm"
+            disabled={syncMutation.isPending}
+            onClick={() => syncMutation.mutate()}
+          >
+            {syncMutation.isPending && <LoadingSpinner size="sm" />}
+            Sync from BQ
+          </button>
+          <button
+            type="button"
+            className="button button--secondary button--sm"
+            disabled={pacingUserSyncMutation.isPending}
+            onClick={() => pacingUserSyncMutation.mutate()}
+          >
+            {pacingUserSyncMutation.isPending && <LoadingSpinner size="sm" />}
+            Sync users to Pacing
+          </button>
+        </div>
       </div>
 
       <div className="team-mgmt__tabs" role="tablist">
