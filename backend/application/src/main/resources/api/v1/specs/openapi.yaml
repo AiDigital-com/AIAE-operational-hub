@@ -3443,8 +3443,11 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: The pacing was deleted.
+        '204':
+          description: >
+            The pacing was deleted. No content: there is nothing to report, and a 200 with an
+            empty body made the generated client try to parse one - a successful delete surfaced
+            in the UI as "Unexpected end of JSON input".
         '401':
           description: The authorization token not provided or expired.
         '403':

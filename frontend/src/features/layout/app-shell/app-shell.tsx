@@ -37,8 +37,6 @@ const PacingOverview = lazy(() =>
 const PacingAdmin = lazy(() =>
   import("../../pacing-admin/pacing-admin").then((m) => ({ default: m.PacingAdmin }))
 );
-// TEMPORARY (Hub→Pacing probe): delete this line and the /pacing-probe route below.
-const PacingProbe = lazy(() => import("../../pacing-probe/pacing-probe").then((m) => ({ default: m.PacingProbe })));
 const SetupTab = lazy(() => import("../../campaigns/tabs/setup-tab").then((m) => ({ default: m.SetupTab })));
 const ReportingTab = lazy(() =>
   import("../../campaigns/tabs/reporting-tab").then((m) => ({ default: m.ReportingTab }))
@@ -136,8 +134,6 @@ export function AppShell() {
                   the same way /teams bounces them, and every backend call this screen makes refuses
                   a non-admin caller again on its own (PacingAdminController#requireAdmin). */}
               <Route path="/pacing-admin" element={admin ? <PacingAdmin /> : <Navigate to="/" replace />} />
-              {/* TEMPORARY: hand-check of the Hub→Pacing channel. Delete with the feature folder. */}
-              <Route path="/pacing-probe" element={<PacingProbe />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

@@ -45,7 +45,10 @@ public class PacingAdminController implements PacingAdminApi {
 	public ResponseEntity<Void> deletePacing(String pacingId) {
 		HubAssertion assertion = signCurrentUserAsAdmin();
 		pacingClient.deletePacing(assertion, pacingId);
-		return ResponseEntity.ok().build();
+		// 204, not 200: there is nothing to report, and an empty body under a 200
+		// made the generated client try to parse one - a successful delete reached
+		// the user as "Unexpected end of JSON input".
+		return ResponseEntity.noContent().build();
 	}
 
 	@Override
