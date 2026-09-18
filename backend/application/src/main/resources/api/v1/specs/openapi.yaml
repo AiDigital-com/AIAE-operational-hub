@@ -26,6 +26,39 @@ tags:
     description: Read-only access to campaigns sourced from BigQuery, optionally filtered by client or agency.
   - name: teams
     description: Admin-only management of Hub teams.
+  - name: pacing
+    description: Live pacing data fetched from the Pacing service, filtered by the caller's resolved Hub RBAC scope.
+  - name: pacingUserSync
+    description: Admin-triggered sync of Hub employees into Pacing's user mirror (a separate tag/interface
+      from "sync", which is the pre-existing NetSuite/Rippling sync — kept apart so each admin trigger
+      is its own generated API interface and controller).
+  - name: pacingDrift
+    description: >
+      Admin-only read of where the Hub roster and Pacing's user mirror disagree (US-106): employees
+      missing in Pacing, users in Pacing with no matching Hub employee, and name/active mismatches.
+      Read-only - never writes to either side.
+  - name: pacingDashboard
+    description: >
+      §6 of the migration plan ("Pacing Dashboard"): one pacing's full dashboard payload, its on-demand
+      refresh, and its per-pacing widget/layout selection. A thin passthrough to Pacing - the widget
+      maths and the widget-spec engine itself live entirely on the Pacing side. Also carries §9
+      ("Pacing Settings and plan data"): editing a pacing's plan (budget/impressions/margin/CTR/VCR/
+      rate type/flight/containers per line item, adding/removing line items) and browsing which of a
+      campaign's line items are not yet on this pacing - the same single write path Pacing itself
+      uses (POST .../settings on the Pacing side), never a second validator here.
+  - name: pacingLibrary
+    description: >
+      The shared widget/block/layout library (§6, US-116/US-118): browse, save, edit, remove and like
+      entries. A thin passthrough to Pacing's own library store.
+  - name: pacingAdmin
+    description: >
+      Administration of the pacing roster itself - not in the migration plan, but carried over from
+      the retired Pacing front end's own Admin screen because there is otherwise no way to delete a
+      mistakenly created pacing or to re-run the nightly Daily Build off-schedule. Admin-only on both
+      sides: the Hub refuses the request itself (a non-admin never reaches Pacing), and Pacing refuses
+      it again if it somehow did. Deletion is irreversible - it removes the pacing's delivery history
+      and journal along with it - and is never triggered from this API without the caller's own
+      explicit confirmation on the Hub's admin screen.
 paths:
   /api/v1/auth/me:
     get:
@@ -2538,6 +2571,1331 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/sync/pacing-users:
+    post:
+      tags:
+        - pacingUserSync
+      operationId: syncPacingUsers
+      description: >
+        Eagerly synchronizes Hub employees into Pacing's user mirror (POST
+        /api/internal/users/sync on the Pacing side), writing back each returned
+        pacing_user_id onto the matching hub_users row. Requires manage-roles permission.
+      responses:
+        '200':
+          description: The sync completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingUserSyncSummaryV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Syncing to Pacing failed. Also returned, deliberately, when Pacing answers 401 (the
+            two services' shared HMAC secrets disagree - a server misconfiguration) rather than
+            passing that 401 through, for the same reason as GET /api/v1/pacing/pacings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings:
+    get:
+      tags:
+        - pacing
+      operationId: listPacings
+      description: >
+        Resolves the current user's Hub RBAC role assignments into a Pacing scope assertion
+        (X-Hub-Assertion, HMAC-signed), then fetches the pacings that scope entitles them to from the
+        Pacing service. The resolved scope is included in the response so a caller can see why the
+        returned pacing list looks the way it does.
+      responses:
+        '200':
+          description: Pacings were fetched from the Pacing service successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingListResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The Pacing service answered the request with a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (it answered 403/unknown_user): the Hub
+            knows this user, but Pacing's user mirror does not yet. A sync gap, not an authorization
+            decision - see the distinct `OPH_053` error code in the response body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching pacings from the Pacing service failed. Also returned, deliberately, when Pacing
+            answers 401 (the two services' shared HMAC secrets disagree - a server misconfiguration,
+            never something the calling user did) rather than passing that 401 through: the Hub's own
+            frontend logs a user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - pacing
+      operationId: createPacing
+      description: >
+        §8 of the migration plan (US-123/124): creates a pacing from the reviewed, selected line
+        items of a campaign the user has already navigated to. `lineItems` carries each selected line
+        item exactly as GET /api/v1/campaigns/{campaignId}/pacing-draft returned it, with any
+        plan-value edits the user made before confirming (targetImpressions/marginPercent/
+        targetCtr/targetVcr/nativeBudget/rateType) - the Hub does not compute or adjust any of these,
+        it only forwards what the caller sent. Requires the current user's resolved Pacing
+        entitlement to carry `canCreate` - Pacing itself is the one that enforces this and answers
+        403 when it does not, exactly as it does for its own retired create screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingCreateV1'
+      responses:
+        '201':
+          description: The pacing was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingCreateResultV1'
+        '400':
+          description: >
+            Pacing rejected the request as structurally invalid (e.g. missing flight dates, mixed
+            currencies across the selected line items, or no pacing name) - the response's `detail`
+            names what was rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The current user's resolved Pacing entitlement does not carry `canCreate`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (it answered 403/unknown_user): the Hub
+            knows this user, but Pacing's user mirror does not yet. A sync gap, not an authorization
+            decision - see the distinct `OPH_053` error code in the response body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Creating the pacing failed. Also returned, deliberately, when Pacing answers 401 (the two
+            services' shared HMAC secrets disagree - a server misconfiguration, never something the
+            calling user did) rather than passing that 401 through: the Hub's own frontend logs a
+            user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/pacing-draft:
+    get:
+      tags:
+        - campaigns
+      operationId: getPacingDraft
+      description: >
+        §8 of the migration plan (US-121/122/123): the campaign's insertion orders and line items,
+        fetched live from NetSuite via Pacing's validate endpoint (POST /api/pacings/validate with a
+        campaign_id selector on the Pacing side), for review before creating a pacing. Each line
+        item's plan fields (targetImpressions, marginPercent, targetCtr, targetVcr) are already
+        auto-filled by Pacing/NetSuite where available - the Hub does not compute or look any of them
+        up itself. `inUse` marks which of these line items a live pacing already covers (US-123),
+        keyed by line item id.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: >
+            The campaign's line items were fetched successfully. `ok: false` in the body (still a 200)
+            means Pacing could validate the campaign but rejected pacing it as-is (e.g. more than one
+            non-USD currency among its line items) - `error` names why; there is nothing to review or
+            create until that is resolved on the NetSuite side.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDraftV1'
+        '400':
+          description: The campaign id was rejected by Pacing as an invalid selector.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching the campaign's line items failed. Also returned, deliberately, when Pacing
+            answers 401 (the two services' shared HMAC secrets disagree - a server misconfiguration,
+            never something the calling user did) rather than passing that 401 through: the Hub's own
+            frontend logs a user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/pacings:
+    get:
+      tags:
+        - campaigns
+      operationId: listCampaignPacings
+      description: >
+        §5 of the migration plan ("Campaign → Pacings"): lists every pacing whose stored campaign set
+        contains this campaign, for the campaign's Pacing tab (US-112). Resolves the same Hub RBAC →
+        Pacing scope assertion as GET /api/v1/pacing/pacings, then asks Pacing for that scope's
+        pacings filtered to this campaign (array containment on Pacing's own campaign_ids column) - a
+        pacing that covers this campaign but falls outside the caller's scope is filtered out same as
+        anywhere else. Row shape is identical to the Overview list (§4), including each row's own
+        campaigns[]: a pacing spanning more than this one campaign still lists its full campaign set,
+        so the caller can offer "also covers: ..." (US-113).
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Pacings for the campaign were fetched from the Pacing service successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingListResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (it answered 403/unknown_user): the Hub
+            knows this user, but Pacing's user mirror does not yet. A sync gap, not an authorization
+            decision - see the distinct `OPH_053` error code in the response body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching pacings from the Pacing service failed. Also returned, deliberately, when Pacing
+            answers 401 (the two services' shared HMAC secrets disagree - a server misconfiguration,
+            never something the calling user did) rather than passing that 401 through: the Hub's own
+            frontend logs a user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/drift:
+    get:
+      tags:
+        - pacingDrift
+      operationId: getPacingDrift
+      description: >
+        Admin-only (US-106). Fetches the full Hub roster and Pacing's full user mirror (GET
+        /api/internal/users on the Pacing side) and diffs them, so drift is visible instead of being
+        discovered by accident - in particular, a user who exists in Pacing but has no matching Hub
+        employee is never touched by the sync (it only ever visits emails it sends) and would
+        otherwise stay however Pacing last left it, active flag included, forever.
+      responses:
+        '200':
+          description: The drift comparison completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDriftReportV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching Pacing's user mirror failed. Also returned, deliberately, when Pacing answers 401
+            (the two services' shared HMAC secrets disagree - a server misconfiguration) rather than
+            passing that 401 through, for the same reason as GET /api/v1/pacing/pacings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingDashboard
+      description: >
+        §6 of the migration plan ("Pacing Dashboard"). Resolves the current user's Hub RBAC scope into
+        a Pacing assertion the same way GET /api/v1/pacing/pacings does, then fetches the live
+        dashboard payload for one pacing from Pacing (GET /api/dashboards/:slug/data on that side,
+        unchanged by this migration) - campaign, plan by line item, daily delivery facts, the
+        per-pacing widget/layout configuration, journal and any library entries referenced by a
+        library-linked widget. `slug` is the pacing's own `dash_slug` (see `PacingRowV1.dashSlug`), not
+        its `id` (Pacing's UUID) - the two are deliberately different: dashboards are addressed by slug
+        everywhere on the Pacing side, refresh is addressed by id (see POST
+        /api/v1/pacing/pacings/{pacingId}/refresh below).
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The dashboard payload was fetched from the Pacing service successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDashboardV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >
+            The Pacing service answered the request with a 404 - the slug does not exist, or is not
+            visible to the current user's resolved scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (it answered 403/unknown_user): the Hub
+            knows this user, but Pacing's user mirror does not yet. A sync gap, not an authorization
+            decision - see the distinct `OPH_053` error code in the response body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Fetching the dashboard from the Pacing service failed. Also returned, deliberately, when
+            Pacing answers 401 (the two services' shared HMAC secrets disagree - a server
+            misconfiguration, never something the calling user did) rather than passing that 401
+            through: the Hub's own frontend logs a user out on any 401 it receives from the Hub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/refresh-status:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingRefreshStatus
+      description: >
+        Polls whether a triggered refresh (POST /api/v1/pacing/pacings/{pacingId}/refresh) has landed
+        (US-119): a pure read of the last completed build for this pacing, not an in-progress flag - a
+        caller detects completion by watching `refreshId` change from a baseline it captured before
+        triggering.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The refresh status was fetched successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRefreshStatusV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (403/unknown_user) - a sync gap, see
+            `OPH_053`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the refresh status from the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/settings:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingDisplay
+      description: >
+        Saves this pacing's widget/layout selection (US-116/117): a full save carries the whole
+        `widgets` array (and optionally `groups`/`layout`) plus the `displayRev` the caller last read,
+        so a concurrent editor's save is detected rather than silently overwritten (Pacing's own
+        optimistic-lock counter on `display`, distinct from the widget library's own
+        `expectedUpdatedAt` CAS). Calls POST /api/dashboards/:slug/settings on the Pacing side
+        (unchanged by this migration; that endpoint accepts more config than this - the Hub only ever
+        writes the `display` fragment of it).
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDisplayUpdateV1'
+      responses:
+        '200':
+          description: The display configuration was saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDisplayUpdateResultV1'
+        '400':
+          description: >
+            Pacing rejected the widget/layout payload as structurally invalid (e.g. too many widgets,
+            a malformed group or layout tile) - see `message` in the response body for which part.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            A concurrent edit was detected (US-118): either the display changed since `displayRev` was
+            read (`reason: stale_settings`, current revision included so the caller can reload and
+            re-apply), or the Hub's writer capability is stale relative to what Pacing now requires
+            (`reason: v2_writer_required`). Never silently overwritten.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDisplayConflictV1'
+        '500':
+          description: Saving the display configuration failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/plan:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingPlan
+      description: >
+        Saves a pacing's plan (§9 of the migration plan, US-125/126/127): budget, target impressions,
+        target margin, target CTR/VCR, rate type, flight dates and date-based containers, per line
+        item. `lineItems` is the WHOLE line-item set this pacing should have after the save - editing a
+        line item's plan (US-125), adding one (US-126) and removing one (US-127) are the same request,
+        differing only in which ids the array carries: an id already on the pacing is updated in place
+        (fields the caller omits are preserved from what Pacing already has stored), an id not
+        currently on the pacing is added (and then MUST carry `channel`/`flightStart`/`flightEnd`,
+        since there is nothing stored yet to fall back to), and an id the pacing currently has that is
+        missing from the array is removed together with its plan - Pacing does this by a plain
+        full-array replace (POST .../settings on the Pacing side), the exact same single write path
+        §6's display save uses, so there is no separate remove/add call. Every value here is exactly
+        what the caller confirmed - the Hub computes, sums or validates none of it beyond what Pacing
+        itself enforces (coefficient-cost margin ranges, currency, container shape). Unlike the
+        display save this endpoint carries no revision - Pacing does not version-guard the plan today
+        (§9: "no change" to service logic), so a concurrent plan edit is not detected; the acceptance
+        criteria's "invalid combination is rejected with a message naming the field" is Pacing's own
+        validation surfacing through `detail` on a 400, not a Hub-side pre-check.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingPlanUpdateV1'
+      responses:
+        '200':
+          description: The plan was saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingPlanUpdateResultV1'
+        '400':
+          description: >
+            Pacing rejected the plan as invalid - e.g. an out-of-range coefficient-cost margin, or a
+            currency mismatch on a newly added line item. `message` names the line item and field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving the plan failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/addable-line-items:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getAddablePacingLineItems
+      description: >
+        Line items of this pacing's own campaign(s) that are not yet on it (§9 of the migration plan,
+        US-126) - offered as a pick list before falling back to add-by-id (POST
+        /api/v1/pacing/line-items/validate) for a line item from another campaign. Calls GET
+        /api/dashboards/:slug/addable-line-items on the Pacing side (unchanged by this migration).
+        `io` absent means this pacing has no stored insertion order to look candidates up from - the
+        caller should offer add-by-id only.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The candidate line items were fetched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingAddableLineItemsV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the candidate line items failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/line-items/validate:
+    post:
+      tags:
+        - pacing
+      operationId: validatePacingLineItems
+      description: >
+        Looks up line items by id directly (§9 of the migration plan, US-126's add-by-id path), for
+        adding a line item to an existing pacing that the campaign-scoped picker
+        (GET .../addable-line-items) does not offer - including a line item that belongs to a
+        different campaign than the pacing's own, which this endpoint returns and marks with its own
+        `campaignId`/`campaignName` exactly as Pacing sent them, never silently substituting the
+        pacing's campaign. Calls POST /api/pacings/validate on the Pacing side with a
+        `line_item_ids` selector (unchanged by this migration) - the same endpoint §8's campaign-scoped
+        draft uses with a `campaign_id` selector instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingLineItemValidateV1'
+      responses:
+        '200':
+          description: >
+            The lookup ran; `ok` may still be false and `lineItems` empty (e.g. every id was
+            malformed or not found - see `notFoundIds`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDraftV1'
+        '400':
+          description: Every id was malformed (not digits-only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '404':
+          description: The Pacing service answered the request with a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings/{pacingId}/status:
+    patch:
+      tags:
+        - pacing
+      operationId: updatePacingStatus
+      description: >
+        Changes a pacing's administrative lifecycle status (§9 of the migration plan, US-128): Live,
+        Paused, Complete or Archive. Calls PATCH /api/pacings/:id/status on the Pacing side (unchanged
+        by this migration) - Pacing journals the change and fires its own Slack line; the Hub adds no
+        logic of its own.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key) - distinct from its dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingStatusUpdateV1'
+      responses:
+        '200':
+          description: The status was changed (or already matched - both are a plain 200).
+        '400':
+          description: The status field was not one of Live, Paused, Complete, Archive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Changing the status failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings/{pacingId}/refresh:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: refreshPacing
+      description: >
+        Triggers an on-demand data refresh for a Live pacing (US-119). Fire-and-forget on the Pacing
+        side (it queues a build and returns immediately; completion is observed by polling GET
+        /api/v1/pacing/dashboards/{slug}/refresh-status). Re-triggering inside the two-minute cooldown
+        answers 429 with the remaining seconds instead of queuing a second run.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key) - distinct from its dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The refresh was triggered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRefreshTriggeredV1'
+        '400':
+          description: The pacing is not Live, so it cannot be refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (403/unknown_user) - a sync gap, see
+            `OPH_053`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: >
+            A refresh for this pacing was already triggered within the last two minutes; re-triggering
+            is refused rather than queuing a second run. The response names the remaining cooldown so
+            the caller can show a countdown instead of a bare error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Triggering the refresh failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/pacings/{pacingId}:
+    delete:
+      tags:
+        - pacingAdmin
+      operationId: deletePacing
+      description: >
+        Permanently deletes a pacing (admin only). Cascades on the Pacing side to its journal, and
+        removes the dashboard data file and slug directory from disk - there is no soft delete and no
+        undo. The Hub itself refuses this call for a non-administrator (see
+        `RbacAuthorizationService#requireAdmin`) before it ever reaches Pacing.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pacing was deleted.
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Deleting the pacing failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/refresh-all-dashboards:
+    post:
+      tags:
+        - pacingAdmin
+      operationId: refreshAllDashboards
+      description: >
+        Triggers the full nightly Daily Build off-schedule (admin only) - the same flow the scheduled
+        cron run uses, rebuilding every Live pacing's dashboard. Fire-and-forget on the Pacing side, the
+        same shape as POST /api/v1/pacing/pacings/{pacingId}/refresh: it fires the build and returns
+        immediately, so a 200 here means "started", never "finished". Re-triggering inside Pacing's own
+        cooldown answers 429 with the remaining seconds instead of queuing a second run.
+      responses:
+        '200':
+          description: The Daily Build was triggered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRefreshTriggeredV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: >
+            The Daily Build was already triggered recently; re-triggering is refused rather than
+            queuing a second run. The response names the remaining cooldown so the caller can show a
+            countdown instead of a bare error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Triggering the Daily Build failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/library:
+    get:
+      tags:
+        - pacingLibrary
+      operationId: listPacingLibrary
+      description: >
+        Browses the shared widget/block/layout library (US-116): every entry visible to the current
+        user, searchable, sortable by usage (default) or likes, filterable by shelf (`mine`/`standard`,
+        anything else is the full catalog) and by kind. Calls GET /api/library on the Pacing side
+        (unchanged by this migration).
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free-text search over entry name/description.
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          description: Sort order; anything other than `likes` is treated as `usage` (the default).
+          schema:
+            type: string
+            enum:
+              - usage
+              - likes
+        - name: shelf
+          in: query
+          required: false
+          description: >
+            `mine` (entries owned by the current user) or `standard` (built-in entries); any other
+            value, or omitted, returns the full catalog.
+          schema:
+            type: string
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PacingLibraryKindV1'
+      responses:
+        '200':
+          description: The library entries were fetched successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryListResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (403/unknown_user) - a sync gap, see
+            `OPH_053`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the library from the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - pacingLibrary
+      operationId: createPacingLibraryEntry
+      description: >
+        Saves a configured widget to the shared library with a name and description (US-118), so other
+        users can find and add it. Only single widgets are supported from the Hub today - saving a
+        multi-widget block or a whole layout to the library needs the canvas editor (§7/§9) and is not
+        yet available here; `kind` stays open on the wire for parity with Pacing's own contract, but the
+        Hub's own UI only ever sends `widget`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingLibraryCreateV1'
+      responses:
+        '201':
+          description: The entry was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryEntryV1'
+        '400':
+          description: The entry failed validation (name/description length, or an invalid definition).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            The current user's library is full, or the Hub's writer capability is stale relative to
+            what Pacing now requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryConflictV1'
+        '429':
+          description: Too many library writes in a short window; retry after the given number of seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Saving the library entry failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/library/{id}:
+    put:
+      tags:
+        - pacingLibrary
+      operationId: updatePacingLibraryEntry
+      description: >
+        Updates a library widget entry's name, description or definition (US-118). Guarded by
+        `expectedUpdatedAt`, the exact update timestamp the caller last read: a mismatch means someone
+        else changed the entry in between, reported as a 409 rather than silently overwritten. Block
+        and layout entries cannot be updated this way (Pacing's own rule - they are re-shared, not
+        edited); attempting to costs a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingLibraryUpdateV1'
+      responses:
+        '200':
+          description: The entry was updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryEntryV1'
+        '400':
+          description: >
+            The entry failed validation, or this entry's kind (block/layout) cannot be updated this
+            way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The current user is neither this entry's owner nor an admin, so may not change it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The entry was not found, or was already removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Someone else changed this entry since `expectedUpdatedAt` was read (US-118: reported, not
+            silently overwritten). The response carries the entry's current `updatedAt` so the caller
+            can reload and retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryConflictV1'
+        '500':
+          description: Updating the library entry failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - pacingLibrary
+      operationId: deletePacingLibraryEntry
+      description: >
+        Soft-deletes a library entry (US-118), guarded by the same `expectedUpdatedAt` CAS as update.
+        Removing it from the library never touches pacings that already added it - their tiles keep
+        working.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingLibraryDeleteV1'
+      responses:
+        '200':
+          description: The entry was removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryDeleteResultV1'
+        '400':
+          description: The delete request was malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The current user is neither this entry's owner nor an admin, so may not remove it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The entry was not found, or was already removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Someone else changed this entry since `expectedUpdatedAt` was read. The response carries
+            the entry's current `updatedAt` so the caller can reload and retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryConflictV1'
+        '500':
+          description: Removing the library entry failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/library/{id}/like:
+    post:
+      tags:
+        - pacingLibrary
+      operationId: likePacingLibraryEntry
+      description: Likes a library entry (idempotent) - US-118.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The like was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLikeResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The entry was not found, or was already removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many library writes in a short window; retry after the given number of seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Recording the like failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - pacingLibrary
+      operationId: unlikePacingLibraryEntry
+      description: Unlikes a library entry (idempotent) - US-118.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The unlike was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLikeResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The entry was not found, or was already removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many library writes in a short window; retry after the given number of seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Recording the unlike failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
 components:
   securitySchemes:
     bearerAuth:
@@ -2593,6 +3951,103 @@ components:
         - users
         - assignmentsUpdated
         - agenciesMapped
+    PacingUserSyncSummaryV1:
+      type: object
+      description: >
+        Summary of a Pacing user sync run. createdInPacing/activated/deactivated/unchanged are Pacing's
+        own account of what the upsert did (only Pacing sees a row's previous state), not the Hub's
+        guess from what it sent - re-running the same batch twice reports 0 for all four on the second
+        run unless something actually changed on Pacing's side in between.
+      properties:
+        usersSent:
+          type: integer
+          format: int32
+          description: Number of Hub employees included in the batch sent to Pacing.
+        createdInPacing:
+          type: integer
+          format: int32
+          description: Number of rows Pacing had never seen before this run.
+        activated:
+          type: integer
+          format: int32
+          description: Number of rows Pacing flipped from inactive to active this run.
+        deactivated:
+          type: integer
+          format: int32
+          description: Number of rows Pacing flipped from active to inactive this run.
+        unchanged:
+          type: integer
+          format: int32
+          description: Number of rows that matched an existing Pacing row and did not change.
+        idsWritten:
+          type: integer
+          format: int32
+          description: Number of hub_users rows whose pacing_user_id was created or corrected this run.
+      required:
+        - usersSent
+        - createdInPacing
+        - activated
+        - deactivated
+        - unchanged
+        - idsWritten
+    PacingDriftRowV1:
+      type: object
+      description: >
+        One disagreement between the Hub roster and Pacing's user mirror (US-106). Every field either
+        system can hold a value for is populated regardless of category, so the row states which system
+        holds which value without a further lookup; the side missing the employee reports null for its
+        name/active fields.
+      properties:
+        email:
+          type: string
+          format: email
+          description: The email address both systems are keyed on.
+        category:
+          type: string
+          description: >
+            MISSING_IN_PACING: the Hub knows this employee, Pacing does not (yet - the sync will create
+            it next run). MISSING_IN_HUB: Pacing has a row, the Hub does not - the gap the sync itself
+            can never close, since it only ever visits emails it sends. NAME_MISMATCH / ACTIVE_MISMATCH:
+            both sides have a row, but the named field differs.
+          enum:
+            - MISSING_IN_PACING
+            - MISSING_IN_HUB
+            - NAME_MISMATCH
+            - ACTIVE_MISMATCH
+        hubName:
+          type: string
+          description: >
+            The Hub's display name for this email; absent/null if the Hub has no row for this email
+            (category=MISSING_IN_HUB).
+        pacingName:
+          type: string
+          description: >
+            Pacing's display name for this email; absent/null if Pacing has no row for this email
+            (category=MISSING_IN_PACING).
+        hubActive:
+          type: boolean
+          description: >
+            Whether the Hub considers this person active; absent/null if the Hub has no row for this
+            email (category=MISSING_IN_HUB).
+        pacingActive:
+          type: boolean
+          description: >
+            Whether Pacing considers this person active; absent/null if Pacing has no row for this
+            email (category=MISSING_IN_PACING).
+      required:
+        - email
+        - category
+    PacingDriftReportV1:
+      type: object
+      description: Outcome of a US-106 drift comparison between the Hub roster and Pacing's user mirror.
+      properties:
+        rows:
+          type: array
+          description: Every disagreement found; empty when both sides fully agree.
+          items:
+            $ref: '#/components/schemas/PacingDriftRowV1'
+      required:
+        - rows
     UserV1:
       type: object
       description: Representation of the authenticated Hub user and effective access.
@@ -4878,3 +6333,1163 @@ components:
       required:
         - team_name
         - status
+    PacingScopeV1:
+      type: object
+      description: >
+        The Pacing-service scope resolved from the current user's Hub RBAC role assignments and
+        asserted on the call to Pacing - included so a caller can see why the returned pacing list
+        looks the way it does.
+      properties:
+        kind:
+          type: string
+          description: >
+            Scope kind sent to Pacing: `all` (unfiltered, admin or an ALL-scoped role), `owners`
+            (restricted to a set of owner Pacing user_ids, e.g. a team), or `campaigns` (restricted to
+            a set of NetSuite campaign ids, for Client Services - not produced yet).
+          enum:
+            - all
+            - owners
+            - campaigns
+        ids:
+          type: array
+          description: >
+            Owner Pacing user_ids - UUIDs as text (kind=owners) or NetSuite campaign ids
+            (kind=campaigns) the scope is restricted to; always empty for kind=all, and legitimately
+            empty when the user is entitled to nothing.
+          items:
+            type: string
+        can_create:
+          type: boolean
+          description: Whether the current user may create a pacing, per the resolved entitlement.
+      required:
+        - kind
+        - ids
+        - can_create
+    PacingListResponseV1:
+      type: object
+      description: >
+        Pacings visible to the current user, fetched live from the Pacing service, together with the
+        resolved scope that produced them.
+      properties:
+        scope:
+          $ref: '#/components/schemas/PacingScopeV1'
+        pacings:
+          type: array
+          description: >
+            Pacings returned by the Pacing service, shaped for the Overview screen (§4 of the
+            migration plan) - see PacingRowV1.
+          items:
+            $ref: '#/components/schemas/PacingRowV1'
+      required:
+        - scope
+        - pacings
+    CampaignRefV1:
+      type: object
+      description: >
+        One campaign a pacing belongs to (§3's ordered campaign set). The first entry in a pacing
+        row's `campaigns` array is the primary campaign a click should navigate to (US-107, and
+        US-113 once §5 lands).
+      properties:
+        id:
+          type: string
+          description: NetSuite campaign id.
+        name:
+          type: string
+          description: Campaign display name, as last resolved from NetSuite.
+      required:
+        - id
+        - name
+    PacingAlertV1:
+      type: object
+      description: >
+        One alert badge for a pacing (US-110), raised by Pacing's shared alert detectors
+        (shared/alerts-core.js) against that pacing's own per-pacing alert configuration. The Hub
+        does not evaluate any threshold itself - Pacing already did, with the same detectors that
+        drive its Slack alerts.
+      properties:
+        type:
+          type: string
+          description: >
+            Detector key, e.g. `pacing_off_pace`, `margin_below_target`, `ctr_below_target` - an
+            open-ended vocabulary owned by Pacing's alerts-core, not enumerated here.
+        severity:
+          type: string
+          description: How urgently this alert should be badged.
+          enum:
+            - critical
+            - warning
+            - info
+        text:
+          type: string
+          description: >
+            The whole sentence - "Pacing -88.8pp severely under target - NW | Native Display
+            Nextdoor". Right for one alert in a tooltip, wrong for a list: a 180-line-item pacing
+            raises well over a hundred, and a hundred sentences is a wall in which the one that
+            matters is indistinguishable from the ninety that repeat. Prefer `value` + `label` when
+            rendering more than one.
+        value:
+          type: string
+          description: >
+            The alert's number on its own - "-88.8pp", "94d", "+15%" - for prominent display. Null
+            for the few detector types that have no meaningful number. Comes from Pacing's own
+            `displayParts`, so per-type formatting lives in one place rather than being parsed back
+            out of `text` here.
+        label:
+          type: string
+          description: >
+            The alert's description without the number, the severity adverb or the line item name -
+            "under target", "data is stale". Pairs with `value`.
+        liId:
+          type: string
+          description: >
+            The line item this alert is about, or absent when it concerns the whole pacing. Worth
+            showing: two different line items can carry the same description - 599888 and 600433 are
+            both "Southwest | Native Display Nextdoor TM271064#99" - and without the id they read as
+            one row alerting twice.
+        name:
+          type: string
+          description: The line item's own description, when the alert has one.
+      required:
+        - type
+        - severity
+        - text
+    PacingRowV1:
+      type: object
+      description: >
+        One pacing visible to the current user, shaped for the Overview screen (§4 of the migration
+        plan, US-109/110/111) - a deliberately narrow projection of what Pacing's GET /api/pacings
+        returns. Fields such as owner id, delegation, client/agency and the per-line-item health
+        breakdown exist on the Pacing side but are not surfaced here because Overview does not use
+        them yet; see PacingContractMapper for the full list of what is left out and why.
+      properties:
+        id:
+          type: string
+          description: Pacing id (Pacing's own UUID primary key).
+        dashSlug:
+          type: string
+          description: >
+            The pacing's dash_slug - Pacing's own routing key for its dashboard (§6 of the migration
+            plan). Distinct from `id`: the dashboard/settings/library endpoints address a pacing by
+            this slug, while refresh addresses it by `id`. Absent only if Pacing itself has none on
+            record for this row, which should not happen in practice.
+
+            Deliberately NOT `nullable: true`. The generator turns a nullable property into a
+            JsonNullable wrapper, and this application registers no JsonNullableModule, so Jackson
+            serializes the wrapper instead of the value: the client receives {"present": true} and
+            puts `present,true` in the dashboard URL, which Pacing rejects as bad_id. The property is
+            not required, so simply omitting it already carries "no slug".
+        name:
+          type: string
+          description: Pacing display name.
+        status:
+          type: string
+          description: Administrative lifecycle status.
+          enum:
+            - Live
+            - Paused
+            - Complete
+            - Archive
+        ownerName:
+          type: string
+          description: Display name of the pacing's current owner.
+        flightStart:
+          type: string
+          format: date
+          description: Campaign flight start date, derived from its line items; null if unresolved.
+        flightEnd:
+          type: string
+          format: date
+          description: Campaign flight end date, derived from its line items; null if unresolved.
+        lineItemCount:
+          type: integer
+          format: int32
+          description: Number of line items on this pacing.
+        createdAt:
+          type: string
+          format: date-time
+          description: >
+            When the pacing was created. Read straight from Pacing's own row (already present on the
+            wire, just not previously mapped here) - not derived. Used by the pacing administration
+            screen; the Overview table does not show it.
+        campaigns:
+          type: array
+          description: >
+            Ordered NetSuite campaigns this pacing belongs to (§3); the first entry is the primary
+            campaign (US-107). Null when campaign resolution has not run for this pacing yet -
+            distinct from an empty list, which cannot legitimately occur.
+          items:
+            $ref: '#/components/schemas/CampaignRefV1'
+        marginActualPct:
+          type: number
+          format: double
+          description: >
+            Budget-weighted actual margin across the pacing's line items, as a percentage; null
+            before any delivery data exists.
+        marginTargetPct:
+          type: number
+          format: double
+          description: >
+            Budget-weighted target margin across the pacing's line items, as a percentage; null
+            before any delivery data exists.
+        pacingDeviationPct:
+          type: number
+          format: double
+          description: >
+            Percentage-point deviation of actual delivery from expected pace (0 = exactly on pace,
+            negative = under-delivering, positive = over-delivering); null before any delivery data
+            exists.
+        paceStatus:
+          type: string
+          description: >
+            Category of `pacingDeviationPct`, computed by Pacing from the same +/-5pp band used
+            everywhere else in the product - not to be confused with `status` (the administrative
+            lifecycle field). `no_data` before any delivery data exists; `inactive` for a
+            Complete/Archive pacing.
+          enum:
+            - on_pace
+            - under
+            - over
+            - no_data
+            - inactive
+        budgetTotal:
+          type: number
+          format: double
+          description: Total planned budget across the pacing's line items.
+        alerts:
+          type: array
+          description: Alert badges raised for this pacing (US-110); empty when none fired.
+          items:
+            $ref: '#/components/schemas/PacingAlertV1'
+      required:
+        - id
+        - name
+        - status
+        - lineItemCount
+        - alerts
+      # Deliberately left open rather than closed: Pacing's real row carries more fields than
+      # Overview uses today (see the description above), and §5/§6/etc. of the migration plan will
+      # want more of them. additionalProperties keeps those reachable, still weakly typed, without
+      # forcing every caller back to a fully untyped row the moment one of them needs a field this
+      # screen does not.
+      additionalProperties: true
+    PacingInUseV1:
+      type: object
+      description: >
+        One live (non-archived) pacing that already covers a given line item (§8, US-123) - advisory,
+        not a ban: a line item may legitimately belong to more than one pacing, and this only says
+        which one was found first.
+      properties:
+        pacingId:
+          type: string
+          description: The other pacing's id.
+        pacingName:
+          type: string
+          description: The other pacing's display name.
+        dashSlug:
+          type: string
+          description: >
+            The other pacing's dash_slug. Deliberately NOT `nullable: true` - see
+            PacingRowV1.dashSlug's own description for why.
+        status:
+          type: string
+          description: The other pacing's administrative lifecycle status.
+      required:
+        - pacingId
+        - pacingName
+        - status
+    PacingDraftLineItemV1:
+      type: object
+      description: >
+        One NetSuite line item as Pacing's validate endpoint returns it (§8, US-121/122), with its
+        plan fields already pre-filled from NetSuite/the reference tables where available (US-124).
+        Every field is read verbatim from that response - the Hub computes none of them.
+      properties:
+        lineItemId:
+          type: string
+          description: NetSuite line item id.
+        channel:
+          type: string
+          description: Delivery channel / media tactic.
+        flightStart:
+          type: string
+          format: date
+          description: Flight start date.
+        flightEnd:
+          type: string
+          format: date
+          description: Flight end date.
+        rateType:
+          type: string
+          description: >
+            Billing rate type (e.g. CPM, CPC, CPV, Flat) as NetSuite has it; pre-filled and editable
+            before creating (US-124).
+        description:
+          type: string
+          description: Line item description, as NetSuite has it.
+        nativeBudget:
+          type: number
+          format: double
+          description: >
+            The line item's budget in its native currency - the pre-filled, editable money value to
+            submit at create (US-124). Equal to `budgetTotal` for a USD line item.
+        budgetTotal:
+          type: number
+          format: double
+          description: >
+            `nativeBudget` converted to USD, for display alongside it on a non-USD line item; read-only.
+        currency:
+          type: string
+          description: The line item's native currency (e.g. USD, CAD).
+        exchangeRate:
+          type: number
+          format: double
+          description: The exchange rate `budgetTotal` was derived from; read-only.
+        converted:
+          type: boolean
+          description: Whether this line item's native currency differs from USD.
+        plannedUnits:
+          type: number
+          format: double
+          description: >
+            NetSuite's own planned unit count (labelled "MP Units" on the retired create screen) -
+            kept alongside `targetImpressions` because the two are deliberately different fields:
+            this is NetSuite's reference figure, `targetImpressions` is the stored plan pre-filled
+            from it. Read-only.
+        targetImpressions:
+          type: number
+          format: double
+          description: >
+            The plan's target impressions, pre-filled from `plannedUnits` where NetSuite supplied one
+            (US-124); editable before creating.
+        marginPercent:
+          type: number
+          format: double
+          description: >
+            The plan's target margin percentage, pre-filled from the tactic margin reference table
+            where it supplied one; editable before creating. Null (and un-badged) wherever the
+            reference table has no row for this line item's tactic.
+        targetCtr:
+          type: number
+          format: double
+          description: >
+            The plan's target CTR percentage, pre-filled from the tactic KPI reference table where it
+            supplied one; editable before creating.
+        targetVcr:
+          type: number
+          format: double
+          description: >
+            The plan's target VCR percentage, pre-filled from the tactic KPI reference table where it
+            supplied one; editable before creating.
+        campaignId:
+          type: string
+          description: NetSuite campaign id this line item belongs to.
+        campaignName:
+          type: string
+          description: NetSuite campaign name.
+        orderNumber:
+          type: string
+          description: >
+            The NetSuite order (insertion order) number this line item belongs to - the grouping key
+            the review panel groups line items under (US-122).
+      required:
+        - lineItemId
+    PacingInsertionOrderV1:
+      type: object
+      description: >
+        One NetSuite insertion order linked to the campaign (§8, US-122) - one entry per distinct
+        order among the campaign's line items, its own fields taken verbatim from NetSuite. Never a
+        sum/min/max derived from its line items: that figure would disagree with NetSuite the moment
+        a line item is excluded from the review panel.
+      properties:
+        orderId:
+          type: string
+          description: NetSuite internal id for the insertion order.
+        orderNumber:
+          type: string
+          description: >
+            NetSuite's order number - the same value line items reference via `orderNumber`, and the
+            review panel's grouping key.
+        orderName:
+          type: string
+          description: The order's display name, where NetSuite has one; absent when it does not.
+        orderBudget:
+          type: number
+          format: double
+          description: The order's own budget, as NetSuite reports it.
+        orderStartDate:
+          type: string
+          format: date
+          description: The order's flight start date.
+        orderEndDate:
+          type: string
+          format: date
+          description: The order's flight end date.
+        orderStatus:
+          type: string
+          description: The order's NetSuite status.
+    PacingDraftV1:
+      type: object
+      description: >
+        A campaign's insertion orders and line items, fetched live via Pacing's validate endpoint for
+        review before creating a pacing (§8, US-121/122/123).
+      properties:
+        ok:
+          type: boolean
+          description: >
+            False when Pacing could read the campaign's line items but will not let them be paced as
+            they stand today (currently: more than one non-USD currency among them) - `error` names
+            why; there is nothing to review or create until that is resolved in NetSuite.
+        error:
+          type: string
+          description: Why `ok` is false; absent when `ok` is true.
+        client:
+          type: string
+          description: Advertiser/client name, as NetSuite reports it on these line items.
+        agency:
+          type: string
+          description: Agency name, as NetSuite reports it on these line items.
+        campaign:
+          type: string
+          description: Campaign name, as NetSuite reports it - also a reasonable default pacing name.
+        orderNumber:
+          type: string
+          description: The first/primary NetSuite order (insertion order) number found among the line items.
+        orderNumbers:
+          type: array
+          description: >
+            Every distinct NetSuite order number found among the line items - a campaign may span more
+            than one insertion order (US-122's IO grouping).
+          items:
+            type: string
+        lineItems:
+          type: array
+          description: Every line item NetSuite has for this campaign.
+          items:
+            $ref: '#/components/schemas/PacingDraftLineItemV1'
+        insertionOrders:
+          type: array
+          description: >
+            Every distinct insertion order linked to the campaign, with its own id/number/name/
+            budget/flight/status (§8, US-122) - the review panel's IO row; `lineItems` group under
+            their parent by `orderNumber`.
+          items:
+            $ref: '#/components/schemas/PacingInsertionOrderV1'
+        notFoundIds:
+          type: array
+          description: >
+            Line item ids that either have no NetSuite row, or have not delivered yet and so are
+            excluded from `lineItems` by default.
+          items:
+            type: string
+        warnings:
+          type: array
+          description: >
+            Human-readable data-quality notes (e.g. a client/agency/campaign mismatch across the
+            campaign's own line items).
+          items:
+            type: string
+        inUse:
+          type: object
+          description: >
+            Which of `lineItems` a live pacing already covers, keyed by line item id (US-123).
+            Advisory - a marked line item can still be selected.
+          additionalProperties:
+            $ref: '#/components/schemas/PacingInUseV1'
+      required:
+        - ok
+        - lineItems
+    PacingCreateLineItemV1:
+      type: object
+      description: >
+        One selected line item to create the pacing with (§8, US-123/124): its NetSuite facts plus
+        whatever plan edits the caller made on the matching `PacingDraftLineItemV1` before confirming.
+      properties:
+        lineItemId:
+          type: string
+        channel:
+          type: string
+        flightStart:
+          type: string
+          format: date
+        flightEnd:
+          type: string
+          format: date
+        rateType:
+          type: string
+        description:
+          type: string
+        nativeBudget:
+          type: number
+          format: double
+        currency:
+          type: string
+        exchangeRate:
+          type: number
+          format: double
+        campaignId:
+          type: string
+        campaignName:
+          type: string
+        orderNumber:
+          type: string
+        targetImpressions:
+          type: number
+          format: double
+        marginPercent:
+          type: number
+          format: double
+        targetCtr:
+          type: number
+          format: double
+        targetVcr:
+          type: number
+          format: double
+      required:
+        - lineItemId
+        - flightStart
+        - flightEnd
+    PacingCreateV1:
+      type: object
+      description: >
+        Creates a pacing from selected, reviewed line items of a campaign (§8, US-123/124). Every
+        plan value on every line item is exactly what the caller confirmed - the Hub does not
+        compute, default or validate any of them beyond what Pacing itself enforces.
+      properties:
+        pacingName:
+          type: string
+          description: Display name for the new pacing.
+        lineItems:
+          type: array
+          description: The selected line items - at least one required.
+          items:
+            $ref: '#/components/schemas/PacingCreateLineItemV1'
+      required:
+        - pacingName
+        - lineItems
+    PacingCreateResultV1:
+      type: object
+      description: The newly created pacing's identifiers.
+      properties:
+        pacingId:
+          type: string
+          description: The new pacing's id.
+        dashSlug:
+          type: string
+          description: >
+            The new pacing's dash_slug. Deliberately NOT `nullable: true` - see PacingRowV1.dashSlug's
+            own description for why.
+      required:
+        - pacingId
+        - dashSlug
+    PacingLibraryKindV1:
+      type: string
+      description: >
+        A library entry's kind - a single configured widget, a group of widgets saved together
+        ("block"), or a whole arrangement ("layout").
+      enum:
+        - widget
+        - block
+        - layout
+    PacingPauseIntervalV1:
+      type: object
+      description: >
+        One paused date range on a line item's plan; the expected-pace curve does not accrue during a
+        paused interval.
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive end date; null/absent means the pause is still open.
+      required:
+        - from
+    PacingLineItemPlanV1:
+      type: object
+      description: >
+        One line item's plan, as stored in the pacing's config (§9 of the migration plan owns editing
+        this; §6 only reads it to compute the plan-vs-actual charts and the financial figures).
+        Deliberately narrow: date-based container overrides and sub-breakdown labels exist on the
+        Pacing side (§9/§10) but are left opaque here - see `containers`.
+      properties:
+        lineItemId:
+          type: string
+        channel:
+          type: string
+        dsp:
+          type: string
+        rateType:
+          type: string
+        clientBudget:
+          type: number
+          format: double
+        plannedImpressions:
+          type: number
+          format: double
+          description: >
+            Target impressions for the flight. 0 on a freshly created pacing whose plan import lost
+            this value between validate and build (a known Pacing-side gap, tracked for §8) - the Hub
+            shows "No data" rather than a fabricated 0% pace when this is 0; it never treats a 0 here
+            as a real plan.
+        marginTargetPct:
+          type: number
+          format: double
+        ctrTargetPct:
+          type: number
+          format: double
+        vcrTargetPct:
+          type: number
+          format: double
+        flightStart:
+          type: string
+          format: date
+        flightEnd:
+          type: string
+          format: date
+        pauseIntervals:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingPauseIntervalV1'
+        containers:
+          type: array
+          description: >
+            Date-based plan overrides (§9/§10) - opaque here. The Hub's plan-vs-actual charts prorate a
+            line item's whole-flight plan linearly and do not re-shape it around its own containers; a
+            line item using per-period container overrides shows a straight-line expected curve here
+            instead of its true per-period one. The pacing's own header pace/margin figures shown above
+            the charts are unaffected - those come verbatim from Pacing's own server-computed health
+            (see PacingRowV1), not from this proration.
+          items:
+            type: object
+            additionalProperties: true
+        nativeBudget:
+          type: number
+          format: double
+          description: >
+            The line item's budget in its own native currency (§9, US-125); null for a USD line item -
+            edit `clientBudget` there instead. Editing this field needs no exchange rate and computes
+            nothing: it round-trips verbatim through PacingLineItemPlanUpdateV1.nativeBudget, and
+            Pacing re-derives its own USD cache (`clientBudget`) server-side on save, exactly as it
+            does at create.
+      required:
+        - lineItemId
+    PacingLineItemPlanUpdateV1:
+      type: object
+      description: >
+        One line item's plan to save (§9 of the migration plan, US-125/126/127) - the editable
+        counterpart of `PacingLineItemPlanV1`. An id already on the pacing needs only the fields
+        being changed; every field left out is preserved from Pacing's own stored value (in
+        particular its `channel`/`description`/`campaignId`/`campaignName`, which this screen never
+        edits, so the Hub never sends them for an EXISTING line item - sending them would only matter
+        if they differed, and they never should). An id not yet on the pacing (US-126, "add") is a
+        plain create-in-place with nothing stored to fall back to: it MUST carry `channel`,
+        `flightStart` and `flightEnd`, and SHOULD also carry `campaignId`/`campaignName`/
+        `description`/`orderNumber` from wherever it was found (the campaign picker or the by-id
+        lookup), so the pacing's own campaign set and line item list stay accurate. An id currently on
+        the pacing that this save's `lineItems` array omits is removed (US-127) together with its plan
+        - the other line items and their delivery history are untouched, since removal is nothing more
+        than not re-sending that one entry.
+      properties:
+        lineItemId:
+          type: string
+        channel:
+          type: string
+          description: Required when this id is not already on the pacing (US-126).
+        description:
+          type: string
+        campaignId:
+          type: string
+        campaignName:
+          type: string
+        orderNumber:
+          type: string
+        rateType:
+          type: string
+        nativeBudget:
+          type: number
+          format: double
+          description: The plan's target spend, in the line item's native currency.
+        targetImpressions:
+          type: number
+          format: double
+        marginTargetPct:
+          type: number
+          format: double
+        targetCtr:
+          type: number
+          format: double
+        targetVcr:
+          type: number
+          format: double
+        flightStart:
+          type: string
+          format: date
+          description: Required when this id is not already on the pacing (US-126).
+        flightEnd:
+          type: string
+          format: date
+          description: Required when this id is not already on the pacing (US-126).
+        containers:
+          type: array
+          description: >
+            Date-based plan overrides (§9) - opaque, forwarded byte-for-byte to Pacing, the only party
+            that parses or enforces their shape: a container exists only once it carries an explicit
+            `target_impressions > 0` and its date children, and the sum of every container's
+            `target_impressions` must not exceed this line item's own `targetImpressions` - both are
+            Pacing's rules to apply and reject, never the Hub's to pre-check or clamp. The Hub adds,
+            edits or removes a whole container/date-child object here; it computes no figure inside
+            one. A container carrying `__action`/`__source_id`/`__scale` (the transport form of
+            "duplicate this container into a new period, scaled by a factor") is Pacing's own existing
+            duplicate mechanism - the Hub sets these three fields verbatim (snake_case, matching
+            Pacing's own wire shape for them) on a client-built clone and forwards them; Pacing strips
+            them once persisted.
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - lineItemId
+    PacingPlanUpdateV1:
+      type: object
+      description: >
+        A full plan save (§9, US-125/126/127). `lineItems` is the whole set this pacing should have
+        after the save - see `PacingLineItemPlanUpdateV1` for what adding/editing/removing a line item
+        means on this one array.
+      properties:
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingLineItemPlanUpdateV1'
+      required:
+        - lineItems
+    PacingPlanUpdateResultV1:
+      type: object
+      description: >
+        Acknowledges a successful plan save. Deliberately carries no echoed plan data - the caller
+        re-reads GET /api/v1/pacing/dashboards/{slug} for the saved values and the figures Pacing
+        recomputed from them (`metrics`), the same read-after-write pattern §6's display save uses,
+        so the dashboard reflects the change from one source rather than two.
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
+    PacingAddableLineItemsV1:
+      type: object
+      description: >
+        Candidates for US-126's "Add line item" picker: this pacing's own campaign(s)' line items not
+        already on it, fetched live from NetSuite via Pacing's validate endpoint exactly as the Create
+        Pacing draft (§8) is - nothing here is summed, converted or otherwise computed in the Hub.
+      properties:
+        ok:
+          type: boolean
+          description: >
+            False when Pacing could read the campaign's line items but will not let them be paced as
+            they stand today (currently: more than one non-USD currency among them) - `error` names
+            why; there is nothing to add from the campaign picker until that is resolved in NetSuite
+            (add-by-id is unaffected, since it looks up ids directly rather than by campaign).
+        error:
+          type: string
+          description: Why `ok` is false; absent when `ok` is true.
+        io:
+          type: string
+          description: >
+            The insertion order number this pacing's candidates were looked up from; absent when this
+            pacing has no stored insertion order on record, in which case add-by-id
+            (POST /api/v1/pacing/line-items/validate) is the only way to add a line item.
+        orders:
+          type: array
+          description: Every distinct order number searched, for a pacing spanning more than one order.
+          items:
+            type: string
+        addable:
+          type: array
+          description: The campaign's line items not yet on this pacing.
+          items:
+            $ref: '#/components/schemas/PacingDraftLineItemV1'
+        alreadyAdded:
+          type: array
+          description: Ids of this campaign's line items that are already on the pacing (informational).
+          items:
+            type: string
+        client:
+          type: string
+          description: Advertiser/client name, as NetSuite reports it on these line items.
+        agency:
+          type: string
+          description: Agency name, as NetSuite reports it on these line items.
+        warnings:
+          type: array
+          items:
+            type: string
+        notFoundIds:
+          type: array
+          items:
+            type: string
+      required:
+        - ok
+        - addable
+        - alreadyAdded
+    PacingLineItemValidateV1:
+      type: object
+      description: Line item ids to look up directly (§9, US-126's add-by-id path).
+      properties:
+        lineItemIds:
+          type: array
+          items:
+            type: string
+      required:
+        - lineItemIds
+    PacingStatusUpdateV1:
+      type: object
+      description: A pacing status change (§9, US-128).
+      properties:
+        status:
+          type: string
+          description: The pacing's new administrative lifecycle status.
+          enum:
+            - Live
+            - Paused
+            - Complete
+            - Archive
+      required:
+        - status
+    PacingDashboardCampaignV1:
+      type: object
+      description: The pacing's own campaign summary, as Pacing's dashboard payload carries it.
+      properties:
+        slug:
+          type: string
+          description: The pacing's dash_slug (Pacing's own routing key for this dashboard).
+        pacingId:
+          type: string
+          description: The pacing id (Pacing's UUID primary key).
+        name:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        currency:
+          type: string
+        status:
+          type: string
+        orderNumber:
+          type: string
+      required:
+        - slug
+        - pacingId
+        - name
+    PacingJournalEntryV1:
+      type: object
+      description: One free-text note left on the pacing (§15 of the migration plan; read-only here).
+      properties:
+        id:
+          type: string
+        ts:
+          type: string
+        msg:
+          type: string
+        uid:
+          type: string
+        editedAt:
+          type: string
+      required:
+        - id
+        - msg
+    PacingDashboardV1:
+      type: object
+      description: >
+        A pacing's full dashboard payload (§6 of the migration plan, US-114/115): campaign summary,
+        plan by line item, daily delivery facts, the per-pacing widget/layout configuration, any shared
+        library entries a linked widget refers to, and the journal. Fetched verbatim from Pacing (GET
+        /api/dashboards/:slug/data on that side, unchanged by this migration) and reshaped only at the
+        edges (field naming, date parsing) - the Hub does not reinterpret `display`/`aggregate`, whose
+        internal shape belongs entirely to Pacing's own widget-spec engine.
+      properties:
+        campaign:
+          $ref: '#/components/schemas/PacingDashboardCampaignV1'
+        planByLineItem:
+          type: object
+          description: Line item id (as text) to its plan.
+          additionalProperties:
+            $ref: '#/components/schemas/PacingLineItemPlanV1'
+        factsDaily:
+          type: array
+          description: >
+            Raw daily delivery facts, one row per line item per day, passed through byte-for-byte from
+            Pacing's own BigQuery-sourced cache - the Hub does not reshape these. §7 (Daily Performance
+            table) reads this same array.
+          items:
+            type: object
+            additionalProperties: true
+        asOf:
+          type: string
+          description: The as-of date Pacing computed this payload's facts against; null if unresolved.
+        display:
+          type: object
+          description: >
+            This pacing's widget/layout selection (US-116/117), Pacing's own `display` object -
+            `widgets`, optionally `groups`/`layout`/`widgetRanges`/`projectionModes`/`enabled`. Passed
+            through opaquely; save it back via `PacingDisplayUpdateV1` using the revision this object
+            carries (`display.rev`).
+          additionalProperties: true
+        aggregate:
+          type: object
+          description: Opaque per-pacing aggregate configuration, unrelated to §6's own widgets.
+          additionalProperties: true
+        capabilities:
+          type: object
+          description: >
+            What this Pacing build accepts on a settings save - currently
+            `{contextWidgetSpec, contextWidgetUnification}`. Echo it back as `displayWriter` when
+            saving: a patch that changes a v2 widget without it is refused with a 409 that reads
+            to a user as "the editor needs to reload", which is a stale-bundle message for a
+            bundle that is not stale.
+          additionalProperties: true
+        metrics:
+          type: object
+          nullable: false
+          description: >
+            The figures a widget binds to: delivery, spend, margin, pace, the impressions/clicks/views
+            splits and the rate-type bid tables. Computed by Pacing (shared/dashboard-metrics.js) from
+            this same payload and passed through untouched - a widget's `bind` expression names a key
+            in here. The Hub must not recompute or adjust any of it. Margin especially: Pacing applies
+            it server-side and nowhere else, so applying it again inflates money, which the migration
+            plan calls out by name. Absent when Pacing could not derive the figures - a pacing with no
+            delivery data - and a widget then reads "No data" rather than zero.
+          additionalProperties: true
+        libraryEntries:
+          type: object
+          description: >
+            Shared library entries referenced by a library-linked widget in `display.widgets`, keyed by
+            entry id - present only when at least one widget links to one.
+          additionalProperties: true
+        journal:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingJournalEntryV1'
+      required:
+        - campaign
+        - planByLineItem
+        - factsDaily
+        - display
+        - journal
+    PacingRefreshStatusV1:
+      type: object
+      description: >
+        Whether/when this pacing's last data refresh landed (US-119) - a completion read, not an
+        in-progress flag; a caller detects completion by polling until `refreshId` changes from a
+        baseline captured before triggering.
+      properties:
+        exists:
+          type: boolean
+          description: Whether any data has ever been built for this pacing.
+        refreshId:
+          type: string
+        rowCount:
+          type: integer
+          format: int32
+        latestDate:
+          type: string
+          format: date
+      required:
+        - exists
+        - rowCount
+    PacingRefreshTriggeredV1:
+      type: object
+      properties:
+        started:
+          type: boolean
+      required:
+        - started
+    PacingRetryAfterV1:
+      type: object
+      description: >
+        A request was refused because of a cooldown or rate limit already in effect; retry after this
+        many seconds instead of queuing another attempt immediately.
+      properties:
+        retryAfterSeconds:
+          type: integer
+          format: int32
+      required:
+        - retryAfterSeconds
+    PacingDisplayUpdateV1:
+      type: object
+      description: >
+        A full display save (US-116/117): the whole `widgets` array, plus `displayRev` (the revision
+        this save was read at) so Pacing can detect a concurrent editor. `groups`/`layout` are optional.
+      properties:
+        display:
+          type: object
+          description: "At minimum `{ widgets: [...] }`; may also carry `groups`/`layout`."
+          additionalProperties: true
+        displayWriter:
+          type: object
+          description: >
+            The `capabilities` object from this pacing's dashboard payload, returned unchanged.
+            Transport only - Pacing never stores it. Declaring a version the client did not read
+            from the server would be asserting a capability nobody verified, so this is echoed
+            rather than constructed.
+          additionalProperties: true
+        displayRev:
+          type: integer
+          format: int32
+      required:
+        - display
+        - displayRev
+    PacingDisplayUpdateResultV1:
+      type: object
+      properties:
+        display:
+          type: object
+          additionalProperties: true
+      required:
+        - display
+    PacingDisplayConflictReasonV1:
+      type: string
+      enum:
+        - stale_settings
+        - v2_writer_required
+    PacingDisplayConflictV1:
+      type: object
+      properties:
+        reason:
+          $ref: '#/components/schemas/PacingDisplayConflictReasonV1'
+        currentRev:
+          type: integer
+          format: int32
+          description: The display's actual current revision; present only for `stale_settings`.
+      required:
+        - reason
+    PacingLibraryCreateV1:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/PacingLibraryKindV1'
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+          description: The canonical widget/block/layout definition being saved.
+          additionalProperties: true
+      required:
+        - kind
+        - name
+        - definition
+    PacingLibraryUpdateV1:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
+        expectedUpdatedAt:
+          type: string
+          description: >
+            The entry's `updatedAt` as last read by the caller - the optimistic-concurrency stamp.
+      required:
+        - name
+        - definition
+        - expectedUpdatedAt
+    PacingLibraryDeleteV1:
+      type: object
+      properties:
+        expectedUpdatedAt:
+          type: string
+      required:
+        - expectedUpdatedAt
+    PacingLibraryDeleteResultV1:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    PacingLibraryEntryV1:
+      type: object
+      description: One entry in the shared widget/block/layout library (US-116/US-118).
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/PacingLibraryKindV1'
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
+        ownerName:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        likes:
+          type: integer
+          format: int32
+        liked:
+          type: boolean
+          description: Whether the current user has liked this entry.
+        mine:
+          type: boolean
+          description: Whether the current user owns this entry.
+        usage:
+          type: integer
+          format: int32
+          description: >
+            Number of pacings currently referencing this entry (cached a few minutes on the Pacing
+            side).
+      required:
+        - id
+        - kind
+        - name
+        - likes
+        - liked
+        - mine
+        - usage
+    PacingLibraryListResponseV1:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingLibraryEntryV1'
+      required:
+        - entries
+    PacingLibraryConflictReasonV1:
+      type: string
+      enum:
+        - stale_entry
+        - library_full
+        - v2_writer_required
+    PacingLibraryConflictV1:
+      type: object
+      properties:
+        reason:
+          $ref: '#/components/schemas/PacingLibraryConflictReasonV1'
+        currentUpdatedAt:
+          type: string
+          description: The entry's actual current `updatedAt`; present only for `stale_entry`.
+      required:
+        - reason
+    PacingLikeResultV1:
+      type: object
+      properties:
+        liked:
+          type: boolean
+        likes:
+          type: integer
+          format: int32
+      required:
+        - liked
+        - likes

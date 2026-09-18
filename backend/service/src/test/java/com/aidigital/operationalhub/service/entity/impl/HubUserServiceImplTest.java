@@ -126,4 +126,43 @@ class HubUserServiceImplTest {
 		assertThat(userCaptor.getValue()).isEqualTo(user);
 		assertThat(result).isEqualTo(saved);
 	}
+
+	@Test
+	void shouldFindAllByIdsTest() {
+		// Given:
+		HubUser user = Instancio.of(HubUser.class)
+				.set(field(HubUser::getId), USER_ID)
+				.create();
+		when(userRepository.findAllById(List.of(USER_ID))).thenReturn(List.of(user));
+
+		// When:
+		List<HubUser> result = service.findAllByIds(List.of(USER_ID));
+
+		// Then:
+		assertThat(result).containsExactly(user);
+	}
+
+	@Test
+	void shouldNotQueryRepositoryWhenIdsAreEmptyTest() {
+		// When:
+		List<HubUser> result = service.findAllByIds(List.of());
+
+		// Then:
+		assertThat(result).isEmpty();
+	}
+
+	@Test
+	void shouldFindAllUsersTest() {
+		// Given:
+		HubUser user = Instancio.of(HubUser.class)
+				.set(field(HubUser::getId), USER_ID)
+				.create();
+		when(userRepository.findAll()).thenReturn(List.of(user));
+
+		// When:
+		List<HubUser> result = service.findAll();
+
+		// Then:
+		assertThat(result).containsExactly(user);
+	}
 }

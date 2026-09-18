@@ -1,0 +1,602 @@
+/* ── header ── */
+.pcreate__header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.pcreate__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.pcreate__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--n-100);
+  border-radius: var(--radius-lg);
+}
+.pcreate__context-cell dt {
+  margin: 0 0 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pcreate__context-cell dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ── result header (§8): total validated, primary IO, ready/need/excluded counts ── */
+.pcreate__result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--n-100);
+  border-radius: var(--radius-lg);
+}
+.pcreate__result-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.pcreate__result-io {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.pcreate__result-counts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.pcreate__count {
+  padding: 3px 9px;
+  border-radius: var(--pill);
+  font-size: 11px;
+  font-weight: 700;
+}
+.pcreate__count--ok {
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  color: var(--good);
+}
+.pcreate__count--need {
+  background: color-mix(in srgb, var(--attention) 16%, transparent);
+  color: var(--attention);
+}
+.pcreate__count--excluded {
+  background: var(--n-200);
+  color: var(--muted-strong);
+}
+
+/* ── name row ── */
+.pcreate__name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pcreate__name-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+.pcreate__name-input {
+  max-width: 420px;
+  height: 38px !important;
+  min-height: 38px !important;
+}
+
+/* ── warnings (background tint, no stripe) ── */
+.pcreate__warnings {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  list-style: none;
+  background: color-mix(in srgb, var(--attention) 12%, transparent);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--muted-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pcreate__blocked {
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.pcreate__empty {
+  margin: 24px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ── table ── */
+.pcreate__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.pcreate__table {
+  width: 100%;
+  min-width: 1184px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pcreate__col-check { width: 36px; }
+.pcreate__col-include { width: 46px; }
+.pcreate__col-li { width: 220px; }
+.pcreate__col-channel { width: 96px; }
+.pcreate__col-flight { width: 140px; }
+.pcreate__col-budget { width: 156px; }
+.pcreate__col-impr { width: 156px; }
+.pcreate__col-rate { width: 124px; }
+.pcreate__col-pct { width: 98px; }
+.pcreate__col-status { width: 150px; }
+
+/* ── group (insertion order) row: full-cell background tint, never a side stripe ── */
+.pcreate__group-row td {
+  padding: 0;
+  background: var(--primary-soft);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.pcreate__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+.pcreate__chevron {
+  width: 13px;
+  height: 13px;
+  color: var(--muted-strong);
+  flex: 0 0 auto;
+  transition: transform .15s;
+}
+.pcreate__chevron--open {
+  transform: rotate(180deg);
+}
+.pcreate__group-label {
+  font-weight: 700;
+}
+.pcreate__group-count {
+  color: var(--muted-strong);
+  font-weight: 600;
+  margin-left: auto;
+}
+.pcreate__group-meta {
+  color: var(--muted-strong);
+  font-weight: 500;
+}
+.pcreate__group-status {
+  flex: 0 0 auto;
+}
+
+/* ── bulk-edit toolbar (§8): gap filter, paste-from-sheet, bulk-set over the checkbox
+   selection - controls share one baseline, never a bare button beside a label-stacked field. ── */
+.pcreate__bulk-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--surface);
+}
+.pcreate__select--auto {
+  width: auto !important;
+}
+.pcreate__bulk-set {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.pcreate__bulk-set-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+.pcreate__input--bulk-value {
+  width: 110px !important;
+}
+.pcreate__bulk-error {
+  font-size: 12px;
+  color: var(--bad);
+}
+
+.pcreate__paste {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-top: none;
+  background: var(--surface);
+}
+.pcreate__paste-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.pcreate__paste-input {
+  width: 100%;
+  min-height: 90px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--n-100);
+  color: var(--ink);
+  resize: vertical;
+}
+.pcreate__paste-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.pcreate__paste-error {
+  color: var(--bad);
+}
+
+/* table-wrap follows directly after the toolbar/paste box, so it loses its own top radius/border
+   when either precedes it - avoided by only rounding the toolbar's top and letting table-wrap keep
+   its full border as the last element in the stack. */
+.pcreate__table-wrap {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* stacked start/end date inputs share one column - two inputs, never an input beside a bare label. */
+.pcreate__flight-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+.pcreate__flight-input {
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 6px !important;
+  font-size: 12px !important;
+  width: 100%;
+}
+
+/* ── line item row ── */
+.pcreate__row {
+  border-bottom: 1px solid var(--border);
+}
+.pcreate__row:hover {
+  background: color-mix(in srgb, var(--primary-soft) 55%, transparent);
+}
+/* Wider horizontal padding than the 10px the header uses: an input fills its cell, so
+   the cell's padding IS the gap between one field and the next. At 10px two adjacent
+   numbers sat close enough to read as one field. */
+.pcreate__row td {
+  padding: 8px 14px;
+  vertical-align: top;
+}
+/* Both control cells centre their control instead of nudging it down by a fixed
+   padding: a checkbox and a button have different intrinsic heights, so one hard-coded
+   offset lines up exactly one of them and leaves the other sitting crooked beside it.
+   The row's own height comes from the input fields further along, so both simply
+   centre within whatever that turns out to be. */
+/* `.pcreate__row td` above sets vertical-align: top, and two selector parts beat one —
+   so a rule written as `.pcreate__cell-check` alone never applied at all, which is why
+   the controls stayed crooked through several attempts at tuning the padding. Matched
+   specificity here rather than reaching for !important. */
+.pcreate__row td.pcreate__cell-check,
+.pcreate__row td.pcreate__cell-include {
+  vertical-align: middle;
+  padding: 4px 6px;
+}
+
+/* Both controls are made BLOCK and centred, rather than left inline.
+   `vertical-align: middle` on the cell only centres the line box; the controls inside
+   it still sit on a shared text baseline, and a checkbox and a 22px button do not have
+   the same one — which is why one kept sitting higher than the other however the cell
+   padding was tuned. Taking them out of the text flow removes the baseline from the
+   question entirely, and the explicit matching size keeps the two columns reading as a
+   pair rather than as two unrelated widgets. */
+.pcreate__cell-check > input {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+}
+/* Include column (PDI-131 fix): decides what gets created, so its cell carries a full-cell background
+   fill - never a side stripe - to read apart from the plain, untinted bulk-select checkbox next to it. */
+/* The include control: a ± button, deliberately NOT a second checkbox. Two identical
+   checkboxes in one row cannot be told apart without reading the header, and these two
+   decide different things — one aims the bulk toolbar, the other decides whether the
+   line item is in the pacing at all. */
+.pcreate__incl {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.pcreate__incl--in {
+  background: color-mix(in srgb, var(--status-green, #2f9e5e) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--status-green, #2f9e5e) 40%, var(--border));
+}
+
+.pcreate__incl--out {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.pcreate__incl:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pcreate__incl:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* An excluded row reads as excluded across its whole width, so a reviewer scanning 190
+   rows sees what is out without checking a control in the first column. */
+.pcreate__row--excluded > td {
+  opacity: 0.55;
+}
+
+/* The former include-cell tints are gone with the checkbox they marked: the ± button
+   carries its own state now, and the whole row dims when it is excluded. A cell fill
+   underneath both would have said the same thing a third time. */
+.pcreate__cell-li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pcreate__li-id {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.pcreate__li-desc {
+  font-size: 12px;
+  color: var(--muted-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 210px;
+}
+.pcreate__cell-channel {
+  color: var(--muted-strong);
+  padding-top: 12px !important;
+}
+.pcreate__cell-status {
+  padding-top: 12px !important;
+}
+/* a row can carry more than one exclusion reason at once (§8) - stacked, never collapsed into one
+   generic badge or a side stripe. */
+.pcreate__status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* every editable cell shares the same baseline: input/select on the left, the "Auto" badge right
+   after it on the same line - never stacked, so a row never grows a second line by itself. */
+.pcreate__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pcreate__input,
+.pcreate__select {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 8px !important;
+  font-size: 13px !important;
+  width: 100%;
+}
+
+/* A select draws its own dropdown arrow at the right edge, inside the padding box. With
+   the 8px the inputs use, the arrow lands on top of the value — "CPM" and the chevron
+   overlap. Room on the right for the arrow, and the column widened to match so the
+   value does not simply get squeezed instead. */
+.pcreate__select {
+  padding-right: 26px !important;
+}
+.pcreate__input--money,
+.pcreate__input,
+.pcreate__input--pct {
+  text-align: right;
+}
+.pcreate__input--pct {
+  max-width: 66px;
+}
+.pcreate__field-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* "Auto" badge: a background tint pill, never a side stripe or colored border. */
+/* Small on purpose: "Auto" annotates the value next to it — it says where the number
+   came from, it is not the number. At its former size it read as loudly as the figure
+   it was attached to, on every pre-filled row of 190. */
+.pcreate__badge {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border-radius: var(--pill);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ── footer ── */
+.pcreate__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.pcreate__included-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted-strong);
+}
+
+@media (max-width: 900px) {
+  .pcreate__context {
+    gap: 16px;
+  }
+}
+
+.pcreate__filter-count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   THE TABLE HEADER.
+
+   Plain, the way the retired SPA had it (index.css `.cp-tbl thead th`): one
+   padding, one type, no fixed height, no vertical-align, no inner wrappers.
+   Every heading is a single line, so they share a baseline by simply being the
+   same kind of thing.
+
+   The elaborate version this replaces — fixed height, flex wrappers, per-column
+   alignment — existed only to hold a two-line "Edit" cell level with one-line
+   neighbours. Once the label came out, all of it was scaffolding around a
+   problem that no longer exists.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.pcreate__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pcreate__col-select-th,
+.pcreate__col-include-th {
+  text-align: center;
+}
+
+/* A sortable heading is a button filling its cell, so the whole heading is the click
+   target — the cell gives up its padding to it, and the button takes exactly the same
+   padding back, or the two kinds of heading sit on different lines. */
+.pcreate__th-sortable {
+  padding: 0;
+}
+
+.pcreate__sort {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  /* `font: inherit` does NOT carry letter-spacing or text-transform — they are not part
+     of the shorthand. Inherited explicitly, or a sortable heading renders in sentence
+     case with no tracking beside uppercase, tracked neighbours. */
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+}
+
+.pcreate__sort:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.pcreate__sort:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* Marks a field the form will refuse without. */
+.pcreate__req {
+  color: var(--status-red, #d14343);
+  font-weight: 700;
+}
+
+/* Faint rather than hidden: a column that CAN be sorted should say so before it is
+   clicked. */
+.pcreate__sort-mark {
+  font-size: 8px;
+  opacity: 0.35;
+}
+
+.pcreate__sort-mark--on {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* The select-all box, nudged down to sit on the same optical line as the heading words
+   beside it. A checkbox is a square with no baseline of its own, so it renders a touch
+   high against uppercase 11px text. */
+.pcreate__col-select-th > input {
+  position: relative;
+  top: 2px;
+}

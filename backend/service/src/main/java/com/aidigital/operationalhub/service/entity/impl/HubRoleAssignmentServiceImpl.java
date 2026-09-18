@@ -42,6 +42,16 @@ public class HubRoleAssignmentServiceImpl implements HubRoleAssignmentService {
 	}
 
 	@Override
+	public List<HubRoleAssignment> findActiveByScopeTypeCodeAndScopeIds(
+			String scopeTypeCode, Collection<Long> scopeIds) {
+		if (scopeIds.isEmpty()) {
+			return List.of();
+		}
+		return assignmentRepository.findAllByScopeTypeCodeAndScopeIdInAndStatus(
+				scopeTypeCode, scopeIds, HubStatus.ACTIVE.getCode());
+	}
+
+	@Override
 	public Optional<HubRoleAssignment> findByIdForUpdate(Long assignmentId) {
 		return assignmentRepository.findByIdForUpdate(assignmentId);
 	}

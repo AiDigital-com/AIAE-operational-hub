@@ -1,0 +1,16 @@
+.cview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cview--empty {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cview__note {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}

@@ -1,0 +1,370 @@
+.pdl {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.pdl__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.pdl__section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.pdl__section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pdl__saving {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+.pdl__empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  margin: 0;
+}
+
+/* ── widget list / cards (no left-rail accents anywhere here) ── */
+.pdl__widget-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pdl__widget-list--nested {
+  margin-top: 8px;
+}
+.pdl__widget {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: grab;
+}
+.pdl__widget--selected {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+.pdl__widget--dragging {
+  opacity: 0.5;
+}
+/* Drawn in CSS, not typed as a character. The obvious glyph for a drag handle is
+   U+283F (braille dots-123456), but plenty of UI sans stacks have no braille block,
+   and a missing glyph renders as an empty box - seven of them down the list, which
+   reads as "broken", not "draggable". Two columns of three dots, painted. */
+.pdl__widget-handle {
+  flex: none;
+  width: 10px;
+  height: 16px;
+  cursor: grab;
+  user-select: none;
+  background-image: radial-gradient(currentcolor 1.4px, transparent 1.5px);
+  background-size: 5px 5px;
+  background-position: 0 2px;
+  background-repeat: repeat;
+  color: var(--muted);
+  opacity: 0.75;
+}
+.pdl__widget-handle:active {
+  cursor: grabbing;
+}
+.pdl__widget-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.pdl__widget-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 2px 8px;
+  border-radius: var(--pill);
+}
+.pdl__widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdl__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.pdl__remove:hover {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+/* ── groups: a full-perimeter tinted mat behind members, never a side stripe ── */
+.pdl__group {
+  position: relative;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  padding: 10px 12px 12px;
+}
+.pdl__group--slate { background: var(--n-100); }
+.pdl__group--blue { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.pdl__group--teal { background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
+.pdl__group--amber { background: color-mix(in srgb, var(--attention) 10%, var(--surface)); }
+.pdl__group-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted-strong);
+}
+.pdl__group-ungroup {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.pdl__group-ungroup:hover {
+  color: var(--ink);
+}
+
+/* ── library filters ── */
+.pdl__filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.pdl__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  color: var(--muted);
+  min-width: 220px;
+  flex: 1;
+  max-width: 360px;
+}
+.pdl__search svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+.pdl__search input {
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+}
+.pdl__fsel {
+  max-width: 160px;
+  min-width: 130px;
+}
+
+/* ── library list ── */
+.pdl__library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pdl__library-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.pdl__library-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.pdl__rename {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pdl__rename input {
+  font: inherit;
+  font-weight: 700;
+  font-size: 13.5px;
+  padding: 3px 6px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  min-height: auto;
+}
+.pdl__rename-confirm,
+.pdl__rename-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pdl__rename-confirm {
+  color: var(--good);
+}
+.pdl__rename-cancel:hover {
+  color: var(--ink);
+}
+.pdl__library-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.pdl__library-kind {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 1px 7px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  color: var(--muted-strong);
+}
+.pdl__library-desc {
+  font-size: 12.5px;
+  color: var(--muted-strong);
+}
+.pdl__library-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  width: 100%;
+}
+.pdl__library-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.pdl__like {
+  border: none;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--border-strong);
+  cursor: pointer;
+  padding: 4px;
+}
+.pdl__like--active {
+  color: var(--bad);
+}
+
+/* ── save-to-library modal ── */
+.pdl__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.pdl__modal {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  box-shadow: var(--shadow-lg);
+}
+.pdl__modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.pdl__modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.pdl__modal-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+.pdl__modal-note {
+  font-size: 12.5px;
+  color: var(--muted-strong);
+  margin: 4px 0 14px;
+}
+.pdl__modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  margin-bottom: 12px;
+}
+.pdl__modal-field input,
+.pdl__modal-field textarea {
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+.pdl__modal-field textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.pdl__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}

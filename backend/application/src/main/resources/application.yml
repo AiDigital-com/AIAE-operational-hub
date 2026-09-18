@@ -131,6 +131,17 @@ app:
       # bigquery.query.bytes.billed distribution says what a legitimate report actually costs - a ceiling
       # that rejects a real report is worse than an expensive one.
       max-bytes-billed: ${BIGQUERY_MAX_BYTES_BILLED:0}
+    pacing:
+      base-url: ${PACING_BASE_URL:http://localhost:3000}
+      # HMAC key shared with Pacing (dash-gate's HUB_ASSERTION_SECRET) for the X-Hub-Assertion header;
+      # it is the whole of the authentication between the two services. No default here on purpose -
+      # only the local profile may default it, to the value dash-gate's own local template ships.
+      assertion-secret: ${PACING_ASSERTION_SECRET:}
+      connect-timeout-ms: ${PACING_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${PACING_READ_TIMEOUT_MS:5000}
+      # Short-lived on purpose: a Hub assertion is a bearer token for whatever it asserts, minted fresh
+      # per request rather than reused.
+      assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}
   usage-logging:
     # One usage_events row per meaningful user action (PDI_100), written off the request thread. Set to false
     # to stop recording without a code change: the aspect leaves the context and the table keeps what it has.

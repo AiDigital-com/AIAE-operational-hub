@@ -1,0 +1,85 @@
+/* The widget board (§6 render) - background tints / top badges only, never a left-rail stripe. */
+
+.wgt-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.wgt-tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 16px;
+  min-width: 0;
+}
+.wgt-tile--section {
+  grid-column: 1 / -1;
+}
+.wgt-tile__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.wgt-tile__badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--n-100);
+  color: var(--muted);
+}
+
+.wgt-layout { display: flex; flex-direction: column; gap: 14px; }
+.wgt-layout__row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+}
+.wgt-layout__col { min-width: 0; }
+
+.wgt-col__badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+/* Groups: a tinted panel wrapping its member tiles, with a title badge on TOP - never a side rail. */
+.wgt-group {
+  grid-column: 1 / -1;
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+/* Same four tints `pacing-dashboard-library.css`'s `.pdl__group--*` already defines, out of the
+   closed GROUP_TINTS palette (`shared/dash-blocks.js`: slate/blue/teal/amber/violet/rose) - the two
+   surfaces must agree on how a group reads, never invent a second palette. */
+.wgt-group--slate { background: var(--n-100); }
+.wgt-group--blue { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.wgt-group--teal { background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
+.wgt-group--amber { background: color-mix(in srgb, var(--attention) 10%, var(--surface)); }
+.wgt-group__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted-strong);
+  margin-bottom: 10px;
+}
+.wgt-group__members {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}

@@ -267,7 +267,51 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * scope - rejected rather than silently skipped, so a crafted request cannot delete outside the
 	 * caller's visibility.
 	 */
-	OPH_050("OPH_050", "'%s' does not belong to this campaign.");
+	OPH_050("OPH_050", "'%s' does not belong to this campaign."),
+
+	/**
+	 * The Pacing service could not be reached at all (connection refused, or a connect/read timeout).
+	 */
+	OPH_051("OPH_051", "The Pacing service is currently unreachable. Please try again shortly."),
+
+	/**
+	 * Pacing rejected the Hub's assertion (HTTP 401): the two services' shared secrets disagree. A
+	 * server misconfiguration, never something the calling user did - deliberately not exposed as an
+	 * authentication failure of the caller's own session.
+	 */
+	OPH_052("OPH_052", "The Pacing service rejected the Hub's request. This is a server-side "
+			+ "configuration issue; contact your administrator."),
+
+	/**
+	 * Pacing answered 403/{@code unknown_user}: the Hub recognizes this user, but Pacing's own user
+	 * mirror does not yet. A sync gap, not an authorization decision - the caller should be told to
+	 * wait for sync or contact an administrator, not that they are forbidden.
+	 */
+	OPH_053("OPH_053", "Your account has not synced to the Pacing service yet. "
+			+ "Contact your administrator if this persists."),
+
+	/**
+	 * Pacing answered 404 for the requested resource.
+	 */
+	OPH_054("OPH_054", "The requested Pacing resource was not found."),
+
+	/**
+	 * Pacing answered with some other, unrecognized non-2xx status.
+	 */
+	OPH_055("OPH_055", "The Pacing service request failed unexpectedly."),
+
+	/**
+	 * Pacing answered 400: the Hub sent a structurally invalid request (§6 of the migration plan - a
+	 * malformed widget/display/library payload, or a refresh requested for a non-Live pacing). Pacing's
+	 * own detail is forwarded verbatim so the caller can see which part was rejected.
+	 */
+	OPH_056("OPH_056", "The Pacing service rejected the request: %s."),
+
+	/**
+	 * Pacing answered 403 for a reason other than an unsynced user (§6, US-118): the current user is
+	 * neither this library entry's owner nor an admin.
+	 */
+	OPH_057("OPH_057", "Only the owner of this library entry, or an admin, may change or remove it.");
 
 	private final String code;
 	private final String description;

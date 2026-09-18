@@ -51,6 +51,14 @@ public class HubUser extends AuditAwareEntity {
 	@Column(name = "grade")
 	private String grade;
 
+	/**
+	 * This employee's {@code user_id} in Pacing's own {@code access.users} table (a UUID, stored as
+	 * text), written back by the Pacing user sync (§2 of the migration plan). {@code null} until the
+	 * first successful sync for this user — a brand-new Hub employee has no Pacing row yet.
+	 */
+	@Column(name = "pacing_user_id")
+	private String pacingUserId;
+
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) {

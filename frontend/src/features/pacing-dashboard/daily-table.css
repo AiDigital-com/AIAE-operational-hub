@@ -1,0 +1,75 @@
+/* Daily Performance table (§7). Layout only — the DataTable primitive owns the
+   grid, the sticky header and the pinned totals row. */
+
+.dtbl__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dtbl__count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One row of inputs, all sharing a baseline. Each filter is a stacked
+   label-over-input pair, so the Clear button stacks an invisible label of its own
+   height rather than sitting on the labels' line — mixing a bare button into a row
+   of label-stacked fields is what makes a control row look crooked. */
+.dtbl__filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.dtbl__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dtbl__filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.dtbl__filter-input {
+  width: 148px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.dtbl__filter-input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+/* Numbers right-aligned and tabular so digits line up down the column; text left.
+   Both are set here rather than in the primitive because what a column holds is
+   this table's knowledge, not the table component's. */
+.dtbl__col--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dtbl__col--text {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dtbl__empty {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
