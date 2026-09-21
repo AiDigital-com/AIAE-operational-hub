@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aPacingDraftLineItemV1, aPacingLineItemPlanV1 } from "@/test/factories";
@@ -154,5 +154,107 @@ describe("PacingPlanSheet", () => {
     const added = lineItems.find((li) => li.lineItemId === "7");
     expect(added).toBeDefined();
     expect(added?.channel).toBe("Video");
+  });
+});
+
+// §10 sub-breakdowns (US-129/130), through the real sheet: authoring a sub-breakdown
+// and getting it into the save request. The maths it feeds already ships on the
+// Pacing side; what matters here is that the editor writes the shape that reader expects.
+describe("PacingPlanSheet — sub-breakdowns", () => {
+  beforeEach(() => {
+    vi.mocked(savePacingPlan).mockReset();
+    vi.mocked(getAddablePacingLineItems).mockReset().mockResolvedValue(emptyAddable);
+  });
+
+  async function openContainer(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /line item 111/i }));
+    await user.click(screen.getByRole("button", { name: /\+ Add container/i }));
+  }
+
+  it("adds a free-text sub-breakdown with its own target and margin, and saves it (US-129/130)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) });
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
+
+    // A value NetSuite has never heard of — that is the whole of US-130.
+    await user.selectOptions(screen.getByRole("combobox", { name: /sub-breakdown dimension/i }), "audience");
+    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown value/i }), { target: { value: "Client's own label" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown target/i }), { target: { value: "250000" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: /sub-breakdown margin percent/i }), { target: { value: "35" } });
+
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    const containers = lineItems[0].containers as unknown as Array<{ dim_children: Array<Record<string, unknown>> }>;
+    expect(containers[0].dim_children).toHaveLength(1);
+    expect(containers[0].dim_children[0]).toMatchObject({
+      dim_key: "audience",
+      dim_value: "Client's own label",
+      target_mode: "absolute",
+      target_value: 250000,
+      margin_percent: 35,
+    });
+  });
+
+  it("shows what a percent target resolves to against the parent container", async () => {
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) });
+
+    await openContainer(user);
+    // buildDefaultContainer copies the LI's plan, so the parent carries 1,000,000.
+    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown target/i }), { target: { value: "30" } });
+    await user.selectOptions(screen.getByRole("combobox", { name: /sub-breakdown target mode/i }), "percent");
+
+    // 30% of the parent's 1,000,000 — the number the manager would otherwise
+    // have to work out to know what they just planned.
+    expect(await screen.findByText("= 300,000")).toBeInTheDocument();
+  });
+
+  it("warns per dimension and never sums two different axes together", async () => {
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 100_000, clientBudget: 5000 }) });
+
+    await openContainer(user);
+
+    // Two axes, 60k each. Summed they would be 120k against a 100k container and
+    // warn for nothing — the exact false positive the retired SPA had to fix.
+    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
+    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
+    const values = screen.getAllByRole("textbox", { name: /sub-breakdown value/i });
+    const targets = screen.getAllByRole("textbox", { name: /sub-breakdown target/i });
+    const dims = screen.getAllByRole("combobox", { name: /sub-breakdown dimension/i });
+    await user.selectOptions(dims[0], "audience");
+    fireEvent.change(values[0], { target: { value: "Sports fans" } });
+    fireEvent.change(targets[0], { target: { value: "60000" } });
+    await user.selectOptions(dims[1], "geo");
+    fireEvent.change(values[1], { target: { value: "TX" } });
+    fireEvent.change(targets[1], { target: { value: "60000" } });
+
+    expect(screen.queryByText(/outrun this container/i)).not.toBeInTheDocument();
+
+    // Push ONE axis over on its own and it must say so, naming that axis.
+    fireEvent.change(targets[1], { target: { value: "150000" } });
+    expect(await screen.findByText(/Geo sub-breakdowns outrun this container/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Audience sub-breakdowns outrun/i)).not.toBeInTheDocument();
+  });
+
+  it("removes a sub-breakdown without touching the date splits beside it", async () => {
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) });
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /\+ Add date split/i }));
+    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown value/i }), { target: { value: "TX" } });
+
+    await user.click(screen.getByRole("button", { name: /Remove sub-breakdown/i }));
+
+    expect(screen.queryByRole("textbox", { name: /sub-breakdown value/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /Date split name/i })).toBeInTheDocument();
   });
 });

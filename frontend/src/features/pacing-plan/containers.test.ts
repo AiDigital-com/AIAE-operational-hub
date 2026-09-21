@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildDateChild,
   buildDefaultContainer,
+  buildDimChild,
+  dimChildLabel,
+  dimKeysOverTarget,
+  DIM_KEYS,
+  DIM_LABELS,
+  resolveDimAbs,
   containerImprSum,
   containerSumExceedsPlan,
   currencyMatches,
@@ -210,5 +216,135 @@ describe("currencyMatches", () => {
   it("flags a real mismatch", () => {
     expect(currencyMatches("CAD", "USD")).toBe(false);
     expect(currencyMatches("CAD", null)).toBe(false);
+  });
+});
+
+// §10 sub-breakdowns (US-129/130). The maths these mirror already shipped on the
+// Pacing side (pacing-core.js:resolveDimAbs); what is tested here is the Hub's
+// reader of it and the warning built on top.
+describe("sub-breakdowns", () => {
+  const container: PacingContainer = {
+    id: "c1",
+    name: "Q1",
+    fs: "2026-01-01",
+    fe: "2026-03-31",
+    target_impressions: 100000,
+    native_budget: 5000,
+    target_spend: 5000,
+    margin_percent: 20,
+    date_children: [],
+    dim_children: [],
+  };
+
+  describe("buildDimChild", () => {
+    it("starts on an absolute target with nothing filled in, as the retired SPA did", () => {
+      const dx = buildDimChild("audience", "Sports fans");
+      expect(dx.dim_key).toBe("audience");
+      expect(dx.dim_value).toBe("Sports fans");
+      expect(dx.target_mode).toBe("absolute");
+      expect(dx.target_value).toBeNull();
+      expect(dx.margin_percent).toBeNull();
+      expect(dx.notify_in_summary).toBe(false);
+      expect(dx.id).toMatch(/^x-/);
+    });
+
+    it("gives every sub-breakdown its own id", () => {
+      expect(buildDimChild("geo", "TX").id).not.toBe(buildDimChild("geo", "TX").id);
+    });
+
+    // US-130: the value the client asked for need not exist in NetSuite.
+    it("accepts a free-text value verbatim", () => {
+      expect(buildDimChild("comment", "Client's own label — 2026 push").dim_value)
+        .toBe("Client's own label — 2026 push");
+    });
+  });
+
+  describe("resolveDimAbs", () => {
+    it("reads an absolute target as the unit count it is", () => {
+      expect(resolveDimAbs({ target_mode: "absolute", target_value: 40000 }, container)).toBe(40000);
+    });
+
+    it("reads a percent target as a share of the PARENT's target", () => {
+      expect(resolveDimAbs({ target_mode: "percent", target_value: 30 }, container)).toBe(30000);
+    });
+
+    it("returns 0 rather than NaN when either side is missing", () => {
+      expect(resolveDimAbs({ target_mode: "absolute", target_value: null }, container)).toBe(0);
+      expect(resolveDimAbs({ target_mode: "percent", target_value: 30 }, { target_impressions: null })).toBe(0);
+    });
+  });
+
+  describe("dimKeysOverTarget", () => {
+    it("flags a key whose sub-breakdowns outrun the container", () => {
+      const c = { ...container, dim_children: [
+        buildDimChild("geo", "TX"), buildDimChild("geo", "CA"),
+      ] };
+      c.dim_children[0].target_value = 70000;
+      c.dim_children[1].target_value = 50000;
+      expect(dimKeysOverTarget(c)).toEqual(["geo"]);
+    });
+
+    // The bug the retired SPA fixed at PacingTab.jsx:950. Audience and Geo cut the
+    // SAME units along independent axes, so their targets are not additive; summing
+    // them warned on every container carrying two dimensions.
+    it("never sums across different keys", () => {
+      const c = { ...container, dim_children: [
+        buildDimChild("audience", "Sports fans"), buildDimChild("geo", "TX"),
+      ] };
+      c.dim_children[0].target_value = 60000;
+      c.dim_children[1].target_value = 60000; // 120k summed, but 60k on each axis
+      expect(dimKeysOverTarget(c)).toEqual([]);
+    });
+
+    it("measures a percent target against the parent, not as a raw number", () => {
+      const c = { ...container, dim_children: [buildDimChild("geo", "TX")] };
+      c.dim_children[0].target_mode = "percent";
+      c.dim_children[0].target_value = 150; // 150% of 100000 = 150000, over
+      expect(dimKeysOverTarget(c)).toEqual(["geo"]);
+      c.dim_children[0].target_value = 90;
+      expect(dimKeysOverTarget(c)).toEqual([]);
+    });
+
+    it("says nothing when the container has no target of its own to measure against", () => {
+      const c = { ...container, target_impressions: null, dim_children: [buildDimChild("geo", "TX")] };
+      c.dim_children[0].target_value = 999999;
+      expect(dimKeysOverTarget(c)).toEqual([]);
+    });
+  });
+
+  describe("keys and labels", () => {
+    // Eleven, per the migration plan — wider than the SPA's eight, which listed only
+    // namebuilder dimensions. Pacing's own widget validator has accepted all eleven
+    // since 2026-08-11; nothing validates a CONTAINER's key at all, so this is the guard.
+    it("offers the eleven keys the plan names, and labels every one", () => {
+      expect([...DIM_KEYS].sort()).toEqual([
+        "audience", "channel", "comment", "creative", "flight", "geo",
+        "keyword", "language", "message", "platform", "tactic",
+      ]);
+      for (const k of DIM_KEYS) expect(DIM_LABELS[k]).toBeTruthy();
+    });
+
+    it("labels a sub-breakdown by dimension and value", () => {
+      expect(dimChildLabel({ dim_key: "audience", dim_value: "Sports fans" })).toBe("Audience: Sports fans");
+    });
+
+    it("falls back to the raw key rather than showing nothing", () => {
+      expect(dimChildLabel({ dim_key: "unknown_axis", dim_value: "x" })).toBe("unknown_axis: x");
+    });
+  });
+
+  describe("duplicateContainer carries them", () => {
+    it("scales an absolute target but not a percent one, and re-ids both", () => {
+      const c = { ...container, dim_children: [
+        buildDimChild("geo", "TX"), buildDimChild("geo", "CA"),
+      ] };
+      c.dim_children[0].target_value = 40000;
+      c.dim_children[1].target_mode = "percent";
+      c.dim_children[1].target_value = 30;
+      const dup = duplicateContainer(c, { name: "Q2", fs: "2026-04-01", fe: "2026-06-30", scale: 0.5 });
+      expect(dup.dim_children[0].target_value).toBe(20000);
+      expect(dup.dim_children[1].target_value).toBe(30);
+      expect(dup.dim_children.map((d) => d.id)).not.toContain(c.dim_children[0].id);
+    });
   });
 });

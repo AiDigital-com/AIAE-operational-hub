@@ -1,0 +1,183 @@
+/* §10's display half. No vertical colour stripes anywhere — this project bans left-rail
+   accents outright; status is carried by the word beside the figure and a tinted text
+   colour, never by a bar down the side of a row. */
+
+.pctn {
+  margin-top: 24px;
+}
+.pctn__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.pctn__lede {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted-strong);
+  max-width: 72ch;
+}
+
+.pctn__li {
+  margin-bottom: 16px;
+}
+.pctn__li-head {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted-strong);
+  margin-bottom: 6px;
+}
+
+/* The table is wide. It scrolls inside its own box rather than making the page scroll
+   sideways, which is the project rule for any wide content. */
+.pctn__scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.pctn__table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pctn__table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted-strong);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.pctn__table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  vertical-align: middle;
+}
+.pctn__table tr:last-child td {
+  border-bottom: none;
+}
+
+.pctn__row--container > td {
+  font-weight: 700;
+  background: var(--n-100);
+}
+/* Children are indented by their first cell only, so every numeric column stays in one
+   vertical line with its parent's — the whole point of nesting them here. */
+.pctn__row--child .pctn__cell-name {
+  padding-left: 30px;
+}
+
+.pctn__cell-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pctn__cell-pace,
+.pctn__cell-margin {
+  white-space: nowrap;
+}
+
+.pctn__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.pctn__chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+.pctn__chevron--open {
+  transform: rotate(90deg);
+}
+.pctn__container-name {
+  font-weight: 700;
+}
+/* A container with no children gets no toggle, so its name needs the space the chevron
+   would have taken — otherwise it sits a few pixels left of its siblings. */
+.pctn__container-name--leaf {
+  padding-left: 16px;
+}
+.pctn__period {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted-strong);
+}
+
+/* Which kind of cut this row is. A word, not a colour: "period" and "split" are the
+   distinction the whole section rests on. */
+.pctn__kind {
+  display: inline-block;
+  min-width: 46px;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+.pctn__kind--dim {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+.pctn__child-label {
+  color: var(--ink);
+}
+
+.pctn__pace {
+  font-variant-numeric: tabular-nums;
+}
+.pctn__pace--done {
+  color: var(--good);
+  font-weight: 700;
+}
+.pctn__pace--short {
+  color: var(--attention-text);
+}
+.pctn__pace-note {
+  color: var(--muted-strong);
+}
+
+.pctn__margin {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.pctn__margin--g { color: var(--good); }
+.pctn__margin--w { color: var(--attention-text); }
+.pctn__margin--b { color: var(--bad); }
+.pctn__margin-target {
+  font-weight: 400;
+  color: var(--muted-strong);
+}
+
+.pctn__muted {
+  color: var(--muted-strong);
+}
+
+/* The verdict in words, for a screen reader and for anyone who cannot tell the tints
+   apart. Visually hidden, not display:none — the latter is skipped by readers too. */
+.pctn__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

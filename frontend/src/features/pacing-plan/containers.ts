@@ -27,6 +27,30 @@ export interface PacingDateChild {
   margin_percent?: number | null;
 }
 
+/**
+ * A sub-breakdown (§10, US-129/130): a slice of a container along ONE dimension.
+ *
+ * Date children say WHEN a container's units land; dim children say WHAT they are.
+ * `target_value` is read through `pacing-core.js:resolveDimAbs`, which is why
+ * `target_mode` matters: `absolute` is a unit count, `percent` is a share OF the
+ * parent container's `target_impressions`. Anything that scales a container must
+ * scale an absolute target and leave a percent one alone - see `duplicateContainer`.
+ *
+ * `dim_value` is free text on purpose (US-130): the manager plans against what the
+ * client asked for, which need not exist in NetSuite.
+ */
+export interface PacingDimChild {
+  id: string;
+  dim_key: string;
+  dim_value: string;
+  target_mode: "absolute" | "percent";
+  target_value: number | null;
+  native_budget?: number | null;
+  target_spend: number | null;
+  margin_percent?: number | null;
+  notify_in_summary?: boolean;
+}
+
 export interface PacingContainer {
   id: string;
   name: string;
@@ -37,7 +61,7 @@ export interface PacingContainer {
   target_spend: number | null;
   margin_percent?: number | null;
   date_children: PacingDateChild[];
-  dim_children: Record<string, unknown>[];
+  dim_children: PacingDimChild[];
   // Transport-only (§9): a client-built duplicate carries these three so dash-gate's existing
   // duplicate mechanism can record the operation; it strips them once persisted (never stored).
   __action?: string;
@@ -137,22 +161,17 @@ export function duplicateContainer(
   // the copy never shares a key with its source, and every ABSOLUTE figure scaled. A percent-mode
   // `target_value` is deliberately left alone - pacing-core's resolveDimAbs reads it as a share OF
   // `container.target_impressions`, which this duplicate already scaled, so scaling it here too would
-  // apply the factor twice. The Hub's plan editor has no dim-child UI, but a container authored in
-  // the old UI carries them and must survive a duplicate intact.
-  const dimChildren = (src.dim_children || []).map((dx) => {
-    const d = dx as Record<string, unknown>;
-    const num = (v: unknown) => (typeof v === "number" ? v : null);
-    const tv = num(d.target_value);
-    const nb = num(d.native_budget);
-    const ts = num(d.target_spend);
-    return {
-      ...d,
-      id: genId("x"),
-      target_value: d.target_mode === "percent" ? d.target_value : tv ? Math.round(tv * scale) : null,
-      native_budget: nb ? Math.round(nb * scale * 100) / 100 : null,
-      target_spend: ts ? Math.round(ts * scale * 100) / 100 : null,
-    };
-  });
+  // apply the factor twice (§10 gave these an editor; before that the only way to own one was to have
+  // authored it in the old UI, and a duplicate still had to carry it intact).
+  const dimChildren: PacingDimChild[] = (src.dim_children || []).map((dx) => ({
+    ...dx,
+    id: genId("x"),
+    target_value: dx.target_mode === "percent"
+      ? dx.target_value
+      : (dx.target_value ? Math.round(dx.target_value * scale) : null),
+    native_budget: dx.native_budget ? Math.round(dx.native_budget * scale * 100) / 100 : null,
+    target_spend: dx.target_spend ? Math.round(dx.target_spend * scale * 100) / 100 : null,
+  }));
   return {
     id: genId("c"),
     name: opts.name || `${src.name || "Container"} (copy)`,
@@ -168,6 +187,92 @@ export function duplicateContainer(
     __source_id: src.id,
     __scale: scale,
   };
+}
+
+/**
+ * Dimension keys a sub-breakdown may use (§10). Eleven, per the migration plan.
+ *
+ * Wider than the retired SPA's own list (`PacingTab.jsx:31` has eight) because that
+ * one enumerated only NAMEBUILDER dimensions. `tactic`, `platform` and `channel` are
+ * line-item properties rather than namebuilder positions, and Pacing's own validator
+ * (`dash-gate/lib/widgets-validate.mjs`'s DIM_KEYS) has accepted all eleven since
+ * 2026-08-11 - `channel`'s comment there records what the narrower list cost: an axis
+ * that could be picked and drawn but never saved.
+ *
+ * Nothing on the Pacing side validates a CONTAINER's dim_key on save (only widget
+ * axes are checked), so this list is the only guard. Widening it here widens what
+ * gets stored, with no server-side net.
+ */
+export const DIM_KEYS = [
+  "audience", "tactic", "platform", "comment", "geo", "creative",
+  "message", "keyword", "flight", "language", "channel",
+] as const;
+
+export const DIM_LABELS: Record<string, string> = {
+  audience: "Audience", tactic: "Tactic", platform: "Platform", comment: "Comment",
+  geo: "Geo", creative: "Creative", message: "Message", keyword: "Keyword",
+  flight: "Flight", language: "Language", channel: "Channel",
+};
+
+/** "Audience: Sports fans" - the retired SPA's `dimChildLabel`, same shape. */
+export function dimChildLabel(child: Pick<PacingDimChild, "dim_key" | "dim_value">): string {
+  const label = DIM_LABELS[child.dim_key] || child.dim_key;
+  return `${label}: ${child.dim_value}`;
+}
+
+/** A new sub-breakdown on `dim_key`/`dim_value`, targets left for the manager to fill.
+ *  Mirrors the retired SPA's `addDimChild` (PacingTab.jsx:894) field for field. */
+export function buildDimChild(dimKey: string, dimValue: string): PacingDimChild {
+  return {
+    id: genId("x"),
+    dim_key: dimKey,
+    dim_value: dimValue,
+    target_mode: "absolute",
+    target_value: null,
+    native_budget: null,
+    target_spend: null,
+    margin_percent: null,
+    notify_in_summary: false,
+  };
+}
+
+/**
+ * One sub-breakdown's target in absolute units - the Hub-side mirror of
+ * `pacing-core.js:resolveDimAbs` (line 290), which is the canonical reader.
+ *
+ * A percent target is a share of the PARENT's `target_impressions`. That is the whole
+ * reason `target_mode` exists, and the reason a duplicate must not scale it twice.
+ */
+export function resolveDimAbs(
+  child: Pick<PacingDimChild, "target_mode" | "target_value">,
+  container: Pick<PacingContainer, "target_impressions">,
+): number {
+  const v = Number(child.target_value) || 0;
+  if (child.target_mode === "percent") return ((Number(container.target_impressions) || 0) * v) / 100;
+  return v;
+}
+
+/**
+ * Which dimension KEYS have over-allocated this container, if any.
+ *
+ * Summed PER KEY and never across keys. Audience and Geo cut the same units along
+ * independent axes, so their targets are not additive - the retired SPA fixed exactly
+ * this bug (`PacingTab.jsx:950`, "Summing them fired a false 'exceeds container
+ * target' on any container carrying two different dimensions"), and `dim-scope.js`'s
+ * single-dim rule says the same. Add them up and every container carrying two
+ * dimensions warns for nothing.
+ *
+ * Informational only, like every other container warning here: Pacing does not
+ * enforce it on save.
+ */
+export function dimKeysOverTarget(container: PacingContainer): string[] {
+  const target = Number(container.target_impressions) || 0;
+  if (target <= 0) return [];
+  const sums = new Map<string, number>();
+  for (const child of container.dim_children || []) {
+    sums.set(child.dim_key, (sums.get(child.dim_key) || 0) + resolveDimAbs(child, container));
+  }
+  return [...sums.entries()].filter(([, sum]) => roundedGreaterThan(sum, target)).map(([key]) => key);
 }
 
 /** A new, empty date split inside `container` - fs/fe default to the container's own window. */
