@@ -36,3 +36,32 @@ export function groupAlertsBySeverity(alerts: readonly PacingAlertV1[]): Record<
   }
   return out;
 }
+
+/**
+ * Who NetSuite thinks runs this pacing, if it disagrees with Pacing's own owner (§11, US-132).
+ *
+ * Returns the NetSuite name only when the two genuinely differ, so a caller can render the
+ * disagreement and nothing otherwise. Null means "nothing to say": they agree, or NetSuite named
+ * nobody, or this pacing has not revalidated since the field started being stored.
+ *
+ * COMPARED VERBATIM, and that is deliberate. There is no key shared between the two systems — the
+ * match is a convention people maintain by typing the same name into both, and Pacing's own query
+ * rejects a non-Latin name loudly for exactly this reason. Trimming, case-folding or stripping
+ * diacritics here would paper over a real mismatch (`Mimic` is not how `Mimić` is spelled in
+ * NetSuite) and hide the very disagreement this exists to surface.
+ *
+ * A pacing spanning several campaigns can name several leads; the first that disagrees is enough to
+ * flag it, and the row shows that one. Which of the two is wrong is the reader's call — Pacing's
+ * owner keeps driving access regardless.
+ */
+export function netSuiteLeadMismatch(
+  ownerName: string | null | undefined,
+  campaigns: ReadonlyArray<{ mpoTeamLead?: string | null }> | null | undefined,
+): string | null {
+  const owner = ownerName ?? "";
+  for (const campaign of campaigns ?? []) {
+    const lead = campaign.mpoTeamLead;
+    if (lead && lead !== owner) return lead;
+  }
+  return null;
+}

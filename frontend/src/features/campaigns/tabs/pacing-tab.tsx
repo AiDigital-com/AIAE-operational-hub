@@ -12,6 +12,8 @@ import { StatusBadge } from "../../../shared/ui/status-badge/status-badge";
 // identically on both screens.
 import { fmtBudget, fmtDate } from "../../pacing/mock/format";
 import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity } from "../../pacing-overview/format";
+import { OwnerPicker } from "../../pacing-overview/owner-picker";
+import { netSuiteLeadMismatch } from "../../pacing-overview/format";
 import { useCampaignPacings } from "../../pacing-overview/hooks";
 import type { OpenPacingState } from "../../pacing-overview/navigation";
 import { AlertsBlock } from "../../pacing-overview/alerts-block";
@@ -107,6 +109,7 @@ function PacingListItem({
   const alerts = row.alerts;
   const alertsBySeverity = groupAlertsBySeverity(alerts);
   const otherCampaigns = otherCampaignsOf(row, currentCampaignId);
+  const netSuiteLead = netSuiteLeadMismatch(row.ownerName ?? null, row.campaigns ?? null);
   // Pacing refuses a refresh for anything but a Live pacing (400 pacing_not_live), so the item is
   // offered but disabled rather than firing a request that can only come back an error.
   const isLive = row.status === "Live";
@@ -131,7 +134,30 @@ function PacingListItem({
             )}
           </span>
           <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
-          <span className="pacing-tab__item-owner">{row.ownerName ?? "—"}</span>
+          <span
+              className="pacing-tab__item-owner"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              role="presentation"
+            >
+              <span className="pacing-tab__item-owner-name" title={row.ownerName ?? undefined}>
+                {row.ownerName ?? "—"}
+              </span>
+              {/* §11, US-132: the same disagreement the Overview shows. Owner is visible on both
+                  screens, so the flag belongs on both — seeing it in one place and not the other is
+                  how somebody concludes it was already dealt with. */}
+              {netSuiteLead && (
+                <span
+                  className="pacing-tab__item-owner-ns"
+                  title={`NetSuite records ${netSuiteLead} as running this campaign. Pacing's owner still decides who can see it — one of the two is out of date.`}
+                >
+                  NetSuite: {netSuiteLead}
+                </span>
+              )}
+              {/* §11, US-131: reassignment is offered here as well as on the Overview. The same
+                  component, so the two cannot end up offering different people. */}
+              <OwnerPicker pacingId={row.id} currentOwnerName={row.ownerName ?? null} />
+            </span>
           <MarginCell
             actual={row.marginActualPct ?? null}
             target={row.marginTargetPct ?? 0}

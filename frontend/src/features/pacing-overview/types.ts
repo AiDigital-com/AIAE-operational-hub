@@ -5,3 +5,5 @@ export type CampaignRefV1 = components["schemas"]["CampaignRefV1"];
 export type PacingAlertV1 = components["schemas"]["PacingAlertV1"];
 export type PacingScopeV1 = components["schemas"]["PacingScopeV1"];
 export type PacingListResponseV1 = components["schemas"]["PacingListResponseV1"];
+export type AssignableOwnerV1 = components["schemas"]["AssignableOwnerV1"];
+export type AssignableOwnerListV1 = components["schemas"]["AssignableOwnerListV1"];

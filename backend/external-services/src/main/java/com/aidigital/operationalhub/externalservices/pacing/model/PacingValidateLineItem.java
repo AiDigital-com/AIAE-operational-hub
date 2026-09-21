@@ -25,6 +25,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param converted     whether this line item's native currency differs from USD
  * @param campaignId    serialized as {@code campaign_id}
  * @param campaignName  serialized as {@code campaign_name}
+ * @param mpoTeamLead who NetSuite records as running this campaign (§11, US-132) - carried from
+ *                    validate through create so a brand-new pacing shows the comparison at once,
+ *                    instead of blank until its first revalidate
  * @param orderNumber   serialized as {@code order_number}; the NetSuite insertion order this line item
  *                      belongs to - the grouping key for the review panel (US-122)
  * @param mrgSource     serialized as {@code mrg_source}; the target margin reference hint (may carry a
@@ -48,6 +51,7 @@ public record PacingValidateLineItem(
 		@JsonProperty("campaign_id") String campaignId,
 		@JsonProperty("campaign_name") String campaignName,
 		@JsonProperty("order_number") String orderNumber,
+		@JsonProperty("mpo_team_lead") String mpoTeamLead,
 		@JsonProperty("mrg_source") PacingMrgSource mrgSource,
 		@JsonProperty("kpi_source") PacingKpiSource kpiSource) {
 }

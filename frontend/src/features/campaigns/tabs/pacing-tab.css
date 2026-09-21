@@ -94,9 +94,22 @@
   font-weight: 700;
   color: var(--primary);
 }
+/* §11: the cell is now the anchor for the reassign popover, so the ellipsis moved onto the NAME
+   inside it. Clipping here instead would cut the popover off at the cell's edge. */
 .pacing-tab__item-owner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
   color: var(--muted-strong);
   font-weight: 600;
+}
+/* min-width: 0 — a flex item's minimum is its content by default, and with nowrap that is the whole
+   string, so the track keeps demanding room for it and the ellipsis never triggers. */
+.pacing-tab__item-owner-name {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -288,4 +301,17 @@
   .pacing-tab__item-alerts {
     display: none;
   }
+}
+
+/* §11, US-132: NetSuite's own team lead, when it disagrees with the owner above it. Same treatment
+   as the Overview — smaller, muted, clipped rather than allowed to widen its grid track. */
+.pacing-tab__item-owner-ns {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--attention-text);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -528,6 +528,11 @@ function CreatePacingForm({
           campaignId: li.campaignId,
           campaignName: li.campaignName,
           orderNumber: li.orderNumber,
+          // Carried straight back, never edited: it is NetSuite's own answer to who runs this
+          // campaign, and storing it at create is what lets the new pacing show the
+          // owner-vs-NetSuite comparison (§11) from its first minute instead of blank until the
+          // nightly refresh catches up.
+          mpoTeamLead: li.mpoTeamLead,
           targetImpressions: parseEditableNumber(row.targetImpressions),
           marginPercent: parseEditableNumber(row.marginPercent),
           targetCtr: parseEditableNumber(row.targetCtr),

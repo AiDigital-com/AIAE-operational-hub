@@ -7,7 +7,10 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRow
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingScopeV1;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlert;
+import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
+import com.aidigital.operationalhub.service.rbac.model.AssignableOwner;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingHealth;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -88,8 +91,41 @@ public class PacingContractMapper {
 		return refs == null ? null : refs.stream().map(this::toCampaignRefV1).toList();
 	}
 
-	private CampaignRefV1 toCampaignRefV1(PacingCampaignRef ref) {
-		return new CampaignRefV1().id(ref.id()).name(ref.name());
+	/**
+	 * Maps one campaign reference onto the contract, including the NetSuite team lead (§11, US-132)
+	 * that the Overview shows beside the pacing's own owner. Passed through as Pacing sent it: the
+	 * comparison between the two is a name match this side must not second-guess by normalising,
+	 * trimming or case-folding - a lead whose name carries a diacritic would stop matching the
+	 * person it names.
+	 *
+	 * @param ref the campaign reference from Pacing
+	 * @return the contract shape
+	 */
+	CampaignRefV1 toCampaignRefV1(PacingCampaignRef ref) {
+		return new CampaignRefV1().id(ref.id()).name(ref.name()).mpoTeamLead(ref.mpoTeamLead());
+	}
+
+	/**
+	 * Maps the assignable owners onto the contract (§11, US-131).
+	 *
+	 * @param owners the people the caller may hand a pacing to
+	 * @return the contract shape, owners already sorted by the service
+	 */
+	public AssignableOwnerListV1 toAssignableOwnerListV1(List<AssignableOwner> owners) {
+		return new AssignableOwnerListV1().owners(owners.stream().map(this::toAssignableOwnerV1).toList());
+	}
+
+	/**
+	 * Maps one assignable owner onto the contract.
+	 *
+	 * @param owner the person
+	 * @return the contract shape
+	 */
+	AssignableOwnerV1 toAssignableOwnerV1(AssignableOwner owner) {
+		return new AssignableOwnerV1()
+				.pacingUserId(owner.pacingUserId())
+				.name(owner.name())
+				.email(owner.email());
 	}
 
 	private PacingAlertV1 toAlertV1(PacingAlert alert) {

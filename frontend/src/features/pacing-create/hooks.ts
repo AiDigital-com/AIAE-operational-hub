@@ -17,7 +17,10 @@ export function usePacingDraft(campaignId: number | undefined) {
 
 /**
  * Creates the pacing (§8, US-123). On success, invalidates the campaign's Pacing tab list so the new
- * pacing appears there immediately without a full page reload.
+ * pacing appears there immediately without a full page reload - and the Overview list with it, which
+ * is the other screen the new pacing belongs on. Without that second line the Overview keeps serving
+ * its cached list (staleTime 30s), so a pacing created here is missing from it until the cache goes
+ * stale or the page is reloaded. Same pair useTransferPacingOwner already invalidates.
  */
 export function useCreatePacing(campaignId: number | undefined) {
   const queryClient = useQueryClient();
@@ -25,6 +28,7 @@ export function useCreatePacing(campaignId: number | undefined) {
     mutationFn: (body: PacingCreateV1) => createPacing(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing", "campaign", campaignId] });
+      void queryClient.invalidateQueries({ queryKey: ["pacing", "overview"] });
     },
   });
 }

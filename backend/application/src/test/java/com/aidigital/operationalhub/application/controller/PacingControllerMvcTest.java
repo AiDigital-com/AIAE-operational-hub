@@ -12,6 +12,10 @@ import com.aidigital.operationalhub.application.exception.mapper.GlobalException
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingCreateContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.service.rbac.AssignableOwnerService;
+import com.aidigital.operationalhub.service.rbac.model.AssignableOwner;
+import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerV1;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
@@ -68,6 +72,9 @@ class PacingControllerMvcTest {
 
 	@Mock
 	private PacingCreateContractMapper createMapper;
+
+	@Mock
+	private AssignableOwnerService assignableOwnerService;
 
 	@InjectMocks
 	private PacingController controller;
@@ -140,7 +147,7 @@ class PacingControllerMvcTest {
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "Campaign", "TM-271064", 1432875.0, 15.5, 0.85, null);
+				"40539", "Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null);
 		doReturn(user).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
@@ -215,6 +222,50 @@ class PacingControllerMvcTest {
 		mockMvc.perform(patch("/api/v1/pacing/pacings/p1/status")
 						.contentType(APPLICATION_JSON).content("{\"status\":\"Bogus\"}"))
 				.andExpect(status().isBadRequest());
+	}
+
+	// ── §11: ownership (US-131) ──
+
+	@Test
+	void shouldTransferOwnerTest() throws Exception {
+		// Given: a straight passthrough. Pacing decides whether the move is allowed, from the scope this
+		// assertion carries - the controller neither re-checks nor records anything.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(patch("/api/v1/pacing/pacings/p1/owner")
+						.contentType(APPLICATION_JSON)
+						.content("{\"newOwnerId\":\"11111111-1111-1111-1111-111111111111\"}"))
+				.andExpect(status().isOk());
+		verify(pacingClient).transferOwner(assertion, "p1", "11111111-1111-1111-1111-111111111111");
+	}
+
+	@Test
+	void shouldListAssignableOwnersTest() throws Exception {
+		// Given: resolved from the SAME entitlement that filters the overview, so the picker and the
+		// list cannot disagree.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.owners(List.of("u-azat")), true);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		List<AssignableOwner> owners = List.of(new AssignableOwner("u-azat", "Azat Nabiev", "azat@aidigital.com"));
+		doReturn(owners).when(assignableOwnerService).resolveFor(entitlement);
+		doReturn(new AssignableOwnerListV1().owners(List.of(
+				new AssignableOwnerV1().pacingUserId("u-azat").name("Azat Nabiev").email("azat@aidigital.com"))))
+				.when(mapper).toAssignableOwnerListV1(owners);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/assignable-owners"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.owners[0].pacingUserId").value("u-azat"))
+				.andExpect(jsonPath("$.owners[0].name").value("Azat Nabiev"));
 	}
 
 	@Test

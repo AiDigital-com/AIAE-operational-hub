@@ -6,6 +6,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCre
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLineItemValidateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingOwnerUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingStatusUpdateV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingCreateContractMapper;
@@ -18,6 +20,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidate
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
+import com.aidigital.operationalhub.service.rbac.AssignableOwnerService;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -43,6 +46,7 @@ public class PacingController implements PacingApi {
 	private final PacingClient pacingClient;
 	private final PacingContractMapper mapper;
 	private final PacingCreateContractMapper createMapper;
+	private final AssignableOwnerService assignableOwnerService;
 
 	@Override
 	public ResponseEntity<PacingListResponseV1> listPacings() {
@@ -87,6 +91,34 @@ public class PacingController implements PacingApi {
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		pacingClient.updateStatus(assertion, pacingId, body.getStatus().getValue());
 		return ResponseEntity.ok().build();
+	}
+
+	/**
+	 * Reassigns a pacing to another person (§11 of the migration plan, US-131).
+	 *
+	 * <p>No logic here either: Pacing checks that both the pacing and the recipient sit inside the
+	 * asserted scope, and journals who made the change. This signs and forwards.
+	 */
+	@Override
+	public ResponseEntity<Void> transferPacingOwner(String pacingId, PacingOwnerUpdateV1 body) {
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
+		HubAssertion assertion = mapper.toAssertion(user, entitlement);
+		pacingClient.transferOwner(assertion, pacingId, body.getNewOwnerId());
+		return ResponseEntity.ok().build();
+	}
+
+	/**
+	 * Who the current user may hand a pacing to (§11, US-131).
+	 *
+	 * <p>Resolved from the same entitlement that filters the overview, so the picker and the list
+	 * agree by construction rather than by two implementations staying in step.
+	 */
+	@Override
+	public ResponseEntity<AssignableOwnerListV1> listAssignableOwners() {
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
+		return ResponseEntity.ok(mapper.toAssignableOwnerListV1(assignableOwnerService.resolveFor(entitlement)));
 	}
 
 	/**

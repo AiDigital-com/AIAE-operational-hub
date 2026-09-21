@@ -320,6 +320,23 @@ public interface PacingClient {
 	void updateStatus(HubAssertion assertion, String pacingId, String status);
 
 	/**
+	 * Reassigns a pacing to another person (§11, US-131): {@code PATCH /api/pacings/:id/owner} on the
+	 * Pacing side. Pacing journals who made the change and when, and fires its own Slack line; this
+	 * client adds no record of its own.
+	 *
+	 * <p>Pacing decides whether the move is allowed, from the scope this assertion carries: both the
+	 * pacing and the person receiving it must be inside it. A caller that offered the wrong choices
+	 * gets a 403 here rather than a silently wrong assignment.
+	 *
+	 * @param assertion  who is calling and what they may see
+	 * @param pacingId   the pacing id (Pacing's own UUID primary key)
+	 * @param newOwnerId the recipient's PACING user id - not their Hub id
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	void transferOwner(HubAssertion assertion, String pacingId, String newOwnerId);
+
+	/**
 	 * Permanently deletes a pacing (admin-only pacing administration screen - not in the migration
 	 * plan, carried over from the retired Pacing front end's own Admin screen because there is
 	 * otherwise no way to remove a mistakenly created pacing): {@code DELETE /api/pacings/:pacingId} on

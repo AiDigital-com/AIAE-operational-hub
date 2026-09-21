@@ -1,0 +1,123 @@
+/* §11, US-131. Sits in the owner cell of a dense table, so the closed state is a bare link and the
+   open state is a popover that floats ABOVE the row rather than growing it — a picker that reflows
+   the table under the cursor makes every other row hard to click. No vertical stripes: banned
+   project-wide. */
+
+.opick__open {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--primary);
+  cursor: pointer;
+  text-align: left;
+}
+.opick__open:hover {
+  text-decoration: underline;
+}
+
+/* Rendered in a portal on <body> and positioned against the VIEWPORT (top/left come from the
+   component, measured off the trigger). Anything positioned inside the table is clipped at its
+   scrolling edge — which is exactly how the bottom row's picker became unreachable. Fixed, not
+   absolute, so scrolling the page does not leave it behind mid-flight. */
+.opick {
+  position: fixed;
+  z-index: 240;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  color: var(--ink);
+  text-align: left;
+}
+
+.opick__search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.opick__search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  outline: none;
+}
+.opick__search-input::placeholder {
+  color: var(--muted);
+}
+
+/* Capped and scrollable: six hundred people do not fit on a screen, and a popover that grows to
+   fit them would cover the table it belongs to. */
+/* Takes whatever height the popover has left after the search box, rather than a fixed cap: the
+   panel itself is capped, so a second number here would only ever be the smaller of the two and
+   leave dead space under the list. */
+.opick__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.opick__option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 6px 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+/* One highlight for both hover and keyboard, so arrowing down and pointing at a row look the same —
+   two different affordances for one state is how people lose track of what Enter will do. */
+.opick__option--on {
+  background: var(--n-100);
+}
+.opick__option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.opick__option-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+.opick__option-email {
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+
+.opick__note {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+
+/* Wraps rather than truncating: a refusal from Pacing names which side of the check failed, and
+   that sentence is the whole value of showing it. */
+.opick__error {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--bad);
+}

@@ -1,7 +1,7 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
-import type { PacingListResponseV1 } from "./types";
+import type { AssignableOwnerListV1, PacingListResponseV1 } from "./types";
 
 interface ApiResult<T> {
   data?: T;
@@ -36,4 +36,31 @@ export async function listCampaignPacings(campaignId: number): Promise<PacingLis
       params: { path: { campaignId } },
     })
   );
+}
+
+/**
+ * Who the current user may hand a pacing to (§11, US-131).
+ *
+ * The same set their Pacing scope already filters this list by — what you can see, you can assign
+ * to. Fetched once and reused across rows rather than per row: it does not vary by pacing.
+ */
+export async function listAssignableOwners(): Promise<AssignableOwnerListV1> {
+  return requireData(await apiClient.GET("/api/v1/pacing/assignable-owners", {}));
+}
+
+/**
+ * Reassigns a pacing (§11, US-131).
+ *
+ * Pacing is the one that decides whether the move is allowed and journals who made it; a refusal
+ * (the recipient is outside the caller's scope) surfaces here as a thrown ApiError, never as a
+ * silent no-op that leaves the row looking reassigned.
+ */
+export async function transferPacingOwner(pacingId: string, newOwnerId: string): Promise<void> {
+  const result = await apiClient.PATCH("/api/v1/pacing/pacings/{pacingId}/owner", {
+    params: { path: { pacingId } },
+    body: { newOwnerId },
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
 }
