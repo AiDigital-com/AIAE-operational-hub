@@ -98,4 +98,65 @@ export interface PacingMetricsBag {
    *  could not be resolved — an unknown metric or a malformed expression — which
    *  must render as "misconfigured", never as zero. */
   bound: Record<string, BoundValue | null>;
+  /** Per-line-item container readings (§10's display half). Absent, or an empty
+   *  object, on a pacing whose line items carry no containers. */
+  containers?: Record<string, ContainerReading[]>;
+}
+
+/** How far a container or one of its children is through its own target. */
+export interface SplitProgress {
+  /** Units still to deliver against this target; 0 once it is met. */
+  remaining: number;
+  /** Days left in this window, counting today as already elapsed. */
+  daysLeft: number;
+  /** What the remaining days would each have to deliver. */
+  neededPerDay: number;
+  state: "not_started" | "active" | "ended";
+}
+
+/** A split's realized margin against the target it inherits (child → container → plan). */
+export interface SplitMargin {
+  /** The target this split is measured against, after inheritance. */
+  effM: number;
+  /** Realized margin, or null when nothing has delivered yet — which is NOT 0%. */
+  marginActual: number | null;
+  hasMargin: boolean;
+  /** Pacing's own verdict: `g` good, `w` watch, `b` bad. Null without delivery. */
+  status: "g" | "w" | "b" | null;
+}
+
+/** One child of a container: a date split (WHEN its units land) or a sub-breakdown
+ *  (WHAT they are). Both carry their own target, pace and margin. */
+export interface ContainerChildReading {
+  id: string | null;
+  kind: "date" | "dim";
+  /** "Audience: Sports fans" for a sub-breakdown; a date split's own name, or null. */
+  label: string | null;
+  dimKey: string | null;
+  dimValue: string | null;
+  fs: string | null;
+  fe: string | null;
+  /** Already resolved: a percent-mode sub-breakdown is a share of its parent's
+   *  units, and Pacing resolved that before sending. Never re-derive it here. */
+  target: number;
+  actual: number;
+  spend: number;
+  clientCost: number;
+  progress: SplitProgress;
+  margin: SplitMargin;
+}
+
+export interface ContainerReading {
+  id: string | null;
+  name: string | null;
+  fs: string | null;
+  fe: string | null;
+  target: number;
+  actual: number;
+  spend: number;
+  clientCost: number;
+  progress: SplitProgress;
+  margin: SplitMargin;
+  dateChildren: ContainerChildReading[];
+  dimChildren: ContainerChildReading[];
 }

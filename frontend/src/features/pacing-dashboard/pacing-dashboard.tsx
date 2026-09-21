@@ -14,6 +14,7 @@ import { savePacingDisplay, triggerPacingRefresh } from "./api";
 import { PacingPlanSheet } from "../pacing-plan/pacing-plan-sheet";
 import { StatusControl } from "../pacing-plan/status-control";
 import { Sheet } from "../../shared/ui/sheet/sheet";
+import { ContainersTable } from "./containers-table";
 import { DailyTable } from "./daily-table";
 import { PacingDashboardLibrary } from "./pacing-dashboard-library";
 import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
@@ -328,6 +329,8 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               </ul>
             </section>
           )}
+
+          <ContainersTable metrics={metrics} />
 
           <DailyTable metrics={metrics} />
         </>

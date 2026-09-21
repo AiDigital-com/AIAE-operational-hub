@@ -340,3 +340,45 @@
 .pplan__status-error {
   font-size: 11px;
 }
+
+/* ── Sub-breakdowns (§10) ────────────────────────────────────────────────────
+   Same row grammar as .pplan__date-child so the two subsections read as siblings:
+   every control on one baseline, the free-text value taking the slack. */
+.pplan__dim-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Seven controls in a 760px sheet: at full width the fixed columns take ~500px and
+     the free-text value - the field that matters most here - would be squeezed to a
+     sliver. Wrapping lets it keep a usable width on a narrow sheet instead of the row
+     forcing a horizontal scrollbar. */
+  flex-wrap: wrap;
+}
+
+.pplan__select {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.pplan__input--dim-key { width: 112px; flex: none; }
+.pplan__input--dim-mode { width: 74px; flex: none; }
+.pplan__input--dim-value { flex: 1 1 150px; min-width: 150px; }
+.pplan__dim-child .pplan__input--num { width: 92px; flex: none; }
+.pplan__dim-child .pplan__input--dim-margin { width: 88px; flex: none; }
+
+/* The resolved figure appears only for a percent target. Fixed width and a reserved
+   slot so switching units ⇄ % does not shuffle the margin field and the remove button
+   sideways under the cursor. */
+.pplan__dim-resolved {
+  width: 78px;
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
