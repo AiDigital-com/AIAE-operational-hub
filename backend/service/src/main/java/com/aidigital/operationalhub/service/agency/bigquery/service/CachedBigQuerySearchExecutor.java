@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.service.agency.bigquery.service;
 
 import com.aidigital.operationalhub.externalservices.bigquery.BigQueryClient;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
@@ -28,6 +29,7 @@ import java.util.Map;
  * <p>Caching can be switched off at runtime via {@code oph.cache.search-enabled} (see
  * {@code BigQuerySearchCacheProperties}), e.g. while diagnosing a staleness report.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class CachedBigQuerySearchExecutor {
@@ -73,7 +75,17 @@ public class CachedBigQuerySearchExecutor {
 			condition = "@bigQuerySearchCacheProperties.isSearchEnabled()",
 			sync = true)
 	public List<Map<String, Object>> query(String sql) {
-		return bigQueryClient.query(sql);
+		List<Map<String, Object>> rows = bigQueryClient.query(sql);
+		// An empty result is cached like any other, for the region's full TTL - `sync = true`
+		// rules out `unless`, and single-flight was judged worth more than the slot. That is a
+		// deliberate trade, not an oversight, but it means one empty answer makes every caller
+		// of this SQL see nothing until the entry expires. Nothing recorded that this had
+		// happened, so a caller turning it into a 404 was indistinguishable from a caller whose
+		// row genuinely does not exist. This line is the difference.
+		if (rows.isEmpty()) {
+			log.info("BigQuery returned no rows; caching the empty result for this SQL: {}", sql);
+		}
+		return rows;
 	}
 
 	/**
