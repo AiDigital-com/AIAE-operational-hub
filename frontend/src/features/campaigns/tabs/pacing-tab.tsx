@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Link, useLocation, useOutletContext } from "react-router-dom";
 import { formatError } from "../../../shared/format/error";
 import { campaignDisplayName } from "../../../shared/format/names";
 import { cn } from "../../../shared/style/cn";
-import { ChevronDownIcon } from "../../../shared/ui/icons/icons";
+import { ChevronDownIcon, MoreVerticalIcon } from "../../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../../shared/ui/loading-spinner/loading-spinner";
+import { useToast } from "../../../shared/ui/toast/toast";
 import { MarginCell } from "../../../shared/ui/margin-cell/margin-cell";
 import { StatusBadge } from "../../../shared/ui/status-badge/status-badge";
 // Money/date string helpers, shared with the Pacing Overview (§4) so the same figures read
@@ -16,9 +17,50 @@ import type { OpenPacingState } from "../../pacing-overview/navigation";
 import { AlertsBlock } from "../../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../../pacing-overview/types";
 import { PacingDashboard } from "../../pacing-dashboard/pacing-dashboard";
+import { triggerPacingRefresh } from "../../pacing-dashboard/api";
 import { CreatePacingPanel } from "../../pacing-create/create-pacing-panel";
+// The one delete confirmation in the product (typed-name friction and all), owned by the Pacing
+// admin screen - this tab reuses it rather than growing a second, gentler way to delete a pacing.
+import { DeletePacingModal } from "../../pacing-admin/pacing-admin-delete-modals";
+import { RevalidatePacingModal } from "../../pacing-admin/pacing-admin-revalidate-modal";
+import { isAdminUser, useCurrentUser } from "../../rbac/hooks";
 import type { CampaignTabContext } from "../campaign-workspace";
 import "./pacing-tab.css";
+
+/** Width the row menu is laid out at, so its fixed position can be computed before it mounts. */
+const ROW_MENU_WIDTH = 210;
+
+/**
+ * Pacing refuses a second refresh of the same pacing within two minutes (its double-launch guard).
+ * Held here too, so a refresh this tab just triggered greys its own menu item out for the same window
+ * instead of letting the user earn a 429 to find out.
+ */
+const REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
+
+/**
+ * Roughly how tall the open menu gets (three items plus the "not Live" note). Only used to decide
+ * whether it still fits below the trigger - the placement itself never relies on this number, so an
+ * estimate that is a little off cannot misplace the panel.
+ */
+const ROW_MENU_MAX_HEIGHT = 200;
+
+/**
+ * Where the fixed-position row menu is pinned. Either hangs from its top edge below the trigger, or -
+ * when the row sits too near the bottom of the window - from its bottom edge just above it. Anchoring
+ * the flipped case by `bottom` keeps it exact: no guess at the panel's own height is involved.
+ */
+type MenuAnchor = { left: number; top: number; bottom?: undefined } | { left: number; bottom: number; top?: undefined };
+
+/** Statuses a re-validate is not offered for - there is nothing to re-seed on an archived pacing. */
+const ARCHIVED_STATUSES = new Set(["Archive", "Archived"]);
+
+/**
+ * Every campaign on this pacing OTHER than the one whose tab we are on — not "everything after the
+ * first": the pacing can list this campaign in any position.
+ */
+function otherCampaignsOf(row: PacingRowV1, currentCampaignId: number) {
+  return (row.campaigns ?? []).filter((campaign) => Number(campaign.id) !== currentCampaignId);
+}
 
 /**
  * One pacing on this campaign's tab. Collapsed, it reads like an Overview row; expanded ("shows its
@@ -34,6 +76,15 @@ function PacingListItem({
   onToggle,
   onOpenDashboard,
   itemRef,
+  canDelete,
+  canRevalidate,
+  refreshCooldownSeconds,
+  menuOpen,
+  menuAnchor,
+  onToggleMenu,
+  onRefresh,
+  onRevalidate,
+  onDelete,
 }: {
   row: PacingRowV1;
   currentCampaignId: number;
@@ -41,63 +92,116 @@ function PacingListItem({
   onToggle: () => void;
   onOpenDashboard: () => void;
   itemRef?: React.Ref<HTMLLIElement>;
+  canDelete: boolean;
+  canRevalidate: boolean;
+  refreshCooldownSeconds: number;
+  menuOpen: boolean;
+  menuAnchor: MenuAnchor | null;
+  onToggleMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onRefresh: () => void;
+  onRevalidate: () => void;
+  onDelete: () => void;
 }) {
   const statusStyle = PACING_STATUS_STYLE[row.status] ?? { color: "var(--muted)" };
   const paceStatus = row.paceStatus ?? "no_data";
   const alerts = row.alerts;
   const alertsBySeverity = groupAlertsBySeverity(alerts);
-  // "Also covers" is every campaign on this pacing OTHER than the one whose tab we're already on —
-  // not "everything after the first": the pacing can list this campaign in any position.
-  const otherCampaigns = (row.campaigns ?? []).filter((campaign) => Number(campaign.id) !== currentCampaignId);
+  const otherCampaigns = otherCampaignsOf(row, currentCampaignId);
+  // Pacing refuses a refresh for anything but a Live pacing (400 pacing_not_live), so the item is
+  // offered but disabled rather than firing a request that can only come back an error.
+  const isLive = row.status === "Live";
+  const inCooldown = refreshCooldownSeconds > 0;
 
   return (
     <li className={cn("pacing-tab__item", expanded && "pacing-tab__item--open")} ref={itemRef}>
-      <button
-        type="button"
-        className="pacing-tab__item-head"
-        onClick={onToggle}
-        aria-expanded={expanded}
-      >
-        <ChevronDownIcon className={cn("pacing-tab__chevron", expanded && "pacing-tab__chevron--open")} />
-        <span className="pacing-tab__item-name">
-          {row.name}
-          {otherCampaigns.length > 0 && (
-            <span className="pacing-tab__item-multi">
-              +{otherCampaigns.length} other campaign{otherCampaigns.length === 1 ? "" : "s"}
+      <div className="pacing-tab__item-row">
+        <button
+          type="button"
+          className="pacing-tab__item-head"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          <ChevronDownIcon className={cn("pacing-tab__chevron", expanded && "pacing-tab__chevron--open")} />
+          <span className="pacing-tab__item-name">
+            {row.name}
+            {otherCampaigns.length > 0 && (
+              <span className="pacing-tab__item-multi">
+                +{otherCampaigns.length} other campaign{otherCampaigns.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </span>
+          <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
+          <span className="pacing-tab__item-owner">{row.ownerName ?? "—"}</span>
+          <MarginCell
+            actual={row.marginActualPct ?? null}
+            target={row.marginTargetPct ?? 0}
+            className="pacing-tab__item-margin"
+          />
+          {row.pacingDeviationPct == null ? (
+            <span className="pacing-tab__item-pace pacing-tab__item-pace--na">—</span>
+          ) : (
+            <span className="pacing-tab__item-pace" style={{ color: PACE_STATUS_COLOR[paceStatus] }}>
+              {row.pacingDeviationPct > 0 ? "+" : ""}
+              {row.pacingDeviationPct.toFixed(1)}pp
             </span>
           )}
-        </span>
-        <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
-        <span className="pacing-tab__item-owner">{row.ownerName ?? "—"}</span>
-        <MarginCell
-          actual={row.marginActualPct ?? null}
-          target={row.marginTargetPct ?? 0}
-          className="pacing-tab__item-margin"
-        />
-        {row.pacingDeviationPct == null ? (
-          <span className="pacing-tab__item-pace pacing-tab__item-pace--na">—</span>
-        ) : (
-          <span className="pacing-tab__item-pace" style={{ color: PACE_STATUS_COLOR[paceStatus] }}>
-            {row.pacingDeviationPct > 0 ? "+" : ""}
-            {row.pacingDeviationPct.toFixed(1)}pp
-          </span>
-        )}
-        <span className="pacing-tab__item-budget">{fmtBudget(row.budgetTotal ?? 0)}</span>
-        {alerts.length > 0 ? (
-          <span className="pacing-tab__item-alerts">
-            {ALERT_SEVERITY_ORDER.filter((severity) => alertsBySeverity[severity]?.length).map((severity) => (
-              <span
-                key={severity}
-                className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}
-              >
-                {alertsBySeverity[severity].length}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="pacing-tab__item-alerts pacing-tab__item-alerts--none" />
-        )}
-      </button>
+          <span className="pacing-tab__item-budget">{fmtBudget(row.budgetTotal ?? 0)}</span>
+          {alerts.length > 0 ? (
+            <span className="pacing-tab__item-alerts">
+              {ALERT_SEVERITY_ORDER.filter((severity) => alertsBySeverity[severity]?.length).map((severity) => (
+                <span
+                  key={severity}
+                  className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}
+                >
+                  {alertsBySeverity[severity].length}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="pacing-tab__item-alerts pacing-tab__item-alerts--none" />
+          )}
+        </button>
+
+        <div className="pacing-tab__menu-wrap">
+          <button
+            type="button"
+            className="pacing-tab__kebab"
+            aria-label={`Actions for ${row.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={onToggleMenu}
+          >
+            <MoreVerticalIcon />
+          </button>
+          {/* Positioned fixed, from the trigger's own rect: the row card clips its overflow, so an
+              absolutely positioned panel would be cut off at the card's bottom edge. Same approach
+              as the Dashboards tab's row menu. */}
+          {menuOpen && (
+            <div className="pacing-tab__menu" role="menu" style={menuAnchor ?? undefined}>
+              <button type="button" role="menuitem" onClick={onRefresh} disabled={!isLive || inCooldown}>
+                {inCooldown ? `Refresh data (${refreshCooldownSeconds}s)` : "Refresh data"}
+              </button>
+              {/* Said where the user is looking: a greyed-out item with no reason reads as broken. */}
+              {!isLive && <p className="pacing-tab__menu-note">Only a Live pacing can be refreshed.</p>}
+              {canRevalidate && (
+                <button type="button" role="menuitem" onClick={onRevalidate}>
+                  Revalidate from NS
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="pacing-tab__menu-danger"
+                  onClick={onDelete}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {expanded && (
         <div className="pacing-tab__item-body">
@@ -174,6 +278,21 @@ export function PacingTab() {
   const pacingsQuery = useCampaignPacings(campaign.id);
   const [expandedId, setExpandedId] = useState<string | null>(openPacingId ?? null);
   const highlightedRef = useRef<HTMLLIElement | null>(null);
+  // Reuses the same ["auth", "me"] cache app-shell.tsx already populated - never a second fetch.
+  // Deleting and re-validating are admin-only on the Hub (PacingAdminController#requireAdmin) and on
+  // Pacing itself, so a non-admin is not shown those two items rather than being offered an action
+  // that can only come back 403. Refreshing is not privileged and stays on every row.
+  const currentUser = useCurrentUser(true);
+  const isAdmin = isAdminUser(currentUser.data);
+  const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PacingRowV1 | null>(null);
+  const [revalidateTarget, setRevalidateTarget] = useState<PacingRowV1 | null>(null);
+  // When each pacing's refresh cooldown runs out, by pacing id. `nowMs` ticks once a second while any
+  // is running so the menu item counts DOWN rather than showing whatever second it was opened on.
+  const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const toast = useToast();
 
   // A fresh navigation (Overview, or an "also covers" link from another campaign's tab) always wins
   // over whatever was expanded before — including re-opening the SAME pacing after following a link
@@ -187,6 +306,113 @@ export function PacingTab() {
       highlightedRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [expandedId, pacingsQuery.data]);
+
+  // An open row menu closes on an outside click, on Escape, and on any scroll or resize — it is
+  // positioned fixed from the trigger's rect, so a scrolled page would leave it hanging over a row
+  // it does not belong to.
+  useEffect(() => {
+    if (openMenuFor == null) return undefined;
+    function closeMenu() {
+      setOpenMenuFor(null);
+      setMenuAnchor(null);
+    }
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".pacing-tab__menu-wrap, .pacing-tab__menu")) closeMenu();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeMenu();
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+    };
+  }, [openMenuFor]);
+
+  // Ticks only while a cooldown is actually running - an interval that never stops would re-render
+  // this whole list once a second for as long as the tab is open.
+  useEffect(() => {
+    const anyRunning = Object.values(cooldownUntil).some((until) => until > Date.now());
+    if (!anyRunning) return undefined;
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [cooldownUntil, nowMs]);
+
+  function toggleRowMenu(event: ReactMouseEvent<HTMLButtonElement>, rowId: string) {
+    // The trigger sits next to the row head, not inside it: without this the click would also toggle
+    // the row open/closed underneath the menu.
+    event.stopPropagation();
+    if (openMenuFor === rowId) {
+      setOpenMenuFor(null);
+      setMenuAnchor(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const left = Math.max(16, rect.right - ROW_MENU_WIDTH);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setOpenMenuFor(rowId);
+    setMenuAnchor(
+      spaceBelow < ROW_MENU_MAX_HEIGHT && rect.top > spaceBelow
+        ? { left, bottom: window.innerHeight - rect.top + 6 }
+        : { left, top: rect.bottom + 6 }
+    );
+  }
+
+  function closeMenu() {
+    setOpenMenuFor(null);
+    setMenuAnchor(null);
+  }
+
+  function askDelete(row: PacingRowV1) {
+    closeMenu();
+    setDeleteTarget(row);
+  }
+
+  function askRevalidate(row: PacingRowV1) {
+    closeMenu();
+    setRevalidateTarget(row);
+  }
+
+  /**
+   * Triggers Pacing's own on-demand build for one row (US-119). Fire-and-forget upstream: a success
+   * here means "queued", never "done", which is what the toast says. A refusal inside the two-minute
+   * window is not an error to dwell on - it comes back as the remaining seconds, which go straight
+   * into this row's countdown.
+   */
+  async function refreshRow(row: PacingRowV1) {
+    closeMenu();
+    try {
+      const outcome = await triggerPacingRefresh(row.id);
+      // One timestamp for both the deadline and the clock it is measured against, so the countdown
+      // starts on the exact second asked for instead of a millisecond past it.
+      const startedAt = Date.now();
+      setNowMs(startedAt);
+      if (outcome.status === "cooldown") {
+        setCooldownUntil((current) => ({ ...current, [row.id]: startedAt + outcome.retryAfterSeconds * 1000 }));
+        toast.showError(`"${row.name}" was refreshed moments ago — try again in ${outcome.retryAfterSeconds}s.`);
+        return;
+      }
+      setCooldownUntil((current) => ({ ...current, [row.id]: startedAt + REFRESH_COOLDOWN_MS }));
+      toast.showSuccess(`Refresh started for "${row.name}". New data lands in a few minutes.`);
+    } catch (error) {
+      toast.showError(formatError(error));
+    }
+  }
+
+  /**
+   * Seconds left on this row's refresh cooldown, or 0 when it may be refreshed now.
+   */
+  function cooldownSecondsFor(rowId: string): number {
+    const until = cooldownUntil[rowId];
+    if (until == null) return 0;
+    return Math.max(0, Math.ceil((until - nowMs) / 1000));
+  }
 
   const rows = pacingsQuery.data?.pacings ?? [];
   const [openDashboardId, setOpenDashboardId] = useState<string | null>(null);
@@ -268,9 +494,39 @@ export function PacingTab() {
               onToggle={() => setExpandedId((current) => (current === row.id ? null : row.id))}
               onOpenDashboard={() => setOpenDashboardId(row.id)}
               itemRef={expandedId === row.id ? highlightedRef : undefined}
+              canDelete={isAdmin}
+              canRevalidate={isAdmin && !ARCHIVED_STATUSES.has(row.status)}
+              refreshCooldownSeconds={cooldownSecondsFor(row.id)}
+              menuOpen={openMenuFor === row.id}
+              menuAnchor={openMenuFor === row.id ? menuAnchor : null}
+              onToggleMenu={(event) => toggleRowMenu(event, row.id)}
+              onRefresh={() => refreshRow(row)}
+              onRevalidate={() => askRevalidate(row)}
+              onDelete={() => askDelete(row)}
             />
           ))}
         </ul>
+      )}
+
+      {deleteTarget && (
+        <DeletePacingModal
+          row={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          // A pacing is not owned by the campaign it is being deleted from - it can cover several,
+          // and this delete removes it from all of them. Said here, where the click happens, because
+          // the campaign tab is the one place the pacing looks like it belongs to one campaign.
+          note={
+            otherCampaignsOf(deleteTarget, campaign.id).length > 0
+              ? `This pacing also covers ${otherCampaignsOf(deleteTarget, campaign.id)
+                  .map((other) => campaignDisplayName(other.name))
+                  .join(", ")} — deleting it removes it there too.`
+              : undefined
+          }
+        />
+      )}
+
+      {revalidateTarget && (
+        <RevalidatePacingModal row={revalidateTarget} onClose={() => setRevalidateTarget(null)} />
       )}
     </section>
   );

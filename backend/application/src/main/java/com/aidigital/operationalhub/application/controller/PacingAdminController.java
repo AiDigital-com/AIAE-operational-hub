@@ -3,10 +3,12 @@ package com.aidigital.operationalhub.application.controller;
 import com.aidigital.operationalhub.application.api.v1.generated.PacingAdminApi;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRevalidateResultV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.RbacAuthorizationService;
@@ -20,8 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST controller for the {@code /api/v1/pacing/admin/*} endpoints - the pacing administration
  * screen that is not in the migration plan (the plan's seventeen sections skip it entirely) but is
- * carried over from the retired Pacing front end's own Admin screen: deleting a mistakenly created
- * pacing, and re-running the nightly Daily Build off-schedule.
+ * carried over from the retired Pacing front end's own Admin screen and row menu: deleting a
+ * mistakenly created pacing, re-running the nightly Daily Build off-schedule, and re-pulling one
+ * pacing's configuration from the NetSuite master.
  *
  * <p>Implements the OpenAPI-generated {@link PacingAdminApi}. Unlike {@link PacingController}, every
  * method here first calls {@link RbacAuthorizationService#requireAdmin} - the Hub does not merely hide
@@ -68,6 +71,18 @@ public class PacingAdminController implements PacingAdminApi {
 					.body(new PacingRetryAfterV1().retryAfterSeconds(outcome.retryAfterSeconds()));
 		}
 		return ResponseEntity.ok(new PacingRefreshTriggeredV1().started(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingRevalidateResultV1> revalidatePacing(String pacingId) {
+		HubAssertion assertion = signCurrentUserAsAdmin();
+		PacingRevalidateResult result = pacingClient.revalidatePacing(assertion, pacingId);
+		// A run that found nothing to change is a plain 200 with changed=false - the screen reports
+		// "already in sync", which is an answer, not an error.
+		return ResponseEntity.ok(new PacingRevalidateResultV1()
+				.changed(result.changed())
+				.changes(result.changes())
+				.warnings(result.warnings()));
 	}
 
 	/**

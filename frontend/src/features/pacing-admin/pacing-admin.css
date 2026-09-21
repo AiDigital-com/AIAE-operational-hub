@@ -210,6 +210,24 @@
   font-size: 12px;
   color: var(--muted);
 }
+/* An extra consequence the calling screen knows about (e.g. "this pacing also covers X") - a warning
+   tint rather than a plain paragraph, so it is not skimmed past on the way to the confirm field. */
+.pacing-admin__confirm-note {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--attention-text) 10%, transparent);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--attention-text);
+}
+/* Plain explanatory copy inside a confirmation (what a re-validate will and will not touch). */
+.pacing-admin__confirm-body {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
 .pacing-admin__confirm-label {
   display: block;
   font-size: 13px;

@@ -14,9 +14,23 @@ import { useDeletePacing } from "./hooks";
 import type { PacingRowV1 } from "./types";
 import "./pacing-admin.css";
 
-/** Deletes one pacing. Requires typing its exact name before "Delete permanently" is clickable -
- *  the same friction the retired Pacing front end's own Admin screen used for this exact action. */
-export function DeletePacingModal({ row, onClose }: { row: PacingRowV1; onClose: () => void }) {
+/**
+ * Deletes one pacing. Requires typing its exact name before "Delete permanently" is clickable - the
+ * same friction the retired Pacing front end's own Admin screen used for this exact action.
+ *
+ * `note` is an extra line of consequence the calling screen knows about and this modal does not -
+ * the campaign Pacing tab uses it to say that the pacing also covers other campaigns and goes from
+ * all of them. Omitted, nothing renders in its place.
+ */
+export function DeletePacingModal({
+  row,
+  onClose,
+  note,
+}: {
+  row: PacingRowV1;
+  onClose: () => void;
+  note?: string;
+}) {
   const [confirmText, setConfirmText] = useState("");
   const mutation = useDeletePacing();
   const nameMatches = confirmText.trim() === row.name.trim();
@@ -42,6 +56,7 @@ export function DeletePacingModal({ row, onClose }: { row: PacingRowV1; onClose:
         <span className="pacing-admin__confirm-name">{row.name}</span>
         {row.dashSlug && <span className="pacing-admin__confirm-slug">{row.dashSlug}</span>}
       </div>
+      {note && <p className="pacing-admin__confirm-note">{note}</p>}
       <label className="pacing-admin__confirm-label" htmlFor="pacing-admin-delete-confirm">
         Type <strong>{row.name}</strong> to confirm
       </label>

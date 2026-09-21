@@ -15,6 +15,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirrorEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserSyncEntry;
@@ -2120,5 +2121,92 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	@Test
+	void shouldRevalidatePacingAndReadWhatChangedTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"changed\":true,\"changes\":[\"client\",\"12345\"],\"warnings\":[]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingRevalidateResult result = client.revalidatePacing(assertion, "p1");
+
+		// Then: `ok` is ignored, the rest is read through - including WHICH fields moved
+		assertThat(result.changed()).isTrue();
+		assertThat(result.changes()).containsExactly("client", "12345");
+		assertThat(result.warnings()).isEmpty();
+		server.verify();
+	}
+
+	@Test
+	void shouldReadRevalidateFoundNothingToChangeTest() {
+		// Given: a pacing already in step with the NetSuite master
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"changed\":false,\"changes\":[],\"warnings\":[]}",
+						MediaType.APPLICATION_JSON));
+
+		// When-Then: not an error, just nothing to do
+		assertThat(client.revalidatePacing(assertion, "p1").changed()).isFalse();
+	}
+
+	@Test
+	void shouldMapRevalidateNsMasterErrorAsUnreachableTest() {
+		// Given: Pacing answered, but the NetSuite master behind it did not - the caller should be told
+		// to try again later (503), not that their request was wrong.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
+				.andRespond(withStatus(HttpStatus.BAD_GATEWAY)
+						.body("{\"error\":\"ns_master_error\",\"details\":\"timeout\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.revalidatePacing(assertion, "p1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	@Test
+	void shouldMapRevalidateNotFoundTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/missing/revalidate"))
+				.andRespond(withStatus(HttpStatus.NOT_FOUND)
+						.body("{\"error\":\"pacing_not_found\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.revalidatePacing(assertion, "missing"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
 	}
 }

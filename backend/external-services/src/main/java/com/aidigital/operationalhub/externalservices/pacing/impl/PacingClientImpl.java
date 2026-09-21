@@ -16,6 +16,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSyncStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirrorEntry;
@@ -702,6 +703,39 @@ public class PacingClientImpl implements PacingClient {
 		}
 	}
 
+	@Override
+	public PacingRevalidateResult revalidatePacing(HubAssertion assertion, String pacingId) {
+		String header = assertionSigner.sign(assertion);
+		String path = PACINGS_PATH + "/" + pacingId + "/revalidate";
+		try {
+			RevalidateResponse response = restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(RevalidateResponse.class);
+			if (response == null) {
+				return new PacingRevalidateResult(false, List.of(), List.of());
+			}
+			return new PacingRevalidateResult(
+					response.changed(),
+					response.changes() == null ? List.of() : List.copyOf(response.changes()),
+					response.warnings() == null ? List.of() : List.copyOf(response.warnings()));
+		} catch (RestClientResponseException ex) {
+			if (ex.getStatusCode().value() == 502) {
+				// Pacing reached us fine; it is the NetSuite master behind it that did not answer. That
+				// is an upstream-of-the-upstream outage, not a bug in the request - the caller should
+				// see "try again later", which is what UNREACHABLE renders as (503).
+				throw new PacingExternalException(
+						PacingFailureReason.UNREACHABLE,
+						"Pacing request failed: POST " + path + " returned HTTP 502 (ns_master_error)", ex);
+			}
+			throw adminActionFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
 	private LineItemCreateRequest toWireLineItem(PacingCreateLineItem li) {
 		return new LineItemCreateRequest(
 				li.lineItemId(), li.channel(), li.flightStart(), li.flightEnd(), li.rateType(), li.nativeBudget(),
@@ -1096,6 +1130,17 @@ public class PacingClientImpl implements PacingClient {
 	 * @param entries the matching library entries
 	 */
 	private record LibraryListResponse(List<PacingLibraryEntry> entries) {
+	}
+
+	/**
+	 * Shape of Pacing's {@code POST /api/pacings/:pacingId/revalidate} response body. Pacing also
+	 * returns {@code ok}; it carries no information beyond the 200 itself and is not read here.
+	 *
+	 * @param changed  whether anything was written back to the pacing's configuration
+	 * @param changes  the field names and line item ids that were updated
+	 * @param warnings non-fatal problems met during the re-pull
+	 */
+	private record RevalidateResponse(boolean changed, List<String> changes, List<String> warnings) {
 	}
 
 	/**

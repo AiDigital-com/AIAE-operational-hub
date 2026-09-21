@@ -1,14 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1 } from "@/test/factories";
+import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1, aUserV1 } from "@/test/factories";
 import { ToastProvider } from "../../../shared/ui/toast/toast";
 import { listCampaignPacings } from "../../pacing-overview/api";
 import type { PacingListResponseV1, PacingRowV1 } from "../../pacing-overview/types";
 import * as pacingDashboardApi from "../../pacing-dashboard/api";
 import * as pacingCreateApi from "../../pacing-create/api";
+import { deletePacing, revalidatePacing } from "../../pacing-admin/api";
+import { getCurrentUser } from "../../rbac/api";
 import type { CampaignTabContext } from "../campaign-workspace";
 import type { CampaignV1 } from "../types";
 import { PacingTab } from "./pacing-tab";
@@ -23,6 +25,20 @@ vi.mock("../../pacing-overview/api", () => ({
 vi.mock("../../pacing-create/api", () => ({
   getPacingDraft: vi.fn(),
   createPacing: vi.fn(),
+}));
+
+// Who is asking decides whether the row carries an actions menu at all (delete is admin-only), so
+// the tab reads the ["auth", "me"] cache - mocked here rather than left to hit the real client.
+vi.mock("../../rbac/api", () => ({
+  getCurrentUser: vi.fn(),
+}));
+
+// The delete itself is the Pacing admin screen's own passthrough, covered by its tests - here we
+// only assert this tab reaches it with the right pacing id.
+vi.mock("../../pacing-admin/api", () => ({
+  deletePacing: vi.fn(),
+  refreshAllDashboards: vi.fn(),
+  revalidatePacing: vi.fn(),
 }));
 
 // §6: the dashboard itself is exercised by pacing-dashboard.test.tsx - here we only assert the tab
@@ -121,9 +137,16 @@ function CampaignRouteStub({ campaign }: { campaign: CampaignV1 }) {
   );
 }
 
+// Row-head queries are anchored with `^`: each row now carries two buttons - its head and the actions
+// trigger, whose accessible name is "Actions for <pacing name>" - so an unanchored /name/ matches both.
 describe("PacingTab", () => {
   beforeEach(() => {
     vi.mocked(listCampaignPacings).mockReset();
+    // Default caller: signed in, no ADMIN role - the majority of these tests are not about deletion.
+    vi.mocked(getCurrentUser).mockReset().mockResolvedValue(aUserV1({ roles: [] }));
+    vi.mocked(deletePacing).mockReset().mockResolvedValue(undefined);
+    vi.mocked(revalidatePacing).mockReset().mockResolvedValue({ changed: false, changes: [], warnings: [] });
+    vi.mocked(pacingDashboardApi.triggerPacingRefresh).mockReset().mockResolvedValue({ status: "started" });
   });
 
   it("shows the empty state when the campaign has no pacings", async () => {
@@ -176,7 +199,7 @@ describe("PacingTab", () => {
       aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", lineItemCount: 7 })])
     );
     renderTab();
-    const row = await screen.findByRole("button", { name: /Ourisman Ford Q1/ });
+    const row = await screen.findByRole("button", { name: /^Ourisman Ford Q1/ });
 
     // When: opened
     await userEvent.click(row);
@@ -209,7 +232,7 @@ describe("PacingTab", () => {
       ])
     );
     renderTab();
-    await userEvent.click(await screen.findByRole("button", { name: /Shared pacing/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Shared pacing/ }));
 
     // Then: the notice names the OTHER campaign only, not this one
     expect(screen.getByText(/This pacing also covers/)).toBeInTheDocument();
@@ -238,14 +261,14 @@ describe("PacingTab", () => {
           ])
     );
     renderTab();
-    await userEvent.click(await screen.findByRole("button", { name: /Shared pacing/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Shared pacing/ }));
 
     // When: following the "also covers" link to campaign 99
     await userEvent.click(screen.getByRole("link", { name: "Ourisman Toyota 2026" }));
 
     // Then: campaign 99's own Pacing tab renders, with the SAME pacing already expanded
     expect(await screen.findByText("Toyota-only pacing")).toBeInTheDocument();
-    const reopened = screen.getByRole("button", { name: /Shared pacing/ });
+    const reopened = screen.getByRole("button", { name: /^Shared pacing/ });
     expect(reopened).toHaveAttribute("aria-expanded", "true");
   });
 
@@ -268,7 +291,7 @@ describe("PacingTab", () => {
     });
     vi.mocked(pacingDashboardApi.listPacingLibrary).mockResolvedValue([]);
     renderTab();
-    await userEvent.click(await screen.findByRole("button", { name: /Ourisman Ford Q1/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Ourisman Ford Q1/ }));
 
     // When: opening the full dashboard
     await userEvent.click(await screen.findByRole("button", { name: /open full dashboard/i }));
@@ -294,9 +317,9 @@ describe("PacingTab", () => {
     renderTab({ initialState: { openPacingId: "wanted" } });
 
     // Then: the named pacing is expanded without any click
-    const wantedRow = await screen.findByRole("button", { name: /Wanted pacing/ });
+    const wantedRow = await screen.findByRole("button", { name: /^Wanted pacing/ });
     expect(wantedRow).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: /Other pacing/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /^Other pacing/ })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows the Create Pacing button when the caller may create, hides it otherwise (§8)", async () => {
@@ -375,11 +398,209 @@ describe("PacingTab", () => {
 
     // When: going back and opening the older empty pacing instead
     await userEvent.click(screen.getByText(/back to pacings/i));
-    await userEvent.click(await screen.findByRole("button", { name: /Older empty pacing/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Older empty pacing/ }));
     await userEvent.click(await screen.findByRole("button", { name: /open full dashboard/i }));
 
     // Then: no claim that anything is being pulled for it
     expect(await screen.findByText("No data has been built for this pacing yet.")).toBeInTheDocument();
     expect(screen.queryByText(/pulling delivery data/i)).not.toBeInTheDocument();
+  });
+  it("offers a non-admin the refresh action but neither revalidate nor delete", async () => {
+    // Given: a signed-in caller without the ADMIN role
+    vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ name: "Ourisman Ford Q1" })]));
+
+    // When:
+    renderTab();
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+
+    // Then: refreshing a pacing you can see is not privileged; the two admin-only actions are absent
+    // rather than shown and refused with a 403
+    expect(await screen.findByRole("menuitem", { name: "Refresh data" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Revalidate from NS" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("triggers a refresh from the row menu and counts the cooldown down on the item", async () => {
+    // Given:
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", status: "Live" })])
+    );
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Refresh data" }));
+
+    // Then: the build is queued upstream and the toast says queued, not finished
+    expect(pacingDashboardApi.triggerPacingRefresh).toHaveBeenCalledWith("p1");
+    expect(await screen.findByText(/Refresh started for "Ourisman Ford Q1"/)).toBeInTheDocument();
+
+    // And: re-opening the menu shows the two-minute window running, with the item off
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    const item = await screen.findByRole("menuitem", { name: "Refresh data (120s)" });
+    expect(item).toBeDisabled();
+  });
+
+  it("turns Pacing's cooldown refusal into that row's countdown instead of a bare error", async () => {
+    // Given: a pacing someone else refreshed 75 seconds ago
+    vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ name: "Ourisman Ford Q1" })]));
+    vi.mocked(pacingDashboardApi.triggerPacingRefresh).mockResolvedValue({
+      status: "cooldown",
+      retryAfterSeconds: 45,
+    });
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Refresh data" }));
+
+    // Then: the remaining seconds are what the row now shows - not "429", and not a fresh 120
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    expect(await screen.findByRole("menuitem", { name: "Refresh data (45s)" })).toBeDisabled();
+  });
+
+  it("offers refresh disabled, with the reason, for a pacing that is not Live", async () => {
+    // Given: Pacing answers 400 pacing_not_live for anything else, so the item must not be clickable
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ name: "Ourisman Ford Q1", status: "Paused" })])
+    );
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+
+    // Then:
+    expect(await screen.findByRole("menuitem", { name: "Refresh data" })).toBeDisabled();
+    expect(screen.getByText("Only a Live pacing can be refreshed.")).toBeInTheDocument();
+    expect(pacingDashboardApi.triggerPacingRefresh).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin re-validate a pacing from NetSuite, and says so when nothing changed", async () => {
+    // Given: an admin, and a pacing already in step with the NetSuite master
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" })])
+    );
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Revalidate from NS" }));
+
+    // Then: it confirms first - this rewrites config from NetSuite, it is not a read
+    expect(await screen.findByText('Re-validate "Ourisman Ford Q1"?')).toBeInTheDocument();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Re-validate" }));
+
+    // Then: "already in sync" is reported as an outcome, not as silence
+    expect(revalidatePacing).toHaveBeenCalledWith("p1");
+    expect(await screen.findByText(/already matches NetSuite/)).toBeInTheDocument();
+  });
+
+  it("reports how many fields a re-validate updated", async () => {
+    // Given:
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(revalidatePacing).mockResolvedValue({
+      changed: true,
+      changes: ["client", "12345"],
+      warnings: [],
+    });
+    vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ name: "Ourisman Ford Q1" })]));
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Revalidate from NS" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Re-validate" }));
+
+    // Then:
+    expect(await screen.findByText(/2 fields updated/)).toBeInTheDocument();
+  });
+
+  it("does not offer a re-validate for an archived pacing", async () => {
+    // Given: an admin, and a pacing there is nothing left to re-seed on
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ name: "Ourisman Ford Q1", status: "Archive" })])
+    );
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+
+    // Then: delete is still there - only the re-validate is gone
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Revalidate from NS" })).not.toBeInTheDocument();
+  });
+
+  it("lets an admin delete a pacing from its row menu, once its name is typed", async () => {
+    // Given: an admin
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", dashSlug: "ourisman_q1_ab12cd" })])
+    );
+    renderTab();
+
+    // When: opening the row's menu and choosing Delete
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    // Then: the confirmation names the pacing and keeps the danger action off until it is typed back
+    expect(await screen.findByText('Delete "Ourisman Ford Q1"?')).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Delete permanently" });
+    expect(confirm).toBeDisabled();
+
+    // When: typing the exact name and confirming
+    await userEvent.type(screen.getByPlaceholderText("Ourisman Ford Q1"), "Ourisman Ford Q1");
+    await userEvent.click(confirm);
+
+    // Then: the delete goes out for THAT pacing and the confirmation closes
+    expect(deletePacing).toHaveBeenCalledWith("p1");
+    await waitFor(() => expect(screen.queryByText('Delete "Ourisman Ford Q1"?')).not.toBeInTheDocument());
+  });
+
+  // The row lives on a campaign tab, but the pacing does not belong to that campaign - it can cover
+  // several, and this delete removes it from all of them. Without this line the tab is the one place
+  // in the product where a global delete looks local.
+  it("warns, before deleting, that the pacing also covers other campaigns", async () => {
+    // Given: an admin, and a pacing covering this campaign and one more
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([
+        aPacing({
+          name: "Ourisman Ford Q1",
+          campaigns: [
+            { id: "42", name: "Ourisman Ford 2026" },
+            { id: "77", name: "Ourisman Ford Summer" },
+          ],
+        }),
+      ])
+    );
+    renderTab();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    // Then: the other campaign is named, not merely counted
+    expect(await screen.findByText(/Ourisman Ford Summer — deleting it removes it there too/)).toBeInTheDocument();
+  });
+
+  it("closes the row menu on an outside click without opening the row", async () => {
+    // Given: an admin with the menu open
+    vi.mocked(getCurrentUser).mockResolvedValue(aUserV1({ roles: ["ADMIN"] }));
+    vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ name: "Ourisman Ford Q1" })]));
+    renderTab();
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+    // When: clicking away
+    await userEvent.click(document.body);
+
+    // Then: the menu is gone, and the row underneath never toggled open (the trigger is a sibling of
+    // the row head, not part of it)
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument());
+    expect(screen.queryByText("Line items")).not.toBeInTheDocument();
   });
 });

@@ -45,12 +45,24 @@
 }
 
 /* ── row head (collapsed summary — one pacing per row) ── */
+/* The head and the actions trigger are siblings, not nested: a button inside a button is invalid
+   markup, and the trigger must not also toggle the row open. The hover tint lives on the strip that
+   holds both, so the row does not light up in two halves. */
+.pacing-tab__item-row {
+  display: flex;
+  align-items: center;
+  transition: background .14s;
+}
+.pacing-tab__item-row:hover {
+  background: var(--primary-soft);
+}
 .pacing-tab__item-head {
   display: grid;
   grid-template-columns: 18px minmax(200px, 1.6fr) 120px 130px 150px 90px 110px 64px;
   align-items: center;
   gap: 14px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 14px 16px;
   border: none;
   background: none;
@@ -59,10 +71,6 @@
   text-align: left;
   color: var(--ink);
   cursor: pointer;
-  transition: background .14s;
-}
-.pacing-tab__item-head:hover {
-  background: var(--primary-soft);
 }
 .pacing-tab__chevron {
   width: 14px;
@@ -118,6 +126,95 @@
 }
 .pacing-tab__item-alerts--none {
   min-height: 20px;
+}
+
+/* ── row actions (kebab + menu) ── */
+.pacing-tab__menu-wrap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding-right: 10px;
+}
+.pacing-tab__kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pacing-tab__kebab:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.pacing-tab__kebab svg {
+  width: 16px;
+  height: 16px;
+}
+/* Fixed, positioned from the trigger's rect by the component: .pacing-tab__item clips its own
+   overflow, which would cut an absolutely positioned panel off at the card's edge. */
+.pacing-tab__menu {
+  position: fixed;
+  z-index: 140;
+  /* A fixed width, not a min-width: the component positions the panel from ROW_MENU_WIDTH before it
+     is mounted, so a panel that turned out wider (the "not Live" note wraps) would hang past the
+     trigger it is anchored to - and past the viewport edge on the rightmost column. */
+  width: 210px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.pacing-tab__menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pacing-tab__menu button:hover:not(:disabled) {
+  background: var(--n-100);
+}
+/* A disabled item must not look live: same ink and same pointer as an enabled one leaves "clicking
+   does nothing" as the only signal that it is off. */
+.pacing-tab__menu button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+/* Why an item is off, said next to it. The kebab's own tooltip cannot do this job - the open menu
+   covers the button it would hang from. Wraps, unlike the item labels above it. */
+.pacing-tab__menu-note {
+  margin: 2px 6px 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: normal;
+}
+/* Scoped through the menu so it outweighs the `.pacing-tab__menu button` colour above - the same
+   rule written flat loses on specificity and the destructive item renders in plain ink. */
+.pacing-tab__menu .pacing-tab__menu-danger {
+  color: var(--bad);
+}
+.pacing-tab__menu .pacing-tab__menu-danger:hover {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 
 /* ── expanded detail ── */
