@@ -12,6 +12,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirrorEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserSyncEntry;
@@ -353,5 +354,27 @@ public interface PacingClient {
 	 *         on any other non-2xx response or network failure (unchecked)
 	 */
 	PacingRefreshOutcome refreshAllDashboards(HubAssertion assertion);
+
+	/**
+	 * Re-pulls a pacing's configuration from the NetSuite master and patches it into the pacing
+	 * (same admin screen as {@link #deletePacing}): {@code POST /api/pacings/:pacingId/revalidate} on
+	 * the Pacing side. Re-seeds margin, targets, flight dates, channel and - only where the pacing has
+	 * none - client/agency, campaigns and currency; the user's own plan is preserved and delivery data
+	 * is untouched. A run that finds nothing to change is a normal 200 with
+	 * {@link PacingRevalidateResult#changed()} false, not an error.
+	 *
+	 * @param assertion who is calling - must carry an unfiltered ({@code kind=all}) scope, or Pacing
+	 *                  answers 403 {@code admin_only}
+	 * @param pacingId  the pacing id (Pacing's own UUID primary key)
+	 * @return what the re-pull changed
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - including
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_NOT_FOUND} when the pacing does not exist, and
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UNREACHABLE} when Pacing itself could not reach the NetSuite master (502
+	 *         {@code ns_master_error})
+	 */
+	PacingRevalidateResult revalidatePacing(HubAssertion assertion, String pacingId);
 }
 

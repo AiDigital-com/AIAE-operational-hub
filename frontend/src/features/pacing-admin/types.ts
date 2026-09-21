@@ -12,3 +12,4 @@ export type RefreshAllOutcome =
   | { status: "cooldown"; retryAfterSeconds: number };
 
 export type PacingRetryAfterV1 = components["schemas"]["PacingRetryAfterV1"];
+export type PacingRevalidateResultV1 = components["schemas"]["PacingRevalidateResultV1"];

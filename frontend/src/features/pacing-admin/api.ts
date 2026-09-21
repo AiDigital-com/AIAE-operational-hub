@@ -9,7 +9,7 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
-import type { PacingRetryAfterV1, RefreshAllOutcome } from "./types";
+import type { PacingRetryAfterV1, PacingRevalidateResultV1, RefreshAllOutcome } from "./types";
 
 /**
  * Permanently deletes a pacing. Irreversible: Pacing removes the row (cascading to its journal) and
@@ -41,4 +41,20 @@ export async function refreshAllDashboards(): Promise<RefreshAllOutcome> {
     throw new ApiError(formatError(result.error), result.response.status);
   }
   return { status: "started" };
+}
+
+/**
+ * Re-pulls a pacing's configuration (margin, targets, flight dates, channel, and - only where the
+ * pacing has none - client/agency, campaigns, currency) from the NetSuite master. Delivery data is
+ * untouched. A run that finds nothing to change comes back as a normal result with `changed: false`,
+ * not an error; the calling screen decides how to say so.
+ */
+export async function revalidatePacing(pacingId: string): Promise<PacingRevalidateResultV1> {
+  const result = await apiClient.POST("/api/v1/pacing/admin/pacings/{pacingId}/revalidate", {
+    params: { path: { pacingId } },
+  });
+  if (result.error || !result.response.ok || !result.data) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
 }

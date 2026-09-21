@@ -3474,6 +3474,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/pacings/{pacingId}/revalidate:
+    post:
+      tags:
+        - pacingAdmin
+      operationId: revalidatePacing
+      description: >
+        Re-pulls a pacing's configuration (margin, targets, flight dates, channel, client/agency,
+        campaigns, currency) from the NetSuite master and patches it into the pacing, reporting what
+        changed. Carried over from the retired Pacing front end's own row menu. Delivery data is not
+        touched - this only re-seeds config the pacing was created from. Admin only, on the Hub
+        (`RbacAuthorizationService#requireAdmin`) and again on the Pacing side.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: >
+            The re-pull ran. `changed` is false when the pacing already matched the NetSuite master -
+            a normal outcome, not an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRevalidateResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Re-validating the pacing failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >
+            The Pacing service could not be reached, or Pacing could not reach the NetSuite master
+            (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/admin/refresh-all-dashboards:
     post:
       tags:
@@ -7308,6 +7363,30 @@ components:
           type: boolean
       required:
         - started
+    PacingRevalidateResultV1:
+      type: object
+      description: >
+        What a re-pull from the NetSuite master changed. `changes` names each touched field or line
+        item id ("client", "agency", "campaigns", "currency", or a line item id), so the caller can
+        report what moved rather than a bare "done".
+      properties:
+        changed:
+          type: boolean
+          description: False when the pacing already matched the NetSuite master - nothing was written.
+        changes:
+          type: array
+          description: Field names and line item ids that were updated; empty when `changed` is false.
+          items:
+            type: string
+        warnings:
+          type: array
+          description: Non-fatal problems met during the re-pull; the changes above were still applied.
+          items:
+            type: string
+      required:
+        - changed
+        - changes
+        - warnings
     PacingRetryAfterV1:
       type: object
       description: >
