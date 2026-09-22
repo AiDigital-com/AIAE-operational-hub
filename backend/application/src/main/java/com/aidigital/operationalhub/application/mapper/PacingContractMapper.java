@@ -16,6 +16,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import com.aidigital.operationalhub.service.rbac.model.PacingScope;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -26,7 +27,10 @@ import java.util.List;
  * transport-level {@link HubAssertion} to the generated {@code /api/v1/pacing/pacings} contract.
  */
 @Component
+@RequiredArgsConstructor
 public class PacingContractMapper {
+
+	private final PacingNsDiffContractMapper nsDiffMapper;
 
 	/**
 	 * Builds the transport-level assertion request the Pacing client signs and sends.
@@ -76,7 +80,8 @@ public class PacingContractMapper {
 				.campaigns(toCampaignRefsV1(row.campaigns()))
 				.alerts(health == null || health.alerts() == null
 						? List.of()
-						: health.alerts().stream().map(this::toAlertV1).toList());
+						: health.alerts().stream().map(this::toAlertV1).toList())
+				.nsDiffSummary(nsDiffMapper.toNsDiffSummaryV1(row.nsDiffSummary()));
 		if (health != null) {
 			v1.marginActualPct(health.marginActual())
 					.marginTargetPct(health.marginTarget())

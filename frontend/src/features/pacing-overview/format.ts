@@ -1,4 +1,4 @@
-import type { PacingAlertV1 } from "./types";
+import type { PacingAlertV1, PacingNsDiffCountsV1, PacingNsDiffSummaryV1 } from "./types";
 
 /** Dot color for the pacing's own administrative status — a different vocabulary from the campaign
  *  statuses `StatusBadge` is normally fed (Live/Paused/Complete/Archive vs. NetSuite's own set), so
@@ -64,4 +64,51 @@ export function netSuiteLeadMismatch(
     if (lead && lead !== owner) return lead;
   }
   return null;
+}
+
+/**
+ * The single number the Overview's "NS diff" column sorts and displays by (§13, US-136). Sums ALL
+ * SIX classes - none is filtered out, since a difference that looks routine to an engineer (e.g. a
+ * fee line's `foreign_campaign`) might not be routine to the person looking, and hiding a class in
+ * advance takes that judgement away from them. A pacing never checked (no summary) counts as 0 here;
+ * callers that need to rank "never checked" below "confirmed in sync" do that themselves, the same
+ * `?? -Infinity` way `MARGIN`/`PACING` sorting already does.
+ */
+export function totalNsDiffCount(summary: PacingNsDiffSummaryV1 | null | undefined): number {
+  if (!summary) return 0;
+  const { counts } = summary;
+  return (
+    counts.missingInNetsuite +
+    counts.missingInPacing +
+    counts.fieldDiff +
+    counts.planDiff +
+    counts.foreignCampaign +
+    counts.ownerDiff
+  );
+}
+
+const NS_DIFF_CLASS_LABEL: Record<keyof PacingNsDiffCountsV1, [singular: string, plural: string]> = {
+  missingInNetsuite: ["missing in NetSuite", "missing in NetSuite"],
+  missingInPacing: ["missing in Pacing", "missing in Pacing"],
+  fieldDiff: ["field difference", "field differences"],
+  planDiff: ["plan difference", "plan differences"],
+  foreignCampaign: ["foreign campaign", "foreign campaigns"],
+  ownerDiff: ["owner mismatch", "owner mismatches"],
+};
+
+/**
+ * One line per non-zero class in a nightly NS-diff summary (§13, US-136), e.g. "2 field
+ * differences" - a zero-count class is left out entirely, so a tooltip built to be scanned quickly
+ * never pads itself with six lines when only one class actually fired.
+ */
+export function nsDiffBreakdownLines(summary: PacingNsDiffSummaryV1 | null | undefined): string[] {
+  if (!summary) return [];
+  const { counts } = summary;
+  return (Object.keys(NS_DIFF_CLASS_LABEL) as Array<keyof PacingNsDiffCountsV1>)
+    .filter((key) => counts[key] > 0)
+    .map((key) => {
+      const [singular, plural] = NS_DIFF_CLASS_LABEL[key];
+      const count = counts[key];
+      return `${count} ${count === 1 ? singular : plural}`;
+    });
 }

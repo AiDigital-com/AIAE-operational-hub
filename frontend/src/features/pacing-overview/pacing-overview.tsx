@@ -13,7 +13,16 @@ import { Tooltip } from "../../shared/ui/tooltip/tooltip";
 // numbers read identically across both Overview screens. Not the mock overlay itself — this screen's
 // data is the real Pacing service response, never mocked.
 import { fmtBudget, fmtDate } from "../pacing/mock/format";
-import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity, netSuiteLeadMismatch } from "./format";
+import {
+  ALERT_SEVERITY_ORDER,
+  PACE_STATUS_COLOR,
+  PACE_STATUS_LABEL,
+  PACING_STATUS_STYLE,
+  groupAlertsBySeverity,
+  netSuiteLeadMismatch,
+  nsDiffBreakdownLines,
+  totalNsDiffCount,
+} from "./format";
 import { usePacingOverview } from "./hooks";
 import { OwnerPicker } from "./owner-picker";
 import { pacingRoute } from "./navigation";
@@ -23,7 +32,7 @@ import "./pacing-overview.css";
 const ALL = "all";
 const SEARCH_DEBOUNCE_MS = 300;
 
-type SortField = "NAME" | "STATUS" | "OWNER" | "MARGIN" | "PACING" | "BUDGET" | "FLIGHT" | "LINE_ITEMS";
+type SortField = "NAME" | "STATUS" | "OWNER" | "MARGIN" | "PACING" | "BUDGET" | "FLIGHT" | "LINE_ITEMS" | "NS_DIFF";
 
 interface SortState {
   field: SortField;
@@ -58,6 +67,13 @@ function compareRows(a: PacingRowV1, b: PacingRowV1, sort: SortState): number {
       return dir * (a.flightStart ?? "").localeCompare(b.flightStart ?? "");
     case "LINE_ITEMS":
       return dir * (a.lineItemCount - b.lineItemCount);
+    case "NS_DIFF": {
+      // A pacing never checked (no nsDiffSummary) sorts lowest, same convention as MARGIN/PACING
+      // above - it should never out-rank one confirmed in sync (0 differences).
+      const av = a.nsDiffSummary ? totalNsDiffCount(a.nsDiffSummary) : -Infinity;
+      const bv = b.nsDiffSummary ? totalNsDiffCount(b.nsDiffSummary) : -Infinity;
+      return dir * (av - bv);
+    }
     default:
       return 0;
   }
@@ -245,6 +261,28 @@ const PacingTableRow = memo(function PacingTableRow({ row, onOpen }: { row: Paci
         {row.flightEnd ? fmtDate(row.flightEnd) : "—"}
       </td>
       <td className="pacing-overview__num">{row.lineItemCount}</td>
+      <td className="pacing-overview__num">
+        {row.nsDiffSummary == null ? (
+          <span className="pacing-overview__no-alerts" title="Not yet checked against NetSuite">
+            —
+          </span>
+        ) : row.nsDiffSummary.inSync ? (
+          <span
+            className="pacing-overview__ns-diff-ok"
+            title={`Checked on ${fmtDate(row.nsDiffSummary.computedAt)} — in sync with NetSuite as of that check.`}
+          >
+            In sync
+          </span>
+        ) : (
+          <Tooltip
+            content={[...nsDiffBreakdownLines(row.nsDiffSummary), `checked on ${fmtDate(row.nsDiffSummary.computedAt)}`].join(
+              " · "
+            )}
+          >
+            <span className="pacing-overview__ns-diff-badge">{totalNsDiffCount(row.nsDiffSummary)}</span>
+          </Tooltip>
+        )}
+      </td>
       <td>
         {alerts.length === 0 ? (
           <span className="pacing-overview__no-alerts">—</span>
@@ -452,6 +490,13 @@ export function PacingOverview() {
                     <SortableHeader
                       label="Line items"
                       field="LINE_ITEMS"
+                      sort={sort}
+                      onSort={cycleSort}
+                      className="pacing-overview__num"
+                    />
+                    <SortableHeader
+                      label="NS diff"
+                      field="NS_DIFF"
                       sort={sort}
                       onSort={cycleSort}
                       className="pacing-overview__num"

@@ -7,6 +7,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDis
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
@@ -14,12 +15,14 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRef
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingNsDiffContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -52,6 +55,7 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final PacingContractMapper assertionMapper;
 	private final PacingDashboardContractMapper mapper;
 	private final PacingPlanContractMapper planMapper;
+	private final PacingNsDiffContractMapper nsDiffMapper;
 
 	@Override
 	public ResponseEntity<PacingDashboardV1> getPacingDashboard(String slug) {
@@ -118,6 +122,13 @@ public class PacingDashboardController implements PacingDashboardApi {
 		HubAssertion assertion = signCurrentUser();
 		PacingAddableLineItems result = pacingClient.getAddableLineItems(assertion, slug);
 		return ResponseEntity.ok(planMapper.toAddableLineItemsV1(result));
+	}
+
+	@Override
+	public ResponseEntity<PacingNsDiffReportV1> getPacingNsDiff(String pacingId) {
+		HubAssertion assertion = signCurrentUser();
+		PacingNsDiffReport report = pacingClient.getNsDiff(assertion, pacingId);
+		return ResponseEntity.ok(nsDiffMapper.toV1(report));
 	}
 
 	private HubAssertion signCurrentUser() {

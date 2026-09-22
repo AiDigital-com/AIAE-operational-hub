@@ -229,6 +229,16 @@
 								<useTags>true</useTags>
 								<skipDefaultInterface>false</skipDefaultInterface>
 								<dateLibrary>java8-localdatetime</dateLibrary>
+								<!-- openApiNullable=false: the generator otherwise wraps any schema with no
+								     declared `type` (a free-form/"any" value) in org.openapitools.jackson.nullable
+								     .JsonNullable, even when the property is required. This application registers
+								     no JsonNullableModule (see PacingRowV1.dashSlug's own openapi.yaml comment for
+								     the same class of gotcha with `nullable: true`), so Jackson would serialize
+								     {"present":true,...} instead of the actual value. No schema in this spec used
+								     `nullable: true` or a typeless schema before PacingNsDiffFieldChangeV1's
+								     polymorphic pacing/netsuite/pacingNative/netsuiteNative fields (§13, US-136),
+								     so disabling this generator feature changes no other generated model. -->
+								<openApiNullable>false</openApiNullable>
 							</configOptions>
 						</configuration>
 					</execution>

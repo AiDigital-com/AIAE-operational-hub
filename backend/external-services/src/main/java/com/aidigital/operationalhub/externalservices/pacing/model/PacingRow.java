@@ -31,6 +31,10 @@ import java.util.List;
  *                       Pacing's own row; used only by the pacing administration screen (not in the
  *                       migration plan), which is the one place this project shows when a pacing was
  *                       created
+ * @param nsDiffSummary  serialized as {@code ns_diff} (§13 of the migration plan, US-136); the
+ *                       nightly job's frozen NetSuite-diff summary — see {@link PacingNsDiffSummary}'s
+ *                       own javadoc for why it is not "current as of now". Null on a pacing the
+ *                       nightly job has never covered.
  */
 public record PacingRow(
 		@JsonProperty("pacing_id") String pacingId,
@@ -43,5 +47,6 @@ public record PacingRow(
 		List<PacingCampaignRef> campaigns,
 		PacingHealth health,
 		@JsonProperty("dash_slug") String dashSlug,
-		@JsonProperty("created_at") String createdAt) {
+		@JsonProperty("created_at") String createdAt,
+		@JsonProperty("ns_diff") PacingNsDiffSummary nsDiffSummary) {
 }

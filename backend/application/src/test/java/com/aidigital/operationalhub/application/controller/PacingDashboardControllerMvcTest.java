@@ -3,12 +3,15 @@ package com.aidigital.operationalhub.application.controller;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.application.exception.GlobalExceptionHandler;
 import com.aidigital.operationalhub.application.exception.mapper.GlobalExceptionResponseHelperImpl;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
+import com.aidigital.operationalhub.application.mapper.PacingNsDiffContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
@@ -18,6 +21,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableL
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -72,6 +76,9 @@ class PacingDashboardControllerMvcTest {
 
 	@Mock
 	private PacingPlanContractMapper planMapper;
+
+	@Mock
+	private PacingNsDiffContractMapper nsDiffMapper;
 
 	@InjectMocks
 	private PacingDashboardController controller;
@@ -160,6 +167,45 @@ class PacingDashboardControllerMvcTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.io").value("TM-1"))
 				.andExpect(jsonPath("$.alreadyAdded[0]").value("111"));
+	}
+
+	@Test
+	void shouldReturnNsDiffReportTest() throws Exception {
+		// Given: §13, US-136 - a plain delegate-and-map, same shape as getDashboardData/getRefreshStatus
+		stubCurrentUser();
+		PacingNsDiffReport report = new PacingNsDiffReport(
+				true, "p1", "nike-ss26", List.of("missing_in_pacing", "owner_diff"),
+				null, false, List.of("manual-1"), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+		doReturn(report).when(pacingClient).getNsDiff(any(), eq("p1"));
+		doReturn(new PacingNsDiffReportV1().pacingId("p1").dashSlug("nike-ss26").inSync(false)
+				.counts(new PacingNsDiffCountsV1().missingInNetsuite(0).missingInPacing(1).fieldDiff(0)
+						.planDiff(0).foreignCampaign(0).ownerDiff(1)))
+				.when(nsDiffMapper).toV1(report);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/pacings/{pacingId}/ns-diff", "p1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.pacingId").value("p1"))
+				.andExpect(jsonPath("$.dashSlug").value("nike-ss26"))
+				.andExpect(jsonPath("$.inSync").value(false));
+	}
+
+	@Test
+	void shouldMapNsDiffUnreachablePacingToServiceUnavailableTest() throws Exception {
+		// Given: the generic PacingExternalException mapping applies here too - not admin-gated, but
+		// still a plain external-service call that can fail the same way every other one does.
+		stubCurrentUser();
+		doThrow(new PacingExternalException(PacingFailureReason.UNREACHABLE, "down"))
+				.when(pacingClient).getNsDiff(any(), eq("p1"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/pacings/{pacingId}/ns-diff", "p1"))
+				.andExpect(status().isServiceUnavailable())
+				.andExpect(jsonPath("$.code").value("OPH_051"));
 	}
 
 	@Test

@@ -3514,6 +3514,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings/{pacingId}/ns-diff:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingNsDiff
+      description: >
+        §13 of the migration plan, US-136 "NetSuite Diff and Data Health". A read-only, on-demand,
+        LIVE comparison of one pacing against current NetSuite data - computed fresh on every call,
+        never cached on the Pacing side (GET /api/pacings/:id/ns-diff on that side). Not admin-gated:
+        any caller with ordinary dashboard access to this pacing may call it - unlike POST
+        /api/v1/pacing/admin/pacings/{pacingId}/revalidate, which is admin-only and also writes back
+        to the pacing. This endpoint writes nothing.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key) - distinct from its dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The diff was computed and returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingNsDiffReportV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            Pacing does not yet recognize the current user (403/unknown_user) - a sync gap, see
+            `OPH_053`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Computing the diff failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/admin/pacings/{pacingId}:
     delete:
       tags:
@@ -6610,6 +6670,351 @@ components:
         - type
         - severity
         - text
+    PacingNsDiffCountsV1:
+      type: object
+      description: >
+        How many differences of each class Pacing's NetSuite diff found for one pacing (§13 of the
+        migration plan, US-136). Shared shape between the nightly summary (PacingNsDiffSummaryV1) and
+        the full live report (PacingNsDiffReportV1).
+      properties:
+        missingInNetsuite:
+          type: integer
+          format: int32
+          description: How many missing_in_netsuite differences - line items Pacing has that NetSuite does not.
+        missingInPacing:
+          type: integer
+          format: int32
+          description: How many missing_in_pacing differences - NetSuite line items not yet added to this pacing.
+        fieldDiff:
+          type: integer
+          format: int32
+          description: >
+            How many field_diff differences - line items present on both sides with a mismatched
+            descriptive/flight field.
+        planDiff:
+          type: integer
+          format: int32
+          description: >
+            How many plan_diff differences - line items present on both sides with a mismatched plan
+            figure (target impressions/spend).
+        foreignCampaign:
+          type: integer
+          format: int32
+          description: >
+            How many foreign_campaign differences - line items whose NetSuite campaign does not match
+            this pacing's own campaign set.
+        ownerDiff:
+          type: integer
+          format: int32
+          description: >
+            How many owner_diff differences - campaigns whose pacing owner does not match NetSuite's
+            recorded team lead.
+      required:
+        - missingInNetsuite
+        - missingInPacing
+        - fieldDiff
+        - planDiff
+        - foreignCampaign
+        - ownerDiff
+    PacingNsDiffSummaryV1:
+      type: object
+      description: >
+        The small nightly-summary shape carried on each pacing row's `nsDiffSummary` (§13 of the
+        migration plan, US-136). Written by a nightly job that only walks Live pacings, and never
+        clears or invalidates this value when a pacing later leaves Live (Complete/Archived) - on a
+        non-Live pacing this is a FROZEN reading from its last night as Live, not a current figure.
+        Treat `computedAt` as "checked on this date", never as "current as of now". For the live,
+        always-fresh breakdown, fetch GET /api/v1/pacing/pacings/{pacingId}/ns-diff.
+      properties:
+        counts:
+          $ref: '#/components/schemas/PacingNsDiffCountsV1'
+        inSync:
+          type: boolean
+          description: Whether every class's count was zero as of computedAt.
+        computedAt:
+          type: string
+          format: date-time
+          description: >
+            When the nightly job last computed this summary. See the class description above for why
+            this is a "checked on" date, not a "current as of" one.
+      required:
+        - counts
+        - inSync
+        - computedAt
+    PacingNsDiffFieldChangeV1:
+      type: object
+      description: >
+        One changed field inside a PacingNsDiffLineItemFieldsV1 entry (§13, US-136), shared by both
+        the field_diff and plan_diff classes of PacingNsDiffReportV1.
+      properties:
+        field:
+          type: string
+          description: >
+            The changed field's name, e.g. channel, flight_start, target_impressions.
+        pacing:
+          description: >
+            The value as stored on the Pacing side. Genuinely polymorphic - a string for
+            channel/rate_type/flight_start/flight_end, a number for
+            native_budget/target_impressions/target_spend - so this is deliberately left untyped
+            rather than guessing at whichever one `field` happens to name.
+        netsuite:
+          description: The value as read from NetSuite; same polymorphism as `pacing`.
+        source:
+          type: string
+          description: >
+            Present only on flight_start/flight_end entries: `override` means a person moved the date
+            on purpose, `plan` means it came from the plain field. Neither implies the value is wrong -
+            it only changes how the difference should read on screen. Absent on every other field.
+          enum:
+            - override
+            - plan
+        pacingNative:
+          description: >
+            Present only on the target_spend entry (never on target_impressions): the native-currency
+            figure alongside the USD value already in `pacing`. For a currency-converted pacing both
+            must be shown, never just one. Same free-form typing as `pacing`. Absent everywhere else.
+        netsuiteNative:
+          description: The NetSuite-side counterpart of `pacingNative`, same presence rule.
+      required:
+        - field
+        - pacing
+        - netsuite
+    PacingNsDiffLineItemFieldsV1:
+      type: object
+      description: >
+        One line item's set of changed fields (§13, US-136) - the shared wrapper shape of both the
+        field_diff and plan_diff classes in PacingNsDiffReportV1: identical on the wire, differing
+        only in which array they populate.
+      properties:
+        lineItemId:
+          type: string
+          description: NetSuite/Pacing line item id.
+        fields:
+          type: array
+          description: The changed fields for this line item.
+          items:
+            $ref: '#/components/schemas/PacingNsDiffFieldChangeV1'
+      required:
+        - lineItemId
+        - fields
+    PacingNsDiffMissingInNetsuiteV1:
+      type: object
+      description: >
+        One line item Pacing has that current NetSuite data does not (§13, US-136, the
+        missing_in_netsuite class).
+      properties:
+        lineItemId:
+          type: string
+          description: Pacing's line item id.
+        channel:
+          type: string
+          description: Delivery channel / media tactic, as stored on the Pacing side.
+        targetSpend:
+          type: number
+          format: double
+          description: The plan's target spend, as stored on the Pacing side.
+        targetImpressions:
+          type: number
+          format: double
+          description: The plan's target impressions, as stored on the Pacing side.
+      required:
+        - lineItemId
+    PacingNsDiffMissingInPacingV1:
+      type: object
+      description: >
+        One NetSuite line item not yet added to this pacing (§13, US-136, the missing_in_pacing
+        class) - the full NetSuite-side shape, enough to review and add it.
+      properties:
+        lineItemId:
+          type: string
+          description: NetSuite line item id.
+        campaignId:
+          type: string
+          description: NetSuite campaign id.
+        campaignName:
+          type: string
+          description: NetSuite campaign display name.
+        orderNumber:
+          type: string
+          description: NetSuite insertion order number.
+        channel:
+          type: string
+          description: Delivery channel / media tactic.
+        rateType:
+          type: string
+          description: Billing rate type (CPM/CPC/CPV/Flat).
+        nativeBudget:
+          type: number
+          format: double
+          description: The budget in its native currency.
+        plannedUnits:
+          type: number
+          format: double
+          description: The plan's target impressions/units.
+        flightStart:
+          type: string
+          format: date
+          description: Flight start date.
+        flightEnd:
+          type: string
+          format: date
+          description: Flight end date.
+        description:
+          type: string
+          description: Line item description.
+        coveredBy:
+          $ref: '#/components/schemas/PacingNsDiffCoveredByV1'
+          description: >
+            The OTHER Live pacing of the same campaign that already carries this line item (§13,
+            US-136 follow-up, found live 2026-09-22: a campaign with two pacings reported the same
+            ten line items as "missing" on both, forever). Absent when nobody covers it. NOTHING
+            IS FILTERED because of this - the entry stays in the list either way (US-136: the
+            reader decides what to correct); only the Overview's count excludes a covered entry,
+            never this list.
+      required:
+        - lineItemId
+    PacingNsDiffCoveredByV1:
+      type: object
+      description: >
+        The other Live pacing PacingNsDiffMissingInPacingV1.coveredBy names (§13, US-136
+        follow-up). The migration plan explicitly allows several pacings per campaign sharing
+        line items, so this is not a defect - it is shown so the reader can tell "nobody has
+        this" apart from "the pacing next door already does".
+      properties:
+        pacingId:
+          type: string
+          description: The other pacing's id.
+        pacingName:
+          type: string
+          description: The other pacing's display name.
+        dashSlug:
+          type: string
+          description: >
+            The other pacing's dash_slug. Deliberately NOT `nullable: true` - see
+            PacingRowV1.dashSlug's own description for why.
+        status:
+          type: string
+          description: >
+            The other pacing's administrative lifecycle status (never Archive - Pacing's own
+            lookup excludes archived pacings).
+      required:
+        - pacingId
+        - pacingName
+        - status
+    PacingNsDiffForeignCampaignV1:
+      type: object
+      description: >
+        One line item whose NetSuite campaign does not match the campaign(s) this pacing is stored
+        under (§13, US-136, the foreign_campaign class).
+      properties:
+        lineItemId:
+          type: string
+          description: NetSuite/Pacing line item id.
+        pacingCampaignId:
+          type: string
+          description: The campaign id stored on the Pacing side for this line item.
+        netsuiteCampaignId:
+          type: string
+          description: The campaign id NetSuite reports for this line item.
+        netsuiteCampaignName:
+          type: string
+          description: That campaign's display name, for showing what the line item actually belongs to.
+        inPacingCampaignSet:
+          type: boolean
+          description: >
+            Whether the NetSuite campaign is at least one of this pacing's own campaigns (§3's ordered
+            campaign set), even if not the one this line item itself is stored under.
+      required:
+        - lineItemId
+        - inPacingCampaignSet
+    PacingNsDiffOwnerMismatchV1:
+      type: object
+      description: >
+        One campaign whose pacing owner does not match who NetSuite records as its team lead (§13,
+        US-136, the owner_diff class) - the live-report counterpart of CampaignRefV1.mpoTeamLead,
+        matched by name the same way that field is.
+      properties:
+        campaignId:
+          type: string
+          description: NetSuite campaign id.
+        campaignName:
+          type: string
+          description: NetSuite campaign display name.
+        ownerName:
+          type: string
+          description: The pacing's current owner display name.
+        mpoTeamLead:
+          type: string
+          description: Who NetSuite records as running this campaign.
+      required:
+        - campaignId
+    PacingNsDiffReportV1:
+      type: object
+      description: >
+        The full response of GET /api/v1/pacing/pacings/{pacingId}/ns-diff (§13 of the migration plan,
+        US-136 "NetSuite Diff and Data Health") - a read-only, on-demand, LIVE comparison of one
+        pacing against current NetSuite data, computed fresh on every call. Not admin-gated: any
+        caller with ordinary dashboard access to the pacing may fetch it - unlike /revalidate, which is
+        admin-only.
+      properties:
+        pacingId:
+          type: string
+          description: The pacing id (Pacing's own UUID primary key).
+        dashSlug:
+          type: string
+          description: The pacing's dash_slug.
+        classes:
+          type: array
+          description: Every diff class Pacing evaluated.
+          items:
+            type: string
+        counts:
+          $ref: '#/components/schemas/PacingNsDiffCountsV1'
+        inSync:
+          type: boolean
+          description: Whether every class's count is zero.
+        notCheckedLineItems:
+          type: array
+          description: >
+            Line item ids this run could not evaluate (e.g. a manually-added id with no NetSuite
+            counterpart to compare against).
+          items:
+            type: string
+        missingInNetsuite:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffMissingInNetsuiteV1'
+        missingInPacing:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffMissingInPacingV1'
+        fieldDiff:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffLineItemFieldsV1'
+        planDiff:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffLineItemFieldsV1'
+        foreignCampaign:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffForeignCampaignV1'
+        ownerDiff:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingNsDiffOwnerMismatchV1'
+      required:
+        - pacingId
+        - dashSlug
+        - counts
+        - inSync
+        - missingInNetsuite
+        - missingInPacing
+        - fieldDiff
+        - planDiff
+        - foreignCampaign
+        - ownerDiff
     PacingRowV1:
       type: object
       description: >
@@ -6717,6 +7122,16 @@ components:
           description: Alert badges raised for this pacing (US-110); empty when none fired.
           items:
             $ref: '#/components/schemas/PacingAlertV1'
+        # The nightly NetSuite-diff summary only (§13, US-136) - see PacingNsDiffSummaryV1's own
+        # description for why it can be a frozen, non-current reading. The Hub fetches the full
+        # breakdown live from GET .../ns-diff when a person opens it. Absent on a pacing the nightly
+        # job has never covered.
+        #
+        # Deliberately NOT `nullable: true`, same reasoning as `dashSlug` above: the generator turns a
+        # nullable property into a JsonNullable wrapper this application does not unwrap. The property
+        # is not required, so omitting it already carries "no summary yet".
+        nsDiffSummary:
+          $ref: '#/components/schemas/PacingNsDiffSummaryV1'
       required:
         - id
         - name

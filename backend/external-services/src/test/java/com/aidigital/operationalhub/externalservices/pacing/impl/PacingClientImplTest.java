@@ -13,6 +13,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -2254,5 +2255,106 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	// ── §13: NetSuite diff (US-136) ──
+
+	@Test
+	void shouldReturnNsDiffReportTest() {
+		// Given: a report shaped like Pacing's real GET /api/pacings/:id/ns-diff response
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/ns-diff"))
+				.andExpect(method(GET))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess(
+						"""
+						{"ok":true,"pacing_id":"p1","dash_slug":"nike-ss26",
+						 "classes":["missing_in_netsuite","missing_in_pacing","field_diff","plan_diff","foreign_campaign","owner_diff"],
+						 "counts":{"missing_in_netsuite":0,"missing_in_pacing":1,"field_diff":2,"plan_diff":0,"foreign_campaign":0,"owner_diff":1},
+						 "in_sync":false,"not_checked_line_items":["manual-1"],
+						 "missing_in_netsuite":[],
+						 "missing_in_pacing":[{"line_item_id":"456","campaign_id":"C1","campaign_name":"Spring Push",
+						   "order_number":"3854","channel":"Display","rate_type":"CPM","native_budget":7000,
+						   "planned_units":1000000,"flight_start":"2026-05-01","flight_end":"2026-05-31","description":"NS desc"}],
+						 "field_diff":[{"line_item_id":"123","fields":[
+						   {"field":"channel","pacing":"Display","netsuite":"Video"},
+						   {"field":"flight_start","pacing":"2026-05-01","netsuite":"2026-05-03","source":"override"}]}],
+						 "plan_diff":[{"line_item_id":"123","fields":[
+						   {"field":"target_spend","pacing":7000,"netsuite":7500,"pacing_native":7000,"netsuite_native":7500}]}],
+						 "foreign_campaign":[{"line_item_id":"123","pacing_campaign_id":"C1","netsuite_campaign_id":"C2",
+						   "netsuite_campaign_name":"Other Campaign","in_pacing_campaign_set":false}],
+						 "owner_diff":[{"campaign_id":"C1","campaign_name":"Spring Push","owner_name":"Ana Ruiz","mpo_team_lead":"Someone Else"}]}
+						""",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingNsDiffReport result = client.getNsDiff(assertion, "p1");
+
+		// Then:
+		assertThat(result.ok()).isTrue();
+		assertThat(result.pacingId()).isEqualTo("p1");
+		assertThat(result.dashSlug()).isEqualTo("nike-ss26");
+		assertThat(result.inSync()).isFalse();
+		assertThat(result.notCheckedLineItems()).containsExactly("manual-1");
+		assertThat(result.counts().missingInPacing()).isEqualTo(1);
+		assertThat(result.counts().fieldDiff()).isEqualTo(2);
+		assertThat(result.missingInPacing()).hasSize(1);
+		assertThat(result.missingInPacing().get(0).campaignName()).isEqualTo("Spring Push");
+		assertThat(result.fieldDiff()).hasSize(1);
+		assertThat(result.fieldDiff().get(0).fields()).hasSize(2);
+		// The polymorphic pacing/netsuite values pass through untouched, string or number alike.
+		assertThat(result.fieldDiff().get(0).fields().get(0).pacing()).isEqualTo("Display");
+		assertThat(result.fieldDiff().get(0).fields().get(1).source()).isEqualTo("override");
+		assertThat(result.planDiff().get(0).fields().get(0).pacingNative()).isEqualTo(7000);
+		assertThat(result.planDiff().get(0).fields().get(0).netsuiteNative()).isEqualTo(7500);
+		assertThat(result.foreignCampaign()).hasSize(1);
+		assertThat(result.foreignCampaign().get(0).netsuiteCampaignName()).isEqualTo("Other Campaign");
+		assertThat(result.ownerDiff()).hasSize(1);
+		assertThat(result.ownerDiff().get(0).mpoTeamLead()).isEqualTo("Someone Else");
+		server.verify();
+	}
+
+	@Test
+	void shouldMapNsDiffNotFoundTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/missing/ns-diff")).andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.getNsDiff(assertion, "missing"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	@Test
+	void shouldClassifyNsDiffConnectionFailureAsUnreachableTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/ns-diff"))
+				.andRespond(request -> {
+					throw new SocketTimeoutException("Read timed out");
+				});
+
+		// When-Then:
+		assertThatThrownBy(() -> client.getNsDiff(assertion, "p1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UNREACHABLE);
 	}
 }

@@ -14,6 +14,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -262,6 +263,29 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	@Override
+	public PacingNsDiffReport getNsDiff(HubAssertion assertion, String pacingId) {
+		String header = assertionSigner.sign(assertion);
+		String path = PACINGS_PATH + "/" + pacingId + "/ns-diff";
+		try {
+			PacingNsDiffReport response = restClient.get()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(PacingNsDiffReport.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER, "Pacing request failed: GET " + path + " returned an empty body");
+			}
+			return response;
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("GET", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
 		}
 	}
 

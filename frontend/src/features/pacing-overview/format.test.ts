@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { netSuiteLeadMismatch } from "./format";
+import { aPacingNsDiffSummaryV1 } from "@/test/factories";
+import { netSuiteLeadMismatch, nsDiffBreakdownLines, totalNsDiffCount } from "./format";
 
 /**
  * §11 (US-132). The whole point of this helper is what it does NOT do: it never tries to decide
@@ -53,5 +54,70 @@ describe("netSuiteLeadMismatch", () => {
     expect(
       netSuiteLeadMismatch("Azat Nabiev", [{ mpoTeamLead: "Azat Nabiev" }, { mpoTeamLead: "Azat Nabiev" }])
     ).toBeNull();
+  });
+});
+
+// §13 (US-136). All six classes count toward the total - none is filtered out, since a difference
+// that looks routine to an engineer might not be routine to the person looking at it.
+describe("totalNsDiffCount", () => {
+  it("sums every class, not just some", () => {
+    const summary = aPacingNsDiffSummaryV1({
+      counts: {
+        missingInNetsuite: 1,
+        missingInPacing: 2,
+        fieldDiff: 3,
+        planDiff: 4,
+        foreignCampaign: 5,
+        ownerDiff: 6,
+      },
+    });
+    expect(totalNsDiffCount(summary)).toBe(21);
+  });
+
+  it("is 0 for a pacing never checked", () => {
+    expect(totalNsDiffCount(null)).toBe(0);
+    expect(totalNsDiffCount(undefined)).toBe(0);
+  });
+
+  it("is 0 when every class is 0", () => {
+    expect(totalNsDiffCount(aPacingNsDiffSummaryV1({ counts: aPacingNsDiffSummaryV1().counts }))).toBe(0);
+  });
+});
+
+describe("nsDiffBreakdownLines", () => {
+  it("lists only classes with a non-zero count, pluralized", () => {
+    const summary = aPacingNsDiffSummaryV1({
+      counts: {
+        missingInNetsuite: 0,
+        missingInPacing: 1,
+        fieldDiff: 2,
+        planDiff: 0,
+        foreignCampaign: 0,
+        ownerDiff: 1,
+      },
+    });
+    expect(nsDiffBreakdownLines(summary)).toEqual([
+      "1 missing in Pacing",
+      "2 field differences",
+      "1 owner mismatch",
+    ]);
+  });
+
+  it("is empty for a pacing with nothing to report", () => {
+    expect(nsDiffBreakdownLines(null)).toEqual([]);
+    expect(
+      nsDiffBreakdownLines(
+        aPacingNsDiffSummaryV1({
+          counts: {
+            missingInNetsuite: 0,
+            missingInPacing: 0,
+            fieldDiff: 0,
+            planDiff: 0,
+            foreignCampaign: 0,
+            ownerDiff: 0,
+          },
+        })
+      )
+    ).toEqual([]);
   });
 });

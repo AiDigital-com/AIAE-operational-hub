@@ -27,6 +27,7 @@ import { DeletePacingModal } from "../../pacing-admin/pacing-admin-delete-modals
 import { RevalidatePacingModal } from "../../pacing-admin/pacing-admin-revalidate-modal";
 import { isAdminUser, useCurrentUser } from "../../rbac/hooks";
 import type { CampaignTabContext } from "../campaign-workspace";
+import { PacingNsDiffSheet } from "./pacing-ns-diff-sheet";
 import "./pacing-tab.css";
 
 /** Width the row menu is laid out at, so its fixed position can be computed before it mounts. */
@@ -87,6 +88,7 @@ function PacingListItem({
   onRefresh,
   onRevalidate,
   onDelete,
+  onOpenNsDiff,
 }: {
   row: PacingRowV1;
   currentCampaignId: number;
@@ -103,6 +105,7 @@ function PacingListItem({
   onRefresh: () => void;
   onRevalidate: () => void;
   onDelete: () => void;
+  onOpenNsDiff: () => void;
 }) {
   const statusStyle = PACING_STATUS_STYLE[row.status] ?? { color: "var(--muted)" };
   const paceStatus = row.paceStatus ?? "no_data";
@@ -209,6 +212,13 @@ function PacingListItem({
               </button>
               {/* Said where the user is looking: a greyed-out item with no reason reads as broken. */}
               {!isLive && <p className="pacing-tab__menu-note">Only a Live pacing can be refreshed.</p>}
+              {/* §13, US-136: a read-only check against NetSuite, not admin-gated - anyone who can see
+                  this pacing may look for a drift, unlike Revalidate below which also writes back to
+                  it. Kept in the same menu as Refresh (also not admin-only) rather than moved next to
+                  the admin-only actions. */}
+              <button type="button" role="menuitem" onClick={onOpenNsDiff}>
+                NetSuite diff
+              </button>
               {canRevalidate && (
                 <button type="button" role="menuitem" onClick={onRevalidate}>
                   Revalidate from NS
@@ -314,6 +324,7 @@ export function PacingTab() {
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PacingRowV1 | null>(null);
   const [revalidateTarget, setRevalidateTarget] = useState<PacingRowV1 | null>(null);
+  const [nsDiffTarget, setNsDiffTarget] = useState<PacingRowV1 | null>(null);
   // When each pacing's refresh cooldown runs out, by pacing id. `nowMs` ticks once a second while any
   // is running so the menu item counts DOWN rather than showing whatever second it was opened on.
   const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
@@ -403,6 +414,11 @@ export function PacingTab() {
   function askRevalidate(row: PacingRowV1) {
     closeMenu();
     setRevalidateTarget(row);
+  }
+
+  function askNsDiff(row: PacingRowV1) {
+    closeMenu();
+    setNsDiffTarget(row);
   }
 
   /**
@@ -529,10 +545,13 @@ export function PacingTab() {
               onRefresh={() => refreshRow(row)}
               onRevalidate={() => askRevalidate(row)}
               onDelete={() => askDelete(row)}
+              onOpenNsDiff={() => askNsDiff(row)}
             />
           ))}
         </ul>
       )}
+
+      <PacingNsDiffSheet row={nsDiffTarget} onClose={() => setNsDiffTarget(null)} />
 
       {deleteTarget && (
         <DeletePacingModal
