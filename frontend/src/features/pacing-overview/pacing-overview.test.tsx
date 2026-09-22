@@ -16,6 +16,11 @@ import { PacingOverview } from "./pacing-overview";
 
 vi.mock("./api", () => ({
   listPacingOverview: vi.fn(),
+  // §11: every row carries an OwnerPicker now. It fetches nothing until opened, but the module has
+  // to exist — a partial mock makes the whole table throw rather than the picker misbehave.
+  listAssignableOwners: vi.fn().mockResolvedValue({ owners: [] }),
+  transferPacingOwner: vi.fn(),
+  listCampaignPacings: vi.fn(),
 }));
 
 /** Stands in for the real campaign Pacing tab, to assert on WHAT a clicked row navigated to
@@ -373,5 +378,87 @@ describe("PacingOverview", () => {
 
     // Then: still on the Overview - clicking did nothing
     expect(screen.getByText("Orphan Pacing")).toBeInTheDocument();
+  });
+
+  // §11 (US-132): both names, side by side, in the table itself — the reader decides which of the
+  // two systems is out of date.
+  it("shows NetSuite's team lead beside the owner when they disagree", async () => {
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            name: "Service Experts Q1",
+            ownerName: "Azat Nabiev",
+            campaigns: [aCampaignRefV1({ name: "Southwest", mpoTeamLead: "Daria Feofanova" })],
+          }),
+        ],
+      })
+    );
+    renderPacingOverview();
+
+    const row = (await screen.findByText("Service Experts Q1")).closest("tr")!;
+    expect(within(row).getByText("Azat Nabiev")).toBeInTheDocument();
+    expect(within(row).getByText("NetSuite: Daria Feofanova")).toBeInTheDocument();
+  });
+
+  it("says nothing extra when the owner and NetSuite agree", async () => {
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            name: "Agreed",
+            ownerName: "Daria Feofanova",
+            campaigns: [aCampaignRefV1({ mpoTeamLead: "Daria Feofanova" })],
+          }),
+        ],
+      })
+    );
+    renderPacingOverview();
+
+    const row = (await screen.findByText("Agreed")).closest("tr")!;
+    expect(within(row).getByText("Daria Feofanova")).toBeInTheDocument();
+    expect(within(row).queryByText(/NetSuite:/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the Alerts column visible when a long NetSuite name appears", async () => {
+    // The bug: the owner cell grew to fit "NetSuite: <long name>", and because the table is
+    // auto-layout at width:100% inside a wrapper that CLIPS rather than scrolls, the columns to its
+    // right were pushed out of view — Alerts first.
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            name: "Long lead",
+            ownerName: "Azat Nabiev",
+            campaigns: [aCampaignRefV1({ mpoTeamLead: "Aleksandra Konstantinopolskaya-Vasilyeva" })],
+            alerts: [aPacingAlertV1({ severity: "critical", text: "Stale data" })],
+          }),
+        ],
+      })
+    );
+    renderPacingOverview();
+
+    const row = (await screen.findByText("Long lead")).closest("tr")!;
+    // Both lines clip instead of widening the column, and each keeps its full text reachable.
+    const ns = within(row).getByText(/NetSuite: Aleksandra/);
+    expect(ns).toHaveClass("pacing-overview__owner-ns");
+    expect(within(row).getByTitle("Azat Nabiev")).toBeInTheDocument();
+    // And the row still renders every column after the owner, alerts included.
+    expect(within(row).getByText("Stale data")).toBeInTheDocument();
+  });
+
+
+  it("does not flag a pacing NetSuite has said nothing about", async () => {
+    // Every pacing carries null here until its next revalidate. Flagging that would light
+    // up the entire list on the day this ships.
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [aPacingRowV1({ name: "Not revalidated yet", ownerName: "Azat Nabiev", campaigns: [aCampaignRefV1()] })],
+      })
+    );
+    renderPacingOverview();
+
+    const row = (await screen.findByText("Not revalidated yet")).closest("tr")!;
+    expect(within(row).queryByText(/NetSuite:/)).not.toBeInTheDocument();
   });
 });

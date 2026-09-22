@@ -15,7 +15,14 @@
   border-radius: var(--radius);
   white-space: nowrap;
   opacity: 0;
-  visibility: hidden;
+  /* `display: none`, not `visibility: hidden`.
+     A hidden-but-displayed absolute element still contributes to its scroll container's
+     scrollable area. In the Pacing Overview that put a strip of empty space to the right of the
+     last column — the bubble's own width, invisible but draggable — as soon as the table's box
+     started scrolling instead of clipping. Not displayed at all contributes nothing.
+     Costs the fade-in: `display` does not animate. A tooltip that appears instantly is a fair
+     trade for one that does not drag phantom width behind it. */
+  display: none;
   pointer-events: none;
   transition: opacity .12s ease, transform .12s ease;
   z-index: 20;
@@ -23,6 +30,6 @@
 .tooltip:hover .tooltip__bubble,
 .tooltip:focus-within .tooltip__bubble {
   opacity: 1;
-  visibility: visible;
+  display: block;
   transform: translateX(-50%) translateY(0);
 }

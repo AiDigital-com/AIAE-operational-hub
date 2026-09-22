@@ -1439,7 +1439,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", 1432875.0, 15.5, 0.85, null);
+				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -1450,6 +1450,10 @@ class PacingClientImplTest {
 								+ "\"native_budget\":20633.4,\"description\":\"desc\",\"currency\":\"USD\","
 								+ "\"exchange_rate\":1.0,\"campaign_id\":\"40539\","
 								+ "\"campaign_name\":\"2026_Campaign\",\"order_number\":\"TM-271064\","
+								// §11, US-132: NetSuite's own team lead rides along on create, so the new
+								// pacing can show the owner-vs-NetSuite comparison without waiting for a
+								// revalidate. Pinned here because it is a wire field, not a Hub-side value.
+								+ "\"mpo_team_lead\":\"Daria Feofanova\","
 								+ "\"target_impressions\":1432875.0,\"margin_percent\":15.5,"
 								+ "\"target_ctr\":0.85}]}"))
 				.andRespond(withStatus(HttpStatus.CREATED)
@@ -1881,6 +1885,48 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	// ── §11: ownership transfer (US-131) ──
+
+	@Test
+	void shouldTransferOwnerTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		// snake_case on the wire: Pacing reads body.new_owner_id, not newOwnerId.
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/owner"))
+				.andExpect(content().json("{\"new_owner_id\":\"11111111-1111-1111-1111-111111111111\"}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then: no exception - void on success.
+		client.transferOwner(assertion, "p1", "11111111-1111-1111-1111-111111111111");
+		server.verify();
+	}
+
+	@Test
+	void shouldSurfacePacingsRefusalWhenRecipientIsOutOfScopeTest() {
+		// Given: Pacing is the one that decides whether a transfer is allowed - both the pacing and the
+		// recipient must sit inside the asserted scope. Its refusal must reach the caller, not be
+		// swallowed into a silent no-op that looks like the reassignment worked.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_OWNERS, List.of("u1"), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1/owner"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"new owner is outside your scope\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.transferOwner(assertion, "p1", "22222222-2222-2222-2222-222222222222"))
+				.isInstanceOf(PacingExternalException.class);
 	}
 
 	// ── §9: status change (US-128) ──

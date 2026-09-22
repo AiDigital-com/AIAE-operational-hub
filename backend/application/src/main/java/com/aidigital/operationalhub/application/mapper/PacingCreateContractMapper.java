@@ -118,7 +118,8 @@ public class PacingCreateContractMapper {
 				.targetVcr(kpi == null ? null : kpi.vcr())
 				.campaignId(li.campaignId())
 				.campaignName(li.campaignName())
-				.orderNumber(li.orderNumber());
+				.orderNumber(li.orderNumber())
+				.mpoTeamLead(li.mpoTeamLead());
 	}
 
 	private Map<String, PacingInUseV1> toInUseV1(Map<String, PacingInUseEntry> inUse) {
@@ -158,6 +159,7 @@ public class PacingCreateContractMapper {
 				li.getCampaignId(),
 				li.getCampaignName(),
 				li.getOrderNumber(),
+				li.getMpoTeamLead(),
 				li.getTargetImpressions(),
 				li.getMarginPercent(),
 				li.getTargetCtr(),

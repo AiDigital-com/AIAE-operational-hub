@@ -17,6 +17,11 @@ import { PacingTab } from "./pacing-tab";
 
 vi.mock("../../pacing-overview/api", () => ({
   listCampaignPacings: vi.fn(),
+  // §11: every row carries an OwnerPicker now. It fetches nothing until opened, but a partial mock
+  // of this module makes the whole list throw rather than the picker misbehave.
+  listAssignableOwners: vi.fn().mockResolvedValue({ owners: [] }),
+  transferPacingOwner: vi.fn(),
+  listPacingOverview: vi.fn(),
 }));
 
 // §8: the Create Pacing panel's own behavior is covered by create-pacing-panel.test.tsx - here we

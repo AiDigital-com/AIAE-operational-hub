@@ -660,6 +660,38 @@ public class PacingClientImpl implements PacingClient {
 		}
 	}
 
+	/**
+	 * Reassigns a pacing to another person (§11, US-131).
+	 *
+	 * <p>Deliberately thin: Pacing checks that both the pacing and the recipient are inside the
+	 * asserted scope, and journals who made the change. Repeating either check here would give two
+	 * places for the answer to differ.
+	 *
+	 * @param assertion  who is calling and what they may see
+	 * @param pacingId   the pacing id
+	 * @param newOwnerId the recipient's Pacing user id
+	 */
+	@Override
+	public void transferOwner(HubAssertion assertion, String pacingId, String newOwnerId) {
+		String header = assertionSigner.sign(assertion);
+		String path = PACINGS_PATH + "/" + pacingId + "/owner";
+		OwnerTransferRequest request = new OwnerTransferRequest(newOwnerId);
+		try {
+			restClient.patch()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("PATCH", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: PATCH " + path, ex);
+		}
+	}
+
 	@Override
 	public void deletePacing(HubAssertion assertion, String pacingId) {
 		String header = assertionSigner.sign(assertion);
@@ -740,7 +772,8 @@ public class PacingClientImpl implements PacingClient {
 		return new LineItemCreateRequest(
 				li.lineItemId(), li.channel(), li.flightStart(), li.flightEnd(), li.rateType(), li.nativeBudget(),
 				li.description(), li.currency(), li.exchangeRate(), li.campaignId(), li.campaignName(),
-				li.orderNumber(), li.targetImpressions(), li.marginPercent(), li.targetCtr(), li.targetVcr());
+				li.orderNumber(), li.mpoTeamLead(), li.targetImpressions(), li.marginPercent(), li.targetCtr(),
+				li.targetVcr());
 	}
 
 	/**
@@ -1193,6 +1226,8 @@ public class PacingClientImpl implements PacingClient {
 	 * @param campaign_id         NetSuite campaign id
 	 * @param campaign_name       NetSuite campaign name
 	 * @param order_number        NetSuite insertion order number
+	 * @param mpo_team_lead       who NetSuite records as running the campaign (§11, US-132), stored so
+	 *                            the new pacing can show the owner-vs-NetSuite comparison at once
 	 * @param target_impressions  the plan's target impressions, as confirmed by the caller
 	 * @param margin_percent      the plan's target margin percentage, as confirmed by the caller
 	 * @param target_ctr          the plan's target CTR percentage, as confirmed by the caller
@@ -1211,6 +1246,7 @@ public class PacingClientImpl implements PacingClient {
 			String campaign_id,
 			String campaign_name,
 			String order_number,
+			String mpo_team_lead,
 			Double target_impressions,
 			Double margin_percent,
 			Double target_ctr,
@@ -1312,5 +1348,14 @@ public class PacingClientImpl implements PacingClient {
 	 * @param status {@code Live}, {@code Paused}, {@code Complete} or {@code Archive}
 	 */
 	private record StatusUpdateRequest(String status) {
+	}
+
+	/**
+	 * Shape of the {@code PATCH /api/pacings/:id/owner} request body (§11, US-131). Snake_case on the
+	 * wire: Pacing reads {@code body.new_owner_id}.
+	 *
+	 * @param new_owner_id the recipient's Pacing user id (UUID)
+	 */
+	private record OwnerTransferRequest(String new_owner_id) {
 	}
 }

@@ -87,14 +87,26 @@
 }
 
 /* ── table ── */
+/* Same shape as the shared DataTable the Reporting tab uses (shared/ui/data-table): content decides
+   the widths, the box scrolls, nothing is clipped.
+
+   `max-content` lets each column take what its text needs — so a 39-character campaign name or a
+   second line under an owner no longer steals width from the columns after it, which is how Alerts
+   used to fall off the end. `min-width: 100%` keeps the table filling its box on a wide screen, so
+   opening the window actually gives every column more room instead of leaving a dead strip on the
+   right. Below that the box scrolls — inside itself, never the page.
+
+   The declared pixel widths that used to live here did stop the column theft, but at the cost of
+   clipping every header on a narrow column and giving a full-screen window nothing at all. */
 .pacing-overview__table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: auto;
   background: var(--surface);
 }
 .pacing-overview__table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
 }
 .pacing-overview__table th {
@@ -108,11 +120,17 @@
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+/* One line per cell, like the shared DataTable's own `tbody td`.
+   This is what makes `width: max-content` mean anything: a column's width becomes the longest single
+   line in it. Let cells wrap and the browser is free to fold text instead, which it does unevenly —
+   some columns shrink, the table still reports a wider max-content, and the difference shows up as
+   dead space to the right of the last column. */
 .pacing-overview__table td {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 13.5px;
   vertical-align: middle;
+  white-space: nowrap;
 }
 .pacing-overview__table tr:last-child td {
   border-bottom: none;
@@ -181,6 +199,7 @@ th:has(.pacing-overview__sort) {
 .pacing-overview__name {
   font-weight: 700;
   color: var(--ink);
+  white-space: nowrap;
 }
 .pacing-overview__campaign {
   display: flex;
@@ -262,4 +281,30 @@ th:has(.pacing-overview__sort) {
 }
 .pacing-overview__no-alerts {
   color: var(--muted);
+}
+
+/* ── Owner vs NetSuite (§11, US-132) ─────────────────────────────────────────
+   Stacked, not side by side: the owner is what the row is sorted and grouped by,
+   and the NetSuite name is a footnote to it. Muted and smaller so a table full of
+   disagreements still reads as a list of owners. No vertical stripe — this project
+   bans left-rail accents outright. */
+/* No cap: the table takes the width its content needs and the box scrolls, so a long NetSuite name
+   no longer costs the columns after it anything. */
+.pacing-overview__owner {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  /* Anchor for the reassign popover, which floats above the row rather than growing it. */
+  position: relative;
+}
+/* Just kept on one line each. Nothing is capped or clipped any more — the column takes the width
+   the longer of the two names needs, and the box scrolls if the whole table outgrows it. */
+.pacing-overview__owner-name,
+.pacing-overview__owner-ns {
+  white-space: nowrap;
+}
+.pacing-overview__owner-ns {
+  font-size: 11px;
+  color: var(--attention-text);
 }

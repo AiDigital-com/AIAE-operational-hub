@@ -3352,6 +3352,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/pacings/{pacingId}/owner:
+    patch:
+      tags:
+        - pacing
+      operationId: transferPacingOwner
+      description: >
+        Reassigns a pacing to another person (§11, US-131). Calls PATCH /api/pacings/:id/owner on
+        the Pacing side, which journals who made the change and when, and fires its own Slack line -
+        the Hub adds no record of its own.
+
+        Pacing enforces the rule, not this endpoint: BOTH the pacing being moved and the person
+        receiving it must sit inside the caller's asserted scope, and it answers 403 when either
+        does not. The assignable-owners list below offers the same set, so a well-behaved client
+        cannot reach that 403 - but the check lives there because scope is what Pacing was told, not
+        what a browser chose to display.
+      parameters:
+        - name: pacingId
+          in: path
+          required: true
+          description: The pacing id (Pacing's own UUID primary key) - distinct from its dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingOwnerUpdateV1'
+      responses:
+        '200':
+          description: Ownership was transferred.
+        '400':
+          description: The new owner id was missing or not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >
+            The pacing, or the person receiving it, is outside the caller's scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/assignable-owners:
+    get:
+      tags:
+        - pacing
+      operationId: listAssignableOwners
+      description: >
+        Who the current user may hand a pacing to (§11, US-131's "only users in scope can be
+        selected").
+
+        This is the SAME set the user's Pacing scope already filters the overview by - what you can
+        see, you can assign to - resolved once here so a picker does not have to reconstruct it.
+        People without a Pacing user id are absent: the §2 sync has not reached them, so Pacing
+        cannot be told about them at all.
+
+        An admin's scope carries no id list (it is "everything"), so for them this returns every Hub
+        user that has a Pacing user id rather than an empty list.
+      responses:
+        '200':
+          description: The assignable owners were resolved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignableOwnerListV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/pacings/{pacingId}/refresh:
     post:
       tags:
@@ -6454,6 +6543,16 @@ components:
         name:
           type: string
           description: Campaign display name, as last resolved from NetSuite.
+        mpoTeamLead:
+          type: string
+          description: >
+            Who NetSuite records as running this campaign (§11, US-132), refreshed on every
+            revalidate. A NAME, not an id: the two systems share no key, so comparing it against
+            the pacing's owner means matching this string against that person's name - a
+            convention people maintain by hand, not a relation. Treat a difference as "the names
+            do not match" and show both, never as "the owner is wrong"; Pacing's owner keeps
+            driving access either way. Null when NetSuite reports none, or before this pacing's
+            next revalidate (the field only started being stored on 2026-09-21).
       required:
         - id
         - name
@@ -6749,6 +6848,13 @@ components:
           description: >
             The NetSuite order (insertion order) number this line item belongs to - the grouping key
             the review panel groups line items under (US-122).
+        mpoTeamLead:
+          type: string
+          description: >
+            Who NetSuite records as running this campaign (§11, US-132). Carried through create so
+            the new pacing shows the owner-vs-NetSuite comparison immediately, instead of blank until
+            the nightly refresh or a manual revalidate fills it in. Read-only, and never a decision:
+            the pacing's owner is whoever created it until a person reassigns it.
       required:
         - lineItemId
     PacingInsertionOrderV1:
@@ -6889,6 +6995,8 @@ components:
         campaignName:
           type: string
         orderNumber:
+          type: string
+        mpoTeamLead:
           type: string
         targetImpressions:
           type: number
@@ -7212,6 +7320,52 @@ components:
             - Archive
       required:
         - status
+    PacingOwnerUpdateV1:
+      type: object
+      description: A pacing ownership transfer (§11, US-131).
+      properties:
+        newOwnerId:
+          type: string
+          description: >
+            The Pacing user id (UUID) of the person receiving the pacing - NOT a Hub user id. The
+            two systems keep separate identities; `hub_users.pacing_user_id` is the link, and
+            AssignableOwnerV1 hands out the Pacing side of it so a caller never has to translate.
+      required:
+        - newOwnerId
+    AssignableOwnerV1:
+      type: object
+      description: >
+        One person the current user may hand a pacing to (§11, US-131).
+      properties:
+        pacingUserId:
+          type: string
+          description: >
+            This person's id in Pacing - the value to send as PacingOwnerUpdateV1.newOwnerId.
+            Present for everyone in this list by construction: somebody without one cannot be named
+            to Pacing at all and is therefore absent rather than listed-but-unusable.
+        name:
+          type: string
+          description: Display name, as the Hub knows it.
+        email:
+          type: string
+          description: Work email, to tell apart two colleagues who share a name.
+      required:
+        - pacingUserId
+        - name
+    AssignableOwnerListV1:
+      type: object
+      description: The people the current user may assign a pacing to (§11, US-131).
+      properties:
+        owners:
+          type: array
+          description: >
+            Sorted by name. Empty when the user has nobody in scope - including themselves, which
+            happens when the §2 user sync has not reached them yet; that is a configuration gap, not
+            a permission answer, so it is an empty list rather than a 403.
+          items:
+            $ref: '#/components/schemas/AssignableOwnerV1'
+      required:
+        - owners
     PacingDashboardCampaignV1:
       type: object
       description: The pacing's own campaign summary, as Pacing's dashboard payload carries it.

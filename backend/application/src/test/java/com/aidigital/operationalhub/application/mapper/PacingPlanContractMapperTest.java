@@ -96,7 +96,7 @@ class PacingPlanContractMapperTest {
 		// mapper must not re-derive that mapping.
 		PacingValidateLineItem candidate = new PacingValidateLineItem(
 				"7", "Display", "2026-01-01", "2026-01-31", "CPM", null, 5000.0, 5000.0, 250000.0,
-				"USD", 1.0, false, "40539", "2026_Campaign", "TM-271064", null, null);
+				"USD", 1.0, false, "40539", "2026_Campaign", "TM-271064", null, null, null);
 		PacingAddableLineItems result = new PacingAddableLineItems(
 				true, null, "TM-271064", List.of("TM-271064"), List.of(candidate), List.of("599852"),
 				"Acme", "MediaCo", List.of(), List.of());

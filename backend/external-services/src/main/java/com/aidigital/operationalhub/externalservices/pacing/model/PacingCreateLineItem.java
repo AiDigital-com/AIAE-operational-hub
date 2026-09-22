@@ -24,6 +24,10 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * @param campaignId        NetSuite campaign id
  * @param campaignName      NetSuite campaign name
  * @param orderNumber       NetSuite insertion order number
+ * @param mpoTeamLead        who NetSuite records as running this campaign (§11, US-132). Carried
+ *                           through create so the new pacing can show the owner-vs-NetSuite
+ *                           comparison from its first minute, rather than blank until the
+ *                           nightly refresh or a manual revalidate fills it in.
  * @param targetImpressions the plan's target impressions, as confirmed by the caller
  * @param marginPercent     the plan's target margin percentage, as confirmed by the caller
  * @param targetCtr         the plan's target CTR percentage, as confirmed by the caller
@@ -42,6 +46,7 @@ public record PacingCreateLineItem(
 		String campaignId,
 		String campaignName,
 		String orderNumber,
+		String mpoTeamLead,
 		Double targetImpressions,
 		Double marginPercent,
 		Double targetCtr,

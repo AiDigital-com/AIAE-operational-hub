@@ -37,7 +37,7 @@ class PacingCreateContractMapperTest {
 		return new PacingValidateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "Northeast | DOOH TM271064#13",
 				20633.4, 20633.4, 1432875.0, "USD", 1.0, false,
-				"40539", "2026_Service-Experts_Q1-Media_Southwest", "TM-271064",
+				"40539", "2026_Service-Experts_Q1-Media_Southwest", "TM-271064", "Daria Feofanova",
 				new PacingMrgSource(15.5), new PacingKpiSource(0.85, null, "tactic"));
 	}
 
@@ -81,7 +81,7 @@ class PacingCreateContractMapperTest {
 		// a null value rather than being absent - and can also legitimately be absent entirely.
 		PacingValidateLineItem li = new PacingValidateLineItem(
 				"1", "Display", "2026-01-01", "2026-01-31", "CPM", "desc", 100.0, 100.0, 1000.0,
-				"USD", 1.0, false, "1", "Campaign", "TM-1", new PacingMrgSource(null), null);
+				"USD", 1.0, false, "1", "Campaign", "TM-1", null, new PacingMrgSource(null), null);
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(li), List.of(), null, null, null, null, List.of(), List.of(), List.of(), Map.of());
 
@@ -116,6 +116,25 @@ class PacingCreateContractMapperTest {
 		assertThat(li.getConverted()).isFalse();
 		assertThat(li.getCampaignId()).isEqualTo("40539");
 		assertThat(li.getOrderNumber()).isEqualTo("TM-271064");
+	}
+
+	@Test
+	void shouldCarryNetSuiteTeamLeadFromValidateThroughToCreateTest() {
+		// Given: NetSuite's own answer to who runs this campaign, on the validated line item.
+		PacingValidateResult result = new PacingValidateResult(
+				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign",
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+
+		// When: it goes out to the create form and comes straight back in the create request.
+		PacingDraftLineItemV1 draftLineItem = mapper.toDraftV1(result).getLineItems().get(0);
+		PacingCreateLineItem submitted = mapper.toCreateLineItem(
+				new PacingCreateLineItemV1().lineItemId("599852").mpoTeamLead(draftLineItem.getMpoTeamLead()));
+
+		// Then: both legs carry it. Without this the new pacing stores no NetSuite lead, so §11's
+		// owner-vs-NetSuite comparison is blank on it until the nightly refresh or a manual
+		// revalidate fills it in - which is exactly the wait this carry exists to remove.
+		assertThat(draftLineItem.getMpoTeamLead()).isEqualTo("Daria Feofanova");
+		assertThat(submitted.mpoTeamLead()).isEqualTo("Daria Feofanova");
 	}
 
 	@Test

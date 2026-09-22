@@ -13,8 +13,9 @@ import { Tooltip } from "../../shared/ui/tooltip/tooltip";
 // numbers read identically across both Overview screens. Not the mock overlay itself — this screen's
 // data is the real Pacing service response, never mocked.
 import { fmtBudget, fmtDate } from "../pacing/mock/format";
-import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity } from "./format";
+import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity, netSuiteLeadMismatch } from "./format";
 import { usePacingOverview } from "./hooks";
+import { OwnerPicker } from "./owner-picker";
 import { pacingRoute } from "./navigation";
 import type { PacingRowV1, PacingScopeV1 } from "./types";
 import "./pacing-overview.css";
@@ -99,6 +100,55 @@ function emptyScopeCopy(scope: PacingScopeV1 | undefined): { title: string; body
   return { title: "No pacings yet", body: "There are no pacings in Pacing yet." };
 }
 
+/**
+ * Who owns this pacing, and where NetSuite disagrees (§11, US-132).
+ *
+ * Shows both names side by side rather than resolving them. Pacing's owner is the one that drives
+ * access and grouping; NetSuite's is shown so a reader can decide which of the two is out of date —
+ * that judgement is theirs, and neither system is authoritative about the other.
+ *
+ * Worded as "NetSuite: <name>", never as an error. The two are matched by NAME, a convention people
+ * maintain by hand, so a flag here can mean a genuine reassignment OR a spelling that drifted apart
+ * (a diacritic, a married name changed in one system only). Calling that "wrong owner" would be a
+ * claim this screen cannot support.
+ */
+function OwnerCell({
+  pacingId,
+  ownerName,
+  campaigns,
+}: {
+  pacingId: string;
+  ownerName: string | null;
+  campaigns: PacingRowV1["campaigns"] | null;
+}) {
+  const netSuiteLead = netSuiteLeadMismatch(ownerName, campaigns);
+  return (
+    // Stops the click from opening the pacing: the whole row is a link target, and reassigning is
+    // not navigating.
+    <span
+      className="pacing-overview__owner"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      role="presentation"
+    >
+      {/* Titles kept even though nothing clips now: the column takes the width it needs, but a
+          screen reader still benefits from the NetSuite line saying what the flag actually means. */}
+      <span className="pacing-overview__owner-name" title={ownerName ?? undefined}>
+        {ownerName ?? "—"}
+      </span>
+      {netSuiteLead && (
+        <span
+          className="pacing-overview__owner-ns"
+          title={`NetSuite records ${netSuiteLead} as running this campaign. Pacing's owner still decides who can see it — one of the two is out of date.`}
+        >
+          NetSuite: {netSuiteLead}
+        </span>
+      )}
+      <OwnerPicker pacingId={pacingId} currentOwnerName={ownerName} />
+    </span>
+  );
+}
+
 function SortableHeader({
   label,
   field,
@@ -171,7 +221,9 @@ const PacingTableRow = memo(function PacingTableRow({ row, onOpen }: { row: Paci
       <td>
         <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
       </td>
-      <td>{row.ownerName ?? "—"}</td>
+      <td>
+        <OwnerCell pacingId={row.id} ownerName={row.ownerName ?? null} campaigns={row.campaigns ?? null} />
+      </td>
       <td className="pacing-overview__num">
         <MarginCell actual={row.marginActualPct ?? null} target={row.marginTargetPct ?? 0} />
       </td>

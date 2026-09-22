@@ -55,7 +55,8 @@ class PacingContractMapperTest {
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), false);
 		PacingRow row = new PacingRow(
 				"p1", "Nike SS26 Display", "Live", "2026-08-01", "2026-09-30", "Azat Nabiev", 3,
-				List.of(new PacingCampaignRef("CAMP-NIKE", "Nike SS26"), new PacingCampaignRef("CAMP-OTHER", "Other")),
+				List.of(new PacingCampaignRef("CAMP-NIKE", "Nike SS26", "Daria Feofanova"),
+						new PacingCampaignRef("CAMP-OTHER", "Other", null)),
 				new PacingHealth("over", 12.3, 18.5, 25.0, 50000.0,
 						List.of(new PacingAlert("pacing_off_pace", "critical", "Pacing +48.4pp", null, null, null, null))),
 				"nike-ss26-display", "2026-07-15T09:30:00.000Z");
@@ -74,9 +75,11 @@ class PacingContractMapperTest {
 		assertThat(v1.getFlightEnd()).isEqualTo(LocalDate.of(2026, 9, 30));
 		assertThat(v1.getLineItemCount()).isEqualTo(3);
 		assertThat(v1.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 7, 15, 9, 30, 0));
+		// §11: the NetSuite team lead rides along so the Overview can show it beside the
+		// pacing's own owner without a second call, and stays null where NetSuite names none.
 		assertThat(v1.getCampaigns()).containsExactly(
-				new CampaignRefV1().id("CAMP-NIKE").name("Nike SS26"),
-				new CampaignRefV1().id("CAMP-OTHER").name("Other"));
+				new CampaignRefV1().id("CAMP-NIKE").name("Nike SS26").mpoTeamLead("Daria Feofanova"),
+				new CampaignRefV1().id("CAMP-OTHER").name("Other").mpoTeamLead(null));
 		assertThat(v1.getMarginActualPct()).isEqualTo(18.5);
 		assertThat(v1.getMarginTargetPct()).isEqualTo(25.0);
 		assertThat(v1.getPacingDeviationPct()).isEqualTo(12.3);
