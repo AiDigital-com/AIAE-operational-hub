@@ -73,17 +73,54 @@ export interface LayoutView {
   [key: string]: unknown;
 }
 
+/** A stored series' presentation, straight off the wire (§6 grammar - see `chart-paint.ts` for how
+ *  `color`/`fill`/`border` tokens resolve, and `chart-view.tsx`'s DASH_PATTERNS/STROKE_WIDTH/CURVE_TYPE
+ *  tables for how `style`/`dashed` resolve to recharts props). `dashed` is `false | "short" | "medium" |
+ *  "long" | true` - both a series and a guide use the same closed set. */
+export interface ChartSeriesStyle {
+  type?: "area" | "bar" | "line" | string;
+  width?: number | string;
+  curve?: "straight" | "smooth" | "step" | string;
+  /** Area only: `"light" | "strong"` picks the fallback fill opacity when the series carries no
+   *  explicit numeric `opacity` of its own. */
+  fill?: "light" | "strong" | string;
+  /** Bar only: `"grouped" | "stacked"`. */
+  bars?: string;
+  points?: boolean;
+  [key: string]: unknown;
+}
+
 export interface ChartValueSeries {
   id: string;
   kind: "value";
   label: string;
   value: { kind: string; metric: string; source?: string; unitFamily?: string };
-  style?: { type?: string; width?: number; dashed?: boolean; curve?: string };
+  style?: ChartSeriesStyle;
   axis?: "left" | "right";
-  color?: string;
-  dashed?: boolean;
+  /** Semantic paint token (`"actual"`, `"spend"`, ...), a palette index, or `"auto"` - see
+   *  `chart-paint.ts`. */
+  color?: string | number;
+  /** Fill token for area/bar; falls back to `color` when absent (chart-paint.ts / ReportChart parity). */
+  fill?: string | number;
+  /** Bar stroke token; falls back to `color` when absent. */
+  border?: string | number;
+  dashed?: boolean | "short" | "medium" | "long";
+  /** Stroke/fill opacity multiplier - the CSS paint itself already carries the intended translucency
+   *  (e.g. `--c-actual-fill` is a low-alpha rgba), so this is almost always `1` in real specs. */
+  opacity?: number;
   accumulate?: "daily" | "cumulative";
-  guide?: { value: { key: string }; label?: string; invert?: boolean };
+  guide?: {
+    value?: { key: string };
+    label?: string;
+    invert?: boolean;
+    calc?: "projection" | string;
+    color?: string | number;
+    dashed?: boolean | "short" | "medium" | "long";
+    style?: ChartSeriesStyle;
+    opacity?: number;
+    labelPlacement?: string;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -94,10 +131,11 @@ export interface ChartCalcSeries {
   basis: string;
   output: "cumulative" | "perDay";
   label: string;
-  style?: { type?: string; width?: number; dashed?: boolean };
+  style?: ChartSeriesStyle;
   axis?: "left" | "right";
-  color?: string;
-  dashed?: boolean;
+  color?: string | number;
+  dashed?: boolean | "short" | "medium" | "long";
+  opacity?: number;
   [key: string]: unknown;
 }
 

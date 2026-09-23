@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ChartViewRenderer } from "./chart-view";
+import { ChartViewRenderer, expectedCurve } from "./chart-view";
 import type { ChartView } from "./widget-types";
 import type { SeriesRow } from "../types-metrics";
 
@@ -133,5 +133,50 @@ describe("a projection stored as a guide", () => {
 
     // Then: it resolved - no "not available" note for a guide that has a target
     expect(screen.queryByText(/Not available in this view/)).toBeNull();
+  });
+});
+
+/**
+ * The row field is ALREADY cumulative.
+ *
+ * `expIm` on a day is the plan from flight start through that day - it climbs by the daily plan
+ * rate and its last value is the campaign's expected-to-date. Treating it as a per-day increment
+ * and accumulating it again is quadratic: on the pacing this was found on, a cumulative chart's
+ * expected line ended at 106.9M against a real 2.46M, and a daily chart drew that same climb where
+ * a flat ~28,564/day target belonged.
+ */
+describe("expectedCurve", () => {
+  // Three days of a plan running at 100/day, as Pacing stores it: 100, 200, 300.
+  const ROWS_CUM: SeriesRow[] = [
+    { date: "d1", expIm: 100, expCo: 1.5 },
+    { date: "d2", expIm: 200, expCo: 3 },
+    { date: "d3", expIm: 300, expCo: 4.5 },
+  ];
+
+  it("should plot a cumulative series as stored", () => {
+    // Then: the curve IS the stored one - accumulating it again would end at 600, not 300
+    expect(expectedCurve("im", "cumulative", ROWS_CUM)).toEqual([100, 200, 300]);
+  });
+
+  it("should plot a per-day series as the day-on-day delta", () => {
+    // Then: a flat 100/day target, which is what a daily chart compares its bars against
+    expect(expectedCurve("im", "perDay", ROWS_CUM)).toEqual([100, 100, 100]);
+  });
+
+  it("should round unit counts and leave money alone", () => {
+    // Then: impressions are whole; a cost curve keeps its cents
+    expect(expectedCurve("im", "perDay", [{ date: "d1", expIm: 0.4 }, { date: "d2", expIm: 1.1 }])).toEqual([0, 1]);
+    expect(expectedCurve("sp", "perDay", ROWS_CUM)).toEqual([1.5, 1.5, 1.5]);
+  });
+
+  it("should treat a projection with no stated output as a daily one", () => {
+    // Given: `cumulative` is the only value that plots the stored curve; the original tests for it
+    // exactly and falls through to the delta. Defaulting the other way would draw a climbing total
+    // where a flat daily target belongs.
+    expect(expectedCurve("im", undefined, ROWS_CUM)).toEqual([100, 100, 100]);
+  });
+
+  it("should answer nothing for a basis with no expected curve", () => {
+    expect(expectedCurve("cv", "perDay", ROWS_CUM)).toBeNull();
   });
 });
