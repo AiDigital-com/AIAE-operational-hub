@@ -90,6 +90,75 @@ function isProjectionSeries(s: ChartSeriesDef): s is ChartCalcSeries {
   return s.kind === "calc" && (s as ChartCalcSeries).calc === "projection";
 }
 
+/**
+ * Which row field carries the expected curve for a projection series' basis.
+ *
+ * A TABLE, not a rule. The obvious rule - "exp" + the capitalised basis - is right for two of
+ * the four and wrong for the other two, and wrong in the quietest possible way: the field simply
+ * is not on the row, the series reports itself unsupported, and the chart draws without its
+ * expected line while everything else about it looks correct. That is what happened to
+ * "Cumulative Spend vs Cost Budget" and "Daily Spend & CPM" - both plot spend, both lost their
+ * budget curve, neither said so.
+ *
+ * `sp` is the trap. Its expected field is `expCo`, and `expCo` is expected COST - not completes,
+ * which is what the name suggests beside `expIm`/`expCl`. Pacing computes it as
+ * `liExpCost(p, to) - base.co`.
+ */
+/** Is this series' guide a projection curve rather than a horizontal target line? */
+function isProjectionGuide(guide: unknown): boolean {
+  return !!guide && typeof guide === "object" && (guide as { calc?: string }).calc === "projection";
+}
+
+/**
+ * The expected curve a Pacing-authored chart attaches to its actual series.
+ *
+ * Two stored shapes mean the same thing. A pacing built from the newer templates carries the
+ * projection as its own `kind: "calc"` series; one built from the older ones carries it as a
+ * `guide` hanging off the actual series - and the guide deliberately stores NEITHER basis nor
+ * output, because the series it hangs on already says both: its `value.metric` is the basis and
+ * its `accumulate` decides per-day versus cumulative.
+ *
+ * Both shapes are live. The Hub understood only the first, so a pacing created before the
+ * template change - which is every pacing migrated from the original service - drew its charts
+ * with no expected curve at all, and said nothing, because a guide it could not read as a target
+ * line simply produced no line.
+ */
+function resolveProjectionGuide(
+  parent: ChartValueSeries,
+  index: number,
+  rows: readonly SeriesRow[]
+): { resolved: ResolvedSeries | null; unsupported: string | null } {
+  const guide = parent.guide as unknown as { label?: string } | undefined;
+  const basis = parent.value?.metric;
+  const field = basis ? EXPECTED_FIELD[basis] : undefined;
+  const perDay = field ? fieldOf(rows, field) : null;
+  const label = guide?.label || "Expected";
+  if (!perDay) return { resolved: null, unsupported: label };
+  const data =
+    parent.accumulate === "cumulative" ? cumulativeOf(perDay.map((v) => v ?? 0)) : perDay;
+  return {
+    resolved: {
+      key: `${parent.id}-expected`,
+      label,
+      axis: parent.axis === "right" ? "right" : "left",
+      color: PALETTE[index % PALETTE.length],
+      kind: "line",
+      // Dashed for the same reason the stored guide is: it is a plan, drawn beside a fact.
+      dashed: true,
+      data,
+      formatter: seriesValueFormatter(basis as string),
+    },
+    unsupported: null,
+  };
+}
+
+const EXPECTED_FIELD: Record<string, string> = {
+  im: "expIm",
+  cl: "expCl",
+  sp: "expCo",
+  coViews: "expVw",
+};
+
 
 
 
@@ -168,10 +237,13 @@ function resolveSeries(
     };
   }
   if (isProjectionSeries(series)) {
-    // The expected curve is `exp` + the basis field, capitalised: expIm, expCo,
-    // expCl, expVw. Pacing computes it per day with the container and pause rules
-    // applied, which a straight-line guess on this side would have missed.
-    const expectedField = "exp" + series.basis.charAt(0).toUpperCase() + series.basis.slice(1);
+    // Pacing computes the expected curve per day with the container and pause rules applied,
+    // which a straight-line guess on this side would have missed. Looked up, not derived: see
+    // EXPECTED_FIELD.
+    const expectedField = EXPECTED_FIELD[series.basis];
+    if (!expectedField) {
+      return { resolved: null, unsupported: series.label || series.basis };
+    }
     const perDay = fieldOf(rows, expectedField);
     if (!perDay) {
       return { resolved: null, unsupported: series.label || series.basis };
@@ -194,10 +266,10 @@ function resolveSeries(
   return { resolved: null, unsupported: seriesLabel(series) };
 }
 
-/** Resolves a chart series' `guide` (target reference line) - only `ctr` has a real, computable
- *  target on this side (`fl.ctrT`, the same budget-weighted CTR target `campaign-metrics.ts` computes
- *  for the KPI bricks); every other guide key (`vcr`, `bidPlanCpm`, `cpc`, `cpv`) is unsupported for
- *  the same reason those value series are (see the module doc comment) and simply draws no line. */
+/** Resolves a chart series' `guide` (target reference line) by the convention Pacing stores its
+ *  targets under: a guide named `ctr` reads `ctrT`, `vcr` reads `vcrT`. Both are in the scalar bag,
+ *  budget-weighted the same way the KPI bricks read them. A key with no `<key>T` beside it draws no
+ *  line, which is the honest answer - there is nothing to compare against. */
 function guideValueFor(key: string, scalars: Record<string, number>): number | null {
   // Guide keys name a TARGET, and Pacing computes those into the scalar bag with
   // the same budget weighting it uses everywhere else - "ctr" reads ctrT. A key
@@ -225,6 +297,13 @@ export function ChartViewRenderer({
       const { resolved, unsupported: label } = resolveSeries(s, i, rows);
       if (resolved) resolvedSeries.push(resolved);
       else if (label) unsupportedLabels.push(label);
+      // A projection guide is a second CURVE on this series, not a property of the first, so it
+      // is resolved alongside rather than inside resolveSeries.
+      if (isValueSeries(s) && isProjectionGuide((s as ChartValueSeries).guide)) {
+        const g = resolveProjectionGuide(s as ChartValueSeries, i + 1, rows);
+        if (g.resolved) resolvedSeries.push(g.resolved);
+        else if (g.unsupported) unsupportedLabels.push(g.unsupported);
+      }
     });
     return { series: resolvedSeries, unsupported: unsupportedLabels };
   }, [view.series, rows]);
@@ -313,7 +392,8 @@ export function ChartViewRenderer({
           })}
           {view.series.map((s) => {
             const guide = (s as ChartValueSeries).guide;
-            if (!guide) return null;
+            // A projection guide is already drawn as a curve above; only a target guide belongs here.
+            if (!guide || isProjectionGuide(guide)) return null;
             const target = guideValueFor(guide.value.key, scalars);
             return target == null ? null : (
               <ReferenceLine

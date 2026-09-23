@@ -109,3 +109,10 @@
 .wgt-col__title { font-size: 12px; font-weight: 700; color: var(--ink); }
 .wgt-col__sub { font-size: 11px; color: var(--muted); }
 .wgt-col__body { display: flex; flex-direction: column; gap: 8px; }
+
+/* rateRows - the per-rate-type repeat. A mixed campaign runs two or three, so this is a list
+   whose length is the pacing's, not the layout's. */
+.wgt-raterows { display: flex; flex-direction: column; gap: 8px; }
+/* The delta sits under its own pair, not in a column of its own: it reads as the difference
+   between the two cells above it. */
+.wgt-raterows__pair { display: flex; flex-direction: column; gap: 2px; }

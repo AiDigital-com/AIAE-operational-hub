@@ -16,10 +16,10 @@ import {
   DetailCard, UnitBar, DeviationGauge, MoneyStat, KvRow, NoteLine, UnsupportedBrick,
 } from "./brick-kit";
 import { fmtKpi } from "./widget-format";
-import { fmtInt } from "../format";
+import { fmtInt, fmtMoney } from "../format";
 import {
   badgeWords, brickValue, canonicalNote, cellValue, deliveryUnits, deltaOf, detailSource,
-  flightProgress, marginTone, resolveBindValue, verdictOf, type BrickCtx,
+  flightProgress, marginTone, rateRows, resolveBindValue, verdictOf, type BrickCtx,
 } from "./brick-data";
 import { marginStatus, marginWord, meterBounds, paceStatus, type Tone } from "./widget-status";
 import type { Brick } from "./widget-types";
@@ -160,11 +160,53 @@ function KvRowBrick({ brick, ctx }: { brick: Brick; ctx: BrickCtx }) {
   return <KvRow label={brick.label} value={fmtKpi(v.value, v.format)} sub={brick.sub} emphasis={brick.emphasis} />;
 }
 
-function RateRowsBrick({ brick }: { brick: Brick; ctx: BrickCtx }) {
-  // Per-rate-type buying/dynamic-rate breakdown - genuinely not computable without the DSP
-  // coefficient/margin-curve model, which is not ported to the Hub (see campaign-metrics.ts). An
-  // honest note, not a silently empty slot.
-  return <UnsupportedBrick label={brick.label} message="Rate breakdown not available in this view." />;
+/**
+ * The per-rate-type repeat: Plan CPC/CPV, the Bid Plan / Bid Fact 2d pair with its delta,
+ * Earned @ Plan CPM, the dynamic client rates.
+ *
+ * A mixed campaign runs two or three rate types, so the SHAPE of this brick changes with the
+ * pacing - which is why the list is built by Pacing and repeated over here.
+ *
+ * This used to render "Rate breakdown not available in this view" on the stated grounds that the
+ * figures needed a DSP model nobody had ported. They did not: `rateTypeRows` has always been in
+ * the engine, and every number it returns comes from the same two bags the rest of this file
+ * reads. The rows were missing because nothing asked for them.
+ */
+function RateRowsBrick({ brick, ctx }: { brick: Brick; ctx: BrickCtx }) {
+  const rows = rateRows(brick.series, ctx);
+  // Empty is not an error: a CPM-only pacing has no Plan CPC row to print, and the series
+  // deliberately skips the CPM entry the card already shows above the repeat.
+  if (rows.length === 0) return null;
+  return (
+    <div className="wgt-raterows">
+      {rows.map((row, i) => {
+        if (row.kind === "pair") {
+          return (
+            <div className="wgt-raterows__pair" key={row.unit || i}>
+              <StatRow
+                layout="pair"
+                cells={[
+                  { label: row.left?.label ?? "", value: row.left?.value ?? "" },
+                  { label: row.right?.label ?? "", value: row.right?.value ?? "" },
+                ]}
+              />
+              {row.delta && <DeltaChip text={row.delta.text} tone={row.delta.good ? "g" : "b"} />}
+            </div>
+          );
+        }
+        if (row.kind === "money") {
+          return (
+            <KvRow
+              key={row.label || i}
+              label={row.label}
+              value={fmtMoney(row.usd ?? null)}
+            />
+          );
+        }
+        return <KvRow key={row.label || i} label={row.label} value={row.value ?? ""} />;
+      })}
+    </div>
+  );
 }
 
 function ProgressBarBrick({ brick, ctx }: { brick: Brick; ctx: BrickCtx }) {
