@@ -19,6 +19,7 @@ import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExte
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
@@ -96,7 +97,7 @@ class PacingDashboardControllerMvcTest {
 	void shouldReturnDashboardPayloadTest() throws Exception {
 		// Given:
 		stubCurrentUser();
-		PacingDashboardData data = new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, List.of());
+		PacingDashboardData data = new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
 		doReturn(new PacingDashboardV1().display(Map.of("widgets", List.of())).journal(List.of())
 				.planByLineItem(Map.of()).factsDaily(List.of()))
@@ -149,6 +150,44 @@ class PacingDashboardControllerMvcTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.message").value("The Pacing service rejected the request: "
 						+ "line item 111: its margin is out of range (coefficient-cost margin must be 0-99.99)."));
+	}
+
+	@Test
+	void shouldSaveDataSettingsTest() throws Exception {
+		// Given: the Data panel moving this pacing onto the manual-adjustments view.
+		stubCurrentUser();
+		PacingDataSettings settings =
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null);
+		doReturn(settings).when(mapper).toDataSettings(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/data-settings", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"source\":\"platform_mart_adjustments_view\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.saved").value(true));
+		verify(pacingClient).saveDataSettings(any(), eq("nike-ss26"), eq(settings));
+	}
+
+	@Test
+	void shouldForwardPacingsDimensionSourceRejectionAsBadRequestTest() throws Exception {
+		// Given: Pacing refuses a malformed dimension source rather than dropping it, naming which one.
+		stubCurrentUser();
+		doReturn(new PacingDataSettings(null, null, null, List.of())).when(mapper).toDataSettings(any());
+		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
+				"bad_dim_sources", "devices: unknown catalog"))
+				.when(pacingClient).saveDataSettings(any(), any(), any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/data-settings", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message")
+						.value("The Pacing service rejected the request: devices: unknown catalog."));
 	}
 
 	@Test

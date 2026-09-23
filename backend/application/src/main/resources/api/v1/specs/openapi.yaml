@@ -3187,6 +3187,84 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/data-settings:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingDataSettings
+      description: >
+        Saves a pacing's data settings: which BigQuery table its delivery is read from
+        (`platform_mart` raw, or `platform_mart_adjustments_view` with the team's manual corrections
+        applied) and which optional extras are fetched with it. Reaches Pacing as POST
+        .../settings carrying only the `data` fragment - the same single write path the display and
+        plan saves use, differing only in which part of the stored config it carries.
+
+        A partial patch by design: only the fields present are written, so this endpoint cannot reset
+        a setting the caller does not know about. `dimSources` is the one exception - it is a
+        whole-array replace, and its schema says what that obliges a caller to send.
+
+        Saving changes nothing on screen. The source is interpolated into the delivery query, so it
+        takes effect when that query next runs - on the nightly build, or on a manual refresh. Until
+        then the dashboard keeps showing figures read from the previous table, which is correct
+        rather than stale: they are what was actually built.
+
+        Unlike the display save this endpoint carries no revision. Pacing does not version-guard the
+        `data` namespace, so a concurrent edit by another user is not detected - last write wins, per
+        key.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDataSettingsUpdateV1'
+      responses:
+        '200':
+          description: The data settings were saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDataSettingsUpdateResultV1'
+        '400':
+          description: >
+            Pacing rejected the settings - in practice a malformed `dimSources` entry, which it
+            refuses rather than silently drops. `message` names what was wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving the data settings failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/dashboards/{slug}/addable-line-items:
     get:
       tags:
@@ -3318,8 +3396,14 @@ paths:
             schema:
               $ref: '#/components/schemas/PacingStatusUpdateV1'
       responses:
-        '200':
-          description: The status was changed (or already matched - both are a plain 200).
+        # 204, not a bodiless 200. The generator puts `produces: application/json` on the
+        # operation (its error responses are JSON), so a 200 with no body goes out as
+        # `Content-Type: application/json` with nothing in it. openapi-fetch only skips parsing
+        # on a 204, a HEAD, or `Content-Length: 0` - and the length header does not survive a
+        # proxy that re-chunks the response, which is why this read as
+        # "Unexpected end of JSON input" once deployed and never locally.
+        '204':
+          description: The status was changed (or already matched - both are a plain 204).
         '400':
           description: The status field was not one of Live, Paused, Complete, Archive.
           content:
@@ -3381,7 +3465,13 @@ paths:
             schema:
               $ref: '#/components/schemas/PacingOwnerUpdateV1'
       responses:
-        '200':
+        # 204, not a bodiless 200. The generator puts `produces: application/json` on the
+        # operation (its error responses are JSON), so a 200 with no body goes out as
+        # `Content-Type: application/json` with nothing in it. openapi-fetch only skips parsing
+        # on a 204, a HEAD, or `Content-Length: 0` - and the length header does not survive a
+        # proxy that re-chunks the response, which is why this read as
+        # "Unexpected end of JSON input" once deployed and never locally.
+        '204':
           description: Ownership was transferred.
         '400':
           description: The new owner id was missing or not a UUID.
@@ -7655,6 +7745,79 @@ components:
           type: boolean
       required:
         - saved
+    PacingDataSourceV1:
+      type: string
+      description: >
+        Which BigQuery table a pacing's delivery is read from. `platform_mart` is the raw feed as the
+        platforms reported it; `platform_mart_adjustments_view` is the same feed with the team's manual
+        delivery corrections applied on top. The two disagree on any pacing that has ever been
+        corrected, so this is a reading of the campaign, not a preference. The allowlist mirrors
+        Pacing's own (`ALLOWED_DATA_SOURCES` in dash-gate/lib/data-config.mjs) - a value outside it is
+        not rejected there but silently replaced by `platform_mart`, so it is closed here instead.
+      enum:
+        - platform_mart
+        - platform_mart_adjustments_view
+    PacingDataSettingsUpdateV1:
+      type: object
+      description: >
+        A pacing's data settings: where its delivery comes from and which optional extras are fetched
+        with it. Every field is optional and only the ones present are written - Pacing merges this
+        into the stored `config.data` key by key, so a caller that knows about three of these four
+        settings cannot reset the fourth to a default it never read.
+
+        None of it changes numbers already on screen: the query behind them is rebuilt on the next
+        refresh, scheduled or manual. A caller that wants the change visible now triggers a refresh
+        after saving.
+      properties:
+        source:
+          $ref: '#/components/schemas/PacingDataSourceV1'
+        fetchCreatives:
+          type: boolean
+          description: >
+            Fetch DSP creative assets alongside delivery, which adds Creative (asset) to the
+            breakdowns. Turning it off removes that breakdown on the next refresh.
+        fetchConversions:
+          type: boolean
+          description: >
+            Fetch conversions, which adds Conversion Action to the breakdowns. Read from the
+            conversions table paired with `source`, so the two stay consistent.
+        dimSources:
+          $ref: '#/components/schemas/PacingDimSourcesV1'
+    PacingDimSourcesV1:
+      type: object
+      description: >
+        The WHOLE `dim_sources` list this pacing should have after the save - the dimensions it loads
+        beside its delivery. Passed through to Pacing opaquely and validated there.
+
+        A whole-array replace, so a caller offering only the built-in catalogue toggles (Devices today)
+        MUST carry every entry it does not own: rebuilding this list from its own checkboxes alone
+        deletes the pacing's sheet-backed sources on a click that has nothing to do with them.
+
+        Wrapped in an object rather than being a bare array property, because the two states have to
+        stay apart and a bare array cannot keep them apart: omitting this object means "leave the
+        stored list alone", while `entries: []` means "clear it". Java's OpenAPI generator initializes
+        an absent array property to an empty list, which would turn every save that never mentions
+        dimension sources - moving the BigQuery source, say - into one that deletes all of them. An
+        absent object stays null, and null is unambiguous.
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - entries
+    PacingDataSettingsUpdateResultV1:
+      type: object
+      description: >
+        Acknowledges a successful data-settings save. Carries no echoed settings for
+        `PacingPlanUpdateResultV1`'s reason: the caller re-reads the dashboard, which is also where it
+        learns whether a refresh has since rebuilt the numbers underneath.
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
     PacingAddableLineItemsV1:
       type: object
       description: >
@@ -7893,6 +8056,15 @@ components:
           description: >
             Shared library entries referenced by a library-linked widget in `display.widgets`, keyed by
             entry id - present only when at least one widget links to one.
+          additionalProperties: true
+        data:
+          type: object
+          description: >
+            This pacing's `config.data` namespace - which BigQuery table its delivery is read from
+            and which optional extras are fetched with it. Passed through from Pacing unchanged and
+            saved back via `PacingDataSettingsUpdateV1`. Absent on a pacing that predates the
+            2026-05-19 BigQuery-direct migration and has never had these settings written; a client
+            then shows Pacing's own defaults (raw `platform_mart`, every extra off).
           additionalProperties: true
         journal:
           type: array

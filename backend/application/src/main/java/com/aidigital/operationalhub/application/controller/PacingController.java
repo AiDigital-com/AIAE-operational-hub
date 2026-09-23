@@ -90,7 +90,10 @@ public class PacingController implements PacingApi {
 		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		pacingClient.updateStatus(assertion, pacingId, body.getStatus().getValue());
-		return ResponseEntity.ok().build();
+		// 204, not a bodiless 200 - see the endpoint's own note in openapi.yaml. A 200 with
+		// `produces: application/json` and nothing in it is a response the browser client tries to
+		// parse the moment a proxy drops its Content-Length.
+		return ResponseEntity.noContent().build();
 	}
 
 	/**
@@ -105,7 +108,8 @@ public class PacingController implements PacingApi {
 		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		pacingClient.transferOwner(assertion, pacingId, body.getNewOwnerId());
-		return ResponseEntity.ok().build();
+		// 204 for {@link #updatePacingStatus}'s reason.
+		return ResponseEntity.noContent().build();
 	}
 
 	/**

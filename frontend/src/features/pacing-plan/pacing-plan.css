@@ -310,6 +310,14 @@
 
 /* ── Sheet footer ── */
 
+/* The section's own action row. Right-aligned so it sits over the cards it acts on rather than
+   competing with the drawer's tab bar above it. */
+.pplan__section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .pplan__footer {
   display: flex;
   align-items: center;

@@ -31,19 +31,46 @@
 .wgt-flight__label { margin-top: 6px; font-size: 12px; color: var(--muted-strong); }
 
 .wgt-detail__label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-.wgt-detail__value { font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
-.wgt-detail__sub { margin-top: 2px; font-size: 11px; color: var(--muted); }
+.wgt-detail__lines { display: flex; flex-direction: column; gap: 2px; }
+/* Lines that carry their own explainer need air between them; lines that do not read as one
+   stacked figure. Two gaps, one component. */
+.wgt-detail__lines--notes { gap: 6px; }
+/* baseline, not center: the unit word is 11px beside a 14px figure, and centring them would
+   float it half a pixel above the digits it belongs to. */
+.wgt-detail__value { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px;
+  font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wgt-detail__number { min-width: 0; overflow-wrap: anywhere; }
+.wgt-detail__unit { flex: none; white-space: nowrap; font-size: 11px; font-weight: 500; color: var(--muted); }
+/* Not a figure: "Clicks plan not set" must not wear the figure's weight or the card's status
+   colour, or an absent plan reads as a delivered zero. */
+.wgt-detail__value--muted { font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: normal; }
+.wgt-detail__note { margin-top: 1px; font-size: 11px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
+.wgt-detail__sub { margin-top: 4px; font-size: 11px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
 
-.wgt-unitbar { display: flex; flex-direction: column; gap: 4px; }
-.wgt-unitbar__head { display: flex; justify-content: space-between; font-size: 12px; }
+.wgt-unitbar { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wgt-unitbar__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
 .wgt-unitbar__unit { font-weight: 700; color: var(--ink); }
 .wgt-unitbar__actual { color: var(--muted-strong); }
+.wgt-unitbar__pcts { font-size: 11px; color: var(--muted-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wgt-unitbar__sep { color: var(--muted); }
 .wgt-unitbar__track { position: relative; height: 7px; border-radius: 6px; background: var(--n-200); }
-.wgt-unitbar__fill { height: 100%; border-radius: 6px; }
-.wgt-unitbar__mark { position: absolute; top: -2px; width: 2px; height: 11px; background: var(--border-strong); }
+.wgt-unitbar__fill { height: 100%; border-radius: 6px; transition: width .3s; }
+.wgt-unitbar__mark { position: absolute; top: -2px; width: 2px; height: 11px; margin-left: -1px;
+  background: var(--border-strong); transition: left .3s; }
+.wgt-unitbar__foot { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.wgt-unitbar__delta { font-weight: 700; font-variant-numeric: tabular-nums; }
+.wgt-unitbar__dir { color: var(--muted); }
+.wgt-unitbar__op { font-weight: 600; }
 
-.wgt-gauge { display: flex; flex-direction: column; align-items: center; }
+.wgt-gauge { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .wgt-gauge__value { font-size: 18px; font-weight: 800; }
+.wgt-gauge__scale { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 10px; color: var(--muted); }
+.wgt-gauge__bound { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wgt-gauge__track { position: relative; flex: 1; min-width: 40px; height: 4px; border-radius: 3px; background: var(--n-200); }
+/* The corridor's midpoint is the target. A hairline, not a tick that competes with the marker. */
+.wgt-gauge__centre { position: absolute; left: 50%; top: -2px; width: 1px; height: 8px; margin-left: -.5px; background: var(--border-strong); }
+.wgt-gauge__marker { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--surface); transition: left .3s; }
 .wgt-gauge__sub { font-size: 11px; color: var(--muted); }
 
 .wgt-money__label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }

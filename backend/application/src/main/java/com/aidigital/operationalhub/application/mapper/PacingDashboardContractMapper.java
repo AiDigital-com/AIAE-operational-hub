@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.application.mapper;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingJournalEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
@@ -11,6 +12,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPau
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
@@ -55,7 +57,35 @@ public class PacingDashboardContractMapper {
 				.capabilities(data.capabilities())
 				.metrics(data.metrics())
 				.libraryEntries(data.libraryEntries())
+				// Null stays null for `metrics`' reason, not display's: a pacing that has never had
+				// these settings written is not a pacing whose source is "". The panel shows Pacing's
+				// own defaults for an absent namespace, and an empty map would be indistinguishable
+				// from a namespace that exists and happens to be empty.
+				.data(data.data())
 				.journal(toJournalV1(data.journal()));
+	}
+
+	/**
+	 * Reads a data-settings save request into the external-services model.
+	 *
+	 * <p>Null in, null out, deliberately: the request's optional fields are optional all the way down,
+	 * and Pacing writes only the keys it receives. Defaulting an absent field here - to
+	 * {@code platform_mart}, to {@code false} - would turn "the caller did not touch this" into "set
+	 * it to the default", which on the BigQuery source means silently moving a corrected pacing back
+	 * onto the raw feed.
+	 *
+	 * @param body the request body
+	 * @return the settings to forward to Pacing
+	 */
+	public PacingDataSettings toDataSettings(PacingDataSettingsUpdateV1 body) {
+		return new PacingDataSettings(
+				body.getSource() == null ? null : body.getSource().getValue(),
+				body.getFetchCreatives(),
+				body.getFetchConversions(),
+				// The wrapper, not its contents, is what says "the caller touched this". An absent
+				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as
+				// an empty list rather than collapsing back into "absent".
+				body.getDimSources() == null ? null : body.getDimSources().getEntries());
 	}
 
 	private PacingDashboardCampaignV1 toCampaignV1(PacingDashboardCampaign campaign) {

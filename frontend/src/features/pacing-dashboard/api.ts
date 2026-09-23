@@ -3,6 +3,7 @@ import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
   PacingDashboardV1,
+  PacingDataSettingsUpdateV1,
   PacingDisplaySaveOutcome,
   PacingLibraryEntryV1,
   PacingLibraryKindV1,
@@ -22,6 +23,31 @@ export async function getPacingDashboard(slug: string): Promise<PacingDashboardV
     throw new ApiError(formatError(result.error), result.response.status);
   }
   return result.data;
+}
+
+/**
+ * Saves a pacing's data settings: which BigQuery table its delivery is read from, and which optional
+ * extras are fetched with it.
+ *
+ * A PARTIAL patch - Pacing merges the `data` namespace key by key and writes only what it receives -
+ * so omit a field rather than sending a value for it when this screen did not touch it. `dimSources`
+ * is the exception: it is a whole-array replace, and the caller must pass every entry the pacing
+ * should keep, not only the ones it toggles.
+ *
+ * Nothing on screen changes on success. The source is interpolated into the delivery query, so the
+ * figures move only once that query runs again - the nightly build, or a manual refresh.
+ */
+export async function savePacingDataSettings(
+  slug: string,
+  settings: PacingDataSettingsUpdateV1
+): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/data-settings", {
+    params: { path: { slug } },
+    body: settings,
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
 }
 
 /** Polls the last completed refresh for a pacing (US-119) - see `usePollingRefreshStatus`. */

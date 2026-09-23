@@ -74,9 +74,25 @@ function lookup(bind: BindSpec | undefined, ctx: BrickCtx): BrickValue {
   };
 }
 
+/**
+ * A brick's figure and what it is measured against.
+ *
+ * An explicit `target` binding wins over the metric's canonical one, and when it is itself
+ * a metric what is taken is that metric's VALUE - "margin against pacing" means the pacing
+ * number.
+ *
+ * ONE exception, and the standard hero depends on it: a target naming the SAME metric as
+ * the value ("margin against margin") is the metric measured against ITS OWN target,
+ * because a number compared with itself is a delta of zero and means nothing. The hero's
+ * margin gauge, its badge and the Margin card's meter are all written that way - read
+ * literally they sit at "On target" forever, on every campaign, which is exactly what this
+ * screen did until the rule came back.
+ */
 export function brickValue(brick: Brick, ctx: BrickCtx): BrickValue {
   const base = lookup(brick.bind, ctx);
-  const target = brick.target ? lookup(brick.target, ctx).value : base.target;
+  const selfTarget =
+    brick.target?.metric != null && brick.bind?.metric != null && brick.target.metric === brick.bind.metric;
+  const target = brick.target && !selfTarget ? lookup(brick.target, ctx).value : base.target;
   return { ...base, target, format: brick.format };
 }
 

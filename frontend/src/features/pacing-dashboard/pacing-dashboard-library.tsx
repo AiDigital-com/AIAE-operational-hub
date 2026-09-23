@@ -4,7 +4,7 @@ import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { CheckIcon, CloseIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon } from "../../shared/ui/icons/icons";
+import { CheckIcon, CloseIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import {
   createPacingLibraryEntry,
@@ -13,6 +13,8 @@ import {
   setPacingLibraryLike,
   updatePacingLibraryEntry,
 } from "./api";
+import type { WidgetRenderContext } from "./widgets/widget-engine";
+import { WidgetPreview } from "./widget-preview";
 import type {
   PacingDisplayShape,
   PacingLibraryEntryV1,
@@ -59,10 +61,34 @@ interface SaveDialogState {
   error: string | null;
 }
 
+/**
+ * Resolves what a widget instance actually draws.
+ *
+ * A LINKED instance carries no spec - the library entry is the definition, and copying it into the
+ * instance is exactly what Pacing forbids, because the copy stops matching the moment the author
+ * edits theirs. So the drawable widget is the entry's definition wearing the instance's id.
+ * Null when the entry is gone; the card still lists it so it can be removed.
+ */
+export function resolveWidget(
+  widget: PacingWidgetInstance,
+  libraryEntries: Record<string, unknown> | undefined
+): PacingWidgetInstance | null {
+  if (!widget.lib) return widget;
+  const entry = libraryEntries?.[widget.lib.key] as { definition?: unknown } | undefined;
+  const definition = entry?.definition as Partial<PacingWidgetInstance> | undefined;
+  if (!definition) return null;
+  return { ...definition, id: widget.id, lib: widget.lib } as PacingWidgetInstance;
+}
+
 interface PacingDashboardLibraryProps {
   display: PacingDisplayShape;
   saving: boolean;
   saveError: string | null;
+  /** The engine context the dashboard itself renders with - the card thumbnails are the real
+   *  widget on this pacing's own figures, not a drawing of one. */
+  renderCtx: WidgetRenderContext;
+  /** Definitions for the linked instances on this pacing, keyed by entry id. */
+  libraryEntries: Record<string, unknown> | undefined;
   /** Saves the WHOLE patch (widgets + groups) back to the pacing; the caller owns the displayRev CAS
    *  and reports a conflict (US-118) rather than silently overwriting. */
   onSave: (patch: { widgets: PacingWidgetInstance[]; groups: PacingWidgetGroup[] }) => void;
@@ -76,7 +102,7 @@ interface PacingDashboardLibraryProps {
  * reproducing Pacing's full widget-spec rendering engine is out of scope here (see the migration
  * report); the dashboard's own health/financial/chart sections above render the real figures directly.
  */
-export function PacingDashboardLibrary({ display, saving, saveError, onSave, isAdmin }: PacingDashboardLibraryProps) {
+export function PacingDashboardLibrary({ display, saving, saveError, onSave, isAdmin, renderCtx, libraryEntries }: PacingDashboardLibraryProps) {
   const queryClient = useQueryClient();
   const widgets = useMemo(() => display.widgets ?? [], [display.widgets]);
   const groups = useMemo(() => display.groups ?? [], [display.groups]);
@@ -309,7 +335,7 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
         {saveError && <p className="form-error">{saveError}</p>}
         {widgets.length === 0 && <p className="pdl__empty">No widgets yet — add one from the library below.</p>}
 
-        <ul className="pdl__widget-list">
+        <ul className="pdl__grid">
           {groups.map((group) => {
             const members = widgets.filter((w) => group.tileIds.includes(w.id));
             if (members.length === 0) return null;
@@ -319,7 +345,7 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                 <button type="button" className="pdl__group-ungroup" onClick={() => ungroup(group.id)}>
                   Ungroup
                 </button>
-                <ul className="pdl__widget-list pdl__widget-list--nested">
+                <ul className="pdl__grid pdl__grid--nested">
                   {members.map((widget) => (
                     <WidgetCard
                       key={widget.id}
@@ -331,6 +357,8 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                       onSaveToLibrary={() => openSaveDialog(widget.id)}
                       onDragStart={() => setDragId(widget.id)}
                       onDrop={() => dragId && reorder(dragId, widget.id)}
+                      renderCtx={renderCtx}
+                      libraryEntries={libraryEntries}
                     />
                   ))}
                 </ul>
@@ -348,6 +376,8 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
               onSaveToLibrary={() => openSaveDialog(widget.id)}
               onDragStart={() => setDragId(widget.id)}
               onDrop={() => dragId && reorder(dragId, widget.id)}
+              renderCtx={renderCtx}
+              libraryEntries={libraryEntries}
             />
           ))}
         </ul>
@@ -399,9 +429,18 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
           <p className="pdl__empty">Nothing matches — try a different search or filter.</p>
         )}
         {libraryQuery.isSuccess && libraryQuery.data.length > 0 && (
-          <ul className="pdl__library-list">
+          <ul className="pdl__grid pdl__grid--library">
             {libraryQuery.data.map((entry) => (
-              <li key={entry.id} className="pdl__library-item">
+              <li key={entry.id} className="pdl__card pdl__card--entry">
+                {/* Only a widget entry is drawable: a block is several widgets and a layout is an
+                    arrangement of them, and neither renders through the tile engine. They keep the
+                    written card the list always was rather than an empty frame that reads broken. */}
+                {entry.kind === "widget" && (
+                  <WidgetPreview
+                    widget={(entry.definition ?? null) as PacingWidgetInstance | null}
+                    ctx={renderCtx}
+                  />
+                )}
                 <div className="pdl__library-info">
                   {renaming?.id === entry.id ? (
                     <span className="pdl__rename">
@@ -434,11 +473,16 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                   ) : (
                     <span className="pdl__library-name">{entry.name}</span>
                   )}
-                  <span className={cn("pdl__library-kind", `pdl__library-kind--${entry.kind}`)}>{entry.kind}</span>
+                  {/* Only where it earns its place: a widget card stays bare, and the chip appears
+                      on the kinds a reader could otherwise mistake for one. The mixed "All" list is
+                      what it is for. */}
+                  {entry.kind !== "widget" && (
+                    <span className={cn("pdl__library-kind", `pdl__library-kind--${entry.kind}`)}>{entry.kind}</span>
+                  )}
                   {entry.description && <span className="pdl__library-desc">{entry.description}</span>}
                   <span className="pdl__library-meta">
                     {entry.ownerName ? `by ${entry.ownerName} · ` : ""}
-                    {entry.usage} pacing{entry.usage === 1 ? "" : "s"} · {entry.likes} like{entry.likes === 1 ? "" : "s"}
+                    {entry.usage} pacing{entry.usage === 1 ? "" : "s"}
                   </span>
                 </div>
                 <div className="pdl__library-actions">
@@ -447,9 +491,10 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                     className={cn("pdl__like", entry.liked && "pdl__like--active")}
                     onClick={() => toggleLike(entry)}
                     aria-pressed={entry.liked}
-                    aria-label={entry.liked ? "Unlike" : "Like"}
+                    aria-label={entry.liked ? `Unlike ${entry.name}` : `Like ${entry.name}`}
+                    title={entry.liked ? "You like this" : "Like this entry"}
                   >
-                    ♥
+                    ♥<span className="pdl__like-n">{entry.likes}</span>
                   </button>
                   {entry.kind === "widget" && (
                     <button type="button" className="button button--sm" onClick={() => addFromLibrary(entry)}>
@@ -544,6 +589,8 @@ function WidgetCard({
   onSaveToLibrary,
   onDragStart,
   onDrop,
+  renderCtx,
+  libraryEntries,
 }: {
   widget: PacingWidgetInstance;
   selected: boolean;
@@ -553,32 +600,50 @@ function WidgetCard({
   onSaveToLibrary: () => void;
   onDragStart: () => void;
   onDrop: () => void;
+  renderCtx: WidgetRenderContext;
+  libraryEntries: Record<string, unknown> | undefined;
 }) {
   return (
     <li
-      className={cn("pdl__widget", selected && "pdl__widget--selected", dragging && "pdl__widget--dragging")}
+      className={cn("pdl__card", selected && "pdl__card--selected", dragging && "pdl__card--dragging")}
       draggable
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
     >
-      <span className="pdl__widget-handle" aria-hidden="true" />
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggleSelect}
-        aria-label={`Select ${widgetTitle(widget)} for grouping`}
-      />
-      <span className="pdl__widget-title">{widgetTitle(widget)}</span>
-      {widget.lib && <span className="pdl__widget-badge">from library</span>}
-      <div className="pdl__widget-actions">
-        <button type="button" className="button button--ghost button--sm" onClick={onSaveToLibrary}>
-          Save to library
-        </button>
-        <button type="button" className="pdl__remove" onClick={onRemove} aria-label={`Remove ${widgetTitle(widget)}`}>
-          <TrashIcon />
-        </button>
+      {/* Name and controls ABOVE the picture, the way the retired gallery card was built - and the
+          opposite way round from a library card, which leads with its picture. The difference is
+          deliberate in the original and worth keeping: your own tiles are scanned by name, someone
+          else's entries are scanned by what they look like. */}
+      <div className="pdl__card-meta">
+        <input
+          type="checkbox"
+          className="pdl__pick"
+          checked={selected}
+          onChange={onToggleSelect}
+          title="Select for grouping"
+          aria-label={`Select ${widgetTitle(widget)} for grouping`}
+        />
+        <span className="pdl__card-title" title={widgetTitle(widget)}>
+          {widgetTitle(widget)}
+        </span>
+        {widget.lib && <span className="pdl__widget-badge">linked</span>}
+        <div className="pdl__card-actions">
+          <button
+            type="button"
+            className="pdl__icon-btn"
+            onClick={onSaveToLibrary}
+            title="Save to library"
+            aria-label={`Save ${widgetTitle(widget)} to library`}
+          >
+            <UploadIcon />
+          </button>
+          <button type="button" className="pdl__icon-btn" onClick={onRemove} aria-label={`Remove ${widgetTitle(widget)}`} title="Remove">
+            <TrashIcon />
+          </button>
+        </div>
       </div>
+      <WidgetPreview widget={resolveWidget(widget, libraryEntries)} ctx={renderCtx} />
     </li>
   );
 }

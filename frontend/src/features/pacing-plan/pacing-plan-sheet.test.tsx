@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aPacingDraftLineItemV1, aPacingLineItemPlanV1 } from "@/test/factories";
 import { getAddablePacingLineItems, savePacingPlan } from "./api";
-import { PacingPlanSheet } from "./pacing-plan-sheet";
+import { useRef, useState } from "react";
+import { PacingPlanSection } from "./pacing-plan-sheet";
+import type { SettingsSectionHandle } from "../pacing-dashboard/settings-section";
 import type { PacingAddableLineItemsV1, PacingLineItemPlanUpdateV1, PacingLineItemPlanV1 } from "./types";
 
 vi.mock("./api", () => ({
@@ -14,13 +16,48 @@ vi.mock("./api", () => ({
   updatePacingStatus: vi.fn(),
 }));
 
+/**
+ * The plan section with a Save of its own.
+ *
+ * The real Save lives in the settings drawer's footer, shared with the data and widget sections,
+ * and its rules (disabled until something is dirty, one error line per failed section) are that
+ * component's and are tested there. Here the button is a plain trigger, so these cases stay about
+ * what the plan editor does rather than about the chrome around it.
+ */
 function renderSheet(planByLineItem: Record<string, PacingLineItemPlanV1>, onClose = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Harness() {
+    const ref = useRef<SettingsSectionHandle>(null);
+    const [error, setError] = useState<string | null>(null);
+    return (
+      <>
+        <PacingPlanSection
+          ref={ref}
+          slug="nike-ss26"
+          currency="USD"
+          planByLineItem={planByLineItem}
+          seedKey={1}
+          onDirtyChange={() => {}}
+        />
+        {error && <p className="form-error">{error}</p>}
+        <button
+          type="button"
+          onClick={async () => {
+            const result = await ref.current?.save();
+            if (result?.ok) onClose();
+            else if (result) setError(result.message);
+          }}
+        >
+          Save plan
+        </button>
+      </>
+    );
+  }
   return {
     onClose,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <PacingPlanSheet open onClose={onClose} slug="nike-ss26" currency="USD" planByLineItem={planByLineItem} />
+        <Harness />
       </QueryClientProvider>
     ),
   };
@@ -28,7 +65,7 @@ function renderSheet(planByLineItem: Record<string, PacingLineItemPlanV1>, onClo
 
 const emptyAddable: PacingAddableLineItemsV1 = { ok: true, addable: [], alreadyAdded: [] };
 
-describe("PacingPlanSheet", () => {
+describe("PacingPlanSection", () => {
   beforeEach(() => {
     vi.mocked(savePacingPlan).mockReset();
     vi.mocked(getAddablePacingLineItems).mockReset().mockResolvedValue(emptyAddable);
@@ -79,8 +116,13 @@ describe("PacingPlanSheet", () => {
     );
     renderSheet({ "111": plan });
 
-    // When:
+    // When: the margin is edited to something Pacing refuses. The edit is the point, not
+    // ceremony - a section with nothing to save does not call the endpoint at all, which is what
+    // lets the drawer press one Save over three sections without three pointless requests.
     await screen.findByText("LI 111");
+    const impressions = screen.getByLabelText("Target impressions for line item 111");
+    await user.clear(impressions);
+    await user.type(impressions, "900000");
     await user.click(screen.getByRole("button", { name: "Save plan" }));
 
     // Then: Pacing's own message, naming the line item and field, surfaces verbatim.

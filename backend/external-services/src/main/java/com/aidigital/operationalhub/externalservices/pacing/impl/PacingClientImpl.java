@@ -10,6 +10,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLi
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -537,6 +538,39 @@ public class PacingClientImpl implements PacingClient {
 				li.lineItemId(), li.channel(), li.description(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.rateType(), li.nativeBudget(), li.targetImpressions(), li.marginPercent(),
 				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.containers());
+	}
+
+	@Override
+	public void saveDataSettings(HubAssertion assertion, String slug, PacingDataSettings settings) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
+		DataSettingsRequest request = new DataSettingsRequest(toWireDataNamespace(settings));
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	/**
+	 * Renames the settings to the snake_case keys Pacing's {@code config.data} namespace stores.
+	 *
+	 * @param settings the settings to write; null fields stay null and are dropped on serialization
+	 * @return the wire shape of the {@code data} object
+	 */
+	private DataNamespaceRequest toWireDataNamespace(PacingDataSettings settings) {
+		return new DataNamespaceRequest(
+				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
+				settings.dimSources());
 	}
 
 	/**
@@ -1355,6 +1389,39 @@ public class PacingClientImpl implements PacingClient {
 	 * @param line_items the whole line-item set to persist
 	 */
 	private record PlanSettingsRequest(List<LineItemPlanUpdateRequest> line_items) {
+	}
+
+	/**
+	 * Shape of the {@code data} object inside a data-settings save, under the snake_case names
+	 * Pacing's {@code config.data} namespace stores.
+	 *
+	 * <p>NON_NULL, and load-bearing for the same reason {@link LineItemPlanUpdateRequest} carries it:
+	 * Pacing's merge gates each key on {@code hasOwnProperty}, so a key present with an explicit null
+	 * is an instruction to WRITE null, not an absent field. The Hub sends nulls for every setting its
+	 * caller did not touch, so they have to be omitted rather than serialized - otherwise saving the
+	 * BigQuery source alone would blank the pacing's fetch toggles and delete its dimension sources.
+	 *
+	 * @param source            the BigQuery table delivery is read from
+	 * @param fetch_creatives   whether DSP creative assets are fetched with it
+	 * @param fetch_conversions whether conversions are fetched with it
+	 * @param dim_sources       the whole dimension-source list, opaque - forwarded byte-for-byte
+	 */
+	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+	private record DataNamespaceRequest(
+			String source,
+			Boolean fetch_creatives,
+			Boolean fetch_conversions,
+			List<Map<String, Object>> dim_sources) {
+	}
+
+	/**
+	 * Shape of the data-only {@code POST /api/dashboards/:slug/settings} request body - carries
+	 * {@code data} only, never {@code display} or {@code line_items}, so a settings save can never
+	 * accidentally touch the widget configuration or the plan.
+	 *
+	 * @param data the data namespace to merge into the stored one
+	 */
+	private record DataSettingsRequest(DataNamespaceRequest data) {
 	}
 
 	/**

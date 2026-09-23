@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatError } from "../../shared/format/error";
 import { cn } from "../../shared/style/cn";
-import { ChevronLeftIcon, RefreshIcon } from "../../shared/ui/icons/icons";
+import { ChevronLeftIcon, RefreshIcon, SettingsIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { MarginCell } from "../../shared/ui/margin-cell/margin-cell";
 // Money/date helpers shared with the Overview/Pacing tab so the same figures read identically.
@@ -10,17 +10,15 @@ import { fmtBudget, fmtDate } from "../pacing/mock/format";
 import { PACE_STATUS_COLOR, PACE_STATUS_LABEL } from "../pacing-overview/format";
 import { AlertsBlock } from "../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../pacing-overview/types";
-import { savePacingDisplay, triggerPacingRefresh } from "./api";
-import { PacingPlanSheet } from "../pacing-plan/pacing-plan-sheet";
+import { triggerPacingRefresh } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
-import { Sheet } from "../../shared/ui/sheet/sheet";
 import { ContainersTable } from "./containers-table";
 import { DailyTable } from "./daily-table";
-import { PacingDashboardLibrary } from "./pacing-dashboard-library";
+import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
 import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
-import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "./types";
+import type { PacingDataShape, PacingDisplayShape } from "./types";
 import type { BrickCtx } from "./widgets/brick-data";
 import { WidgetBoard, type WidgetRenderContext } from "./widgets/widget-engine";
 import type { PacingMetricsBag } from "./types-metrics";
@@ -61,13 +59,10 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const currentUser = useCurrentUser(true);
   const isAdmin = isAdminUser(currentUser.data);
 
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
   // rather than re-arming itself on the next status fetch.
@@ -139,36 +134,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshStatus.watching]);
 
-  async function handleSaveDisplay(patch: { widgets: PacingWidgetInstance[]; groups: PacingWidgetGroup[] }) {
-    if (!slug || !data) return;
-    setSaving(true);
-    setSaveError(null);
-    const currentDisplay = (data.display ?? {}) as PacingDisplayShape;
-    const nextDisplay = { ...currentDisplay, widgets: patch.widgets, groups: patch.groups };
-    const displayRev = currentDisplay.rev ?? 0;
-    try {
-      const outcome = await savePacingDisplay(
-        slug,
-        nextDisplay,
-        displayRev,
-        (data.capabilities ?? undefined) as Record<string, unknown> | undefined
-      );
-      if (outcome.status === "conflict") {
-        setSaveError(
-          outcome.conflict.reason === "stale_settings"
-            ? "This pacing's layout changed elsewhere. Reload to see the latest before editing again."
-            : "The editor needs to reload before saving again."
-        );
-        return;
-      }
-      queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
-    } catch (error) {
-      setSaveError(formatError(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const isRefreshing = refreshStatus.watching;
   const inCooldown = cooldownUntil != null && cooldownSeconds > 0;
 
@@ -196,9 +161,13 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           <button
             type="button"
             className="button button--ghost button--sm"
-            onClick={() => setPlanOpen(true)}
+            onClick={() => setSettingsOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
+            title="Pacing settings"
           >
-            Edit plan
+            <SettingsIcon />
+            Settings
           </button>
           <button
             type="button"
@@ -208,15 +177,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           >
             <RefreshIcon className={cn(isRefreshing && "pdash__refresh-icon--spin")} />
             {inCooldown ? `Refresh (${cooldownSeconds}s)` : isRefreshing ? "Refreshing…" : "Refresh data"}
-          </button>
-          <button
-            type="button"
-            className="button button--ghost button--sm"
-            onClick={() => setLibraryOpen(true)}
-            aria-haspopup="dialog"
-            aria-expanded={libraryOpen}
-          >
-            Widgets
           </button>
         </div>
       </header>
@@ -284,34 +244,23 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             ctx={widgetCtx}
           />
 
-          {/* Composing the dashboard is a slide-over, not a section of the page.
-              The retired SPA made the same call — SettingsDrawer.jsx is a modal
-              dialog holding Display alongside Pacing, Data and Notifications —
-              and for the same reason: choosing widgets is something a person
-              does occasionally, while reading the figures is what they came for.
-              Inline, the panel spent screen on a tool most viewers never open,
-              and read as part of the data rather than as settings for it. */}
-          <Sheet
-            open={libraryOpen}
-            onClose={() => setLibraryOpen(false)}
-            title="Widgets"
-            className="pdash__library-sheet"
-          >
-            <PacingDashboardLibrary
-              display={(data.display ?? {}) as PacingDisplayShape}
-              saving={saving}
-              saveError={saveError}
-              onSave={handleSaveDisplay}
-              isAdmin={isAdmin}
-            />
-          </Sheet>
-
-          <PacingPlanSheet
-            open={planOpen}
-            onClose={() => setPlanOpen(false)}
+          {/* Every per-pacing setting behind one gear, as the retired SPA had it: a right-hand
+              drawer with a row of tabs and ONE Save over all of them. Three buttons opening three
+              panels with three Save buttons was three places to learn and three chances to leave
+              an edit behind. */}
+          <PacingSettingsDrawer
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
             slug={slug ?? ""}
             currency={data.campaign?.currency ?? "USD"}
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
+            data={data.data as PacingDataShape | undefined}
+            display={(data.display ?? {}) as PacingDisplayShape}
+            capabilities={(data.capabilities ?? undefined) as Record<string, unknown> | undefined}
+            isAdmin={isAdmin}
+            renderCtx={widgetCtx}
+            libraryEntries={data.libraryEntries as Record<string, unknown> | undefined}
+            onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 
           {data.journal.length > 0 && (
