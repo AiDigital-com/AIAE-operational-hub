@@ -107,6 +107,25 @@
   --chart-grey: 0 0% 72%;
   --chart-sky: 219 74% 52%;
   --chart-magenta: 346 69% 52%;
+
+  /* Pacing chart semantic paint - values copied from the retired SPA's index.css so a stored series
+     token (`color: "actual"`, `fill: "spendFill"`, ...) resolves to the same hue it did there. See
+     `widgets/chart-paint.ts`. */
+  --c-actual: #111a2d;
+  --c-actual-fill: rgba(0, 9, 220, 0.05);
+  --c-expected: #78b41d;
+  --c-spend: #2330ff;
+  --c-spend-fill: rgba(0, 9, 220, 0.10);
+  --c-bar: rgba(0, 9, 220, 0.30);
+  --c-bar-bd: rgba(0, 9, 220, 0.56);
+  --c-bar-im: rgba(17, 26, 45, 0.18);
+  --c-bar-im-bd: rgba(17, 26, 45, 0.36);
+  --c-ctr: #0009dc;
+  --c-ctr-fill: rgba(0, 9, 220, 0.06);
+  --c-vcr: #8b5cf6;
+  --c-vcr-fill: rgba(139, 92, 246, 0.10);
+  --c-cpm: #cf911d;
+  --c-cpc: #cf911d;
   --radius-card: var(--radius-lg);
   --radius-control: var(--radius);
   --sidebar-width: var(--sidebar-w);
@@ -143,6 +162,23 @@
   --chart-grey: 0 0% 72%;
   --chart-sky: 219 74% 52%;
   --chart-magenta: 346 69% 52%;
+
+  /* Dark-mode pacing chart semantic paint - same source as the light block above. */
+  --c-actual: #dfe7ff;
+  --c-actual-fill: rgba(108, 125, 255, 0.08);
+  --c-expected: #aef33e;
+  --c-spend: #8090ff;
+  --c-spend-fill: rgba(108, 125, 255, 0.08);
+  --c-bar: rgba(108, 125, 255, 0.35);
+  --c-bar-bd: rgba(108, 125, 255, 0.62);
+  --c-bar-im: rgba(223, 231, 255, 0.24);
+  --c-bar-im-bd: rgba(223, 231, 255, 0.48);
+  --c-ctr: #8090ff;
+  --c-ctr-fill: rgba(108, 125, 255, 0.08);
+  --c-vcr: #b08cff;
+  --c-vcr-fill: rgba(176, 140, 255, 0.10);
+  --c-cpm: #ffbe3b;
+  --c-cpc: #ffbe3b;
 
   --surface-default: hsl(var(--gh-background));
   --surface-muted: hsl(var(--gh-secondary));
