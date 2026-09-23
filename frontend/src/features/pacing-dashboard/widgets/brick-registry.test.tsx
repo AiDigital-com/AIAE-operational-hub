@@ -177,3 +177,48 @@ describe("a metric measured against its own target", () => {
     expect(screen.getByText("+10 pp")).toBeInTheDocument();
   });
 });
+
+describe("rateRows brick", () => {
+  it("should draw the per-rate-type rows Pacing computed", () => {
+    // Given: the Finance card's bidPair repeat. These read "Rate breakdown not available in this
+    // view" until the engine's own rateTypeRows was called - the figures were never missing.
+    renderBrick({ type: "rateRows", series: "bidPair" } as Brick, {
+      metrics: bag({
+        readings: {
+          rateRows: {
+            bidPair: [
+              {
+                kind: "pair",
+                unit: "CPM",
+                left: { label: "Bid Plan CPM", value: "$2.81" },
+                right: { label: "Bid Fact 2d CPM", value: "$2.60" },
+                // Buying UNDER the planned bid is the good news, so this delta is good news.
+                delta: { text: "-$0.21 vs plan", good: true },
+              },
+            ],
+          },
+        },
+      }),
+    });
+
+    // Then:
+    expect(screen.getByText("Bid Plan CPM")).toBeInTheDocument();
+    expect(screen.getByText("$2.81")).toBeInTheDocument();
+    expect(screen.getByText("Bid Fact 2d CPM")).toBeInTheDocument();
+    expect(screen.getByText("$2.60")).toBeInTheDocument();
+    expect(screen.getByText("-$0.21 vs plan")).toBeInTheDocument();
+  });
+
+  it("should draw nothing when this pacing runs no such rate type", () => {
+    // Given: a CPM-only pacing asked for the Plan-rate repeat, which deliberately skips CPM
+    const { container } = render(
+      (() => {
+        const C = brickRenderer("rateRows")!;
+        return <C brick={{ type: "rateRows", series: "planRate" } as Brick} ctx={{ metrics: bag({ readings: { rateRows: { planRate: [] } } }) }} />;
+      })()
+    );
+
+    // Then: empty is an answer, not a failure - no placeholder, no empty frame
+    expect(container).toBeEmptyDOMElement();
+  });
+});

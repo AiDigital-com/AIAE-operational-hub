@@ -71,6 +71,21 @@ export interface DailyMetricRow {
   cpm: number;
 }
 
+/** One row of a rateRows repeat. Three shapes, one list: a labelled figure, a client-side
+ *  figure carrying its own currency, or a Bid Plan / Bid Fact pair with an optional delta.
+ *  Every figure arrives FORMATTED - Pacing chose the separators and the currency. */
+export interface RateRow {
+  kind: "row" | "money" | "pair";
+  label?: string;
+  value?: string;
+  usd?: number;
+  unit?: string;
+  left?: { label: string; value: string };
+  right?: { label: string; value: string };
+  /** `good` is not `delta >= 0`: buying UNDER the planned bid is the good news. */
+  delta?: { text: string; good: boolean } | null;
+}
+
 export interface PacingMetricsBag {
   /** The latest date carrying facts; null on a pacing with no delivery. */
   asOf: string | null;

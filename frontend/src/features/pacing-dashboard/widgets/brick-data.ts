@@ -18,7 +18,7 @@
  * If a figure is missing or wrong, the fix belongs in Pacing. Adding the
  * calculation here would recreate exactly what was removed.
  */
-import type { PacingMetricsBag, DetailSource } from "../types-metrics";
+import type { PacingMetricsBag, DetailSource, RateRow } from "../types-metrics";
 import type { BindSpec, Brick, StatRowCell } from "./widget-types";
 import type { Tone } from "./widget-status";
 
@@ -161,6 +161,20 @@ export interface DeliveryUnit {
 export function deliveryUnits(ctx: BrickCtx): DeliveryUnit[] {
   const units = ctx.metrics?.readings.deliveryUnits;
   return Array.isArray(units) ? (units as DeliveryUnit[]) : [];
+}
+
+/**
+ * The per-rate-type rows a Finance card repeats over, for the series the brick names.
+ *
+ * Computed by Pacing (`rateTypeRows`) on the same two bags every other figure here uses. This
+ * side carried a stub claiming the numbers needed a DSP model nobody had ported - they did not;
+ * nothing was calling the function.
+ */
+export function rateRows(series: string | undefined, ctx: BrickCtx): RateRow[] {
+  if (!series) return [];
+  const all = ctx.metrics?.readings.rateRows as Record<string, RateRow[]> | undefined;
+  const rows = all?.[series];
+  return Array.isArray(rows) ? rows : [];
 }
 
 /**
