@@ -1,12 +1,16 @@
 package com.aidigital.operationalhub.application.mapper;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSourceV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourcesV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
@@ -41,7 +45,8 @@ class PacingDashboardContractMapperTest {
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
 				"2026-08-05", Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
-				Map.of("campaign", Map.of("mA", 42.5)), null, List.of(journal));
+				Map.of("campaign", Map.of("mA", 42.5)), null,
+				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), List.of(journal));
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data);
@@ -64,8 +69,67 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.getDisplay()).containsKey("widgets");
 		assertThat(result.getAggregate()).containsEntry("groupBy", "day");
 		assertThat(result.getLibraryEntries()).isNull();
+		// The data namespace rides through whole: the Data panel edits four of its keys and must be
+		// able to carry the rest back unchanged.
+		assertThat(result.getData())
+				.isEqualTo(Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true));
 		assertThat(result.getJournal()).hasSize(1);
 		assertThat(result.getJournal().get(0).getMsg()).isEqualTo("Kicked off");
+	}
+
+	@Test
+	void shouldCarryOnlyTheDataSettingsTheRequestSetTest() {
+		// Given: a request that moves the BigQuery source and touches nothing else. Pacing writes the
+		// keys it receives, so an absent field has to stay absent all the way down - defaulting it here
+		// would turn "the caller did not touch this" into "set it to the default", which on the source
+		// means moving a corrected pacing back onto the raw feed.
+		PacingDataSettingsUpdateV1 body = new PacingDataSettingsUpdateV1()
+				// fromValue, not the generated constant: the generator strips the shared `platform_` prefix,
+				// so its constant is named MART_ADJUSTMENTS_VIEW - a name that says less than the wire value
+				// this test is actually about, and one a regenerated spec could rename underneath it.
+				.source(PacingDataSourceV1.fromValue("platform_mart_adjustments_view"));
+
+		// When:
+		PacingDataSettings result = mapper.toDataSettings(body);
+
+		// Then:
+		assertThat(result.source()).isEqualTo("platform_mart_adjustments_view");
+		assertThat(result.fetchCreatives()).isNull();
+		assertThat(result.fetchConversions()).isNull();
+		assertThat(result.dimSources()).isNull();
+	}
+
+	@Test
+	void shouldKeepAFalseFetchToggleDistinctFromAnAbsentOneTest() {
+		// Given: turning a toggle off is a value to write; leaving it alone is not. Collapsing the two
+		// would make every toggle one-way.
+		PacingDataSettingsUpdateV1 body = new PacingDataSettingsUpdateV1()
+				.fetchCreatives(false)
+				.dimSources(new PacingDimSourcesV1().entries(List.of(Map.of("id", "devices", "loader", "bq_mart"))));
+
+		// When:
+		PacingDataSettings result = mapper.toDataSettings(body);
+
+		// Then:
+		assertThat(result.source()).isNull();
+		assertThat(result.fetchCreatives()).isFalse();
+		assertThat(result.fetchConversions()).isNull();
+		assertThat(result.dimSources()).containsExactly(Map.of("id", "devices", "loader", "bq_mart"));
+	}
+
+	@Test
+	void shouldKeepAnEmptyDimensionSourceListDistinctFromAnAbsentOneTest() {
+		// Given: the wrapper is present and its list is empty - "clear every dimension source", which is
+		// what unticking the last one means. Collapsing it back to null would make that unticking a
+		// silent no-op; the wrapper exists precisely so this case survives the generated DTO.
+		PacingDataSettingsUpdateV1 body =
+				new PacingDataSettingsUpdateV1().dimSources(new PacingDimSourcesV1().entries(List.of()));
+
+		// When:
+		PacingDataSettings result = mapper.toDataSettings(body);
+
+		// Then:
+		assertThat(result.dimSources()).isNotNull().isEmpty();
 	}
 
 	@Test
@@ -73,7 +137,7 @@ class PacingDashboardContractMapperTest {
 		// Given: a defensive rule shared with PacingContractMapper's own date parsing
 		PacingDashboardCampaign campaign =
 				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", "Live", null);
-		PacingDashboardData data = new PacingDashboardData(campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, List.of());
+		PacingDashboardData data = new PacingDashboardData(campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, List.of());
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data);

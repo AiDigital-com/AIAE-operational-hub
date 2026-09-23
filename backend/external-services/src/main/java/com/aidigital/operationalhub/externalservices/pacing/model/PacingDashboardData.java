@@ -6,10 +6,12 @@ import java.util.Map;
 /**
  * A pacing's full dashboard payload, as {@code GET /api/dashboards/:slug/data} returns it (§6 of the
  * migration plan, US-114/115). Restricted to the fields the Pacing Dashboard screen needs; Pacing's
- * real response also carries {@code types}, {@code availableSplits}, {@code notify}, {@code data},
+ * real response also carries {@code types}, {@code availableSplits}, {@code notify},
  * {@code third_party}, {@code mappings_v3}, {@code deliveryStats}, {@code creatives},
- * {@code conversions}, {@code dimSources}, {@code sourceFacts} and {@code capabilities} - none of
- * those are read here because §6 does not use them yet.
+ * {@code conversions}, {@code dimSources} and {@code sourceFacts} - none of those are read here
+ * because §6 does not use them yet. {@code data} WAS on that list until the Data panel: a pacing
+ * whose source setting the Hub cannot show is a pacing whose delivery silently comes from the raw
+ * mart because nobody could see, let alone change, which table it reads.
  *
  * <p>{@code display}/{@code aggregate}/{@code libraryEntries}/{@code metrics} are kept fully opaque:
  * their internal grammar belongs entirely to Pacing's own widget-spec engine, which this migration
@@ -32,6 +34,12 @@ import java.util.Map;
  *                       them, which is what a pacing with no delivery data looks like.
  * @param libraryEntries shared library entries a linked widget refers to, keyed by entry id; null when
  *                       no widget links to one
+ * @param data           this pacing's {@code config.data} namespace - the BigQuery source its delivery
+ *                       is read from and the optional extras fetched with it. Opaque here for
+ *                       {@code display}'s reason inverted: the Hub edits four of its keys and must not
+ *                       disturb the rest (a sheet binding, a mapping), so it reads the object rather
+ *                       than a narrowed projection of it. Null on a pacing that predates the
+ *                       BigQuery-direct migration and has never had these settings written
  * @param journal        free-text notes on this pacing
  */
 public record PacingDashboardData(
@@ -44,5 +52,6 @@ public record PacingDashboardData(
 		Map<String, Object> capabilities,
 		Map<String, Object> metrics,
 		Map<String, Object> libraryEntries,
+		Map<String, Object> data,
 		List<PacingJournalEntry> journal) {
 }

@@ -3,9 +3,8 @@
  * budget, target impressions, target margin, target CTR/VCR, rate type, flight and date-based
  * containers; add a line item from the campaign or by id; remove a line item with a confirmation
  * naming what is lost. One Save button, one request - the same single write path Pacing's own
- * settings-save endpoint has always used. Placed in a slide-over `Sheet`, the same primitive §6's
- * Widgets panel uses, for the same reason the retired SPA put its whole Settings screen in a drawer:
- * editing a plan is something a person does occasionally, not the reason they opened the dashboard.
+ * settings-save endpoint has always used - now fired by the settings drawer's single Save, beside the
+ * data and widget sections, the way the retired SPA's one drawer footer saved all of its tabs.
  *
  * The hard rule this file exists to respect: no pacing figure is computed here. Every number either
  * comes verbatim from `PacingLineItemPlanV1` or is what the user just typed; the only arithmetic in
@@ -15,10 +14,10 @@
  * ranges, and - not yet enforced by Pacing today - the container-sum-vs-plan rule) is Pacing's;
  * this only renders whatever it says back.
  */
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { formatError } from "../../shared/format/error";
 import { Modal } from "../../shared/ui/modal/modal";
-import { Sheet } from "../../shared/ui/sheet/sheet";
+import type { SettingsSectionHandle, SettingsSectionProps } from "../pacing-dashboard/settings-section";
 import { NumericField } from "../pacing-create/numeric-field";
 import { parseEditableNumber } from "../pacing-create/format";
 import { AddLineItemPanel } from "./add-line-item-panel";
@@ -238,123 +237,127 @@ function LineItemCard({ li, currency, isLast, open, onToggleOpen, onChange, onRe
   );
 }
 
-export interface PacingPlanSheetProps {
-  open: boolean;
-  onClose: () => void;
+export interface PacingPlanSectionProps extends SettingsSectionProps {
   slug: string;
   currency: string;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
+  /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
+  seedKey: number;
 }
 
-export function PacingPlanSheet({ open, onClose, slug, currency, planByLineItem }: PacingPlanSheetProps) {
-  const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [addingLi, setAddingLi] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const savePlan = useSavePacingPlan(slug);
+export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
+  function PacingPlanSection({ slug, currency, planByLineItem, seedKey, onDirtyChange }, ref) {
+    const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
+    const [base, setBase] = useState<Record<string, EditableLineItem>>({});
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
+    const [addingLi, setAddingLi] = useState(false);
+    const savePlan = useSavePacingPlan(slug);
 
-  // Re-hydrate from the latest server data every time the sheet opens - never carry a stale edit
-  // across a close/reopen, and never show an edit still in flight from a previous session.
-  useEffect(() => {
-    if (!open) return;
-    const seeded = seedAll(planByLineItem);
-    setLineItems(seeded);
-    const ids = Object.keys(seeded).sort();
-    setExpanded(new Set(ids.slice(0, 1)));
-    setAddingLi(false);
-    setSaveError(null);
-    // Re-seed only when the sheet transitions open, not on every planByLineItem identity change
-    // (which would clobber in-progress edits on every unrelated background refetch).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, slug]);
+    // Re-hydrate from the latest server data every time the drawer opens - never carry a stale edit
+    // across a close/reopen, and never show an edit still in flight from a previous session.
+    useEffect(() => {
+      const seeded = seedAll(planByLineItem);
+      setLineItems(seeded);
+      setBase(seeded);
+      const ids = Object.keys(seeded).sort();
+      setExpanded(new Set(ids.slice(0, 1)));
+      setAddingLi(false);
+      // Re-seed only when the drawer re-opens, not on every planByLineItem identity change (which
+      // would clobber in-progress edits on every unrelated background refetch).
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [seedKey, slug]);
 
-  const ids = useMemo(() => Object.keys(lineItems).sort(), [lineItems]);
-  const existingIds = useMemo(() => new Set(ids), [ids]);
+    const ids = useMemo(() => Object.keys(lineItems).sort(), [lineItems]);
+    const existingIds = useMemo(() => new Set(ids), [ids]);
 
-  function toggleExpanded(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+    // Compared as the payload that would be SENT, not as the editor's own state: seeding builds
+    // fresh objects, so an identity check would call an untouched plan dirty the moment it loads.
+    const dirty = useMemo(
+      () => JSON.stringify(ids.map((id) => toPlanUpdateLineItem(lineItems[id])))
+        !== JSON.stringify(Object.keys(base).sort().map((id) => toPlanUpdateLineItem(base[id]))),
+      [ids, lineItems, base]
+    );
+    useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
-  function updateLineItem(id: string, next: EditableLineItem) {
-    setLineItems((prev) => ({ ...prev, [id]: next }));
-  }
+    const stateRef = useRef({ ids, lineItems, dirty });
+    stateRef.current = { ids, lineItems, dirty };
 
-  function removeLineItem(id: string) {
-    setLineItems((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  }
+    useImperativeHandle(ref, () => ({
+      async save() {
+        const { ids: currentIds, lineItems: current, dirty: isDirty } = stateRef.current;
+        if (!isDirty) return { ok: true as const };
+        try {
+          await savePlan.mutateAsync(currentIds.map((id) => toPlanUpdateLineItem(current[id])));
+          setBase(current);
+          return { ok: true as const };
+        } catch (error) {
+          return { ok: false as const, message: formatError(error) };
+        }
+      },
+      reset() {
+        setLineItems(base);
+        setAddingLi(false);
+      },
+    }));
 
-  function addCandidates(candidates: PacingDraftLineItemV1[]) {
-    setLineItems((prev) => {
-      const next = { ...prev };
-      for (const candidate of candidates) next[candidate.lineItemId] = seedFromCandidate(candidate);
-      return next;
-    });
-    setExpanded((prev) => new Set([...prev, ...candidates.map((c) => c.lineItemId)]));
-    setAddingLi(false);
-  }
-
-  async function handleSave() {
-    setSaveError(null);
-    try {
-      await savePlan.mutateAsync(ids.map((id) => toPlanUpdateLineItem(lineItems[id])));
-      onClose();
-    } catch (error) {
-      setSaveError(formatError(error));
+    function toggleExpanded(id: string) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
     }
-  }
 
-  return (
-    <Sheet
-      open={open}
-      onClose={onClose}
-      title="Pacing plan"
-      className="pplan__sheet"
-      headerActions={
-        <button type="button" className="button button--ghost button--sm" onClick={() => setAddingLi((v) => !v)}>
-          + Add line item
-        </button>
-      }
-      footer={
-        <div className="pplan__footer">
-          {saveError && <span className="form-error pplan__footer-error">{saveError}</span>}
-          <div className="pplan__footer-actions">
-            <button type="button" className="button button--ghost button--sm" onClick={onClose} disabled={savePlan.isPending}>
-              Cancel
-            </button>
-            <button type="button" className="button button--primary button--sm" onClick={() => void handleSave()} disabled={savePlan.isPending}>
-              {savePlan.isPending ? "Saving…" : "Save plan"}
-            </button>
-          </div>
+    function updateLineItem(id: string, next: EditableLineItem) {
+      setLineItems((prev) => ({ ...prev, [id]: next }));
+    }
+
+    function removeLineItem(id: string) {
+      setLineItems((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+
+    function addCandidates(candidates: PacingDraftLineItemV1[]) {
+      setLineItems((prev) => {
+        const next = { ...prev };
+        for (const candidate of candidates) next[candidate.lineItemId] = seedFromCandidate(candidate);
+        return next;
+      });
+      setExpanded((prev) => new Set([...prev, ...candidates.map((c) => c.lineItemId)]));
+      setAddingLi(false);
+    }
+
+    return (
+      <>
+        <div className="pplan__section-actions">
+          <button type="button" className="button button--ghost button--sm" onClick={() => setAddingLi((v) => !v)}>
+            + Add line item
+          </button>
         </div>
-      }
-    >
-      {addingLi && (
-        <AddLineItemPanel slug={slug} currency={currency} existingIds={existingIds} onAdd={addCandidates} onClose={() => setAddingLi(false)} />
-      )}
 
-      {ids.length === 0 && !addingLi && <p className="pplan__hint">No line items on this pacing.</p>}
+        {addingLi && (
+          <AddLineItemPanel slug={slug} currency={currency} existingIds={existingIds} onAdd={addCandidates} onClose={() => setAddingLi(false)} />
+        )}
 
-      {ids.map((id) => (
-        <LineItemCard
-          key={id}
-          li={lineItems[id]}
-          currency={currency}
-          isLast={ids.length === 1}
-          open={expanded.has(id)}
-          onToggleOpen={() => toggleExpanded(id)}
-          onChange={(next) => updateLineItem(id, next)}
-          onRemove={() => removeLineItem(id)}
-        />
-      ))}
-    </Sheet>
-  );
-}
+        {ids.length === 0 && !addingLi && <p className="pplan__hint">No line items on this pacing.</p>}
+
+        {ids.map((id) => (
+          <LineItemCard
+            key={id}
+            li={lineItems[id]}
+            currency={currency}
+            isLast={ids.length === 1}
+            open={expanded.has(id)}
+            onToggleOpen={() => toggleExpanded(id)}
+            onChange={(next) => updateLineItem(id, next)}
+            onRemove={() => removeLineItem(id)}
+          />
+        ))}
+      </>
+    );
+  }
+);

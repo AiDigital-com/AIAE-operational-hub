@@ -193,6 +193,9 @@ class PacingControllerMvcTest {
 				.andExpect(jsonPath("$.code").value("OPH_057"));
 	}
 	@Test
+	// 204, not 200: a bodiless 200 on an operation the generator marks `produces: application/json`
+	// is a response the browser client parses as JSON and chokes on as soon as a proxy re-chunks it
+	// and drops the Content-Length. See the endpoint's note in openapi.yaml.
 	void shouldChangePacingStatusTest() throws Exception {
 		// Given: §9 (US-128) - a straight passthrough, bodiless on success.
 		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
@@ -206,7 +209,7 @@ class PacingControllerMvcTest {
 		// When / Then:
 		mockMvc.perform(patch("/api/v1/pacing/pacings/p1/status")
 						.contentType(APPLICATION_JSON).content("{\"status\":\"Archive\"}"))
-				.andExpect(status().isOk());
+				.andExpect(status().isNoContent());
 		verify(pacingClient).updateStatus(assertion, "p1", "Archive");
 	}
 
@@ -242,7 +245,7 @@ class PacingControllerMvcTest {
 		mockMvc.perform(patch("/api/v1/pacing/pacings/p1/owner")
 						.contentType(APPLICATION_JSON)
 						.content("{\"newOwnerId\":\"11111111-1111-1111-1111-111111111111\"}"))
-				.andExpect(status().isOk());
+				.andExpect(status().isNoContent());
 		verify(pacingClient).transferOwner(assertion, "p1", "11111111-1111-1111-1111-111111111111");
 	}
 

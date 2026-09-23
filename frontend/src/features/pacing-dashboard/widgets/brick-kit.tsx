@@ -7,6 +7,7 @@
 import type { ReactNode } from "react";
 import { cn } from "../../../shared/style/cn";
 import { TONE_COLOR, type Tone } from "./widget-status";
+import type { DetailLine } from "../types-metrics";
 import "./brick-kit.css";
 
 export function BigStat({
@@ -141,6 +142,17 @@ export function FlightBullet({ day, total, daysLeftText }: { day: number; total:
   );
 }
 
+/**
+ * One stacked figure card.
+ *
+ * A line is `{ value, unit, note, muted }` and all four are load-bearing: Pacing formats the
+ * number, names its unit and writes the sentence that explains it, and dropping any of them
+ * turns a reading into a bare number. "4,998,739" is not "4,998,739 impr", and "25,436/day"
+ * without "2,289,249 impr ÷ 90 days." is a target with nothing behind it.
+ *
+ * `muted` is a line that is not a figure at all ("Clicks plan not set"). It must not wear the
+ * figure's type or the card's status colour, or an absent plan reads as a delivered zero.
+ */
 export function DetailCard({
   label,
   lines,
@@ -148,28 +160,57 @@ export function DetailCard({
   status,
 }: {
   label?: string | null;
-  lines: Array<{ value: string }>;
+  lines: DetailLine[];
   sub?: string | null;
   status?: Tone;
 }) {
+  // Lines that carry their own explainer need air between them; lines that do not read as one
+  // stacked figure. Two gaps, one component - the retired kit made the same call.
+  const spaced = lines.some((line) => line.note);
   return (
     <div className="wgt-detail">
       {label && <div className="wgt-detail__label">{label}</div>}
-      {lines.map((line, i) => (
-        <div key={i} className="wgt-detail__value" style={status ? { color: TONE_COLOR[status] } : undefined}>
-          {line.value}
-        </div>
-      ))}
+      <div className={cn("wgt-detail__lines", spaced && "wgt-detail__lines--notes")}>
+        {lines.map((line, i) => (
+          <div key={i}>
+            <div
+              className={cn("wgt-detail__value", line.muted && "wgt-detail__value--muted")}
+              style={status && !line.muted ? { color: TONE_COLOR[status] } : undefined}
+            >
+              <span className="wgt-detail__number">{line.value}</span>
+              {line.unit && <span className="wgt-detail__unit">{line.unit}</span>}
+            </div>
+            {line.note && <div className="wgt-detail__note">{line.note}</div>}
+          </div>
+        ))}
+      </div>
       {sub && <div className="wgt-detail__sub">{sub}</div>}
     </div>
   );
 }
 
+const clampPct = (n: number | null | undefined) => Math.max(0, Math.min(100, n || 0));
+
+/**
+ * One delivery unit's row: the two percentages, the bar with its plan-pace tick, and the pace
+ * line under it.
+ *
+ * The whole track is the flight (0 → 100% of plan), the fill is what actually delivered and
+ * the tick marks where delivery should be by now. The gap between them IS the delta printed
+ * underneath - so a bar drawn without that line shows the gap and refuses to name it, which is
+ * what this component did while `paceDelta` and `opText` arrived and went unread.
+ *
+ * `hasPlan: false` is a unit with no goal at all. It gets its count and no bar: there is no
+ * pace to be on or off, and a 0%-wide bar would read as one that is failing.
+ */
 export function UnitBar({
   unit,
+  hasPlan,
   actualLabel,
   actualPct,
   plannedPct,
+  paceDelta,
+  opText,
   status,
 }: {
   unit: string;
@@ -181,29 +222,76 @@ export function UnitBar({
   opText: string;
   status: Tone;
 }) {
+  if (!hasPlan) {
+    return (
+      <div className="wgt-unitbar">
+        <div className="wgt-unitbar__head">
+          <span className="wgt-unitbar__unit">{unit}</span>
+          <span className="wgt-unitbar__actual">{actualLabel} · plan not set</span>
+        </div>
+      </div>
+    );
+  }
+  const delta = paceDelta ?? 0;
+  const sign = delta >= 0 ? "+" : "−";
+  const direction = delta > 0.05 ? "ahead of plan" : delta < -0.05 ? "behind plan" : "on plan";
+  const color = TONE_COLOR[status];
   return (
     <div className="wgt-unitbar">
       <div className="wgt-unitbar__head">
         <span className="wgt-unitbar__unit">{unit}</span>
-        <span className="wgt-unitbar__actual">{actualLabel}</span>
+        <span className="wgt-unitbar__pcts">
+          Actual {actualPct.toFixed(1)}% <span className="wgt-unitbar__sep">/</span> Plan{" "}
+          {(plannedPct ?? 0).toFixed(1)}%
+        </span>
       </div>
       <div className="wgt-unitbar__track">
-        <div className="wgt-unitbar__fill" style={{ width: `${Math.max(0, Math.min(100, actualPct))}%`, background: TONE_COLOR[status] }} />
-        {plannedPct != null && <div className="wgt-unitbar__mark" style={{ left: `${Math.max(0, Math.min(100, plannedPct))}%` }} />}
+        <div className="wgt-unitbar__fill" style={{ width: `${clampPct(actualPct)}%`, background: color }} />
+        {plannedPct != null && <div className="wgt-unitbar__mark" style={{ left: `${clampPct(plannedPct)}%` }} />}
+      </div>
+      <div className="wgt-unitbar__foot">
+        <span className="wgt-unitbar__delta" style={{ color }}>
+          {sign}
+          {Math.abs(delta).toFixed(1)} pp
+        </span>
+        <span className="wgt-unitbar__dir">{direction} ·</span>
+        <span className="wgt-unitbar__op" style={{ color }}>
+          {opText}
+        </span>
       </div>
     </div>
   );
 }
 
-export function DeviationGauge({ value, target, status }: { value: number | null; target: number | null; spread?: number; status: Tone }) {
+/**
+ * How far a figure sits from its target, on a corridor of `spread` points either side.
+ *
+ * The corridor is the reading: "+12.5 pp" alone says nothing about whether that is a lot.
+ * `spread` arrives on the brick (the hero's margin gauge asks for 10) and was declared and
+ * ignored here, which left the number floating with no scale to judge it by.
+ */
+export function DeviationGauge({ value, target, spread, status }: { value: number | null; target: number | null; spread?: number; status: Tone }) {
   if (value == null || target == null) return null;
   const delta = value - target;
+  const range = Number.isFinite(spread) && (spread as number) > 0 ? (spread as number) : 10;
+  // Where the delta lands on the corridor, 50% being dead on target. Clamped: a figure past
+  // the corridor's end is off the scale, and a marker outside the track would say nothing
+  // more than one pinned to its edge.
+  const markerPct = Math.max(0, Math.min(100, ((delta + range) / (range * 2)) * 100));
   return (
     <div className="wgt-gauge">
       <span className="wgt-gauge__value" style={{ color: TONE_COLOR[status] }}>
         {delta >= 0 ? "+" : ""}
         {delta.toFixed(1)}pp
       </span>
+      <div className="wgt-gauge__scale">
+        <span className="wgt-gauge__bound">−{range} pp</span>
+        <span className="wgt-gauge__track">
+          <span className="wgt-gauge__centre" />
+          <span className="wgt-gauge__marker" style={{ left: `${markerPct}%`, background: TONE_COLOR[status] }} />
+        </span>
+        <span className="wgt-gauge__bound">+{range} pp</span>
+      </div>
       <span className="wgt-gauge__sub">vs target</span>
     </div>
   );

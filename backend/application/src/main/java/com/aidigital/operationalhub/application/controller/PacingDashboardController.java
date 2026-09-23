@@ -3,6 +3,8 @@ package com.aidigital.operationalhub.application.controller;
 import com.aidigital.operationalhub.application.api.v1.generated.PacingDashboardApi;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictReasonV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
@@ -115,6 +117,14 @@ public class PacingDashboardController implements PacingDashboardApi {
 		HubAssertion assertion = signCurrentUser();
 		pacingClient.savePlan(assertion, slug, planMapper.toPlanUpdateLineItems(body));
 		return ResponseEntity.ok(new PacingPlanUpdateResultV1().saved(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingDataSettingsUpdateResultV1> updatePacingDataSettings(
+			String slug, PacingDataSettingsUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		pacingClient.saveDataSettings(assertion, slug, mapper.toDataSettings(body));
+		return ResponseEntity.ok(new PacingDataSettingsUpdateResultV1().saved(true));
 	}
 
 	@Override

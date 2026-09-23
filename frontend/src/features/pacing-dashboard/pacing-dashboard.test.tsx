@@ -158,11 +158,12 @@ describe("PacingDashboard", () => {
     await screen.findByRole("button", { name: /refresh \(42s\)/i });
   });
 
-  it("should keep the widget library out of the page until it is asked for (US-116)", async () => {
+  it("should keep every pacing setting behind one gear (US-116)", async () => {
     // Given: composing the dashboard is an occasional act; reading it is the point.
     // The panel used to sit inline at the bottom of the page, which spent screen on a
     // tool most viewers never open and read as part of the data rather than settings
-    // for it. It is a slide-over now, as it was in the retired SPA.
+    // for it. It is one slide-over now, holding the plan, the data settings and the
+    // widgets on tabs - as the retired SPA's one Settings drawer did.
     vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1());
     vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1());
     renderDashboard();
@@ -171,7 +172,8 @@ describe("PacingDashboard", () => {
     // Then: nothing of the panel is on the page…
     expect(screen.queryByText(/this pacing's widgets/i)).not.toBeInTheDocument();
 
-    // When: the header button is pressed…
+    // When: the gear is pressed and the Widgets tab chosen…
+    await userEvent.click(screen.getByRole("button", { name: /^settings$/i }));
     await userEvent.click(screen.getByRole("button", { name: /^widgets$/i }));
 
     // Then: …it opens, and as a dialog rather than another section of the page.

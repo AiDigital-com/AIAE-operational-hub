@@ -1,6 +1,7 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { getPacingDashboard, getPacingRefreshStatus } from "./api";
+import { getPacingDashboard, getPacingRefreshStatus, savePacingDataSettings } from "./api";
+import type { PacingDataSettingsUpdateV1 } from "./types";
 
 /**
  * The pacing dashboard payload (§6 of the migration plan, US-114/115) - one request per pacing, same
@@ -11,6 +12,24 @@ export function usePacingDashboard(slug: string | undefined) {
     queryKey: ["pacing", "dashboard", slug],
     queryFn: () => getPacingDashboard(slug as string),
     enabled: !!slug,
+  });
+}
+
+/**
+ * Saves this pacing's data settings.
+ *
+ * Invalidates only this pacing's dashboard, NOT the `["pacing"]` prefix the plan save clears: none of
+ * these settings changes a figure any list shows. What the re-read is for is the panel itself - it
+ * hydrates from the payload's `data`, so without it a reopened panel would still show the previous
+ * source until something else refetched.
+ */
+export function useSavePacingDataSettings(slug: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: PacingDataSettingsUpdateV1) => savePacingDataSettings(slug as string, settings),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+    },
   });
 }
 

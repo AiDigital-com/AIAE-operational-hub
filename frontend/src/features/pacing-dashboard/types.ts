@@ -11,6 +11,31 @@ export type PacingLibraryEntryV1 = components["schemas"]["PacingLibraryEntryV1"]
 export type PacingLibraryKindV1 = components["schemas"]["PacingLibraryKindV1"];
 export type PacingLibraryConflictV1 = components["schemas"]["PacingLibraryConflictV1"];
 export type PacingLikeResultV1 = components["schemas"]["PacingLikeResultV1"];
+export type PacingDataSourceV1 = components["schemas"]["PacingDataSourceV1"];
+export type PacingDataSettingsUpdateV1 = components["schemas"]["PacingDataSettingsUpdateV1"];
+
+/** One entry of `data.dim_sources` - a dimension this pacing loads beside its delivery. Opaque on the
+ *  wire and owned by Pacing, which validates the shape and refuses a malformed one. The Data panel
+ *  reads `id`/`loader` to answer "is the Devices catalogue source on?" and carries every other entry
+ *  through untouched on save: the list is a whole-array replace, so an entry this panel drops is an
+ *  entry the pacing loses. */
+export interface PacingDimSource {
+  id?: string;
+  loader?: string;
+  [key: string]: unknown;
+}
+
+/** The part of the opaque `data` namespace the Data panel reads and writes. Every other key it may
+ *  carry (`delivery_tab`, `coef_enabled`, `sheet`, and whatever Pacing adds next) is preserved by not
+ *  being sent: the save is a per-key merge on Pacing's side, so a key this type does not name is a key
+ *  this screen cannot disturb. */
+export interface PacingDataShape {
+  source?: string;
+  fetch_creatives?: boolean;
+  fetch_conversions?: boolean;
+  dim_sources?: PacingDimSource[];
+  [key: string]: unknown;
+}
 
 /** A single library-linked or inline widget instance inside `display.widgets[]` (opaque on the wire -
  *  see PacingDashboardV1.display's own description). Only the handful of fields the Hub's widget

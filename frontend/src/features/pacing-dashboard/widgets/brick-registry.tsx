@@ -108,7 +108,9 @@ function DetailCardBrick({ brick, ctx }: { brick: Brick; ctx: BrickCtx }) {
     return <DetailCard label={brick.label} lines={d.lines} sub={d.sub || brick.sub} status={d.status} />;
   }
   const v = brickValue(brick, ctx);
-  return <DetailCard label={brick.label} lines={[{ value: fmtKpi(v.value, v.format) }]} sub={brick.sub} />;
+  // A bound figure, not a named source: the binding carries a number and nothing else, so
+  // there is no unit word and no explainer to print beside it.
+  return <DetailCard label={brick.label} lines={[{ value: fmtKpi(v.value, v.format), unit: null, note: null }]} sub={brick.sub} />;
 }
 
 function UnitBarsBrick({ ctx }: { brick: Brick; ctx: BrickCtx }) {

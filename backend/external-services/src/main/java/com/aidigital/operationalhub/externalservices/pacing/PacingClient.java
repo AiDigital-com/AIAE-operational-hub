@@ -6,6 +6,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLi
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -293,6 +294,36 @@ public interface PacingClient {
 	 *         naming the line item and field
 	 */
 	void savePlan(HubAssertion assertion, String slug, List<PacingLineItemPlanUpdate> lineItems);
+
+	/**
+	 * Saves a pacing's data settings: which BigQuery table its delivery is read from, and which
+	 * optional extras are fetched with it. {@code POST /api/dashboards/:slug/settings} on the Pacing
+	 * side carrying only the {@code data} fragment - the third caller of that one write path, beside
+	 * {@link #saveDisplay} and {@link #savePlan}.
+	 *
+	 * <p>A PARTIAL patch: Pacing merges the namespace key by key and only writes the keys present, so
+	 * a null field on {@code settings} leaves the stored value alone rather than resetting it. That is
+	 * what keeps this endpoint safe to call from a panel that exposes four of the namespace's
+	 * settings while a pacing may carry several more.
+	 *
+	 * <p>Nothing visible changes on a successful save. The source is interpolated into the delivery
+	 * query, which runs on the nightly build or on {@link #refreshPacing} - until then the dashboard
+	 * keeps showing what was actually built from the previous table.
+	 *
+	 * <p>Like {@link #savePlan} and unlike {@link #saveDisplay} there is no revision and so no
+	 * conflict outcome: Pacing does not version-guard this namespace, and a rejection (in practice a
+	 * malformed dimension source, which Pacing refuses rather than drops) throws.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param settings  the settings to write; null fields are omitted from the request, never sent as
+	 *                  JSON nulls - Pacing's merge treats a present key as an instruction to write
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - a refused dimension source is
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail}
+	 */
+	void saveDataSettings(HubAssertion assertion, String slug, PacingDataSettings settings);
 
 	/**
 	 * Fetches this pacing's own campaign(s)' line items that are not yet on it (§9 of the migration

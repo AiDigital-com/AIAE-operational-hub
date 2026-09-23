@@ -1,0 +1,70 @@
+/* Pacing settings drawer: one gear, three sections, one Save. */
+
+/* No width override: the Sheet's own min(940px, 62vw) is what the widget library already shipped
+   at, and the library is the widest thing in here. The plan editor's old 760px fits inside it. */
+
+/* Metrics copied from the campaign Pacing settings' tab bar, not re-invented - two tab bars on one
+   product that disagree by a pixel is worse than either of them. `margin-bottom: -1px` is the
+   load-bearing one: .sheet__tabs draws a 1px divider, and without it the active tab's 2px underline
+   floats above that line instead of sitting on it. */
+.psettings__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 13px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color .15s;
+}
+.psettings__tab:hover { color: var(--ink); }
+.psettings__tab--active { color: var(--ink); border-bottom-color: var(--primary); }
+/* Which tab holds unsaved work, answerable without visiting all three. A dot on the tab itself,
+   not a rail beside it. */
+.psettings__tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--attention, var(--primary));
+}
+
+/* Hidden, not unmounted: the drafts a single Save commits live in the sections. `display: none`
+   rather than a height trick - an off-screen panel must not be tabbable or read out. */
+.psettings__panel--hidden { display: none; }
+
+.psettings__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.psettings__footer-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.psettings__footer-error { overflow-wrap: anywhere; }
+.psettings__dirty { color: var(--muted-strong); font-weight: 600; }
+.psettings__footer-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
+}
+
+.psettings__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
