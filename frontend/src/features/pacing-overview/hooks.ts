@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listAssignableOwners, listCampaignPacings, listPacingOverview, transferPacingOwner } from "./api";
+import { getPacingNsDiff, listAssignableOwners, listCampaignPacings, listPacingOverview, transferPacingOwner } from "./api";
 
 /**
  * The canonical owner of the Pacing Overview list (§4 of the migration plan, US-109). One request
@@ -56,5 +56,19 @@ export function useTransferPacingOwner() {
       void queryClient.invalidateQueries({ queryKey: ["pacing", "overview"] });
       void queryClient.invalidateQueries({ queryKey: ["pacing", "campaign"] });
     },
+  });
+}
+
+/**
+ * The live, full NetSuite diff for one pacing (§13, US-136), fetched fresh every time the sheet that
+ * shows it opens. `enabled` is that sheet's own open state - there is no polling, and the default
+ * (zero) `staleTime` means re-opening the same pacing refetches rather than showing whatever it last
+ * saw, which is the whole point: this is never read from the row's own nightly `nsDiffSummary` cache.
+ */
+export function usePacingNsDiff(pacingId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["pacing", "ns-diff", pacingId],
+    queryFn: () => getPacingNsDiff(pacingId),
+    enabled: enabled && pacingId !== "",
   });
 }

@@ -5,10 +5,14 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAle
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRowV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingScopeV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffSummaryV1;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlert;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingHealth;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffCounts;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffSummary;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
@@ -28,7 +32,7 @@ import static org.instancio.Select.field;
  */
 class PacingContractMapperTest {
 
-	private final PacingContractMapper mapper = new PacingContractMapper();
+	private final PacingContractMapper mapper = new PacingContractMapper(new PacingNsDiffContractMapper());
 
 	@Test
 	void shouldBuildAssertionFromUserAndEntitlementTest() {
@@ -59,7 +63,11 @@ class PacingContractMapperTest {
 						new PacingCampaignRef("CAMP-OTHER", "Other", null)),
 				new PacingHealth("over", 12.3, 18.5, 25.0, 50000.0,
 						List.of(new PacingAlert("pacing_off_pace", "critical", "Pacing +48.4pp", null, null, null, null))),
-				"nike-ss26-display", "2026-07-15T09:30:00.000Z");
+				"nike-ss26-display", "2026-07-15T09:30:00.000Z",
+				// §13: the nightly ns-diff summary rides along on the row, mapped straight through by
+				// the dedicated PacingNsDiffContractMapper this class delegates to.
+				new PacingNsDiffSummary(
+						new PacingNsDiffCounts(0, 1, 2, 0, 0, 1), false, "2026-09-21T02:30:00.000Z"));
 
 		// When:
 		PacingListResponseV1 response = mapper.toV1(entitlement, List.of(row));
@@ -87,6 +95,13 @@ class PacingContractMapperTest {
 		assertThat(v1.getPaceStatus()).isEqualTo(PacingRowV1.PaceStatusEnum.OVER);
 		assertThat(v1.getAlerts()).containsExactly(
 				new PacingAlertV1().type("pacing_off_pace").severity(PacingAlertV1.SeverityEnum.CRITICAL).text("Pacing +48.4pp"));
+		// §13, US-136: the nightly ns-diff summary is mapped straight through.
+		assertThat(v1.getNsDiffSummary()).isEqualTo(
+				new PacingNsDiffSummaryV1()
+						.counts(new PacingNsDiffCountsV1()
+								.missingInNetsuite(0).missingInPacing(1).fieldDiff(2).planDiff(0).foreignCampaign(0).ownerDiff(1))
+						.inSync(false)
+						.computedAt(LocalDateTime.of(2026, 9, 21, 2, 30, 0)));
 	}
 
 	@Test
@@ -94,7 +109,8 @@ class PacingContractMapperTest {
 		// Given: a fresh pacing with no line items yet and campaigns not yet resolved - the row must
 		// degrade to nulls/empties, not throw, and still round-trip its own scalar fields.
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), false);
-		PacingRow row = new PacingRow("p2", "Fresh Pacing", "Live", null, null, "Bob Petrov", 0, null, null, null, null);
+		PacingRow row =
+				new PacingRow("p2", "Fresh Pacing", "Live", null, null, "Bob Petrov", 0, null, null, null, null, null);
 
 		// When:
 		PacingRowV1 v1 = mapper.toV1(entitlement, List.of(row)).getPacings().get(0);
@@ -106,13 +122,16 @@ class PacingContractMapperTest {
 		assertThat(v1.getMarginActualPct()).isNull();
 		assertThat(v1.getPaceStatus()).isNull();
 		assertThat(v1.getAlerts()).isEmpty();
+		// §13: absent when the nightly job has never covered this pacing, not a default/empty summary.
+		assertThat(v1.getNsDiffSummary()).isNull();
 	}
 
 	@Test
 	void shouldDegradeAMalformedFlightDateToNullRatherThanThrowTest() {
 		// Given:
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), false);
-		PacingRow row = new PacingRow("p3", "Bad Dates", "Live", "not-a-date", "", "X", 1, null, null, null, null);
+		PacingRow row =
+				new PacingRow("p3", "Bad Dates", "Live", "not-a-date", "", "X", 1, null, null, null, null, null);
 
 		// When:
 		PacingRowV1 v1 = mapper.toV1(entitlement, List.of(row)).getPacings().get(0);
@@ -127,7 +146,8 @@ class PacingContractMapperTest {
 		// Given: same degrade-to-null contract as the flight dates above, for the same reason - a
 		// malformed value from an external service should not fail the whole row.
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), false);
-		PacingRow row = new PacingRow("p4", "Bad Created At", "Live", null, null, "X", 1, null, null, null, "not-a-timestamp");
+		PacingRow row = new PacingRow(
+				"p4", "Bad Created At", "Live", null, null, "X", 1, null, null, null, "not-a-timestamp", null);
 
 		// When:
 		PacingRowV1 v1 = mapper.toV1(entitlement, List.of(row)).getPacings().get(0);

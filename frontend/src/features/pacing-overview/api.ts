@@ -1,7 +1,7 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
-import type { AssignableOwnerListV1, PacingListResponseV1 } from "./types";
+import type { AssignableOwnerListV1, PacingListResponseV1, PacingNsDiffReportV1 } from "./types";
 
 interface ApiResult<T> {
   data?: T;
@@ -63,4 +63,16 @@ export async function transferPacingOwner(pacingId: string, newOwnerId: string):
   if (result.error || !result.response.ok) {
     throw new ApiError(formatError(result.error), result.response.status);
   }
+}
+
+/**
+ * The live, on-demand full NetSuite diff for one pacing (§13 of the migration plan, US-136) -
+ * computed fresh by Pacing on every call, never cached there or here. Not admin-gated, unlike
+ * `revalidatePacing` (`pacing-admin/api.ts`), which also writes back to the pacing; this endpoint
+ * writes nothing.
+ */
+export async function getPacingNsDiff(pacingId: string): Promise<PacingNsDiffReportV1> {
+  return requireData(
+    await apiClient.GET("/api/v1/pacing/pacings/{pacingId}/ns-diff", { params: { path: { pacingId } } })
+  );
 }

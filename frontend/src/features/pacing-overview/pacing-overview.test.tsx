@@ -7,6 +7,7 @@ import {
   aCampaignRefV1,
   aPacingAlertV1,
   aPacingListResponseV1,
+  aPacingNsDiffSummaryV1,
   aPacingRowV1,
   aPacingScopeV1,
 } from "@/test/factories";
@@ -460,5 +461,91 @@ describe("PacingOverview", () => {
 
     const row = (await screen.findByText("Not revalidated yet")).closest("tr")!;
     expect(within(row).queryByText(/NetSuite:/)).not.toBeInTheDocument();
+  });
+
+  // §13 (US-136): the nightly NS-diff summary column.
+  describe("NS diff column", () => {
+    it("shows a muted dash for a pacing never checked", async () => {
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Never checked", nsDiffSummary: undefined })] })
+      );
+      renderPacingOverview();
+
+      const row = (await screen.findByText("Never checked")).closest("tr")!;
+      const cell = within(row).getByTitle("Not yet checked against NetSuite");
+      expect(cell).toHaveTextContent("—");
+    });
+
+    it("shows 'In sync' rather than a count when every class is zero", async () => {
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({
+          pacings: [aPacingRowV1({ name: "Healthy", nsDiffSummary: aPacingNsDiffSummaryV1({ inSync: true }) })],
+        })
+      );
+      renderPacingOverview();
+
+      const row = (await screen.findByText("Healthy")).closest("tr")!;
+      expect(within(row).getByText("In sync")).toBeInTheDocument();
+      expect(within(row).queryByText("0")).not.toBeInTheDocument();
+    });
+
+    it("shows the total count as a badge when NetSuite disagrees, with a per-class tooltip", async () => {
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({
+          pacings: [
+            aPacingRowV1({
+              name: "Drifted",
+              nsDiffSummary: aPacingNsDiffSummaryV1({
+                inSync: false,
+                computedAt: "2026-09-20T03:00:00Z",
+                counts: {
+                  missingInNetsuite: 0,
+                  missingInPacing: 1,
+                  fieldDiff: 2,
+                  planDiff: 0,
+                  foreignCampaign: 0,
+                  ownerDiff: 1,
+                },
+              }),
+            }),
+          ],
+        })
+      );
+      renderPacingOverview();
+
+      const row = (await screen.findByText("Drifted")).closest("tr")!;
+      // 2 + 1 + 1 = 4 total differences, across all six classes - not a yes/no flag.
+      expect(within(row).getByText("4")).toBeInTheDocument();
+    });
+
+    it("sorts a never-checked pacing below one confirmed in sync", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({
+          pacings: [
+            aPacingRowV1({ id: "p1", name: "Never checked", nsDiffSummary: undefined }),
+            aPacingRowV1({ id: "p2", name: "In sync", nsDiffSummary: aPacingNsDiffSummaryV1({ inSync: true }) }),
+            aPacingRowV1({
+              id: "p3",
+              name: "Has differences",
+              nsDiffSummary: aPacingNsDiffSummaryV1({
+                inSync: false,
+                counts: { missingInNetsuite: 3, missingInPacing: 0, fieldDiff: 0, planDiff: 0, foreignCampaign: 0, ownerDiff: 0 },
+              }),
+            }),
+          ],
+        })
+      );
+      renderPacingOverview();
+      await screen.findByText("Never checked");
+      const rowNames = () =>
+        screen.getAllByRole("row").slice(1).map((row) => within(row).queryAllByRole("cell")[0]?.textContent);
+
+      // Ascending: never-checked first, then in-sync (0), then the highest count last.
+      await user.click(screen.getByRole("button", { name: /NS diff/ }));
+      await waitFor(() => expect(rowNames()[0]).toContain("Never checked"));
+      expect(rowNames()[1]).toContain("In sync");
+      expect(rowNames()[2]).toContain("Has differences");
+    });
   });
 });

@@ -19,6 +19,14 @@ import type {
   CampaignRefV1,
   PacingAlertV1,
   PacingListResponseV1,
+  PacingNsDiffCountsV1,
+  PacingNsDiffCoveredByV1,
+  PacingNsDiffForeignCampaignV1,
+  PacingNsDiffMissingInNetsuiteV1,
+  PacingNsDiffMissingInPacingV1,
+  PacingNsDiffOwnerMismatchV1,
+  PacingNsDiffReportV1,
+  PacingNsDiffSummaryV1,
   PacingRowV1,
   PacingScopeV1,
 } from "../features/pacing-overview/types";
@@ -302,6 +310,109 @@ export function aPacingListResponseV1(overrides: Partial<PacingListResponseV1> =
   return {
     scope: aPacingScopeV1(),
     pacings: [aPacingRowV1()],
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffCountsV1(overrides: Partial<PacingNsDiffCountsV1> = {}): PacingNsDiffCountsV1 {
+  return {
+    missingInNetsuite: 0,
+    missingInPacing: 0,
+    fieldDiff: 0,
+    planDiff: 0,
+    foreignCampaign: 0,
+    ownerDiff: 0,
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffSummaryV1(overrides: Partial<PacingNsDiffSummaryV1> = {}): PacingNsDiffSummaryV1 {
+  return {
+    counts: aPacingNsDiffCountsV1(),
+    inSync: true,
+    computedAt: "2026-09-20T03:00:00Z",
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffMissingInNetsuiteV1(
+  overrides: Partial<PacingNsDiffMissingInNetsuiteV1> = {}
+): PacingNsDiffMissingInNetsuiteV1 {
+  return {
+    lineItemId: randomString("li"),
+    channel: "Display",
+    targetSpend: 5000,
+    targetImpressions: 100000,
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffMissingInPacingV1(
+  overrides: Partial<PacingNsDiffMissingInPacingV1> = {}
+): PacingNsDiffMissingInPacingV1 {
+  return {
+    lineItemId: randomString("li"),
+    campaignId: randomString("CAMP"),
+    campaignName: randomString("Campaign"),
+    orderNumber: randomString("IO"),
+    channel: "Display",
+    rateType: "CPM",
+    nativeBudget: 4000,
+    plannedUnits: 80000,
+    flightStart: "2026-08-01",
+    flightEnd: "2026-09-30",
+    description: randomString("Line item"),
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffCoveredByV1(overrides: Partial<PacingNsDiffCoveredByV1> = {}): PacingNsDiffCoveredByV1 {
+  return {
+    pacingId: randomString("pacing"),
+    pacingName: randomString("Pacing"),
+    dashSlug: randomString("dash-slug"),
+    status: "Live",
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffForeignCampaignV1(
+  overrides: Partial<PacingNsDiffForeignCampaignV1> = {}
+): PacingNsDiffForeignCampaignV1 {
+  return {
+    lineItemId: randomString("li"),
+    pacingCampaignId: randomString("CAMP"),
+    netsuiteCampaignId: randomString("CAMP"),
+    netsuiteCampaignName: randomString("Campaign"),
+    inPacingCampaignSet: false,
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffOwnerMismatchV1(
+  overrides: Partial<PacingNsDiffOwnerMismatchV1> = {}
+): PacingNsDiffOwnerMismatchV1 {
+  return {
+    campaignId: randomString("CAMP"),
+    campaignName: randomString("Campaign"),
+    ownerName: randomString("Owner"),
+    mpoTeamLead: randomString("Lead"),
+    ...overrides,
+  };
+}
+
+export function aPacingNsDiffReportV1(overrides: Partial<PacingNsDiffReportV1> = {}): PacingNsDiffReportV1 {
+  return {
+    pacingId: randomString("pacing"),
+    dashSlug: randomString("dash-slug"),
+    counts: aPacingNsDiffCountsV1(),
+    inSync: true,
+    missingInNetsuite: [],
+    missingInPacing: [],
+    fieldDiff: [],
+    planDiff: [],
+    foreignCampaign: [],
+    ownerDiff: [],
     ...overrides,
   };
 }

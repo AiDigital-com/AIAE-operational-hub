@@ -10,6 +10,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -128,6 +129,24 @@ public interface PacingClient {
 	 *         .PacingFailureReason#UPSTREAM_BAD_REQUEST})
 	 */
 	PacingRefreshOutcome refreshPacing(HubAssertion assertion, String pacingId);
+
+	/**
+	 * Fetches a read-only, on-demand, LIVE comparison of one pacing against current NetSuite data (§13
+	 * of the migration plan, US-136 "NetSuite Diff and Data Health"): {@code GET
+	 * /api/pacings/:id/ns-diff} on the Pacing side. Computed fresh on every call - unlike
+	 * {@link #revalidatePacing}, nothing here is written back to the pacing, and unlike
+	 * {@link PacingRow#nsDiffSummary()}'s nightly value, nothing here is stale.
+	 *
+	 * <p>Not admin-gated on the Pacing side: any caller with ordinary dashboard access to this pacing
+	 * may call it, unlike {@link #revalidatePacing} which requires an unfiltered scope.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param pacingId  the pacing id (Pacing's own UUID primary key)
+	 * @return the full diff report
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingNsDiffReport getNsDiff(HubAssertion assertion, String pacingId);
 
 	/**
 	 * Saves this pacing's widget/layout selection (US-116/117/118). A concurrent edit (stale revision,

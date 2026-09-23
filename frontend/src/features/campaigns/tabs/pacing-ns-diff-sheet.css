@@ -1,0 +1,197 @@
+/* §13, US-136: the live full NetSuite diff sheet. Plain headings, background-free entry cards, and
+   status color used only on inline text (the "no differences" state, source badges) - no vertical
+   stripe on any state, same discipline as the rest of the Pacing screens. */
+
+.pacing-ns-diff__section + .pacing-ns-diff__section {
+  margin-top: 24px;
+}
+.pacing-ns-diff__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--ink);
+}
+.pacing-ns-diff__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.pacing-ns-diff__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pacing-ns-diff__entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.pacing-ns-diff__entry-id {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.pacing-ns-diff__entry-sub {
+  font-weight: 400;
+  color: var(--muted);
+}
+.pacing-ns-diff__entry-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+
+/* ── missing_in_netsuite / missing_in_pacing field grids ── */
+.pacing-ns-diff__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.pacing-ns-diff__field--wide {
+  grid-column: 1 / -1;
+}
+.pacing-ns-diff__field dt {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+.pacing-ns-diff__field dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ── field_diff / plan_diff rows ── */
+.pacing-ns-diff__field-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pacing-ns-diff__field-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.pacing-ns-diff__field-name {
+  font-weight: 700;
+  color: var(--muted-strong);
+  min-width: 130px;
+}
+.pacing-ns-diff__field-values {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.pacing-ns-diff__arrow {
+  color: var(--muted);
+}
+.pacing-ns-diff__field-native {
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+/* "Moved on purpose" reads as a fact, not a warning - plain neutral fill, never a stripe. */
+.pacing-ns-diff__source-badge {
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── flight groups / "covered by another pacing" disclosures (§13 follow-up) ──
+   Collapsed-by-default rows: background tint + chevron only, never a side stripe. */
+.pacing-ns-diff__flight-groups {
+  margin-top: 4px;
+}
+.pacing-ns-diff__group + .pacing-ns-diff__group {
+  margin-top: 10px;
+}
+.pacing-ns-diff__group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--n-100);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.pacing-ns-diff__group-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: transform .15s;
+  flex: 0 0 auto;
+}
+.pacing-ns-diff__group-chevron--open {
+  transform: rotate(180deg);
+}
+.pacing-ns-diff__group-body {
+  padding: 10px 4px 0;
+}
+.pacing-ns-diff__group--covered > .pacing-ns-diff__group-head {
+  margin-top: 14px;
+  background: var(--primary-soft);
+}
+.pacing-ns-diff__covered-group + .pacing-ns-diff__covered-group {
+  margin-top: 14px;
+}
+.pacing-ns-diff__covered-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.pacing-ns-diff__covered-group-head a {
+  color: var(--primary);
+}
+
+.pacing-ns-diff__empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--good);
+  font-weight: 700;
+  font-size: 14px;
+}
+.pacing-ns-diff__note {
+  margin: 24px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 12.5px;
+}

@@ -3,9 +3,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1, aUserV1 } from "@/test/factories";
+import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1, aPacingNsDiffReportV1, aUserV1 } from "@/test/factories";
 import { ToastProvider } from "../../../shared/ui/toast/toast";
-import { listCampaignPacings } from "../../pacing-overview/api";
+import { getPacingNsDiff, listCampaignPacings } from "../../pacing-overview/api";
 import type { PacingListResponseV1, PacingRowV1 } from "../../pacing-overview/types";
 import * as pacingDashboardApi from "../../pacing-dashboard/api";
 import * as pacingCreateApi from "../../pacing-create/api";
@@ -22,6 +22,8 @@ vi.mock("../../pacing-overview/api", () => ({
   listAssignableOwners: vi.fn().mockResolvedValue({ owners: [] }),
   transferPacingOwner: vi.fn(),
   listPacingOverview: vi.fn(),
+  // §13: every row's "NetSuite diff" action fetches the live report through this module.
+  getPacingNsDiff: vi.fn(),
 }));
 
 // §8: the Create Pacing panel's own behavior is covered by create-pacing-panel.test.tsx - here we
@@ -152,6 +154,7 @@ describe("PacingTab", () => {
     vi.mocked(deletePacing).mockReset().mockResolvedValue(undefined);
     vi.mocked(revalidatePacing).mockReset().mockResolvedValue({ changed: false, changes: [], warnings: [] });
     vi.mocked(pacingDashboardApi.triggerPacingRefresh).mockReset().mockResolvedValue({ status: "started" });
+    vi.mocked(getPacingNsDiff).mockReset().mockResolvedValue(aPacingNsDiffReportV1());
   });
 
   it("shows the empty state when the campaign has no pacings", async () => {
@@ -423,6 +426,71 @@ describe("PacingTab", () => {
     expect(await screen.findByRole("menuitem", { name: "Refresh data" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Revalidate from NS" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+    // §13, US-136: like Refresh, this writes nothing back, so it is not admin-gated either.
+    expect(screen.getByRole("menuitem", { name: "NetSuite diff" })).toBeInTheDocument();
+  });
+
+  // §13, US-136. The live full breakdown, opened from the row menu, fetched fresh on every open.
+  describe("NetSuite diff sheet", () => {
+    it("opens the live report for a non-admin, with no differences shown as one message", async () => {
+      vi.mocked(listCampaignPacings).mockResolvedValue(
+        aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" })])
+      );
+      vi.mocked(getPacingNsDiff).mockResolvedValue(aPacingNsDiffReportV1({ inSync: true }));
+      renderTab();
+
+      await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "NetSuite diff" }));
+
+      expect(getPacingNsDiff).toHaveBeenCalledWith("p1");
+      expect(await screen.findByText(/No differences — this pacing matches NetSuite/)).toBeInTheDocument();
+    });
+
+    it("shows each non-empty class with its own heading and count, live rather than the nightly summary", async () => {
+      vi.mocked(listCampaignPacings).mockResolvedValue(
+        aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" })])
+      );
+      vi.mocked(getPacingNsDiff).mockResolvedValue(
+        aPacingNsDiffReportV1({
+          inSync: false,
+          missingInPacing: [
+            {
+              lineItemId: "600433",
+              campaignName: "Southwest",
+              channel: "Native Display",
+            },
+          ],
+          ownerDiff: [{ campaignId: "c1", campaignName: "Southwest", ownerName: "Azat Nabiev", mpoTeamLead: "Daria Feofanova" }],
+        })
+      );
+      renderTab();
+
+      await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "NetSuite diff" }));
+
+      expect(await screen.findByText("Missing from this pacing")).toBeInTheDocument();
+      // Grouped by flight and collapsed by default (§13 follow-up) - expand the one group to see it.
+      await userEvent.click(screen.getByRole("button", { name: "No flight dates · 1" }));
+      expect(screen.getByText("600433")).toBeInTheDocument();
+      expect(screen.getByText("Owner differs from NetSuite")).toBeInTheDocument();
+      expect(screen.getByText(/Pacing: Azat Nabiev · NetSuite: Daria Feofanova/)).toBeInTheDocument();
+      // Only the two populated classes get a heading - no empty sections for the other four.
+      expect(screen.queryByText("No longer in NetSuite")).not.toBeInTheDocument();
+      expect(screen.queryByText("Field differences")).not.toBeInTheDocument();
+    });
+
+    it("surfaces a failed live check as an error, not a silent empty sheet", async () => {
+      vi.mocked(listCampaignPacings).mockResolvedValue(
+        aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" })])
+      );
+      vi.mocked(getPacingNsDiff).mockRejectedValue(new Error("Pacing is unreachable"));
+      renderTab();
+
+      await userEvent.click(await screen.findByRole("button", { name: "Actions for Ourisman Ford Q1" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "NetSuite diff" }));
+
+      expect(await screen.findByText("Pacing is unreachable")).toBeInTheDocument();
+    });
   });
 
   it("triggers a refresh from the row menu and counts the cooldown down on the item", async () => {

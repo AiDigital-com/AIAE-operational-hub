@@ -293,7 +293,7 @@ class CampaignControllerTest {
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
 		HubAssertion assertion = new HubAssertion(currentUser.email(), PacingScope.KIND_ALL, List.of(), true);
 		List<PacingRow> pacings =
-				List.of(new PacingRow("p1", "nike-ss26", "Live", null, null, null, 0, null, null, null, null));
+				List.of(new PacingRow("p1", "nike-ss26", "Live", null, null, null, 0, null, null, null, null, null));
 		PacingListResponseV1 body = new PacingListResponseV1()
 				.scope(new PacingScopeV1().kind(PacingScopeV1.KindEnum.ALL).ids(List.of()).canCreate(true))
 				.pacings(List.of());
