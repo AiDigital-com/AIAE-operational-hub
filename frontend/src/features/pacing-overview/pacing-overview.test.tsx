@@ -151,6 +151,63 @@ describe("PacingOverview", () => {
     expect(screen.getByText("2")).toBeInTheDocument(); // warning
   });
 
+  it("should name the severity and list one alert per line when a badge is hovered", async () => {
+    // The bug: the hover joined every alert into a single nowrap line of middots, wider than the
+    // window and clipped by the table - "нечитаемый вообще". And three coloured pills in a row do
+    // not say which is which, so the card has to name the severity it belongs to.
+    const user = userEvent.setup();
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            alerts: [
+              aPacingAlertV1({ type: "ctr_below", severity: "warning", text: "CTR 0.08% below target 0.30% — Display LI" }),
+              aPacingAlertV1({ type: "stale_data", severity: "warning", text: "Stale data: latest 2026-09-18 (5d ago)" }),
+            ],
+          }),
+        ],
+      })
+    );
+    renderPacingOverview();
+    await screen.findByRole("table");
+
+    await user.hover(screen.getByLabelText("2 warning alerts"));
+
+    const card = await screen.findByRole("tooltip");
+    expect(card).toHaveTextContent("2 warning");
+    // Separate list items, not one run-on sentence: each alert is its own line and can wrap.
+    const lines = card.querySelectorAll(".tooltip__lines li");
+    expect([...lines].map((li) => li.textContent)).toEqual([
+      "CTR 0.08% below target 0.30% — Display LI",
+      "Stale data: latest 2026-09-18 (5d ago)",
+    ]);
+  });
+
+  it("should stop the hover card short of a wall of text, and say how many it left out", async () => {
+    // A pacing in trouble raises twenty of these. Twenty lines is a screen, not a hint - and a card
+    // that quietly showed eight of them would contradict the count on the badge it came from.
+    const user = userEvent.setup();
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            alerts: Array.from({ length: 11 }, (_, i) =>
+              aPacingAlertV1({ type: `t${i}`, severity: "critical", text: `Alert number ${i}` })
+            ),
+          }),
+        ],
+      })
+    );
+    renderPacingOverview();
+    await screen.findByRole("table");
+
+    await user.hover(screen.getByLabelText("11 critical alerts"));
+
+    const card = await screen.findByRole("tooltip");
+    expect(card.querySelectorAll(".tooltip__lines li")).toHaveLength(9); // 8 alerts + the note
+    expect(card).toHaveTextContent("+3 more");
+  });
+
   it("should filter by status against the already-loaded set, without a second request", async () => {
     // Given:
     const user = userEvent.setup();
@@ -444,8 +501,9 @@ describe("PacingOverview", () => {
     const ns = within(row).getByText(/NetSuite: Aleksandra/);
     expect(ns).toHaveClass("pacing-overview__owner-ns");
     expect(within(row).getByTitle("Azat Nabiev")).toBeInTheDocument();
-    // And the row still renders every column after the owner, alerts included.
-    expect(within(row).getByText("Stale data")).toBeInTheDocument();
+    // And the row still renders every column after the owner, alerts included. The alert text itself
+    // lives in the hover card now, so the column is checked by its badge.
+    expect(within(row).getByLabelText("1 critical alerts")).toHaveTextContent("1");
   });
 
 

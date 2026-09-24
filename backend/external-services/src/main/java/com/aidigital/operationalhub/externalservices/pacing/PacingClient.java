@@ -7,6 +7,8 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItem
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -324,6 +326,60 @@ public interface PacingClient {
 	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail}
 	 */
 	void saveDataSettings(HubAssertion assertion, String slug, PacingDataSettings settings);
+
+	/**
+	 * The delegations in force for the caller (§12 of the migration plan, US-135) - both the ones
+	 * they granted and the ones they received.
+	 *
+	 * <p>Only live grants come back: Pacing filters out revoked and expired rows in the query, so an
+	 * expired delegation leaves this list by itself and there is no status to interpret here.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @return the delegations in force, newest first
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	List<PacingDelegation> listDelegations(HubAssertion assertion);
+
+	/**
+	 * Grants a delegation (§12, US-133/134). Scoped to named pacings, or portfolio-wide when none are
+	 * named.
+	 *
+	 * <p>Re-granting to the same person over the same scope EXTENDS the existing row instead of adding
+	 * a second one. The one case Pacing refuses is a new end date that would cut an active grant
+	 * short: it answers 409 rather than quietly shortening someone's access, and the message carries
+	 * the date the existing grant runs to.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param grant     the delegation to write
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - a broken rule is
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail} naming it
+	 */
+	void createDelegation(HubAssertion assertion, PacingDelegationGrant grant);
+
+	/**
+	 * Extends a live delegation's end date (§12). Scope and recipient cannot move - only the date.
+	 *
+	 * @param assertion    who is calling and what they may see
+	 * @param delegationId the grant to extend
+	 * @param expiresAt    the new end date, date-only and inclusive
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	void extendDelegation(HubAssertion assertion, String delegationId, String expiresAt);
+
+	/**
+	 * Revokes a delegation (§12, US-134). Takes effect immediately; the record is kept - Pacing stamps
+	 * {@code revoked_at} and never deletes the row, so who had access when stays answerable.
+	 *
+	 * @param assertion    who is calling and what they may see
+	 * @param delegationId the grant to revoke
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	void revokeDelegation(HubAssertion assertion, String delegationId);
 
 	/**
 	 * Fetches this pacing's own campaign(s)' line items that are not yet on it (§9 of the migration

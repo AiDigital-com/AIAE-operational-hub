@@ -23,7 +23,9 @@
    absolute, so scrolling the page does not leave it behind mid-flight. */
 .opick {
   position: fixed;
-  z-index: 240;
+  /* Above the sheet and modal overlays (300), below toasts (400). The delegation form lives inside a
+     sheet, and at the table's old 240 the popover opened BEHIND the drawer it belongs to. */
+  z-index: 320;
   width: 280px;
   max-width: calc(100vw - 16px);
   max-height: 320px;
@@ -120,4 +122,41 @@
   padding: 8px 10px;
   font-size: 11px;
   color: var(--bad);
+}
+
+/* The same picker as a FORM FIELD (§12, the delegation form). Identical popover, different closed
+   state: in a table cell the trigger is a bare link, in a form it has to sit on the same baseline as
+   the date and reason inputs beside it, or the row reads as broken. Matches the global input rule in
+   styles.css rather than guessing: 42px tall, same border, radius and padding. */
+.opick__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.opick__field:hover {
+  border-color: var(--muted);
+}
+.opick__field[aria-expanded="true"] {
+  border-color: var(--primary);
+}
+/* Nothing chosen yet reads as a placeholder, the way the select's first option used to. */
+.opick__field--empty {
+  color: var(--muted);
+}
+.opick__field-chevron {
+  flex: none;
+  color: var(--muted);
 }

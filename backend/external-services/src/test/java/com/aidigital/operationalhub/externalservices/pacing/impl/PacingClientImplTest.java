@@ -10,6 +10,8 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItem
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -1649,6 +1651,129 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("devices: unknown catalog");
+	}
+
+	@Test
+	void shouldReadDelegationsUnderPacingsOwnColumnNamesTest() {
+		// Given: Pacing answers with SELECT d.* plus joined names, so the wire keys are column names.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/delegations"))
+				.andRespond(withSuccess("{\"delegations\":[{"
+						+ "\"delegation_id\":\"d1\",\"delegator_id\":\"u1\",\"delegator_name\":\"Lead\","
+						+ "\"delegate_id\":\"u2\",\"delegate_name\":\"Me\","
+						+ "\"starts_at\":\"2026-09-01T00:00:00.000Z\",\"expires_at\":\"2026-09-20T23:59:59.000Z\","
+						+ "\"pacing_id\":null,\"scope_pacing_name\":null,\"pacing_count\":7,"
+						+ "\"revoked_at\":null,\"created_at\":\"2026-09-01T00:00:00.000Z\"}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		List<PacingDelegation> result = client.listDelegations(assertion);
+
+		// Then: renamed, and the count that gives a portfolio-wide grant its size carried through
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0).delegationId()).isEqualTo("d1");
+		assertThat(result.get(0).delegatorName()).isEqualTo("Lead");
+		assertThat(result.get(0).pacingId()).isNull();
+		assertThat(result.get(0).pacingCount()).isEqualTo(7);
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitAbsentDelegationFieldsRatherThanSendNullsTest() {
+		// Given: a portfolio-wide grant with no start date. Pacing reads an ABSENT starts_at as "now"
+		// and an absent pacing_ids as "everything I own" - sending either as an explicit null would
+		// have it parse a null date and scope the grant to nothing.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/delegations"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).contains("\"delegate_id\":\"u2\"");
+					assertThat(body).contains("\"expires_at\":\"2026-09-20\"");
+					assertThat(body).doesNotContain("starts_at");
+					assertThat(body).doesNotContain("pacing_ids");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createDelegation(assertion,
+				new PacingDelegationGrant("u2", null, "2026-09-20", null, List.of()));
+		server.verify();
+	}
+
+	@Test
+	void shouldCarryNamedPacingsOnADelegationTest() {
+		// Given: a scoped grant - Pacing writes one row per pacing.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/delegations"))
+				.andExpect(content().json("{\"delegate_id\":\"u2\",\"pacing_ids\":[\"p1\",\"p2\"]}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createDelegation(assertion,
+				new PacingDelegationGrant("u2", "2026-09-01", "2026-09-20", "Leave", List.of("p1", "p2")));
+		server.verify();
+	}
+
+	@Test
+	void shouldSayWhenAGrantWouldCutAnActiveOneShortTest() {
+		// Given: Pacing's 409. It refuses to quietly shorten somebody's access and answers with the
+		// date the existing grant runs to - and that date IS the message. "Conflict" alone tells the
+		// delegator nothing about what to do next.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/delegations"))
+				.andRespond(withStatus(HttpStatus.CONFLICT)
+						.body("{\"error\":\"would_shorten_active\",\"existing_expires_at\":\"2026-10-05\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+		PacingDelegationGrant grant = new PacingDelegationGrant("u2", null, "2026-09-20", null, List.of());
+
+		// When-Then:
+		assertThatThrownBy(() -> client.createDelegation(assertion, grant))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getDetail())
+				.asString()
+				.contains("2026-10-05");
+	}
+
+	@Test
+	void shouldRevokeAndExtendByIdTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/delegations/d1"))
+				.andExpect(content().json("{\"expires_at\":\"2026-09-25\"}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+		server.expect(requestTo(BASE_URL + "/api/delegations/d1"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then: both address the row by its own id - a delegation over several pacings is several
+		// rows, and revoking one of them must not touch the others.
+		client.extendDelegation(assertion, "d1", "2026-09-25");
+		client.revokeDelegation(assertion, "d1");
+		server.verify();
 	}
 
 	@Test

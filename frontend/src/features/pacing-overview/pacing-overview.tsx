@@ -24,6 +24,7 @@ import {
   totalNsDiffCount,
 } from "./format";
 import { usePacingOverview } from "./hooks";
+import { DelegationsPanel } from "./delegations-panel";
 import { OwnerPicker } from "./owner-picker";
 import { pacingRoute } from "./navigation";
 import type { PacingRowV1, PacingScopeV1 } from "./types";
@@ -196,6 +197,40 @@ function SortableHeader({
   );
 }
 
+/** How many lines a tooltip shows before it stops being something you read at a glance. A pacing in
+ *  trouble can raise twenty alerts, and twenty is a screen, not a hint. */
+const TOOLTIP_LINES = 8;
+
+/**
+ * What a badge says when you hover it: how many of what, then one item per line.
+ *
+ * The lines used to be joined into one `nowrap` sentence with middots, which for a dozen alerts was
+ * a strip of text wider than the window - clipped by the table at one end and off the screen at the
+ * other. One per line, capped, with the rest counted.
+ */
+function BadgeDetail({ title, lines, footer }: { title: string; lines: string[]; footer?: string }) {
+  const shown = lines.slice(0, TOOLTIP_LINES);
+  const hidden = lines.length - shown.length;
+  return (
+    <>
+      <span className="tooltip__title">{title}</span>
+      <ul className="tooltip__lines">
+        {/* Keyed by position as well as text: two line items can raise word-for-word the same
+            alert, and a duplicate key would drop one of them. */}
+        {shown.map((line, index) => (
+          <li key={`${index}-${line}`}>{line}</li>
+        ))}
+        {hidden > 0 && (
+          // Says there is more rather than pretending the list ended - the count is the badge's own
+          // number, and a tooltip that silently showed eight of twelve would contradict it.
+          <li className="tooltip__more">+{hidden} more — open the pacing to see them all</li>
+        )}
+      </ul>
+      {footer && <span className="tooltip__foot">{footer}</span>}
+    </>
+  );
+}
+
 /**
  * One pacing row. Memoized so re-sorting/re-filtering only reconciles rows whose own data actually
  * changed identity, not the whole table. Clicking a row opens it (US-113): navigates to the first
@@ -275,9 +310,15 @@ const PacingTableRow = memo(function PacingTableRow({ row, onOpen }: { row: Paci
           </span>
         ) : (
           <Tooltip
-            content={[...nsDiffBreakdownLines(row.nsDiffSummary), `checked on ${fmtDate(row.nsDiffSummary.computedAt)}`].join(
-              " · "
-            )}
+            content={
+              <BadgeDetail
+                title={`${totalNsDiffCount(row.nsDiffSummary)} ${
+                  totalNsDiffCount(row.nsDiffSummary) === 1 ? "difference" : "differences"
+                } vs NetSuite`}
+                lines={nsDiffBreakdownLines(row.nsDiffSummary)}
+                footer={`Checked on ${fmtDate(row.nsDiffSummary.computedAt)}`}
+              />
+            }
           >
             <span className="pacing-overview__ns-diff-badge">{totalNsDiffCount(row.nsDiffSummary)}</span>
           </Tooltip>
@@ -289,8 +330,21 @@ const PacingTableRow = memo(function PacingTableRow({ row, onOpen }: { row: Paci
         ) : (
           <div className="pacing-overview__alerts">
             {ALERT_SEVERITY_ORDER.filter((severity) => alertsBySeverity[severity]?.length).map((severity) => (
-              <Tooltip key={severity} content={alertsBySeverity[severity].map((alert) => alert.text).join(" · ")}>
-                <span className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}>
+              <Tooltip
+                key={severity}
+                content={
+                  <BadgeDetail
+                    // The colour alone does not say which severity a badge is, and three of them in a
+                    // row is a guess. The heading names it.
+                    title={`${alertsBySeverity[severity].length} ${severity}`}
+                    lines={alertsBySeverity[severity].map((alert) => alert.text)}
+                  />
+                }
+              >
+                <span
+                  className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}
+                  aria-label={`${alertsBySeverity[severity].length} ${severity} alerts`}
+                >
                   {alertsBySeverity[severity].length}
                 </span>
               </Tooltip>
@@ -372,11 +426,26 @@ export function PacingOverview() {
     [navigate]
   );
 
+  const [delegationsOpen, setDelegationsOpen] = useState(false);
+
   return (
     <section className="pacing-overview">
       <div className="pacing-overview__head">
         <h1 className="pacing-overview__title">Pacing</h1>
+        {/* Delegations belong beside the list they affect: what a delegation does is add somebody
+            else's pacings to this very page, or hand yours to them. */}
+        <button
+          type="button"
+          className="button button--ghost button--sm"
+          onClick={() => setDelegationsOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={delegationsOpen}
+        >
+          Delegations
+        </button>
       </div>
+
+      <DelegationsPanel open={delegationsOpen} onClose={() => setDelegationsOpen(false)} />
 
       {overview.isPending && <LoadingBlock label="Loading pacings" />}
 

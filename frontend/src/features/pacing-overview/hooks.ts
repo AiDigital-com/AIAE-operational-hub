@@ -1,3 +1,4 @@
+import { createDelegation, extendDelegation, listDelegations, revokeDelegation } from "./delegations-api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPacingNsDiff, listAssignableOwners, listCampaignPacings, listPacingOverview, transferPacingOwner } from "./api";
 
@@ -71,4 +72,54 @@ export function usePacingNsDiff(pacingId: string, enabled: boolean) {
     queryFn: () => getPacingNsDiff(pacingId),
     enabled: enabled && pacingId !== "",
   });
+}
+
+/**
+ * Delegations in force for the current user (§12, US-135) - granted and received.
+ *
+ * Pacing filters out revoked and expired rows, so this list needs no client-side status logic and
+ * an expired grant leaves it by itself. Refetched on focus because a colleague may have revoked
+ * one while this tab sat open, and "why can I still see this" is exactly the question the screen
+ * exists to answer.
+ */
+export function useDelegations(enabled = true) {
+  return useQuery({
+    queryKey: ["pacing", "delegations"],
+    queryFn: listDelegations,
+    enabled,
+  });
+}
+
+/**
+ * Grants, extends or revokes - each invalidating both the delegation list and the pacing lists.
+ *
+ * The pacing lists matter as much as the list itself: a delegation decides what the DELEGATE can
+ * see, so granting or revoking one legitimately adds rows to or removes them from somebody's
+ * overview. Re-reading is the only honest way to show that.
+ */
+function useDelegationMutation<T>(fn: (input: T) => Promise<void>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // Wrapped rather than passed by reference: React Query calls a mutationFn with (variables,
+    // context), so handing it the API function directly gives that function a second argument it
+    // never asked for. Harmless today; a trap the day one of them grows an optional parameter.
+    mutationFn: (input: T) => fn(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pacing"] });
+    },
+  });
+}
+
+export function useCreateDelegation() {
+  return useDelegationMutation(createDelegation);
+}
+
+export function useRevokeDelegation() {
+  return useDelegationMutation(revokeDelegation);
+}
+
+export function useExtendDelegation() {
+  return useDelegationMutation(({ delegationId, expiresAt }: { delegationId: string; expiresAt: string }) =>
+    extendDelegation(delegationId, expiresAt)
+  );
 }
