@@ -9,6 +9,7 @@ import type {
   PacingLibraryKindV1,
   PacingLibrarySaveOutcome,
   PacingLikeResultV1,
+  PacingNotifySettingsV1,
   PacingRefreshOutcome,
   PacingRefreshStatusV1,
 } from "./types";
@@ -42,6 +43,29 @@ export async function savePacingDataSettings(
   settings: PacingDataSettingsUpdateV1
 ): Promise<void> {
   const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/data-settings", {
+    params: { path: { slug } },
+    body: settings,
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
+/**
+ * Saves a pacing's alert configuration (§14 of the migration plan): which of the 13 detectors run,
+ * which also post to Slack, each threshold, the master Slack switch, the legacy VCR/ACR summary
+ * column, whether paused line items are hidden from the Slack summary, and which projection the
+ * summary's target column prints.
+ *
+ * A WHOLE-OBJECT replace, unlike `savePacingDataSettings` - Pacing stores `notify` as one unit and
+ * refuses a save missing any of the 13 alert keys, so `settings` must be the complete configuration
+ * this pacing should have after the save, not a patch of only what changed.
+ *
+ * Nothing on screen changes on success - it only changes who gets alerted and what the Slack summary
+ * shows, both computed on the next detector run.
+ */
+export async function savePacingNotifySettings(slug: string, settings: PacingNotifySettingsV1): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/notify-settings", {
     params: { path: { slug } },
     body: settings,
   });

@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { getPacingDashboard, getPacingRefreshStatus, savePacingDataSettings } from "./api";
-import type { PacingDataSettingsUpdateV1 } from "./types";
+import {
+  getPacingDashboard,
+  getPacingRefreshStatus,
+  savePacingDataSettings,
+  savePacingNotifySettings,
+} from "./api";
+import type { PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
 
 /**
  * The pacing dashboard payload (§6 of the migration plan, US-114/115) - one request per pacing, same
@@ -27,6 +32,23 @@ export function useSavePacingDataSettings(slug: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: PacingDataSettingsUpdateV1) => savePacingDataSettings(slug as string, settings),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+    },
+  });
+}
+
+/**
+ * Saves this pacing's alert configuration (§14 of the migration plan).
+ *
+ * Invalidates only this pacing's dashboard, the same as `useSavePacingDataSettings`: none of these
+ * settings change a figure any list shows, but the Alerts tab hydrates from the payload's `notify`,
+ * so without it a reopened tab would still show the previous configuration.
+ */
+export function useSavePacingNotifySettings(slug: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: PacingNotifySettingsV1) => savePacingNotifySettings(slug as string, settings),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
     },

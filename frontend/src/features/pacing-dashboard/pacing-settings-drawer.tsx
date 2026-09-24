@@ -4,10 +4,11 @@ import { CloseIcon } from "../../shared/ui/icons/icons";
 import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
+import { PacingAlertsSection } from "./alerts-panel";
 import { PacingDataSection } from "./data-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
-import type { PacingDataShape, PacingDisplayShape } from "./types";
+import type { PacingDataShape, PacingDisplayShape, PacingNotifySettingsV1 } from "./types";
 import type { WidgetRenderContext } from "./widgets/widget-engine";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-settings-drawer.css";
@@ -45,12 +46,16 @@ export interface PacingSettingsDrawerProps {
   /** Handed to the widget section so its cards preview through the dashboard's own engine. */
   renderCtx: WidgetRenderContext;
   libraryEntries: Record<string, unknown> | undefined;
+  /** This pacing's stored alert configuration (§14), straight off the dashboard payload. */
+  notify: PacingNotifySettingsV1 | undefined;
+  /** Whether this pacing has a video line item - gates the Alerts tab's two VCR-only rows. */
+  hasVideo: boolean;
   /** Re-read the dashboard after a save that landed. */
   onSaved: () => void;
 }
 
 type DirtyMap = Record<SettingsTabId, boolean>;
-const NOTHING_DIRTY: DirtyMap = { plan: false, data: false, widgets: false };
+const NOTHING_DIRTY: DirtyMap = { plan: false, data: false, widgets: false, alerts: false };
 
 export function PacingSettingsDrawer({
   open,
@@ -64,6 +69,8 @@ export function PacingSettingsDrawer({
   isAdmin,
   renderCtx,
   libraryEntries,
+  notify,
+  hasVideo,
   onSaved,
 }: PacingSettingsDrawerProps) {
   const [tab, setTab] = useState<SettingsTabId>("plan");
@@ -78,8 +85,9 @@ export function PacingSettingsDrawer({
   const plan = useRef<SettingsSectionHandle>(null);
   const dataSection = useRef<SettingsSectionHandle>(null);
   const widgets = useRef<SettingsSectionHandle>(null);
+  const alerts = useRef<SettingsSectionHandle>(null);
   const handles = useMemo(
-    () => ({ plan, data: dataSection, widgets }) as Record<SettingsTabId, typeof plan>,
+    () => ({ plan, data: dataSection, widgets, alerts }) as Record<SettingsTabId, typeof plan>,
     []
   );
 
@@ -99,6 +107,7 @@ export function PacingSettingsDrawer({
   const markPlan = useCallback((v: boolean) => setDirty((d) => (d.plan === v ? d : { ...d, plan: v })), []);
   const markData = useCallback((v: boolean) => setDirty((d) => (d.data === v ? d : { ...d, data: v })), []);
   const markWidgets = useCallback((v: boolean) => setDirty((d) => (d.widgets === v ? d : { ...d, widgets: v })), []);
+  const markAlerts = useCallback((v: boolean) => setDirty((d) => (d.alerts === v ? d : { ...d, alerts: v })), []);
 
   const dirtyTabs = SETTINGS_TABS.filter((t) => dirty[t.id]).map((t) => t.id);
   const anyDirty = dirtyTabs.length > 0;
@@ -230,6 +239,16 @@ export function PacingSettingsDrawer({
             libraryEntries={libraryEntries}
             seedKey={seedKey}
             onDirtyChange={markWidgets}
+          />
+        </div>
+        <div className={cn("psettings__panel", tab !== "alerts" && "psettings__panel--hidden")}>
+          <PacingAlertsSection
+            ref={alerts}
+            slug={slug}
+            notify={notify}
+            hasVideo={hasVideo}
+            seedKey={seedKey}
+            onDirtyChange={markAlerts}
           />
         </div>
       </Sheet>

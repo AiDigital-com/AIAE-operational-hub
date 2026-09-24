@@ -13,6 +13,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
@@ -326,6 +327,38 @@ public interface PacingClient {
 	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail}
 	 */
 	void saveDataSettings(HubAssertion assertion, String slug, PacingDataSettings settings);
+
+	/**
+	 * Saves a pacing's alert configuration (§14 of the migration plan): which of the 13 detectors run,
+	 * which also post to Slack, each one's threshold, the master Slack switch, the legacy VCR/ACR
+	 * summary column, whether paused line items are hidden from the Slack summary, and which
+	 * projection ({@code plan}/{@code reforecast}) the summary's target column prints. {@code POST
+	 * /api/dashboards/:slug/settings} on the Pacing side carrying only the {@code notify} fragment -
+	 * the fourth caller of that one write path, beside {@link #saveDisplay}, {@link #savePlan} and
+	 * {@link #saveDataSettings}.
+	 *
+	 * <p>Unlike {@link #saveDataSettings}, this is a WHOLE-OBJECT replace, not a partial patch: Pacing
+	 * stores {@code notify} as one unit ({@code dash-gate/lib/db.mjs:saveSettings}) and its validator
+	 * requires every one of the 13 alert keys to be present, refusing rather than defaulting a key the
+	 * caller left out. {@code settings} must therefore be the WHOLE configuration this pacing should
+	 * have after the save - typically what {@link #getDashboardData}'s {@code notify} returned, edited
+	 * in place, never a narrower object built from only the fields a screen changed.
+	 *
+	 * <p>Nothing visible changes on a successful save - it only changes who gets alerted and what the
+	 * Slack summary shows, both computed on the next detector run. Like {@link #saveDataSettings} and
+	 * unlike {@link #saveDisplay} there is no revision and so no conflict outcome: Pacing does not
+	 * version-guard this namespace either, and a rejection (an out-of-range threshold, an inverted
+	 * band, a malformed field) throws.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param settings  the whole alert configuration to persist
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - a refused configuration is
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail} naming the field
+	 */
+	void saveNotifySettings(HubAssertion assertion, String slug, PacingNotifySettings settings);
 
 	/**
 	 * The delegations in force for the caller (§12 of the migration plan, US-135) - both the ones

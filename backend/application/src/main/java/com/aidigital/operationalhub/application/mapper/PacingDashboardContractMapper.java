@@ -1,5 +1,15 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBandV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBaseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleDaysV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleFactorV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapDaysV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapPpV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleSpendV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleThresholdPctV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleWindowThresholdV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
@@ -8,14 +18,29 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLib
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLineItemPlanV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifyMetricsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPauseIntervalV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSummaryProjectionV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleFactor;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapPp;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleSpend;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPauseInterval;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import org.springframework.stereotype.Component;
@@ -62,6 +87,7 @@ public class PacingDashboardContractMapper {
 				// own defaults for an absent namespace, and an empty map would be indistinguishable
 				// from a namespace that exists and happens to be empty.
 				.data(data.data())
+				.notify(data.notifySettings() == null ? null : toV1(data.notifySettings()))
 				.journal(toJournalV1(data.journal()));
 	}
 
@@ -86,6 +112,173 @@ public class PacingDashboardContractMapper {
 				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as
 				// an empty list rather than collapsing back into "absent".
 				body.getDimSources() == null ? null : body.getDimSources().getEntries());
+	}
+
+	/**
+	 * Builds the {@code notify} field of the {@code GET /api/v1/pacing/dashboards/{slug}} response
+	 * (§14 of the migration plan).
+	 *
+	 * @param settings the alert configuration Pacing returned
+	 * @return the generated {@link PacingNotifySettingsV1}
+	 */
+	public PacingNotifySettingsV1 toV1(PacingNotifySettings settings) {
+		return new PacingNotifySettingsV1()
+				.alerts(toV1(settings.alerts()))
+				.metrics(new PacingNotifyMetricsV1().vcr(settings.metrics().vcr()))
+				.hidePaused(settings.hidePaused())
+				.summaryProjection(PacingSummaryProjectionV1.fromValue(settings.summaryProjection()));
+	}
+
+	/**
+	 * Reads a {@code POST /api/v1/pacing/dashboards/{slug}/notify-settings} request into the
+	 * external-services model (§14 of the migration plan).
+	 *
+	 * <p>Unlike {@link #toDataSettings}, every field is required by the generated request type - this
+	 * is a whole-object replace, not a partial patch (see {@link PacingNotifySettings}'s javadoc), so
+	 * there is no "absent means untouched" case to preserve here.
+	 *
+	 * @param body the request body
+	 * @return the alert configuration to forward to Pacing
+	 */
+	public PacingNotifySettings toNotifySettings(PacingNotifySettingsV1 body) {
+		return new PacingNotifySettings(
+				toAlertsConfig(body.getAlerts()),
+				new PacingNotifyMetrics(body.getMetrics().getVcr()),
+				body.getHidePaused(),
+				body.getSummaryProjection().getValue());
+	}
+
+	/**
+	 * Maps the 13-detector alert configuration, plus its master Slack switch, to the generated shape.
+	 *
+	 * @param alerts the alert configuration Pacing returned
+	 * @return the generated {@link PacingAlertsConfigV1}
+	 */
+	PacingAlertsConfigV1 toV1(PacingAlertsConfig alerts) {
+		return new PacingAlertsConfigV1()
+				.enabled(alerts.enabled())
+				.bidFactAbovePlan(toV1(alerts.bidFactAbovePlan()))
+				.dataGap(new PacingAlertRuleGapDaysV1()
+						.enabled(alerts.dataGap().enabled()).slack(alerts.dataGap().slack())
+						.gapDays(alerts.dataGap().gapDays()))
+				.ctrBelowTarget(toV1(alerts.ctrBelowTarget()))
+				.vcrBelowTarget(toV1(alerts.vcrBelowTarget()))
+				.ctrAboveTarget(toV1(alerts.ctrAboveTarget()))
+				.vcrOver100(toV1(alerts.vcrOver100()))
+				.noImpressionsYet(toV1(alerts.noImpressionsYet()))
+				.pacingOffPace(new PacingAlertRuleBandV1()
+						.enabled(alerts.pacingOffPace().enabled()).slack(alerts.pacingOffPace().slack())
+						.low(alerts.pacingOffPace().low()).high(alerts.pacingOffPace().high()))
+				.marginBelowTarget(new PacingAlertRuleGapPpV1()
+						.enabled(alerts.marginBelowTarget().enabled()).slack(alerts.marginBelowTarget().slack())
+						.gapPp(alerts.marginBelowTarget().gapPp()))
+				.spendOverspend(new PacingAlertRuleSpendV1()
+						.enabled(alerts.spendOverspend().enabled()).slack(alerts.spendOverspend().slack())
+						.warnPct(alerts.spendOverspend().warnPct()).badPct(alerts.spendOverspend().badPct()))
+				.dspForecastOverspend(toV1(alerts.dspForecastOverspend()))
+				.staleData(new PacingAlertRuleDaysV1()
+						.enabled(alerts.staleData().enabled()).slack(alerts.staleData().slack())
+						.days(alerts.staleData().days()))
+				.rateCostAbovePlan(new PacingAlertRuleThresholdPctV1()
+						.enabled(alerts.rateCostAbovePlan().enabled()).slack(alerts.rateCostAbovePlan().slack())
+						.thresholdPct(alerts.rateCostAbovePlan().thresholdPct()));
+	}
+
+	/**
+	 * Maps a threshold-less detector (no threshold field beyond enabled/slack).
+	 *
+	 * @param rule the detector's stored configuration
+	 * @return the generated {@link PacingAlertRuleBaseV1}
+	 */
+	PacingAlertRuleBaseV1 toV1(PacingAlertRuleBase rule) {
+		return new PacingAlertRuleBaseV1().enabled(rule.enabled()).slack(rule.slack());
+	}
+
+	/**
+	 * Maps a factor-of-target detector ({@code ctr_below_target}, {@code vcr_below_target},
+	 * {@code ctr_above_target}).
+	 *
+	 * @param rule the detector's stored configuration
+	 * @return the generated {@link PacingAlertRuleFactorV1}
+	 */
+	PacingAlertRuleFactorV1 toV1(PacingAlertRuleFactor rule) {
+		return new PacingAlertRuleFactorV1().enabled(rule.enabled()).slack(rule.slack()).factor(rule.factor());
+	}
+
+	/**
+	 * Maps the Bid Fact above plan detector, the only one with both a window and a threshold.
+	 *
+	 * @param rule the detector's stored configuration
+	 * @return the generated {@link PacingAlertRuleWindowThresholdV1}
+	 */
+	PacingAlertRuleWindowThresholdV1 toV1(PacingAlertRuleWindowThreshold rule) {
+		return new PacingAlertRuleWindowThresholdV1()
+				.enabled(rule.enabled()).slack(rule.slack())
+				.window(rule.window()).thresholdPct(rule.thresholdPct());
+	}
+
+	/**
+	 * Reads the generated alert-configuration request shape into the external-services model.
+	 *
+	 * @param v1 the request's alert configuration
+	 * @return the alert configuration to forward to Pacing
+	 */
+	PacingAlertsConfig toAlertsConfig(PacingAlertsConfigV1 v1) {
+		return new PacingAlertsConfig(
+				v1.getEnabled(),
+				toWindowThreshold(v1.getBidFactAbovePlan()),
+				new PacingAlertRuleGapDays(
+						v1.getDataGap().getEnabled(), v1.getDataGap().getSlack(), v1.getDataGap().getGapDays()),
+				toFactor(v1.getCtrBelowTarget()),
+				toFactor(v1.getVcrBelowTarget()),
+				toFactor(v1.getCtrAboveTarget()),
+				toBase(v1.getVcrOver100()),
+				toBase(v1.getNoImpressionsYet()),
+				new PacingAlertRuleBand(
+						v1.getPacingOffPace().getEnabled(), v1.getPacingOffPace().getSlack(),
+						v1.getPacingOffPace().getLow(), v1.getPacingOffPace().getHigh()),
+				new PacingAlertRuleGapPp(
+						v1.getMarginBelowTarget().getEnabled(), v1.getMarginBelowTarget().getSlack(),
+						v1.getMarginBelowTarget().getGapPp()),
+				new PacingAlertRuleSpend(
+						v1.getSpendOverspend().getEnabled(), v1.getSpendOverspend().getSlack(),
+						v1.getSpendOverspend().getWarnPct(), v1.getSpendOverspend().getBadPct()),
+				toBase(v1.getDspForecastOverspend()),
+				new PacingAlertRuleDays(
+						v1.getStaleData().getEnabled(), v1.getStaleData().getSlack(), v1.getStaleData().getDays()),
+				new PacingAlertRuleThresholdPct(
+						v1.getRateCostAbovePlan().getEnabled(), v1.getRateCostAbovePlan().getSlack(),
+						v1.getRateCostAbovePlan().getThresholdPct()));
+	}
+
+	/**
+	 * Reads a threshold-less detector's request shape into the external-services model.
+	 *
+	 * @param v1 the detector's request shape
+	 * @return the detector configuration to forward to Pacing
+	 */
+	PacingAlertRuleBase toBase(PacingAlertRuleBaseV1 v1) {
+		return new PacingAlertRuleBase(v1.getEnabled(), v1.getSlack());
+	}
+
+	/**
+	 * Reads a factor-of-target detector's request shape into the external-services model.
+	 *
+	 * @param v1 the detector's request shape
+	 * @return the detector configuration to forward to Pacing
+	 */
+	PacingAlertRuleFactor toFactor(PacingAlertRuleFactorV1 v1) {
+		return new PacingAlertRuleFactor(v1.getEnabled(), v1.getSlack(), v1.getFactor());
+	}
+
+	/**
+	 * Reads the Bid Fact above plan detector's request shape into the external-services model.
+	 *
+	 * @param v1 the detector's request shape
+	 * @return the detector configuration to forward to Pacing
+	 */
+	PacingAlertRuleWindowThreshold toWindowThreshold(PacingAlertRuleWindowThresholdV1 v1) {
+		return new PacingAlertRuleWindowThreshold(v1.getEnabled(), v1.getSlack(), v1.getWindow(), v1.getThresholdPct());
 	}
 
 	private PacingDashboardCampaignV1 toCampaignV1(PacingDashboardCampaign campaign) {
