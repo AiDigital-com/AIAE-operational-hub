@@ -1,0 +1,59 @@
+/* Delegations (§12): grant, see, revoke. */
+
+.deleg__section + .deleg__section {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+.deleg__heading { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--ink); }
+.deleg__hint { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted-strong); }
+
+.deleg__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.deleg__field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* Every field is label-over-control, so nothing in this grid sits on a different baseline from its
+   neighbour - the failure a bare input beside a labelled one always produces. */
+.deleg__field--wide { grid-column: 1 / -1; }
+.deleg__label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+
+.deleg__actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+.deleg__list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.deleg__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+/* A portfolio-wide grant is the bigger promise, so it is tinted rather than railed - the project
+   bans side stripes, and a background says "all of it" just as well. */
+.deleg__row--wide-scope { background: var(--n-100); }
+.deleg__row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.deleg__person { font-size: 13.5px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.deleg__scope { font-size: 12px; color: var(--muted-strong); overflow-wrap: anywhere; }
+.deleg__row-meta { display: flex; flex-direction: column; gap: 2px; text-align: right; flex: none; }
+.deleg__period { font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.deleg__reason { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  .deleg__row { flex-wrap: wrap; }
+  .deleg__row-meta { text-align: left; }
+}
+
+/* One line, ellipsised: the trigger is a grid cell of fixed width and a long name must not push the
+   chevron out of it. flex:1 with min-width:0, because a flex item's default min-width:auto refuses
+   to shrink below its own text and the ellipsis would never happen. */
+.deleg__to-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

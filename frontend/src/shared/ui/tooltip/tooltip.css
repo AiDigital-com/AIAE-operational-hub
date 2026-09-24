@@ -2,34 +2,73 @@
   position: relative;
   display: inline-flex;
 }
+
+/* Portalled onto <body> and positioned against the viewport (top/left come from the component,
+   measured off the anchor AND off the bubble's own size). Two things this buys over the absolute
+   bubble it replaces: a table that scrolls can no longer clip it, and it cannot contribute phantom
+   scrollable width to that table, which is what the old `display:none` dance was working around. */
 .tooltip__bubble {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  position: fixed;
+  /* Above the sheet and modal overlays (300) and the person picker (320); below toasts (400). */
+  z-index: 330;
+  /* Wraps. A tooltip is worth having only if it can be read, and the alert list behind these badges
+     is a dozen sentences, not three words. */
+  max-width: 340px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   background: var(--ink);
   color: var(--surface);
   font-size: 12px;
   font-weight: 600;
-  padding: 6px 10px;
+  line-height: 1.45;
+  padding: 8px 10px;
   border-radius: var(--radius);
-  white-space: nowrap;
-  opacity: 0;
-  /* `display: none`, not `visibility: hidden`.
-     A hidden-but-displayed absolute element still contributes to its scroll container's
-     scrollable area. In the Pacing Overview that put a strip of empty space to the right of the
-     last column — the bubble's own width, invisible but draggable — as soon as the table's box
-     started scrolling instead of clipping. Not displayed at all contributes nothing.
-     Costs the fade-in: `display` does not animate. A tooltip that appears instantly is a fair
-     trade for one that does not drag phantom width behind it. */
-  display: none;
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+  /* Never steals the hover from the thing it explains - moving the pointer toward the bubble would
+     otherwise make it flicker out from under itself. */
   pointer-events: none;
-  transition: opacity .12s ease, transform .12s ease;
-  z-index: 20;
 }
-.tooltip:hover .tooltip__bubble,
-.tooltip:focus-within .tooltip__bubble {
-  opacity: 1;
+
+/* ── structured content ──────────────────────────────────────────────────────
+   A heading that says how many of what, then one line per item. Joining the items into a single
+   sentence is what made this unreadable: twelve alerts separated by middots is a paragraph nobody
+   parses at a glance. */
+.tooltip__title {
   display: block;
-  transform: translateX(-50%) translateY(0);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  opacity: .72;
+}
+.tooltip__lines {
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* Hanging indent: the wrapped remainder of a long alert lines up under its own first word, not
+   under the bullet. Without it a two-line alert and two one-line alerts look the same. */
+.tooltip__lines li {
+  font-weight: 500;
+  padding-left: 11px;
+  text-indent: -11px;
+}
+.tooltip__lines li::before {
+  content: "• ";
+  opacity: .55;
+}
+.tooltip__more {
+  opacity: .7;
+  font-style: italic;
+}
+.tooltip__foot {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: .66;
 }

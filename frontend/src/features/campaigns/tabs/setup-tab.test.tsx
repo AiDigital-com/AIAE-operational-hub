@@ -113,9 +113,14 @@ describe("SetupTab", () => {
     renderSetupTab();
     await screen.findByText(/IO SO/);
 
-    // Then: the +3 tag is present, and hovering it reveals the remaining tactic names
+    // Then: the +3 tag is present, and hovering it reveals the remaining tactic names. Not rendered
+    // until then - the bubble is portalled onto <body> on hover, so it cannot be clipped by the
+    // table or drag phantom width behind it.
     expect(screen.getByText("+3")).toBeInTheDocument();
-    expect(screen.getByText("YouTube, Native, Audio")).toBeInTheDocument();
+    expect(screen.queryByText("YouTube, Native, Audio")).not.toBeInTheDocument();
+
+    await userEvent.hover(screen.getByText("+3"));
+    expect(await screen.findByText("YouTube, Native, Audio")).toBeInTheDocument();
   });
 
   it("should match a line item by its channel and show only that line item, not its order's other siblings", async () => {

@@ -11,6 +11,8 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItem
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -59,6 +61,7 @@ public class PacingClientImpl implements PacingClient {
 	private static final String USERS_SYNC_PATH = "/api/internal/users/sync";
 	private static final String INTERNAL_USERS_PATH = "/api/internal/users";
 	private static final String DASHBOARDS_PATH = "/api/dashboards";
+	private static final String DELEGATIONS_PATH = "/api/delegations";
 	private static final String LIBRARY_PATH = "/api/library";
 	private static final String ADMIN_REFRESH_ALL_PATH = "/api/admin/refresh-all-dashboards";
 
@@ -571,6 +574,140 @@ public class PacingClientImpl implements PacingClient {
 		return new DataNamespaceRequest(
 				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
 				settings.dimSources());
+	}
+
+	@Override
+	public List<PacingDelegation> listDelegations(HubAssertion assertion) {
+		String header = assertionSigner.sign(assertion);
+		try {
+			DelegationListResponse response = restClient.get()
+					.uri(DELEGATIONS_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(DelegationListResponse.class);
+			// An empty list is an answer - nobody has delegated anything. Only a missing BODY is a
+			// failure, and it is the same failure every other read here reports.
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER,
+						"Pacing request failed: GET " + DELEGATIONS_PATH + " returned an empty body");
+			}
+			return response.delegations() == null ? List.of()
+					: response.delegations().stream().map(this::toDelegation).toList();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("GET", DELEGATIONS_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + DELEGATIONS_PATH, ex);
+		}
+	}
+
+	@Override
+	public void createDelegation(HubAssertion assertion, PacingDelegationGrant grant) {
+		String header = assertionSigner.sign(assertion);
+		DelegationCreateRequest request = new DelegationCreateRequest(
+				grant.delegateId(), grant.startsAt(), grant.expiresAt(), grant.reason(),
+				grant.pacingIds() == null || grant.pacingIds().isEmpty() ? null : grant.pacingIds());
+		try {
+			restClient.post()
+					.uri(DELEGATIONS_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw delegationFailure("POST", DELEGATIONS_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + DELEGATIONS_PATH, ex);
+		}
+	}
+
+	@Override
+	public void extendDelegation(HubAssertion assertion, String delegationId, String expiresAt) {
+		String header = assertionSigner.sign(assertion);
+		String path = DELEGATIONS_PATH + "/" + delegationId;
+		try {
+			restClient.patch()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(new DelegationExtendRequest(expiresAt))
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw delegationFailure("PATCH", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: PATCH " + path, ex);
+		}
+	}
+
+	@Override
+	public void revokeDelegation(HubAssertion assertion, String delegationId) {
+		String header = assertionSigner.sign(assertion);
+		String path = DELEGATIONS_PATH + "/" + delegationId;
+		try {
+			restClient.delete()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw delegationFailure("DELETE", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: DELETE " + path, ex);
+		}
+	}
+
+	/**
+	 * Renames one delegation row from Pacing's snake_case wire shape.
+	 *
+	 * @param row the wire row
+	 * @return the delegation
+	 */
+	private PacingDelegation toDelegation(DelegationRow row) {
+		return new PacingDelegation(
+				row.delegation_id(), row.delegator_id(), row.delegator_name(), row.delegator_email(),
+				row.delegate_id(), row.delegate_name(), row.delegate_email(),
+				row.starts_at(), row.expires_at(), row.reason(),
+				row.pacing_id(), row.scope_pacing_name(), row.scope_dash_slug(), row.pacing_count());
+	}
+
+	/**
+	 * Maps a non-2xx delegation response to a {@link PacingExternalException}.
+	 *
+	 * <p>Its own describer for one case the shared helper has no words for: 409
+	 * {@code would_shorten_active}. Pacing refuses to quietly cut an active grant short and answers
+	 * with the date the existing one runs to - and that date IS the message. "Conflict" without it
+	 * tells the delegator nothing about what to do next, which is either to pick a later date or to
+	 * revoke the grant they forgot they had made.
+	 *
+	 * <p>Everything else - the rule refusals on 400, the 403/404s - has a plain {@code error} code and
+	 * an optional {@code detail}, exactly the shape {@link #dashboardFailure} already reads.
+	 *
+	 * @param method the HTTP method that was called
+	 * @param path   the path that was called
+	 * @param ex     the response exception
+	 * @return the mapped exception, ready to throw
+	 */
+	private PacingExternalException delegationFailure(
+			String method, String path, RestClientResponseException ex) {
+		JsonNode body = readBody(ex);
+		if (ex.getStatusCode().value() == 409) {
+			String until = textField(body, "existing_expires_at");
+			String pacing = textField(body, "pacing_name");
+			String detail = "An active delegation already runs to " + (until == null ? "a later date" : until)
+					+ (pacing == null ? "" : " for " + pacing)
+					+ ". Revoke it first, or pick a date on or after that one.";
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_BAD_REQUEST,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 409 (would_shorten_active)",
+					detail);
+		}
+		return dashboardFailure(method, path, ex, body);
 	}
 
 	/**
@@ -1389,6 +1526,83 @@ public class PacingClientImpl implements PacingClient {
 	 * @param line_items the whole line-item set to persist
 	 */
 	private record PlanSettingsRequest(List<LineItemPlanUpdateRequest> line_items) {
+	}
+
+	/**
+	 * One delegation as Pacing's {@code GET /api/delegations} returns it - {@code SELECT d.*} plus the
+	 * joined names, so the field names are the column names.
+	 *
+	 * @param delegation_id     the grant's id
+	 * @param delegator_id      who gave the access
+	 * @param delegator_name    their name
+	 * @param delegator_email   their email
+	 * @param delegate_id       who received it
+	 * @param delegate_name     their name
+	 * @param delegate_email    their email
+	 * @param starts_at         when the grant opens
+	 * @param expires_at        when it closes
+	 * @param reason            free text, or null
+	 * @param pacing_id         the scoped pacing, or null for everything the delegator owns
+	 * @param scope_pacing_name that pacing's name
+	 * @param scope_dash_slug   that pacing's slug
+	 * @param pacing_count      how many pacings the delegator owns
+	 */
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+	private record DelegationRow(
+			String delegation_id,
+			String delegator_id,
+			String delegator_name,
+			String delegator_email,
+			String delegate_id,
+			String delegate_name,
+			String delegate_email,
+			String starts_at,
+			String expires_at,
+			String reason,
+			String pacing_id,
+			String scope_pacing_name,
+			String scope_dash_slug,
+			Integer pacing_count) {
+	}
+
+	/**
+	 * The {@code GET /api/delegations} envelope.
+	 *
+	 * @param delegations the rows
+	 */
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+	private record DelegationListResponse(List<DelegationRow> delegations) {
+	}
+
+	/**
+	 * The {@code POST /api/delegations} body.
+	 *
+	 * <p>NON_NULL for {@link LineItemPlanUpdateRequest}'s reason: Pacing reads an ABSENT
+	 * {@code starts_at} as "now" and an absent {@code pacing_ids} as "everything I own", and both of
+	 * those are decisions - sending them as explicit nulls would have Pacing parse a null date and
+	 * scope a grant to nothing.
+	 *
+	 * @param delegate_id who receives the access
+	 * @param starts_at   date-only, or absent for now
+	 * @param expires_at  date-only and inclusive
+	 * @param reason      free text, or absent
+	 * @param pacing_ids  the scoped pacings, or absent for everything the delegator owns
+	 */
+	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+	private record DelegationCreateRequest(
+			String delegate_id,
+			String starts_at,
+			String expires_at,
+			String reason,
+			List<String> pacing_ids) {
+	}
+
+	/**
+	 * The {@code PATCH /api/delegations/:id} body - only the end date can move.
+	 *
+	 * @param expires_at the new end date, date-only and inclusive
+	 */
+	private record DelegationExtendRequest(String expires_at) {
 	}
 
 	/**

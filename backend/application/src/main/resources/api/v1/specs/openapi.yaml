@@ -93,7 +93,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -122,7 +123,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -151,7 +153,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -180,7 +183,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -225,7 +229,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -268,7 +273,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -317,7 +323,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -367,7 +374,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -412,7 +420,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -457,7 +466,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -502,7 +512,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -541,7 +552,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -604,7 +616,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -663,7 +676,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -746,7 +760,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -805,7 +820,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -860,7 +876,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -918,7 +935,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -978,7 +996,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1043,7 +1062,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1102,7 +1122,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1166,7 +1187,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1227,7 +1249,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1294,7 +1317,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1349,7 +1373,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1409,7 +1434,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1458,7 +1484,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1507,7 +1534,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1562,7 +1590,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1626,7 +1655,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1669,7 +1699,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1723,7 +1754,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1772,7 +1804,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1828,7 +1861,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1892,7 +1926,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1938,7 +1973,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -1994,7 +2030,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2044,7 +2081,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2110,7 +2148,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2176,7 +2215,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2245,7 +2285,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2309,7 +2350,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2358,7 +2400,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2393,7 +2436,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2432,7 +2476,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2477,7 +2522,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2525,7 +2571,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2560,7 +2607,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2590,7 +2638,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2605,7 +2654,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2630,7 +2680,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2661,7 +2712,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2729,7 +2781,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2775,7 +2828,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2797,7 +2851,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2834,7 +2889,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2865,7 +2921,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2906,7 +2963,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -2943,7 +3001,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -2976,7 +3035,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3008,7 +3068,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3028,7 +3089,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3077,7 +3139,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3105,7 +3168,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3164,7 +3228,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3182,7 +3247,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3242,7 +3308,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3260,7 +3327,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3294,7 +3362,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3312,7 +3381,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3367,7 +3437,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3413,7 +3484,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3431,7 +3503,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3495,7 +3568,210 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/delegations:
+    get:
+      tags:
+        - pacingDelegation
+      operationId: listPacingDelegations
+      description: >
+        Delegations in force for the current user (§12, US-135) - both the ones they granted and the
+        ones they received, so a person can answer "why can I see this?" without asking anyone.
+
+        Only live grants are returned: Pacing filters out revoked and expired rows, so an expired
+        delegation drops off this list by itself rather than needing to be cleaned up.
+      responses:
+        '200':
+          description: The delegations in force.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDelegationListV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >-
+            The delegation, the recipient or a named pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - pacingDelegation
+      operationId: createPacingDelegation
+      description: >
+        Grants a delegation (§12, US-133/134). Scoped to named pacings, or portfolio-wide when none
+        are named.
+
+        Re-granting to the same person over the same scope EXTENDS the existing row rather than
+        adding a second one - except when the new end date would cut an active grant short, which
+        Pacing refuses with 409 rather than silently shortening someone's access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDelegationCreateV1'
+      responses:
+        '201':
+          description: The delegation was granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDelegationResultV1'
+        '400':
+          description: >-
+            Pacing refused the grant - `message` says which rule was broken: at most 30 days, no
+            delegating to yourself, no start in the past, or a malformed pacing id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >-
+            An active grant already runs later than the requested end date. Revoke it first;
+            `message` carries the date it runs to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >-
+            The delegation, the recipient or a named pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/delegations/{delegationId}:
+    patch:
+      tags:
+        - pacingDelegation
+      operationId: updatePacingDelegation
+      description: Extends a live delegation's end date (§12). Scope and recipient cannot move.
+      parameters:
+        - name: delegationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDelegationUpdateV1'
+      responses:
+        '200':
+          description: The delegation was extended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDelegationResultV1'
+        '400':
+          description: >-
+            Pacing refused the new end date - before the start, or more than 30 days after it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >-
+            The delegation, the recipient or a named pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    delete:
+      tags:
+        - pacingDelegation
+      operationId: revokePacingDelegation
+      description: >
+        Revokes a delegation (§12, US-134). Takes effect immediately; the record is kept - Pacing
+        stamps `revoked_at` and never deletes the row, so who had access when stays answerable.
+      parameters:
+        - name: delegationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The delegation was revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDelegationResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >-
+            The delegation, the recipient or a named pacing was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3526,7 +3802,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3564,7 +3841,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3599,7 +3877,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3633,7 +3912,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3659,7 +3939,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3708,7 +3989,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3810,7 +4092,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3864,7 +4147,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3884,7 +4168,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -3921,7 +4206,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -3947,7 +4233,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -4020,7 +4307,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -4087,7 +4375,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -4114,7 +4403,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -4138,7 +4428,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -4164,7 +4455,8 @@ paths:
         '401':
           description: The authorization token not provided or expired.
         '403':
-          description: The authorization token not correct or user not authorized.
+          description: >-
+            The authorization token not correct or user not authorized.
           content:
             application/json:
               schema:
@@ -4188,7 +4480,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
-          description: The Pacing service could not be reached (connection failure or timeout).
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -7740,6 +8033,131 @@ components:
         re-reads GET /api/v1/pacing/dashboards/{slug} for the saved values and the figures Pacing
         recomputed from them (`metrics`), the same read-after-write pattern §6's display save uses,
         so the dashboard reflects the change from one source rather than two.
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
+    PacingDelegationV1:
+      type: object
+      description: >
+        One live delegation (§12, US-135). Pacing returns only grants that are neither revoked nor
+        expired, so a row being here IS the statement that it is in force right now.
+      properties:
+        delegationId:
+          type: string
+        delegatorId:
+          type: string
+        delegatorName:
+          type: string
+        delegatorEmail:
+          type: string
+        delegateId:
+          type: string
+        delegateName:
+          type: string
+        delegateEmail:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          nullable: true
+        pacingId:
+          type: string
+          nullable: true
+          description: >
+            The single pacing this grant covers, or null for everything the delegator owns. A
+            delegation over several pacings is several rows, one per pacing - that is how Pacing
+            stores it, and collapsing them here would make revoking one of them unexpressible.
+        pacingName:
+          type: string
+          nullable: true
+          description: The scoped pacing's name; null on a portfolio-wide grant.
+        dashSlug:
+          type: string
+          nullable: true
+        pacingCount:
+          type: integer
+          format: int32
+          description: >
+            How many pacings the delegator owns. What a portfolio-wide grant is worth, in one
+            number - "everything I own" means nothing without it.
+        direction:
+          type: string
+          enum: [granted, received]
+          description: >
+            Which side of this grant the caller is on - `granted` when they gave the access,
+            `received` when they were given it.
+
+            Answered here rather than on the client, because the client cannot answer it: the id a
+            delegation is keyed on is the PACING user id, and nothing on that side knows the
+            caller's own. Matched on email, which is what the Hub asserts and what Pacing resolves
+            its users by - the one identifier both systems already agree on.
+      required:
+        - delegationId
+        - delegatorId
+        - delegateId
+        - startsAt
+        - expiresAt
+    PacingDelegationListV1:
+      type: object
+      properties:
+        delegations:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingDelegationV1'
+      required:
+        - delegations
+    PacingDelegationCreateV1:
+      type: object
+      description: >
+        A new delegation (§12, US-133/134). `pacingIds` empty or absent grants everything the
+        delegator owns; a list scopes it, and Pacing writes one row per pacing.
+
+        Pacing enforces the rules - at most 30 days, no delegating to yourself, no start in the
+        past, at most 50 pacings, and every pacing must be one the delegator owns. They are
+        database constraints and endpoint checks there, not re-implemented here: a second copy of
+        a rule is a rule that will eventually disagree with itself. A caller that offers a date
+        picker should still bound it at 30 days, so the refusal is rare rather than routine.
+      properties:
+        delegateId:
+          type: string
+          description: The recipient's Pacing user id - `pacingUserId` from AssignableOwnerV1.
+        startsAt:
+          type: string
+          format: date
+          description: Date-only. Absent means now.
+        expiresAt:
+          type: string
+          format: date
+          description: Date-only, inclusive - Pacing reads it as the end of that day.
+        reason:
+          type: string
+          nullable: true
+        pacingIds:
+          type: array
+          description: Empty or absent grants everything the delegator owns.
+          items:
+            type: string
+      required:
+        - delegateId
+        - expiresAt
+    PacingDelegationUpdateV1:
+      type: object
+      description: Extends a live delegation. Only the end date can move; scope and recipient cannot.
+      properties:
+        expiresAt:
+          type: string
+          format: date
+      required:
+        - expiresAt
+    PacingDelegationResultV1:
+      type: object
       properties:
         saved:
           type: boolean

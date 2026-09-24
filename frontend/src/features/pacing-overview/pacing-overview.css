@@ -257,27 +257,35 @@ th:has(.pacing-overview__sort) {
   align-items: center;
   gap: 5px;
 }
+/* Tinted pill with strong coloured text, the same treatment warnings get in pacing-admin, the
+   pacing tab and the dashboard - not a solid fill with white digits. White on the warning colour
+   (#b3860b light, a yellow in dark) is around 3:1, and 11px bold digits at 3:1 is the "нечитаемый"
+   this was reported as. Text mixed toward --ink the way --color-success-text is, so it stays legible
+   against its own tint in both themes. No vertical stripes: banned project-wide. */
 .pacing-overview__alert-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
+  min-width: 22px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: var(--pill);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 800;
-  color: #fff;
+  font-variant-numeric: tabular-nums;
   cursor: default;
 }
 .pacing-overview__alert-badge--critical {
-  background: var(--bad);
+  background: color-mix(in srgb, var(--bad) 15%, var(--surface));
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
 }
 .pacing-overview__alert-badge--warning {
-  background: var(--attention-text);
+  background: color-mix(in srgb, var(--attention) 22%, var(--surface));
+  color: color-mix(in srgb, var(--attention-text) 82%, var(--ink));
 }
 .pacing-overview__alert-badge--info {
-  background: var(--muted-strong);
+  background: color-mix(in srgb, var(--muted-strong) 13%, var(--surface));
+  color: var(--muted-strong);
 }
 .pacing-overview__no-alerts {
   color: var(--muted);
@@ -285,8 +293,8 @@ th:has(.pacing-overview__sort) {
 
 /* ── NS diff cell (§13, US-136) ──────────────────────────────────────────────
    "In sync" is plain colored text, not a badge - a table full of healthy pacings should not compete
-   for attention with the ones that need it. A real count of differences gets the same filled-pill
-   treatment as the alert badges above: full background, no vertical stripe. */
+   for attention with the ones that need it. A real count of differences gets the same tinted-pill
+   treatment as the alert badges above: background tint, no vertical stripe. */
 .pacing-overview__ns-diff-ok {
   font-size: 12.5px;
   font-weight: 700;
@@ -296,14 +304,15 @@ th:has(.pacing-overview__sort) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
+  min-width: 22px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: var(--pill);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 800;
-  color: #fff;
-  background: var(--bad);
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--bad) 15%, var(--surface));
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
   cursor: default;
 }
 
