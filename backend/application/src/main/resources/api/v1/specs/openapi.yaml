@@ -3333,6 +3333,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/notify-settings:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingNotifySettings
+      description: >
+        Saves a pacing's alert configuration (§14 of the migration plan): which of the 13 detectors
+        run, which of those also post to Slack, each one's threshold, the master Slack switch, the
+        VCR/ACR summary column, whether paused line items are hidden from the Slack summary, and
+        which projection (`plan` or `reforecast`) the summary's target column prints. Reaches Pacing
+        as POST .../settings carrying only the `notify` fragment - the same single write path the
+        display, plan and data-settings saves use.
+
+        Unlike the data-settings save, this is a WHOLE-OBJECT replace, not a partial patch: Pacing
+        stores `notify` as one unit and this endpoint's request schema mirrors that - every alert key
+        must be present. A caller that only knows about some of the 13 keys must still round-trip the
+        rest exactly as read from `GET /api/v1/pacing/dashboards/{slug}`, or it silently disables
+        every alert it left out.
+
+        Nothing on screen depends on this - it only changes who gets alerted and what the Slack
+        summary shows, both computed on the next detector run. Unlike the display save this endpoint
+        carries no revision: Pacing does not version-guard `notify`, so a concurrent edit by another
+        user is not detected - last write wins.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingNotifySettingsV1'
+      responses:
+        '200':
+          description: The alert configuration was saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingNotifySettingsUpdateResultV1'
+        '400':
+          description: >
+            Pacing rejected the alert configuration as structurally invalid - an unknown-typed
+            field, an out-of-range threshold, or an inverted band (e.g. pacing-off-pace's low bound
+            at or above its high bound). `message` names the field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving the alert configuration failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/dashboards/{slug}/addable-line-items:
     get:
       tags:
@@ -8236,6 +8316,273 @@ components:
           type: boolean
       required:
         - saved
+    PacingAlertRuleBaseV1:
+      type: object
+      description: >
+        A detector with no threshold of its own - just whether it runs and whether it also posts to
+        Slack. Used by `vcrOver100`, `noImpressionsYet` and `dspForecastOverspend`.
+      properties:
+        enabled:
+          type: boolean
+          description: Whether this detector runs at all.
+        slack:
+          type: boolean
+          description: >
+            Whether a firing alert also posts to Slack, on top of showing on the dashboard. Has no
+            effect while `enabled` is false, or while the master `alerts.enabled` switch is off.
+      required:
+        - enabled
+        - slack
+    PacingAlertRuleFactorV1:
+      type: object
+      description: >
+        A rate detector expressed as a factor of its own target (e.g. 0.7 = 70% of target,
+        2.0 = 200% of target). Used by `ctrBelowTarget`, `vcrBelowTarget` and `ctrAboveTarget`. A
+        factor of 0 is read by Pacing as "use the built-in default" for that key, not as a literal
+        zero threshold.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        factor:
+          type: number
+          format: double
+      required:
+        - enabled
+        - slack
+        - factor
+    PacingAlertRuleWindowThresholdV1:
+      type: object
+      description: Bid Fact above plan - the only detector with both a lookback window and a threshold.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        window:
+          type: integer
+          format: int32
+          description: Lookback window in days with data. Pacing only accepts 1, 2 or 3.
+        thresholdPct:
+          type: number
+          format: double
+          description: How far above the plan CPM triggers the alert, in percent.
+      required:
+        - enabled
+        - slack
+        - window
+        - thresholdPct
+    PacingAlertRuleGapDaysV1:
+      type: object
+      description: Data gap - missing days between two dates that both have data.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        gapDays:
+          type: integer
+          format: int32
+      required:
+        - enabled
+        - slack
+        - gapDays
+    PacingAlertRuleBandV1:
+      type: object
+      description: >
+        Pacing off-pace - a two-sided band in percentage points around on-pace (0). `low` must be
+        strictly less than `high`, or Pacing refuses the save: an inverted band would fire for every
+        settled line item on every refresh.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        low:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+      required:
+        - enabled
+        - slack
+        - low
+        - high
+    PacingAlertRuleGapPpV1:
+      type: object
+      description: Margin below target - how many percentage points below target margin triggers the alert.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        gapPp:
+          type: number
+          format: double
+      required:
+        - enabled
+        - slack
+        - gapPp
+    PacingAlertRuleSpendV1:
+      type: object
+      description: >
+        Spend overspend - two thresholds against percent of cost budget spent: `warnPct` for a
+        warning, `badPct` for critical. Pacing refuses a save where `badPct` is below `warnPct`.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        warnPct:
+          type: number
+          format: double
+        badPct:
+          type: number
+          format: double
+      required:
+        - enabled
+        - slack
+        - warnPct
+        - badPct
+    PacingAlertRuleDaysV1:
+      type: object
+      description: Stale data - how many days old the latest data point must be to trigger the alert.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        days:
+          type: integer
+          format: int32
+      required:
+        - enabled
+        - slack
+        - days
+    PacingAlertRuleThresholdPctV1:
+      type: object
+      description: Rate cost (CPC/CPV) above plan - how far above plan cost-per-unit triggers the alert.
+      properties:
+        enabled:
+          type: boolean
+        slack:
+          type: boolean
+        thresholdPct:
+          type: number
+          format: double
+      required:
+        - enabled
+        - slack
+        - thresholdPct
+    PacingAlertsConfigV1:
+      type: object
+      description: >
+        All 13 configurable detectors (§14 of the migration plan), plus the master Slack switch. Two
+        more detectors exist on the Pacing side - `post_flight_delivery` and `paused_li_delivering` -
+        with no configuration entry at all; they are not represented here because there is nothing to
+        edit for them.
+      properties:
+        enabled:
+          type: boolean
+          description: Master "send alerts to Slack" switch. Off leaves every alert on the dashboard only.
+        bidFactAbovePlan:
+          $ref: '#/components/schemas/PacingAlertRuleWindowThresholdV1'
+        dataGap:
+          $ref: '#/components/schemas/PacingAlertRuleGapDaysV1'
+        ctrBelowTarget:
+          $ref: '#/components/schemas/PacingAlertRuleFactorV1'
+        vcrBelowTarget:
+          $ref: '#/components/schemas/PacingAlertRuleFactorV1'
+        ctrAboveTarget:
+          $ref: '#/components/schemas/PacingAlertRuleFactorV1'
+        vcrOver100:
+          $ref: '#/components/schemas/PacingAlertRuleBaseV1'
+        noImpressionsYet:
+          $ref: '#/components/schemas/PacingAlertRuleBaseV1'
+        pacingOffPace:
+          $ref: '#/components/schemas/PacingAlertRuleBandV1'
+        marginBelowTarget:
+          $ref: '#/components/schemas/PacingAlertRuleGapPpV1'
+        spendOverspend:
+          $ref: '#/components/schemas/PacingAlertRuleSpendV1'
+        dspForecastOverspend:
+          $ref: '#/components/schemas/PacingAlertRuleBaseV1'
+        staleData:
+          $ref: '#/components/schemas/PacingAlertRuleDaysV1'
+        rateCostAbovePlan:
+          $ref: '#/components/schemas/PacingAlertRuleThresholdPctV1'
+      required:
+        - enabled
+        - bidFactAbovePlan
+        - dataGap
+        - ctrBelowTarget
+        - vcrBelowTarget
+        - ctrAboveTarget
+        - vcrOver100
+        - noImpressionsYet
+        - pacingOffPace
+        - marginBelowTarget
+        - spendOverspend
+        - dspForecastOverspend
+        - staleData
+        - rateCostAbovePlan
+    PacingNotifyMetricsV1:
+      type: object
+      description: >
+        Legacy metrics namespace beside the alerts, unrelated to any detector: whether the Slack
+        summary's daily table includes a VCR/ACR column.
+      properties:
+        vcr:
+          type: boolean
+      required:
+        - vcr
+    PacingSummaryProjectionV1:
+      type: string
+      description: >
+        Which target the Slack summary's "Tgt" column prints. `plan` is the flat flight-wide plan;
+        `reforecast` (the default) includes the pace still needed to finish the plan from today.
+        Independent of the dashboard's own chart-mode setting - the two may differ on purpose.
+      enum:
+        - plan
+        - reforecast
+    PacingNotifySettingsV1:
+      type: object
+      description: >
+        A pacing's whole alert configuration (§14 of the migration plan) - the 13 detectors, the
+        master Slack switch, the legacy VCR/ACR metrics toggle, whether paused line items are hidden
+        from the Slack summary, and which projection the summary's target column prints. Read from
+        `GET /api/v1/pacing/dashboards/{slug}` and saved back whole via
+        `POST /api/v1/pacing/dashboards/{slug}/notify-settings` - unlike the data-settings save, this
+        is not a partial patch, so a save must carry every field, including any this screen did not
+        change.
+      properties:
+        alerts:
+          $ref: '#/components/schemas/PacingAlertsConfigV1'
+        metrics:
+          $ref: '#/components/schemas/PacingNotifyMetricsV1'
+        hidePaused:
+          type: boolean
+          description: Exclude paused line items from the Slack summary table.
+        summaryProjection:
+          $ref: '#/components/schemas/PacingSummaryProjectionV1'
+      required:
+        - alerts
+        - metrics
+        - hidePaused
+        - summaryProjection
+    PacingNotifySettingsUpdateResultV1:
+      type: object
+      description: >
+        Acknowledges a successful alert-configuration save. Carries no echoed settings for
+        `PacingDataSettingsUpdateResultV1`'s reason: the caller re-reads the dashboard for the saved
+        values.
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
     PacingAddableLineItemsV1:
       type: object
       description: >
@@ -8484,6 +8831,8 @@ components:
             2026-05-19 BigQuery-direct migration and has never had these settings written; a client
             then shows Pacing's own defaults (raw `platform_mart`, every extra off).
           additionalProperties: true
+        notify:
+          $ref: '#/components/schemas/PacingNotifySettingsV1'
         journal:
           type: array
           items:

@@ -1,5 +1,7 @@
 package com.aidigital.operationalhub.externalservices.pacing.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 import java.util.Map;
 
@@ -40,6 +42,15 @@ import java.util.Map;
  *                       disturb the rest (a sheet binding, a mapping), so it reads the object rather
  *                       than a narrowed projection of it. Null on a pacing that predates the
  *                       BigQuery-direct migration and has never had these settings written
+ * @param notifySettings this pacing's alert configuration (§14 of the migration plan) - unlike
+ *                       {@code data}/{@code display}, modeled in full rather than kept opaque,
+ *                       because the Alerts screen owns and rewrites the whole namespace, never a
+ *                       narrowed slice of it. Null on a pacing whose {@code config.notify} has never
+ *                       been written - a client then shows Pacing's own detector defaults. Named
+ *                       {@code notifySettings} rather than the wire key {@code notify}: a record
+ *                       component named {@code notify} is illegal - its generated accessor would
+ *                       override the final {@code Object.notify()} - so {@link JsonProperty} carries
+ *                       the translation instead
  * @param journal        free-text notes on this pacing
  */
 public record PacingDashboardData(
@@ -53,5 +64,6 @@ public record PacingDashboardData(
 		Map<String, Object> metrics,
 		Map<String, Object> libraryEntries,
 		Map<String, Object> data,
+		@JsonProperty("notify") PacingNotifySettings notifySettings,
 		List<PacingJournalEntry> journal) {
 }

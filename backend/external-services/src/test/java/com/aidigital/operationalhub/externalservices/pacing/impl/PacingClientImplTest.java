@@ -16,6 +16,18 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleFactor;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapPp;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleSpend;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
@@ -1651,6 +1663,132 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("devices: unknown catalog");
+	}
+
+	@Test
+	void shouldDeserializeNotifySettingsOnDashboardDataTest() {
+		// Given: §14 - dash-gate's snake_case `config.notify` wire shape, one full round trip through
+		// all 13 alert keys plus the master switch, metrics, hide_paused and summary_projection.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
+				.andRespond(withSuccess(
+						"{\"campaign\":{\"id\":\"nike-ss26\"},\"planByLineItem\":{},\"factsDaily\":[],"
+								+ "\"display\":{},\"journal\":[],"
+								+ "\"notify\":{\"alerts\":{\"enabled\":true,"
+								+ "\"bid_fact_above_plan\":{\"enabled\":true,\"slack\":true,\"window\":2,\"threshold_pct\":5},"
+								+ "\"data_gap\":{\"enabled\":true,\"slack\":true,\"gap_days\":1},"
+								+ "\"ctr_below_target\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
+								+ "\"vcr_below_target\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
+								+ "\"ctr_above_target\":{\"enabled\":true,\"slack\":true,\"factor\":2.0},"
+								+ "\"vcr_over_100\":{\"enabled\":true,\"slack\":true},"
+								+ "\"no_impressions_yet\":{\"enabled\":true,\"slack\":true},"
+								+ "\"pacing_off_pace\":{\"enabled\":true,\"slack\":true,\"low\":-5,\"high\":5},"
+								+ "\"margin_below_target\":{\"enabled\":true,\"slack\":true,\"gap_pp\":3},"
+								+ "\"spend_overspend\":{\"enabled\":true,\"slack\":true,\"warn_pct\":90,\"bad_pct\":100},"
+								+ "\"dsp_forecast_overspend\":{\"enabled\":true,\"slack\":true},"
+								+ "\"stale_data\":{\"enabled\":true,\"slack\":true,\"days\":2},"
+								+ "\"rate_cost_above_plan\":{\"enabled\":true,\"slack\":true,\"threshold_pct\":10}},"
+								+ "\"metrics\":{\"vcr\":true},\"hide_paused\":false,\"summary_projection\":\"plan\"}}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingDashboardData result = client.getDashboardData(assertion, "nike-ss26");
+
+		// Then:
+		PacingNotifySettings notify = result.notifySettings();
+		assertThat(notify).isNotNull();
+		assertThat(notify.alerts().enabled()).isTrue();
+		assertThat(notify.alerts().bidFactAbovePlan().window()).isEqualTo(2);
+		assertThat(notify.alerts().bidFactAbovePlan().thresholdPct()).isEqualTo(5);
+		assertThat(notify.alerts().pacingOffPace().low()).isEqualTo(-5);
+		assertThat(notify.alerts().pacingOffPace().high()).isEqualTo(5);
+		assertThat(notify.alerts().spendOverspend().warnPct()).isEqualTo(90);
+		assertThat(notify.alerts().spendOverspend().badPct()).isEqualTo(100);
+		assertThat(notify.metrics().vcr()).isTrue();
+		assertThat(notify.hidePaused()).isFalse();
+		assertThat(notify.summaryProjection()).isEqualTo("plan");
+	}
+
+	@Test
+	void shouldSendNotifySettingsWholeObjectWhenSavingTest() {
+		// Given: §14 - unlike saveDataSettings, notify is a WHOLE-OBJECT replace, so every alert key
+		// must be present on the wire.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingNotifySettings settings = sampleNotifySettings();
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).contains("\"notify\":{");
+					assertThat(body).contains("\"bid_fact_above_plan\"");
+					assertThat(body).contains("\"pacing_off_pace\"");
+					assertThat(body).contains("\"summary_projection\":\"reforecast\"");
+					// Never the plan, display or data fragments - a notify save touches one fragment.
+					assertThat(body).doesNotContain("\"line_items\"");
+					assertThat(body).doesNotContain("\"display\"");
+					assertThat(body).doesNotContain("\"data\":{");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then: no exception - void on success.
+		client.saveNotifySettings(assertion, "nike-ss26", settings);
+		server.verify();
+	}
+
+	@Test
+	void shouldReportTheDetailWhenPacingRefusesNotifySettingsTest() {
+		// Given: dash-gate's validator (notify-validate.mjs) refuses a structurally invalid alert
+		// configuration with a human `detail` naming the field, exactly like bad_dim_sources/
+		// bad_sheet_config.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
+						.body("{\"ok\":false,\"error\":\"bad_notify\","
+								+ "\"detail\":\"alerts.pacing_off_pace.low must be less than .high\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+		PacingNotifySettings settings = sampleNotifySettings();
+
+		// When-Then:
+		assertThatThrownBy(() -> client.saveNotifySettings(assertion, "nike-ss26", settings))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getDetail())
+				.isEqualTo("alerts.pacing_off_pace.low must be less than .high");
+	}
+
+	private PacingNotifySettings sampleNotifySettings() {
+		return new PacingNotifySettings(
+				new PacingAlertsConfig(
+						true,
+						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
+						new PacingAlertRuleGapDays(true, true, 1),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 2.0),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBand(true, true, -5, 5),
+						new PacingAlertRuleGapPp(true, true, 3),
+						new PacingAlertRuleSpend(true, true, 90, 100),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleDays(true, true, 2),
+						new PacingAlertRuleThresholdPct(true, true, 10)),
+				new PacingNotifyMetrics(false),
+				false,
+				"reforecast");
 	}
 
 	@Test

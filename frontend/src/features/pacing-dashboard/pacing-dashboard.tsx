@@ -18,6 +18,7 @@ import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
 import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
+import { computeHasVideo } from "./alerts-panel";
 import type { PacingDataShape, PacingDisplayShape } from "./types";
 import type { BrickCtx } from "./widgets/brick-data";
 import { WidgetBoard, type WidgetRenderContext } from "./widgets/widget-engine";
@@ -260,6 +261,8 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             isAdmin={isAdmin}
             renderCtx={widgetCtx}
             libraryEntries={data.libraryEntries as Record<string, unknown> | undefined}
+            notify={data.notify}
+            hasVideo={computeHasVideo((data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>)}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 

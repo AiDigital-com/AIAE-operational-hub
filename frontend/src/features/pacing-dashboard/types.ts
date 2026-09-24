@@ -13,6 +13,9 @@ export type PacingLibraryConflictV1 = components["schemas"]["PacingLibraryConfli
 export type PacingLikeResultV1 = components["schemas"]["PacingLikeResultV1"];
 export type PacingDataSourceV1 = components["schemas"]["PacingDataSourceV1"];
 export type PacingDataSettingsUpdateV1 = components["schemas"]["PacingDataSettingsUpdateV1"];
+export type PacingNotifySettingsV1 = components["schemas"]["PacingNotifySettingsV1"];
+export type PacingAlertsConfigV1 = components["schemas"]["PacingAlertsConfigV1"];
+export type PacingSummaryProjectionV1 = components["schemas"]["PacingSummaryProjectionV1"];
 
 /** One entry of `data.dim_sources` - a dimension this pacing loads beside its delivery. Opaque on the
  *  wire and owned by Pacing, which validates the shape and refuses a malformed one. The Data panel

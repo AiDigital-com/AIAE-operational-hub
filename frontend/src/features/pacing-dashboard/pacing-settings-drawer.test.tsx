@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { aPacingLineItemPlanV1 } from "@/test/factories";
+import { aPacingLineItemPlanV1, aPacingNotifySettingsV1 } from "@/test/factories";
 import * as dashApi from "./api";
 import * as planApi from "../pacing-plan/api";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
@@ -18,6 +18,7 @@ import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 vi.mock("./api", () => ({
   savePacingDataSettings: vi.fn(),
   savePacingDisplay: vi.fn(),
+  savePacingNotifySettings: vi.fn(),
   listPacingLibrary: vi.fn(),
   createPacingLibraryEntry: vi.fn(),
   updatePacingLibraryEntry: vi.fn(),
@@ -69,6 +70,7 @@ describe("PacingSettingsDrawer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(dashApi.savePacingDataSettings).mockResolvedValue(undefined);
+    vi.mocked(dashApi.savePacingNotifySettings).mockResolvedValue(undefined);
     vi.mocked(dashApi.listPacingLibrary).mockResolvedValue([]);
     vi.mocked(planApi.getAddablePacingLineItems).mockResolvedValue({ ok: true, addable: [], alreadyAdded: [] });
     vi.mocked(planApi.savePacingPlan).mockResolvedValue({ saved: true });
@@ -181,5 +183,23 @@ describe("PacingSettingsDrawer", () => {
     // looking at still hold their drafts - unmounting them would discard two thirds of the work on
     // a tab click.
     expect(screen.getByRole("radio", { name: /With manual adjustments/ })).toBeChecked();
+  });
+
+  it("should show a fourth Alerts tab and write it alone when it is the only edit (§14)", async () => {
+    // Given: a pacing with a stored alert configuration
+    const { onSaved } = renderDrawer({ notify: aPacingNotifySettingsV1(), hasVideo: false });
+
+    // When: only the Alerts tab is touched
+    await userEvent.click(screen.getByRole("button", { name: /^Alerts/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Send alerts to Slack" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: notify is a whole-object replace (unlike Data's per-key patch above), so the request still
+    // carries every one of the 13 alert keys - not just the one the user touched.
+    await waitFor(() => expect(dashApi.savePacingNotifySettings).toHaveBeenCalledTimes(1));
+    const [, body] = vi.mocked(dashApi.savePacingNotifySettings).mock.calls[0];
+    expect(Object.keys(body.alerts)).toHaveLength(14); // 13 detectors + the master switch
+    expect(dashApi.savePacingDataSettings).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalled();
   });
 });

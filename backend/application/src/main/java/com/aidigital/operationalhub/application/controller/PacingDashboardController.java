@@ -9,6 +9,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDis
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
@@ -125,6 +127,14 @@ public class PacingDashboardController implements PacingDashboardApi {
 		HubAssertion assertion = signCurrentUser();
 		pacingClient.saveDataSettings(assertion, slug, mapper.toDataSettings(body));
 		return ResponseEntity.ok(new PacingDataSettingsUpdateResultV1().saved(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingNotifySettingsUpdateResultV1> updatePacingNotifySettings(
+			String slug, PacingNotifySettingsV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		pacingClient.saveNotifySettings(assertion, slug, mapper.toNotifySettings(body));
+		return ResponseEntity.ok(new PacingNotifySettingsUpdateResultV1().saved(true));
 	}
 
 	@Override

@@ -31,11 +31,13 @@ import type {
   PacingScopeV1,
 } from "../features/pacing-overview/types";
 import type {
+  PacingAlertsConfigV1,
   PacingDashboardCampaignV1,
   PacingDashboardV1,
   PacingJournalEntryV1,
   PacingLibraryEntryV1,
   PacingLineItemPlanV1,
+  PacingNotifySettingsV1,
   PacingRefreshStatusV1,
 } from "../features/pacing-dashboard/types";
 import type {
@@ -474,6 +476,38 @@ export function aPacingDashboardV1(overrides: Partial<PacingDashboardV1> = {}): 
     aggregate: {},
     libraryEntries: undefined,
     journal: [],
+    ...overrides,
+  };
+}
+
+/** §14 - the 13 detectors at their documented defaults, master switch on (tests usually care whether
+ *  a save reaches Pacing, not whether the master switch happens to be off). */
+export function aPacingAlertsConfigV1(overrides: Partial<PacingAlertsConfigV1> = {}): PacingAlertsConfigV1 {
+  return {
+    enabled: true,
+    bidFactAbovePlan: { enabled: true, slack: true, window: 2, thresholdPct: 5 },
+    dataGap: { enabled: true, slack: true, gapDays: 1 },
+    ctrBelowTarget: { enabled: true, slack: true, factor: 0.7 },
+    vcrBelowTarget: { enabled: true, slack: true, factor: 0.7 },
+    ctrAboveTarget: { enabled: true, slack: true, factor: 2.0 },
+    vcrOver100: { enabled: true, slack: true },
+    noImpressionsYet: { enabled: true, slack: true },
+    pacingOffPace: { enabled: true, slack: true, low: -5, high: 5 },
+    marginBelowTarget: { enabled: true, slack: true, gapPp: 3 },
+    spendOverspend: { enabled: true, slack: true, warnPct: 90, badPct: 100 },
+    dspForecastOverspend: { enabled: true, slack: true },
+    staleData: { enabled: true, slack: true, days: 2 },
+    rateCostAbovePlan: { enabled: true, slack: true, thresholdPct: 10 },
+    ...overrides,
+  };
+}
+
+export function aPacingNotifySettingsV1(overrides: Partial<PacingNotifySettingsV1> = {}): PacingNotifySettingsV1 {
+  return {
+    alerts: aPacingAlertsConfigV1(),
+    metrics: { vcr: false },
+    hidePaused: false,
+    summaryProjection: "reforecast",
     ...overrides,
   };
 }

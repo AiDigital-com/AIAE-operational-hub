@@ -1,0 +1,213 @@
+/* Alerts panel (§14): the retired SPA's Settings · Notifications tab, on the Hub's own primitives.
+   Severity is carried by the section heading text alone - never a left-edge stripe, which this
+   product bans outright (matches pacing-overview/alerts-block.css's own rule). */
+
+.palerts {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.palerts__globals {
+  display: flex;
+  flex-direction: column;
+}
+
+.palerts__master {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 6px;
+  cursor: pointer;
+}
+.palerts__master + .palerts__master {
+  border-top: 1px solid var(--border);
+}
+.palerts__master input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+  padding: 0;
+  flex: 0 0 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.palerts__master-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.palerts__master-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.palerts__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
+
+.palerts__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.palerts__rules-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.palerts__rules-heading > :last-child {
+  width: 60px;
+  text-align: center;
+}
+
+.palerts__sect-title {
+  margin: 0 0 8px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+}
+
+/* One row shape for every rule: the enable checkbox, the name+condition column (which grows and
+   wraps), and the Slack toggle pinned to a fixed-width column so every row's toggle lines up under
+   the "Slack" heading regardless of how long its condition sentence runs. */
+.palerts__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 6px;
+  border-radius: var(--radius);
+}
+.palerts__row:hover {
+  background: var(--n-100);
+}
+.palerts__row + .palerts__row {
+  border-top: 1px solid var(--border);
+}
+
+.palerts__cb {
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  margin-top: 3px;
+  padding: 0;
+  flex: 0 0 15px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.palerts__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.palerts__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.palerts__row--off .palerts__name {
+  color: var(--muted);
+  font-weight: 500;
+}
+.palerts__tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* The condition sentence: inline fields sit on the same baseline as the surrounding words, never
+   stacked - "below <input> or above <input> pp" reads as one line even when it wraps. */
+.palerts__condition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.palerts__row--off .palerts__condition {
+  color: var(--muted);
+}
+.palerts__unit {
+  color: var(--muted);
+}
+
+.palerts__num,
+.palerts__select {
+  height: 26px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.palerts__num {
+  width: 60px;
+  flex: 0 0 60px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.palerts__select {
+  flex: none;
+}
+.palerts__num:focus,
+.palerts__select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.palerts__slack {
+  display: flex;
+  flex: 0 0 60px;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.palerts__slack--disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.palerts__slack-text {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.palerts__metric-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 6px;
+  cursor: pointer;
+}

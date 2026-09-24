@@ -1,5 +1,15 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBandV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBaseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleDaysV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleFactorV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapDaysV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapPpV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleSpendV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleThresholdPctV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleWindowThresholdV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSourceV1;
@@ -7,13 +17,28 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDim
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifyMetricsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSummaryProjectionV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleFactor;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapPp;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleSpend;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPauseInterval;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import org.junit.jupiter.api.Test;
@@ -46,7 +71,8 @@ class PacingDashboardContractMapperTest {
 				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
 				"2026-08-05", Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
 				Map.of("campaign", Map.of("mA", 42.5)), null,
-				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), List.of(journal));
+				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
+				List.of(journal));
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data);
@@ -133,11 +159,110 @@ class PacingDashboardContractMapperTest {
 	}
 
 	@Test
+	void shouldMapFullNotifySettingsToV1Test() {
+		// Given: §14 - all 13 alert keys, exercising every one of the per-shape mapping helpers.
+		PacingNotifySettings settings = new PacingNotifySettings(
+				new PacingAlertsConfig(
+						true,
+						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
+						new PacingAlertRuleGapDays(true, true, 1),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 2.0),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBand(true, true, -5, 5),
+						new PacingAlertRuleGapPp(true, true, 3),
+						new PacingAlertRuleSpend(true, true, 90, 100),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleDays(true, true, 2),
+						new PacingAlertRuleThresholdPct(true, true, 10)),
+				new PacingNotifyMetrics(true),
+				true,
+				"plan");
+
+		// When:
+		PacingNotifySettingsV1 result = mapper.toV1(settings);
+
+		// Then:
+		assertThat(result.getAlerts().getEnabled()).isTrue();
+		assertThat(result.getAlerts().getBidFactAbovePlan().getWindow()).isEqualTo(2);
+		assertThat(result.getAlerts().getBidFactAbovePlan().getThresholdPct()).isEqualTo(5);
+		assertThat(result.getAlerts().getDataGap().getGapDays()).isEqualTo(1);
+		assertThat(result.getAlerts().getCtrBelowTarget().getFactor()).isEqualTo(0.7);
+		assertThat(result.getAlerts().getVcrBelowTarget().getFactor()).isEqualTo(0.7);
+		assertThat(result.getAlerts().getCtrAboveTarget().getFactor()).isEqualTo(2.0);
+		assertThat(result.getAlerts().getVcrOver100().getEnabled()).isTrue();
+		assertThat(result.getAlerts().getNoImpressionsYet().getSlack()).isTrue();
+		assertThat(result.getAlerts().getPacingOffPace().getLow()).isEqualTo(-5);
+		assertThat(result.getAlerts().getPacingOffPace().getHigh()).isEqualTo(5);
+		assertThat(result.getAlerts().getMarginBelowTarget().getGapPp()).isEqualTo(3);
+		assertThat(result.getAlerts().getSpendOverspend().getWarnPct()).isEqualTo(90);
+		assertThat(result.getAlerts().getSpendOverspend().getBadPct()).isEqualTo(100);
+		assertThat(result.getAlerts().getDspForecastOverspend().getEnabled()).isTrue();
+		assertThat(result.getAlerts().getStaleData().getDays()).isEqualTo(2);
+		assertThat(result.getAlerts().getRateCostAbovePlan().getThresholdPct()).isEqualTo(10);
+		assertThat(result.getMetrics().getVcr()).isTrue();
+		assertThat(result.getHidePaused()).isTrue();
+		assertThat(result.getSummaryProjection()).isEqualTo(PacingSummaryProjectionV1.PLAN);
+	}
+
+	@Test
+	void shouldMapFullNotifySettingsFromV1Test() {
+		// Given: §14 - the reverse direction, as the notify-settings save endpoint reads it.
+		PacingNotifySettingsV1 body = new PacingNotifySettingsV1()
+				.alerts(new PacingAlertsConfigV1()
+						.enabled(true)
+						.bidFactAbovePlan(new PacingAlertRuleWindowThresholdV1().enabled(true).slack(true).window(2).thresholdPct(5.0))
+						.dataGap(new PacingAlertRuleGapDaysV1().enabled(true).slack(true).gapDays(1))
+						.ctrBelowTarget(new PacingAlertRuleFactorV1().enabled(true).slack(true).factor(0.7))
+						.vcrBelowTarget(new PacingAlertRuleFactorV1().enabled(true).slack(true).factor(0.7))
+						.ctrAboveTarget(new PacingAlertRuleFactorV1().enabled(true).slack(true).factor(2.0))
+						.vcrOver100(new PacingAlertRuleBaseV1().enabled(true).slack(true))
+						.noImpressionsYet(new PacingAlertRuleBaseV1().enabled(true).slack(true))
+						.pacingOffPace(new PacingAlertRuleBandV1().enabled(true).slack(true).low(-5.0).high(5.0))
+						.marginBelowTarget(new PacingAlertRuleGapPpV1().enabled(true).slack(true).gapPp(3.0))
+						.spendOverspend(new PacingAlertRuleSpendV1().enabled(true).slack(true).warnPct(90.0).badPct(100.0))
+						.dspForecastOverspend(new PacingAlertRuleBaseV1().enabled(true).slack(true))
+						.staleData(new PacingAlertRuleDaysV1().enabled(true).slack(true).days(2))
+						.rateCostAbovePlan(new PacingAlertRuleThresholdPctV1().enabled(true).slack(true).thresholdPct(10.0)))
+				.metrics(new PacingNotifyMetricsV1().vcr(false))
+				.hidePaused(false)
+				.summaryProjection(PacingSummaryProjectionV1.REFORECAST);
+
+		// When:
+		PacingNotifySettings result = mapper.toNotifySettings(body);
+
+		// Then:
+		assertThat(result.alerts().enabled()).isTrue();
+		assertThat(result.alerts().bidFactAbovePlan().window()).isEqualTo(2);
+		assertThat(result.alerts().bidFactAbovePlan().thresholdPct()).isEqualTo(5.0);
+		assertThat(result.alerts().dataGap().gapDays()).isEqualTo(1);
+		assertThat(result.alerts().ctrBelowTarget().factor()).isEqualTo(0.7);
+		assertThat(result.alerts().vcrBelowTarget().factor()).isEqualTo(0.7);
+		assertThat(result.alerts().ctrAboveTarget().factor()).isEqualTo(2.0);
+		assertThat(result.alerts().vcrOver100().enabled()).isTrue();
+		assertThat(result.alerts().noImpressionsYet().slack()).isTrue();
+		assertThat(result.alerts().pacingOffPace().low()).isEqualTo(-5.0);
+		assertThat(result.alerts().pacingOffPace().high()).isEqualTo(5.0);
+		assertThat(result.alerts().marginBelowTarget().gapPp()).isEqualTo(3.0);
+		assertThat(result.alerts().spendOverspend().warnPct()).isEqualTo(90.0);
+		assertThat(result.alerts().spendOverspend().badPct()).isEqualTo(100.0);
+		assertThat(result.alerts().dspForecastOverspend().enabled()).isTrue();
+		assertThat(result.alerts().staleData().days()).isEqualTo(2);
+		assertThat(result.alerts().rateCostAbovePlan().thresholdPct()).isEqualTo(10.0);
+		assertThat(result.metrics().vcr()).isFalse();
+		assertThat(result.hidePaused()).isFalse();
+		assertThat(result.summaryProjection()).isEqualTo("reforecast");
+	}
+
+	@Test
 	void shouldDegradeMalformedFlightDatesToNullRatherThanFailTest() {
 		// Given: a defensive rule shared with PacingContractMapper's own date parsing
 		PacingDashboardCampaign campaign =
 				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", "Live", null);
-		PacingDashboardData data = new PacingDashboardData(campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, List.of());
+		PacingDashboardData data = new PacingDashboardData(
+				campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data);

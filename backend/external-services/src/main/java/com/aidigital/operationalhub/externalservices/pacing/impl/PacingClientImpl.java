@@ -17,6 +17,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
@@ -574,6 +575,27 @@ public class PacingClientImpl implements PacingClient {
 		return new DataNamespaceRequest(
 				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
 				settings.dimSources());
+	}
+
+	@Override
+	public void saveNotifySettings(HubAssertion assertion, String slug, PacingNotifySettings settings) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
+		NotifySettingsRequest request = new NotifySettingsRequest(settings);
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
 	}
 
 	@Override

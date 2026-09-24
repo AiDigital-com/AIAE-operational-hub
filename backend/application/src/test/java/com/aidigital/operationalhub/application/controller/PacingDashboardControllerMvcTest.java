@@ -18,10 +18,22 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleFactor;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapDays;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleGapPp;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleSpend;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
@@ -47,6 +59,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +72,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @ExtendWith(MockitoExtension.class)
 class PacingDashboardControllerMvcTest {
+
+	// §14 - PacingNotifySettingsV1 is a whole-object replace, so every one of the 13 alert keys is a
+	// required field; a partial body like the data-settings tests use would 400 before the controller
+	// even runs.
+	private static final String FULL_NOTIFY_SETTINGS_JSON = "{"
+			+ "\"alerts\":{\"enabled\":true,"
+			+ "\"bidFactAbovePlan\":{\"enabled\":true,\"slack\":true,\"window\":2,\"thresholdPct\":5},"
+			+ "\"dataGap\":{\"enabled\":true,\"slack\":true,\"gapDays\":1},"
+			+ "\"ctrBelowTarget\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
+			+ "\"vcrBelowTarget\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
+			+ "\"ctrAboveTarget\":{\"enabled\":true,\"slack\":true,\"factor\":2.0},"
+			+ "\"vcrOver100\":{\"enabled\":true,\"slack\":true},"
+			+ "\"noImpressionsYet\":{\"enabled\":true,\"slack\":true},"
+			+ "\"pacingOffPace\":{\"enabled\":true,\"slack\":true,\"low\":-5,\"high\":5},"
+			+ "\"marginBelowTarget\":{\"enabled\":true,\"slack\":true,\"gapPp\":3},"
+			+ "\"spendOverspend\":{\"enabled\":true,\"slack\":true,\"warnPct\":90,\"badPct\":100},"
+			+ "\"dspForecastOverspend\":{\"enabled\":true,\"slack\":true},"
+			+ "\"staleData\":{\"enabled\":true,\"slack\":true,\"days\":2},"
+			+ "\"rateCostAbovePlan\":{\"enabled\":true,\"slack\":true,\"thresholdPct\":10}},"
+			+ "\"metrics\":{\"vcr\":false},\"hidePaused\":false,\"summaryProjection\":\"reforecast\"}";
 
 	@Mock
 	private CurrentUserService currentUserService;
@@ -97,7 +130,8 @@ class PacingDashboardControllerMvcTest {
 	void shouldReturnDashboardPayloadTest() throws Exception {
 		// Given:
 		stubCurrentUser();
-		PacingDashboardData data = new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, List.of());
+		PacingDashboardData data =
+				new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
 		doReturn(new PacingDashboardV1().display(Map.of("widgets", List.of())).journal(List.of())
 				.planByLineItem(Map.of()).factsDaily(List.of()))
@@ -188,6 +222,60 @@ class PacingDashboardControllerMvcTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.message")
 						.value("The Pacing service rejected the request: devices: unknown catalog."));
+	}
+
+	@Test
+	void shouldSaveNotifySettingsTest() throws Exception {
+		// Given: §14 - a full round-trip alert configuration, camelCase on this contract.
+		stubCurrentUser();
+		PacingNotifySettings settings = new PacingNotifySettings(
+				new PacingAlertsConfig(
+						true,
+						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
+						new PacingAlertRuleGapDays(true, true, 1),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 2.0),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBand(true, true, -5, 5),
+						new PacingAlertRuleGapPp(true, true, 3),
+						new PacingAlertRuleSpend(true, true, 90, 100),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleDays(true, true, 2),
+						new PacingAlertRuleThresholdPct(true, true, 10)),
+				new PacingNotifyMetrics(false),
+				false,
+				"reforecast");
+		doReturn(settings).when(mapper).toNotifySettings(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/notify-settings", "nike-ss26")
+						.contentType(APPLICATION_JSON).content(FULL_NOTIFY_SETTINGS_JSON))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.saved").value(true));
+		verify(pacingClient).saveNotifySettings(any(), eq("nike-ss26"), eq(settings));
+	}
+
+	@Test
+	void shouldForwardPacingsNotifyRejectionAsBadRequestTest() throws Exception {
+		// Given: dash-gate's validator refuses an inverted pacing-off-pace band rather than storing it.
+		stubCurrentUser();
+		doReturn(mock(PacingNotifySettings.class)).when(mapper).toNotifySettings(any());
+		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
+				"bad_notify", "alerts.pacing_off_pace.low must be less than .high"))
+				.when(pacingClient).saveNotifySettings(any(), any(), any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/notify-settings", "nike-ss26")
+						.contentType(APPLICATION_JSON).content(FULL_NOTIFY_SETTINGS_JSON))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("The Pacing service rejected the request: "
+						+ "alerts.pacing_off_pace.low must be less than .high."));
 	}
 
 	@Test
