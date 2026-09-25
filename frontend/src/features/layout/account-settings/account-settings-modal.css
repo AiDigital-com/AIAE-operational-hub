@@ -1,0 +1,136 @@
+.acct-settings {
+  max-width: 420px;
+}
+
+.acct-settings__section {
+  margin-top: 4px;
+}
+/* Appearance and Daily Summary are two sections of one modal, not two widgets - this is their only
+   separation, so the modal still reads as a single surface rather than a stack of cards. */
+.acct-settings__section + .acct-settings__section {
+  margin-top: 22px;
+}
+.acct-settings__heading {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+/* The segmented control and its trailing saving-indicator share one row and one baseline; the
+   indicator reserves its width at all times (opacity toggles, nothing is ever added/removed) so a
+   save-in-flight cannot nudge the control beside it. */
+.acct-settings__seg-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* One shared segmented-control look for both sections (see segmented-control.tsx, which renders
+   both): the track sizes to its own buttons instead of stretching to the modal's width, so a
+   two-option track (Appearance) comes out shorter than a three-option one (Daily Summary) instead
+   of the same width split into fatter buttons. Buttons share one fixed padding, so they match
+   across sections regardless of how many share a given track. */
+.acct-settings__seg {
+  display: flex;
+  flex: 0 0 auto;
+  max-width: 100%;
+  background: var(--n-100);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px;
+  gap: 3px;
+}
+.acct-settings__seg-btn {
+  padding: 8px 16px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 13px;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--muted-strong);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s, color .15s;
+}
+.acct-settings__seg-btn:disabled {
+  cursor: default;
+}
+.acct-settings__seg-btn--active {
+  background: var(--primary-fill);
+  color: var(--color-accent-contrast);
+}
+.acct-settings__saving {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.acct-settings__saving--visible {
+  opacity: 1;
+}
+
+/* Reserves two lines' worth of height so switching between the shortest and longest hint never
+   changes the modal's height. */
+.acct-settings__hint {
+  margin: 10px 0 0;
+  min-height: 2.6em;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+/* The Slack group id field (only rendered while Auto is selected - see the component's own doc).
+   Everything stacks on its own full-width line, label above input above hint above button above
+   result, rather than sharing a row with the input: the input is 42px tall (the shared `input`
+   rule) and `.button--sm` is 34px, so putting them side by side would either mismatch their
+   baseline or force one to override its own height just to line up with the other. Stacking, the
+   same layout pacing-admin's delete-confirmation input+button already uses, needs neither. */
+.acct-settings__slack {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.acct-settings__slack-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.acct-settings__slack-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.acct-settings__slack-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+/* Reserved height (matches `.acct-settings__hint`'s own reservation) so a save result - success,
+   the Slack-unreachable warning, or a refusal's specific reason - never nudges the modal's height
+   on the common short outcomes; only an unusually long refusal sentence grows past it. Full-text
+   colour, never a side stripe (project rule) - the three outcomes read by ink colour alone. */
+.acct-settings__slack-result {
+  margin: 8px 0 0;
+  min-height: 2.6em;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.acct-settings__slack-result--success {
+  color: var(--color-success-text);
+}
+.acct-settings__slack-result--warning {
+  color: var(--attention-text);
+}
+.acct-settings__slack-result--error {
+  color: var(--color-danger);
+  font-weight: 700;
+}

@@ -2,7 +2,10 @@
   position: fixed;
   inset: 0;
   background: rgba(45, 48, 64, .42);
-  z-index: 300;
+  /* Above every other portaled overlay in the app (PersonPicker's popover at 320, Tooltip's bubble at
+     330) so a modal genuinely sits on top of the page it covers, not beside something left open on
+     it. Below Toast (400): an error or confirmation toast must still be readable over an open modal. */
+  z-index: 340;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -17,10 +20,38 @@
   max-width: 520px;
   padding: 26px;
 }
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
 .modal__title {
   font-size: 19px;
   font-weight: 800;
-  margin-bottom: 4px;
+  margin: 0;
+}
+.modal__close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.modal__close:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.modal__close svg {
+  width: 14px;
+  height: 14px;
 }
 .modal__sub {
   font-size: 13.5px;

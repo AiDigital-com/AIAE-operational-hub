@@ -8,40 +8,54 @@
   gap: 24px;
 }
 
+/* One bordered card holding the three master switches, so it reads as one settings group rather than
+   three loose rows. */
 .palerts__globals {
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
+/* Centred against the WHOLE text column, not its first line. Each of these rows carries a title and
+   a sentence under it, so pinning the box to the top (as the retired SPA did, with a nudge in px to
+   put it on the title's baseline) leaves it visibly high against a two-line block — and that nudge
+   then has to be re-tuned whenever the type scale or a description's wrapping changes. Letting flex
+   centre it needs no number and survives a description that wraps to three lines. */
 .palerts__master {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
-  padding: 10px 6px;
+  padding: 12px;
   cursor: pointer;
 }
 .palerts__master + .palerts__master {
   border-top: 1px solid var(--border);
 }
 .palerts__master input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  min-width: 16px;
-  min-height: 16px;
-  margin-top: 2px;
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  min-height: 13px;
+  margin: 0;
   padding: 0;
-  flex: 0 0 16px;
+  flex: 0 0 13px;
   accent-color: var(--primary);
   cursor: pointer;
 }
+/* Ordinary flow, NOT a flex column — same reason as .palerts__text on a rule row. Two flex items
+   can only stack or wrap whole; as inline text the title and its explanation read as one sentence
+   and break by words when the drawer is narrow. */
 .palerts__master-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
+  line-height: 1.5;
 }
+/* 13px, matching a rule row's name. The two groups now have the same shape — bold label, middot,
+   muted explanation — so a different size between them would read as an accident rather than a
+   hierarchy. */
 .palerts__master-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink);
 }
@@ -60,7 +74,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 6px;
+  padding: 0 2px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
@@ -68,13 +82,13 @@
   text-transform: uppercase;
 }
 .palerts__rules-heading > :last-child {
-  width: 60px;
+  width: 46px;
   text-align: center;
 }
 
 .palerts__sect-title {
   margin: 0 0 8px;
-  padding: 0 6px;
+  padding: 0 2px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -82,42 +96,96 @@
   color: var(--muted-strong);
 }
 
-/* One row shape for every rule: the enable checkbox, the name+condition column (which grows and
-   wraps), and the Slack toggle pinned to a fixed-width column so every row's toggle lines up under
-   the "Slack" heading regardless of how long its condition sentence runs. */
+/* Each rule is its own bordered row, ~44px tall: a fixed enable cell, a clickable middle that opens
+   the rule's popover, and a fixed Slack cell - stacked with a small gap rather than sharing hairlines,
+   so every rule reads as its own settled unit. */
 .palerts__row {
+  position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 6px;
+  align-items: stretch;
+  min-height: 44px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.palerts__row:hover {
-  background: var(--n-100);
+.palerts__row:last-child {
+  margin-bottom: 0;
 }
-.palerts__row + .palerts__row {
-  border-top: 1px solid var(--border);
+
+.palerts__cell {
+  display: flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.palerts__cell--slack {
+  flex-basis: 46px;
+}
+.palerts__cell--slack-disabled {
+  cursor: default;
 }
 
 .palerts__cb {
-  width: 15px;
-  height: 15px;
-  min-width: 15px;
-  min-height: 15px;
-  margin-top: 3px;
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  min-height: 13px;
+  margin: 0;
   padding: 0;
   flex: 0 0 15px;
   accent-color: var(--primary);
-  cursor: pointer;
+  cursor: inherit;
+}
+.palerts__cell--slack-disabled .palerts__cb {
+  opacity: 0.45;
 }
 
-.palerts__text {
+/* The clickable middle: name, optional tag, and the muted condition sentence. A button when the rule
+   has fields to open, a plain div (same padding, same min-height, no chevron) when it does not - so a
+   rule with nothing to configure still looks like every other row. */
+/* A flex ROW holding exactly one item (.palerts__text), purely so `align-items: center` can centre
+   that item against the row's full height. It used to be a flex COLUMN with the name and the
+   condition as two separate items, which is what forced them onto separate lines whatever the child
+   elements said about themselves — they were flex items, not inline text. */
+.palerts__trigger {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
   flex: 1;
+  align-items: center;
   min-width: 0;
+  padding: 8px 26px 8px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
 }
+/* The single item. Ordinary flow inside, so the name and the condition read as one sentence and
+   wrap by words when the drawer is narrow. */
+.palerts__text {
+  min-width: 0;
+  line-height: 1.5;
+}
+button.palerts__trigger {
+  position: relative;
+  cursor: pointer;
+}
+button.palerts__trigger:hover {
+  background: var(--n-100);
+}
+button.palerts__trigger::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 5px;
+  height: 5px;
+  margin-top: -4px;
+  border: solid var(--muted);
+  border-width: 0 1px 1px 0;
+  transform: rotate(45deg);
+}
+
 .palerts__name {
   font-size: 13px;
   font-weight: 600;
@@ -140,68 +208,111 @@
   vertical-align: middle;
 }
 
-/* The condition sentence: inline fields sit on the same baseline as the surrounding words, never
-   stacked - "below <input> or above <input> pp" reads as one line even when it wraps. */
+/* Inline, on the name's own line. Wraps rather than truncates: these sentences carry the numbers a
+   person came to check ("More than 3 pp below target"), so losing their tail to an ellipsis would
+   hide the very thing the row exists to show — and the row's min-height lets it grow. */
 .palerts__condition {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
   color: var(--muted-strong);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
+  white-space: normal;
 }
 .palerts__row--off .palerts__condition {
   color: var(--muted);
 }
 .palerts__unit {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The rule's fields, opened from the row. Fixed rather than absolute: the row can sit inside a
+   scrolling drawer body, so it is positioned against the viewport and re-placed on scroll/resize
+   instead (see `AlertRow`'s placement effect) - the same idiom `data-table__pop` uses for its own
+   anchored popovers. */
+.palerts__popover {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.palerts__popover-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* One label column and one control column, so every field in a popover lines up with the ones under
+   it. 116px is the width the retired SPA's own notifications popover used for these labels. */
+.palerts__field {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 28px;
+  margin-bottom: 10px;
+}
+.palerts__field:last-of-type {
+  margin-bottom: 0;
+}
+.palerts__field-label {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.palerts__field-control {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.palerts__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--muted);
 }
 
 .palerts__num,
 .palerts__select {
-  height: 26px;
+  height: 28px;
   min-width: 0;
   box-sizing: border-box;
-  padding: 0 6px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink);
   font-family: inherit;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .palerts__num {
-  width: 60px;
-  flex: 0 0 60px;
+  width: 58px;
+  flex: 0 1 58px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .palerts__select {
-  flex: none;
+  flex: 1 1 auto;
+  width: 100%;
 }
 .palerts__num:focus,
 .palerts__select:focus {
   outline: none;
   border-color: var(--primary);
-}
-
-.palerts__slack {
-  display: flex;
-  flex: 0 0 60px;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  cursor: pointer;
-}
-.palerts__slack--disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-.palerts__slack-text {
-  font-size: 10px;
-  color: var(--muted);
 }
 
 .palerts__metric-row {

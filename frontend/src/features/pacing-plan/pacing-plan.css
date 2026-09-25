@@ -176,12 +176,25 @@
   background: var(--n-100);
   overflow: hidden;
 }
+/* The summary and its buttons share ONE row and each takes the width it needs.
+   They used to be the expand button with `padding-right: 76px` and the actions floated over it with
+   `position: absolute`. 76px is the width "Duplicate ×" happened to need when it was measured — and
+   it was already too narrow, so the units and split count ran under the Duplicate button. Any reserve
+   like that is wrong again the moment a label, a font or a button count changes; a row cannot
+   overlap itself. */
+.pplan__container-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
 .pplan__container-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 8px 76px 8px 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
   border: none;
   background: none;
   text-align: left;
@@ -189,21 +202,26 @@
   font: inherit;
   font-size: 12px;
 }
+/* The one part that may be long and is the one part safe to clip: the period, the unit count and the
+   split badge are all short and fixed-shape, and losing their tail would hide a number. */
 .pplan__container-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 700;
   color: var(--ink);
 }
-.pplan__container-period {
+.pplan__container-period,
+.pplan__container-units {
+  flex: none;
   color: var(--muted-strong);
 }
 .pplan__container-units {
   margin-left: auto;
-  color: var(--muted-strong);
 }
 .pplan__container-actions {
-  position: absolute;
-  top: 4px;
-  right: 4px;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 4px;

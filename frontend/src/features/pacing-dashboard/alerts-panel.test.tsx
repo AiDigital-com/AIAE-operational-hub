@@ -92,7 +92,7 @@ describe("PacingAlertsSection", () => {
     expect(screen.getByRole("checkbox", { name: "Enable Stale data" })).toBeChecked();
   });
 
-  it("shows the stored thresholds rather than the defaults", () => {
+  it("shows the stored thresholds rather than the defaults", async () => {
     renderPanel(
       aPacingNotifySettingsV1({
         alerts: {
@@ -102,6 +102,8 @@ describe("PacingAlertsSection", () => {
       })
     );
 
+    // The threshold field now lives in the rule's popover - opened by clicking the row.
+    await userEvent.click(screen.getByRole("button", { name: "Edit Stale data" }));
     expect(screen.getByRole("spinbutton", { name: "Stale data threshold, days" })).toHaveValue(5);
   });
 
@@ -144,6 +146,7 @@ describe("PacingAlertsSection", () => {
   it("converts a percent-of-target threshold back to the stored factor", async () => {
     renderPanel(aPacingNotifySettingsV1());
 
+    await userEvent.click(screen.getByRole("button", { name: "Edit CTR vs target" }));
     const field = screen.getByRole("spinbutton", { name: "CTR lower bound, percent of target" });
     await userEvent.clear(field);
     await userEvent.type(field, "60");
@@ -157,6 +160,7 @@ describe("PacingAlertsSection", () => {
   it("falls back to the last-saved value when a threshold field is left blank", async () => {
     renderPanel(aPacingNotifySettingsV1());
 
+    await userEvent.click(screen.getByRole("button", { name: "Edit Stale data" }));
     const field = screen.getByRole("spinbutton", { name: "Stale data threshold, days" });
     await userEvent.clear(field);
     // Something else has to be dirty, or Save is a no-op with nothing to send.
@@ -235,5 +239,58 @@ describe("PacingAlertsSection", () => {
     );
 
     expect(screen.getByRole("checkbox", { name: "Slack for Stale data" })).toBeDisabled();
+  });
+
+  it("opens a rule's popover on click and closes it on an outside click", async () => {
+    renderPanel(aPacingNotifySettingsV1());
+
+    const trigger = screen.getByRole("button", { name: "Edit Stale data" });
+    expect(screen.queryByRole("dialog", { name: "Stale data" })).not.toBeInTheDocument();
+
+    await userEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Stale data" })).toBeInTheDocument();
+
+    await userEvent.click(document.body);
+    expect(screen.queryByRole("dialog", { name: "Stale data" })).not.toBeInTheDocument();
+  });
+
+  it("toggles the enable and Slack checkboxes without opening the rule's popover", async () => {
+    renderPanel(aPacingNotifySettingsV1());
+
+    // Slack first, while the rule is still enabled - toggling "enable" off disables this rule's own
+    // Slack checkbox, which is a separate, already-covered behaviour, not what this case is about.
+    const slackBox = screen.getByRole("checkbox", { name: "Slack for Stale data" });
+    await userEvent.click(slackBox);
+    expect(slackBox).not.toBeChecked();
+    expect(screen.queryByRole("dialog", { name: "Stale data" })).not.toBeInTheDocument();
+
+    const enableBox = screen.getByRole("checkbox", { name: "Enable Stale data" });
+    await userEvent.click(enableBox);
+    expect(enableBox).not.toBeChecked();
+    expect(screen.queryByRole("dialog", { name: "Stale data" })).not.toBeInTheDocument();
+  });
+
+  it("shows the default note only where the detector reads a stored zero as its own default", async () => {
+    renderPanel(aPacingNotifySettingsV1());
+
+    // ctrBelowTarget: shared/alerts-core.js reads `cfg.factor || 0.7`, so a stored zero silently
+    // becomes 0.7 - the note is honest here.
+    await userEvent.click(screen.getByRole("button", { name: "Edit CTR vs target" }));
+    const ctrField = screen.getByRole("spinbutton", { name: "CTR lower bound, percent of target" });
+    expect(screen.queryByText(/Zero uses the default/)).not.toBeInTheDocument();
+    await userEvent.clear(ctrField);
+    await userEvent.type(ctrField, "0");
+    expect(screen.getByText("Zero uses the default: 70% of target for the lower bound.")).toBeInTheDocument();
+    await userEvent.clear(ctrField);
+    await userEvent.type(ctrField, "60");
+    expect(screen.queryByText(/Zero uses the default/)).not.toBeInTheDocument();
+
+    // staleData.days: shared/alerts-core.js reads `cfg.days != null ? cfg.days : 2`, so a stored zero
+    // is honored as zero, not read as "use the default" - no note here.
+    await userEvent.click(screen.getByRole("button", { name: "Edit Stale data" }));
+    const staleField = screen.getByRole("spinbutton", { name: "Stale data threshold, days" });
+    await userEvent.clear(staleField);
+    await userEvent.type(staleField, "0");
+    expect(screen.queryByText(/Zero uses the default/)).not.toBeInTheDocument();
   });
 });

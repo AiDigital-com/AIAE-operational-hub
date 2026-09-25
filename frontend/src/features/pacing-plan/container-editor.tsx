@@ -286,32 +286,36 @@ export function ContainerCard({
 
   return (
     <div className="pplan__container-card">
-      <button type="button" className="pplan__container-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className={`pplan__chevron${open ? " pplan__chevron--open" : ""}`}>▸</span>
-        <span className="pplan__container-name">{container.name || "Container"}</span>
-        {container.fs && container.fe && (
-          <span className="pplan__container-period">
-            {container.fs} – {container.fe}
+      {/* Summary and actions sit in ONE flex row as siblings, so neither can overlap the other. Not
+          nested, because both are buttons. */}
+      <div className="pplan__container-top">
+        <button type="button" className="pplan__container-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <span className={`pplan__chevron${open ? " pplan__chevron--open" : ""}`}>▸</span>
+          <span className="pplan__container-name">{container.name || "Container"}</span>
+          {container.fs && container.fe && (
+            <span className="pplan__container-period">
+              {container.fs} – {container.fe}
+            </span>
+          )}
+          <span className="pplan__container-units">{fmtInt(container.target_impressions)} units</span>
+          <span className="pplan__badge">
+            {splitCount} split{splitCount === 1 ? "" : "s"}
           </span>
-        )}
-        <span className="pplan__container-units">{fmtInt(container.target_impressions)} units</span>
-        <span className="pplan__badge">
-          {splitCount} split{splitCount === 1 ? "" : "s"}
-        </span>
-      </button>
-      <div className="pplan__container-actions">
-        <button type="button" className="button button--ghost button--sm" onClick={() => setDuplicating(true)}>
-          Duplicate
         </button>
-        <button
-          type="button"
-          className="pplan__icon-btn"
-          onClick={() => setShowRemoveConfirm(true)}
-          aria-label="Remove container"
-          title="Remove container"
-        >
-          ×
-        </button>
+        <div className="pplan__container-actions">
+          <button type="button" className="button button--ghost button--sm" onClick={() => setDuplicating(true)}>
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="pplan__icon-btn"
+            onClick={() => setShowRemoveConfirm(true)}
+            aria-label="Remove container"
+            title="Remove container"
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       {open && (

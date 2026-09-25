@@ -9,20 +9,19 @@ import { CLIENTS_PAGE_SIZE, useAgencyClientList } from "../../clients/hooks";
 import type { AgencyClientV1, AgencyPageResponseV1, AgencyV1 } from "../../agencies/types";
 import { cn } from "../../../shared/style/cn";
 import { useDebounce } from "../../../shared/hooks/use-debounce";
-import { useTheme } from "../../../shared/style/theme";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   HomeIcon,
-  MoonIcon,
+  MoreVerticalIcon,
   PacingIcon,
   SearchIcon,
   SettingsIcon,
-  SunIcon,
   TeamIcon,
 } from "../../../shared/ui/icons/icons";
 import { LoadingSpinner } from "../../../shared/ui/loading-spinner/loading-spinner";
 import type { UserV1 } from "../../rbac/types";
+import { AccountSettingsModal } from "../account-settings/account-settings-modal";
 import "./sidebar.css";
 
 const CLIENT_WITHOUT_NAME = "Client without name";
@@ -77,8 +76,6 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 // re-render the whole agency/client tree here; AppShell passes stable `user` (cached query data)
 // and a useCallback-memoized `onToggleCollapsed`, so this memo is effective.
 export const Sidebar = memo(function Sidebar({ isAdmin, user, collapsed, onToggleCollapsed }: SidebarProps) {
-  const { theme, setTheme } = useTheme();
-
   const agencyMatch = useMatch("/agencies/:agencyId");
   const nestedClientMatch = useMatch("/agencies/:agencyId/clients/:clientId");
   const matchedAgencyId = nestedClientMatch?.params.agencyId ?? agencyMatch?.params.agencyId;
@@ -91,6 +88,7 @@ export const Sidebar = memo(function Sidebar({ isAdmin, user, collapsed, onToggl
 
   // Navigating to an agency expands it; clicking the already-open agency toggles its sub-list shut.
   const [expandedId, setExpandedId] = useState<number | null>(activeAgencyId);
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   useEffect(() => {
     if (activeAgencyId !== null) setExpandedId(activeAgencyId);
   }, [activeAgencyId]);
@@ -200,6 +198,7 @@ function hideExtraAgencies() {
   const loadedClients = moreClients.data?.pages.flatMap((page) => page.content) ?? [];
 
   const userRole = user?.roles?.includes("ADMIN") ? "Admin" : "User";
+  const displayName = user?.full_name || "Signed in";
 
   return (
     <aside className={cn("sidebar", collapsed && "sidebar--collapsed")} aria-label="Primary">
@@ -383,22 +382,6 @@ function hideExtraAgencies() {
       </div>
 
       <div className="sidebar__footer">
-        <div className="sidebar__theme-toggle">
-          <button
-            type="button"
-            className={cn("sidebar__theme-opt", theme === "light" && "sidebar__theme-opt--active")}
-            onClick={() => setTheme("light")}
-          >
-            <SunIcon /> <span>Light</span>
-          </button>
-          <button
-            type="button"
-            className={cn("sidebar__theme-opt", theme === "dark" && "sidebar__theme-opt--active")}
-            onClick={() => setTheme("dark")}
-          >
-            <MoonIcon /> <span>Dark</span>
-          </button>
-        </div>
         <button
           type="button"
           className="sidebar__collapse-btn"
@@ -409,12 +392,34 @@ function hideExtraAgencies() {
         </button>
         <div className="sidebar__user">
           <UserButton afterSignOutUrl="/" />
-          <div className="sidebar__user-meta">
-            <span className="sidebar__user-name">{user?.full_name || "Signed in"}</span>
+          {/* Collapsed-sidebar stand-in for the name/role text below - same monogram pattern as the
+              brand mark above. Purely decorative: the Account Settings trigger is its own button now
+              (see below), so it stays reachable whether or not this shows. */}
+          <span className="sidebar__user-initials" aria-hidden="true">{initials(displayName)}</span>
+          <span className="sidebar__user-meta">
+            <span className="sidebar__user-name">{displayName}</span>
             <span className="sidebar__user-role">{userRole}</span>
-          </div>
+          </span>
+          {/* The Account Settings trigger: its own button at the row's trailing edge, not the name/role
+              block itself (that read as a static label wearing a caret, and got sent back twice - once
+              as a gear that doubled for "Pacing admin" in this same nav, once as a bare chevron with no
+              visible chrome). MoreVerticalIcon is reused deliberately: it already means "more actions"
+              in this app's row menus (team-management, campaigns, pacing tabs), so nothing here collides
+              with a nav glyph. Unlike those row-menu kebabs it keeps a visible border/background at
+              rest (see sidebar__user-trigger in the CSS) so it reads as pressable before anyone hovers
+              or tabs to it. */}
+          <button
+            type="button"
+            className="sidebar__user-trigger"
+            aria-label="Account settings"
+            onClick={() => setAccountSettingsOpen(true)}
+          >
+            <MoreVerticalIcon />
+          </button>
         </div>
       </div>
+
+      <AccountSettingsModal open={accountSettingsOpen} onClose={() => setAccountSettingsOpen(false)} />
     </aside>
   );
 });

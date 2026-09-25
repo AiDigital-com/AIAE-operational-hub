@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.externalservices.pacing;
 
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -532,5 +533,44 @@ public interface PacingClient {
 	 *         {@code ns_master_error})
 	 */
 	PacingRevalidateResult revalidatePacing(HubAssertion assertion, String pacingId);
+
+	/**
+	 * Fetches the current user's own Pacing account preferences (Account Settings, "Daily Summary"):
+	 * {@code GET /api/me} on the Pacing side. The Hub already knows identity and scope from its own
+	 * RBAC - this reads only the two things Pacing itself owns and stores:
+	 * {@code access.users.notify_destination} and {@code access.users.slack_channel_id}.
+	 *
+	 * @param assertion who is calling
+	 * @return the account preferences ({@link PacingAccount#slackWarning()} is always {@code null}
+	 *         here - Pacing only sets it on a {@code PATCH} response)
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingAccount getAccount(HubAssertion assertion);
+
+	/**
+	 * Updates the current user's Daily Summary delivery preference and/or their own private Slack
+	 * group: {@code PATCH /api/me} on the Pacing side, carrying both {@code notify_destination} and
+	 * {@code slack_channel_id} (the caller round-trips whichever one it is not changing - see
+	 * {@code PacingAccountUpdateV1}'s own description for why that matters). Pacing validates
+	 * {@code notify_destination} is one of {@code auto}/{@code dm}/{@code off}, and - only when
+	 * {@code slack_channel_id} actually changed - checks the new value against Slack itself before
+	 * storing it, refusing with 400 an id that does not resolve, is not a private group, or one the
+	 * bot or the person is not a member of.
+	 *
+	 * @param assertion         who is calling
+	 * @param notifyDestination {@code auto}, {@code dm}, or {@code off}
+	 * @param slackChannelId    the Slack group id, or an empty string to clear it
+	 * @return what Pacing now has stored, echoed back so the caller can confirm what was saved;
+	 *         {@link PacingAccount#slackWarning()} is set when the new {@code slackChannelId} was
+	 *         saved but could not be checked against Slack (an outage on Pacing's side)
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response (an invalid {@code notifyDestination}, or a {@code
+	 *         slackChannelId} Slack itself rejected, both come back as
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_BAD_REQUEST} with Pacing's own reason as the exception detail) or network
+	 *         failure (unchecked)
+	 */
+	PacingAccount updateAccount(HubAssertion assertion, String notifyDestination, String slackChannelId);
 }
 

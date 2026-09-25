@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { parseEditableNumber } from "../pacing-create/format";
 import { cn } from "../../shared/style/cn";
@@ -23,6 +23,12 @@ import "./alerts-panel.css";
  * made (`EditableLineItem`): a controlled `<input type="number">` fights the user over an in-progress
  * "-" or a trailing ".", because neither parses to a value React can hold. A blank or unparseable
  * field falls back to what was last saved when Save is pressed - see `resolveNumber` below.
+ *
+ * PRESENTATION matches the retired SPA's `NotificationsTab.jsx` (owner request, 2026-09): the three
+ * master switches sit inside one bordered card; each rule is its own ~44px bordered row showing a
+ * muted, computed condition sentence; the rule's actual fields live in a popover opened by clicking
+ * the row. None of that changes what is being configured - same 13 keys, same thresholds, same
+ * coupling, same gates - only how it is shown.
  */
 
 const DEFAULT_ALERTS: PacingAlertsConfigV1 = {
@@ -46,6 +52,25 @@ const DEFAULT_ALERTS: PacingAlertsConfigV1 = {
  *  read "70", not "70.00000000000001"). */
 function factorToPct(factor: number): number {
   return Number((factor * 100).toPrecision(12));
+}
+
+/** A rule's own current field, read as a plain number for the row's condition sentence - 0 while the
+ *  field is blank or mid-edit, same as the panel's own display of "nothing typed yet". */
+function num(text: string): number {
+  return parseEditableNumber(text) ?? 0;
+}
+
+/** What five of the thirteen detectors actually see when a stored value is falsy (`shared/alerts-
+ *  core.js`: `cfg.factor || 0.7`, `cfg.threshold_pct || 5`, `cfg.gap_days || 1`) - the condition
+ *  sentence for those rules is built from THIS, not the raw typed number, so it never claims "alert
+ *  below 0% of target" when the detector is about to read that as "use my 70% default" instead. */
+function orDefault(value: number, fallback: number): number {
+  return value || fallback;
+}
+
+/** "1 day" / "3 days" - every plural count this panel's condition sentences and field units need. */
+function plural(count: number, word: string): string {
+  return `${count} ${count === 1 ? word : `${word}s`}`;
 }
 
 /**
@@ -261,7 +286,7 @@ function equal(a: EditableNotify, b: EditableNotify): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// ── Row primitives ──────────────────────────────────────────────────────────
+// ── Field primitives (live inside a rule's popover) ─────────────────────────
 
 function NumField({
   value,
@@ -311,9 +336,39 @@ function SelectField({
   );
 }
 
+/** One field inside a rule's popover: a label, its control(s), and an optional unit caption. Every
+ *  rule's editor is built from one or two of these, so a two-field row (a band's low/high) and a
+ *  one-field row (a single threshold) read as the same kind of thing. */
+function Field({ label, unit, children }: { label: string; unit?: string; children: ReactNode }) {
+  return (
+    <div className="palerts__field">
+      <span className="palerts__field-label">{label}</span>
+      <span className="palerts__field-control">
+        {children}
+        {unit && <span className="palerts__unit">{unit}</span>}
+      </span>
+    </div>
+  );
+}
+
+/** Zero is a legitimate stored value for every threshold here - `notify-validate.mjs` allows `min: 0`
+ *  on all of them - but five detectors read theirs with `||` rather than `!= null`
+ *  (`shared/alerts-core.js`: `cfg.factor || 0.7`, `cfg.threshold_pct || 5`, `cfg.gap_days || 1`), so a
+ *  stored zero is silently read there as "use my own default" rather than as zero. This note says so,
+ *  and only appears on those five fields - the other eight honor zero as zero and get no note. */
+function DefaultNote({ value, fallback }: { value: number; fallback: string }) {
+  if (value !== 0) return null;
+  return <p className="palerts__note">Zero uses the default: {fallback}.</p>;
+}
+
+// ── Row primitive ────────────────────────────────────────────────────────────
+
 interface AlertRowProps {
   name: string;
   tag?: string;
+  /** A muted, computed sentence describing the rule's current condition (e.g. "More than 3 pp below
+   *  target") - read-only in the row; the fields that produce it live in the popover below. */
+  condition: string;
   enabled: boolean;
   enabledMixed?: boolean;
   slack: boolean;
@@ -321,12 +376,21 @@ interface AlertRowProps {
   slackDisabled: boolean;
   onToggleEnabled: () => void;
   onToggleSlack: () => void;
+  /** The rule's editable fields, opened in a popover from the row. Omitted for a rule with nothing to
+   *  configure (e.g. "DSP forecast overspend") - that row still shows its condition, but opens
+   *  nothing, and looks exactly like every other row. */
   children?: ReactNode;
 }
+
+const POPOVER_WIDTH = 380;
+const POPOVER_MARGIN = 8;
+/** Space between the row and its popover. */
+const POPOVER_GAP = 4;
 
 function AlertRow({
   name,
   tag,
+  condition,
   enabled,
   enabledMixed,
   slack,
@@ -336,25 +400,125 @@ function AlertRow({
   onToggleSlack,
   children,
 }: AlertRowProps) {
+  const [open, setOpen] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Placed from the row's own rect, re-measured before paint so the popover never flashes at a stale
+  // (0,0) position, and again on any scroll/resize while it stays open - the drawer body is its own
+  // scroll container, so the window never sees that scroll bubble on its own.
+  //
+  // RIGHT-aligned to the row, not left. A rule row spans the whole drawer, so anchoring the panel's
+  // left edge to it put a 380px panel over the rows below AND left it hanging off to one side; lining
+  // its right edge up with the row's is what makes it read as belonging to that row.
+  //
+  // It also flips above the row when there is no space under it and there IS space over it — near the
+  // bottom of a long list the panel used to run off the end. The flip needs the panel's REAL height,
+  // which only exists once it is in the DOM, so this effect deliberately runs after every render and
+  // bails out when the answer has not moved (the same convergence the retired SPA's Popover used).
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    function place() {
+      const rect = rowRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const height = popRef.current?.offsetHeight ?? 0;
+      const left = Math.max(
+        POPOVER_MARGIN,
+        Math.min(rect.right - POPOVER_WIDTH, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN),
+      );
+      const below = rect.bottom + POPOVER_GAP;
+      const flip =
+        height > 0 &&
+        below + height > window.innerHeight - POPOVER_MARGIN &&
+        rect.top - height - POPOVER_GAP > POPOVER_MARGIN;
+      const top = flip ? rect.top - height - POPOVER_GAP : below;
+      setPos((cur) => (cur && cur.top === top && cur.left === left ? cur : { top, left }));
+    }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+    // No dependency list on purpose: the flip above needs the panel's measured height, which does not
+    // exist on the render that first mounts it. Running after every render lets the second pass see
+    // the real height; `setPos` returns the current object when nothing moved, so this settles after
+    // one extra pass instead of looping.
+  });
+
+  // Closes on an outside click or Escape. Scoped to this row rather than the checkboxes specifically:
+  // the trigger, both checkboxes and the popover all live under `rowRef`, so a click on any of them is
+  // never "outside" - the trigger's own onClick (not this) is what lets clicking it again close it.
+  useEffect(() => {
+    if (!open) return undefined;
+    function onPointerDown(event: PointerEvent) {
+      if (rowRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const text = (
+    // ONE element around both, deliberately. The trigger around this is a flex container, and two
+    // spans there would be two flex items — stacked or wrapped as whole blocks, never flowing as a
+    // sentence. Inside this single item they are ordinary inline text: one line when it fits, and a
+    // word-level wrap when it does not.
+    <span className="palerts__text">
+      <span className="palerts__name">
+        {name}
+        {tag && <span className="palerts__tag">{tag}</span>}
+      </span>
+      {/* One line, name and condition separated by a middot — the retired SPA's shape. The
+          separator lives inside this span so it disappears with the condition on a rule that
+          has none, rather than leaving a dangling "· " after the name. */}
+      {condition ? <span className="palerts__condition">{` · ${condition}`}</span> : null}
+    </span>
+  );
+
   return (
-    <div className={cn("palerts__row", !enabled && "palerts__row--off")}>
-      <input
-        type="checkbox"
-        className="palerts__cb"
-        checked={enabled}
-        ref={(el) => { if (el) el.indeterminate = !!enabledMixed; }}
-        onChange={onToggleEnabled}
-        aria-label={`Enable ${name}`}
-      />
-      <div className="palerts__text">
-        <span className="palerts__name">
-          {name}
-          {tag && <span className="palerts__tag">{tag}</span>}
-        </span>
-        {children && <span className="palerts__condition">{children}</span>}
-      </div>
+    <div ref={rowRef} className={cn("palerts__row", !enabled && "palerts__row--off")}>
+      <label className="palerts__cell palerts__cell--enable">
+        <input
+          type="checkbox"
+          className="palerts__cb"
+          checked={enabled}
+          ref={(el) => { if (el) el.indeterminate = !!enabledMixed; }}
+          onChange={onToggleEnabled}
+          aria-label={`Enable ${name}`}
+        />
+      </label>
+
+      {children ? (
+        <button
+          type="button"
+          ref={triggerRef}
+          className="palerts__trigger"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`Edit ${name}`}
+          onClick={() => setOpen((current) => !current)}
+        >
+          {text}
+        </button>
+      ) : (
+        <div className="palerts__trigger palerts__trigger--static">{text}</div>
+      )}
+
       <label
-        className={cn("palerts__slack", slackDisabled && "palerts__slack--disabled")}
+        className={cn("palerts__cell", "palerts__cell--slack", slackDisabled && "palerts__cell--slack-disabled")}
         title={
           slackDisabled
             ? "Enable Slack alerts and this rule to send it to Slack."
@@ -372,8 +536,20 @@ function AlertRow({
           onChange={onToggleSlack}
           aria-label={`Slack for ${name}`}
         />
-        <span className="palerts__slack-text">Slack</span>
       </label>
+
+      {open && children && (
+        <div
+          ref={popRef}
+          className="palerts__popover"
+          role="dialog"
+          aria-label={name}
+          style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" }}
+        >
+          <h4 className="palerts__popover-title">{name}</h4>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -490,6 +666,20 @@ export const PacingAlertsSection = forwardRef<SettingsSectionHandle, PacingAlert
 
     const bidWindow = draft.alerts.bidFactAbovePlan.window || 2;
 
+    // Condition sentences - read-only in the row, computed from the live draft so they update as the
+    // popover's own fields are edited. The five that fall back with `||` (see `orDefault`) describe
+    // what the detector will actually do with the current value, not the raw number typed.
+    const ctrLowPct = orDefault(num(ctrLow.factorPct), factorToPct(DEFAULT_ALERTS.ctrBelowTarget.factor));
+    const ctrHighPct = orDefault(num(ctrHigh.factorPct), factorToPct(DEFAULT_ALERTS.ctrAboveTarget.factor));
+    const ctrCondition = ctrLow.enabled && !ctrHigh.enabled
+      ? `Below ${ctrLowPct}% of target`
+      : ctrHigh.enabled && !ctrLow.enabled
+        ? `Above ${ctrHighPct}% of target`
+        : `Below ${ctrLowPct}% or above ${ctrHighPct}% of target`;
+    const vcrBelowPct = orDefault(num(draft.alerts.vcrBelowTarget.factorPct), factorToPct(DEFAULT_ALERTS.vcrBelowTarget.factor));
+    const bidThresholdPct = orDefault(num(draft.alerts.bidFactAbovePlan.thresholdPct), DEFAULT_ALERTS.bidFactAbovePlan.thresholdPct);
+    const dataGapDays = orDefault(num(draft.alerts.dataGap.gapDays), DEFAULT_ALERTS.dataGap.gapDays);
+
     return (
       <div className="palerts">
         <div className="palerts__globals">
@@ -502,7 +692,7 @@ export const PacingAlertsSection = forwardRef<SettingsSectionHandle, PacingAlert
             />
             <span className="palerts__master-text">
               <span className="palerts__master-title">Send alerts to Slack</span>
-              <span className="palerts__hint">When off, alerts stay on the dashboard.</span>
+              <span className="palerts__hint">{" · When off, alerts stay on the dashboard."}</span>
             </span>
           </label>
 
@@ -515,7 +705,7 @@ export const PacingAlertsSection = forwardRef<SettingsSectionHandle, PacingAlert
             />
             <span className="palerts__master-text">
               <span className="palerts__master-title">Hide paused line items</span>
-              <span className="palerts__hint">Exclude paused items from the Slack summary.</span>
+              <span className="palerts__hint">{" · Exclude paused items from the Slack summary."}</span>
             </span>
           </label>
 
@@ -528,9 +718,7 @@ export const PacingAlertsSection = forwardRef<SettingsSectionHandle, PacingAlert
             />
             <span className="palerts__master-text">
               <span className="palerts__master-title">Use flat plan in Slack summary</span>
-              <span className="palerts__hint">
-                When off, the target includes the pace still needed to finish the plan.
-              </span>
+              <span className="palerts__hint">{" · When off, the target includes the pace still needed to finish the plan."}</span>
             </span>
           </label>
         </div>
@@ -544,155 +732,218 @@ export const PacingAlertsSection = forwardRef<SettingsSectionHandle, PacingAlert
           <section className="palerts__sect">
             <h4 className="palerts__sect-title">Critical</h4>
 
-            <AlertRow name="Margin below target" {...rowProps("marginBelowTarget")}>
-              <span>by</span>
-              <NumField
-                value={draft.alerts.marginBelowTarget.gapPp}
-                step={0.5}
-                onChange={(v) => patchKey("marginBelowTarget", { gapPp: v })}
-                ariaLabel="Margin gap, percentage points"
-              />
-              <span className="palerts__unit">pp</span>
+            <AlertRow
+              name="Margin below target"
+              condition={`More than ${num(draft.alerts.marginBelowTarget.gapPp)} pp below target`}
+              {...rowProps("marginBelowTarget")}
+            >
+              <Field label="Below target by" unit="pp">
+                <NumField
+                  value={draft.alerts.marginBelowTarget.gapPp}
+                  step={0.5}
+                  onChange={(v) => patchKey("marginBelowTarget", { gapPp: v })}
+                  ariaLabel="Margin gap, percentage points"
+                />
+              </Field>
             </AlertRow>
 
-            <AlertRow name="DSP forecast overspend" {...rowProps("dspForecastOverspend")}>
-              <span>forecast spend exceeds cost budget</span>
-            </AlertRow>
+            <AlertRow
+              name="DSP forecast overspend"
+              condition="Forecast DSP spend exceeds cost budget"
+              {...rowProps("dspForecastOverspend")}
+            />
 
-            <AlertRow name="No delivery yet" {...rowProps("noImpressionsYet")}>
-              <span>campaign started but no impressions</span>
-            </AlertRow>
+            <AlertRow
+              name="No delivery yet"
+              condition="Past start date · no delivery in planned units"
+              {...rowProps("noImpressionsYet")}
+            />
 
             {hasVideo && (
-              <AlertRow name="VCR over 100%" tag="Video" {...rowProps("vcrOver100")}>
-                <span>completes exceed impressions - data error</span>
-              </AlertRow>
+              <AlertRow
+                name="VCR over 100%"
+                tag="Video"
+                condition="Completes exceed impressions"
+                {...rowProps("vcrOver100")}
+              />
             )}
           </section>
 
           <section className="palerts__sect">
             <h4 className="palerts__sect-title">Warning</h4>
 
-            <AlertRow name="Pacing off-pace" {...rowProps("pacingOffPace")}>
-              <span>below</span>
-              <NumField
-                value={draft.alerts.pacingOffPace.low}
-                onChange={(v) => patchKey("pacingOffPace", { low: v })}
-                ariaLabel="Pacing low bound, percentage points"
-              />
-              <span>or above</span>
-              <NumField
-                value={draft.alerts.pacingOffPace.high}
-                onChange={(v) => patchKey("pacingOffPace", { high: v })}
-                ariaLabel="Pacing high bound, percentage points"
-              />
-              <span className="palerts__unit">pp</span>
+            <AlertRow
+              name="Pacing off-pace"
+              condition={`Below ${num(draft.alerts.pacingOffPace.low)} pp or above ${num(draft.alerts.pacingOffPace.high)} pp`}
+              {...rowProps("pacingOffPace")}
+            >
+              <Field label="Below" unit="pp">
+                <NumField
+                  value={draft.alerts.pacingOffPace.low}
+                  onChange={(v) => patchKey("pacingOffPace", { low: v })}
+                  ariaLabel="Pacing low bound, percentage points"
+                />
+              </Field>
+              <Field label="Above" unit="pp">
+                <NumField
+                  value={draft.alerts.pacingOffPace.high}
+                  onChange={(v) => patchKey("pacingOffPace", { high: v })}
+                  ariaLabel="Pacing high bound, percentage points"
+                />
+              </Field>
             </AlertRow>
 
-            <AlertRow name="CTR vs target" {...ctrCoupled}>
-              <span>alert outside</span>
-              <NumField
-                value={ctrLow.factorPct}
-                step={5}
-                onChange={(v) => patchKey("ctrBelowTarget", { factorPct: v })}
-                ariaLabel="CTR lower bound, percent of target"
+            <AlertRow name="CTR vs target" condition={ctrCondition} {...ctrCoupled}>
+              <Field label="Below" unit="% of target">
+                <NumField
+                  value={ctrLow.factorPct}
+                  step={5}
+                  onChange={(v) => patchKey("ctrBelowTarget", { factorPct: v })}
+                  ariaLabel="CTR lower bound, percent of target"
+                />
+              </Field>
+              <DefaultNote
+                value={num(ctrLow.factorPct)}
+                fallback={`${factorToPct(DEFAULT_ALERTS.ctrBelowTarget.factor)}% of target for the lower bound`}
               />
-              <span className="palerts__unit">%</span>
-              <span>-</span>
-              <NumField
-                value={ctrHigh.factorPct}
-                step={5}
-                onChange={(v) => patchKey("ctrAboveTarget", { factorPct: v })}
-                ariaLabel="CTR upper bound, percent of target"
+              <Field label="Above" unit="% of target">
+                <NumField
+                  value={ctrHigh.factorPct}
+                  step={5}
+                  onChange={(v) => patchKey("ctrAboveTarget", { factorPct: v })}
+                  ariaLabel="CTR upper bound, percent of target"
+                />
+              </Field>
+              <DefaultNote
+                value={num(ctrHigh.factorPct)}
+                fallback={`${factorToPct(DEFAULT_ALERTS.ctrAboveTarget.factor)}% of target for the upper bound`}
               />
-              <span className="palerts__unit">%</span>
-              <span>of target</span>
             </AlertRow>
 
             {hasVideo && (
-              <AlertRow name="VCR vs target" tag="Video" {...rowProps("vcrBelowTarget")}>
-                <span>alert below</span>
-                <NumField
-                  value={draft.alerts.vcrBelowTarget.factorPct}
-                  step={5}
-                  onChange={(v) => patchKey("vcrBelowTarget", { factorPct: v })}
-                  ariaLabel="VCR lower bound, percent of target"
+              <AlertRow
+                name="VCR vs target"
+                tag="Video"
+                condition={`Below ${vcrBelowPct}% of target`}
+                {...rowProps("vcrBelowTarget")}
+              >
+                <Field label="Below" unit="% of target">
+                  <NumField
+                    value={draft.alerts.vcrBelowTarget.factorPct}
+                    step={5}
+                    onChange={(v) => patchKey("vcrBelowTarget", { factorPct: v })}
+                    ariaLabel="VCR lower bound, percent of target"
+                  />
+                </Field>
+                <DefaultNote
+                  value={num(draft.alerts.vcrBelowTarget.factorPct)}
+                  fallback={`${factorToPct(DEFAULT_ALERTS.vcrBelowTarget.factor)}% of target`}
                 />
-                <span className="palerts__unit">%</span>
-                <span>of target</span>
               </AlertRow>
             )}
 
-            <AlertRow name="Bid Fact above plan" {...rowProps("bidFactAbovePlan")}>
-              <SelectField
-                value={bidWindow}
-                options={[
-                  { value: 1, label: "1 day" },
-                  { value: 2, label: "2 days" },
-                  { value: 3, label: "3 days" },
-                ]}
-                onChange={(v) => patchKey("bidFactAbovePlan", { window: v })}
-                ariaLabel="Bid Fact window, days with data"
+            <AlertRow
+              name="Bid Fact above plan"
+              condition={`More than ${bidThresholdPct}% above plan · last ${plural(bidWindow, "day")} with data`}
+              {...rowProps("bidFactAbovePlan")}
+            >
+              <Field label="Window">
+                <SelectField
+                  value={bidWindow}
+                  options={[
+                    { value: 1, label: "1 day with data" },
+                    { value: 2, label: "2 days with data" },
+                    { value: 3, label: "3 days with data" },
+                  ]}
+                  onChange={(v) => patchKey("bidFactAbovePlan", { window: v })}
+                  ariaLabel="Bid Fact window, days with data"
+                />
+              </Field>
+              <Field label="Above plan by" unit="%">
+                <NumField
+                  value={draft.alerts.bidFactAbovePlan.thresholdPct}
+                  step={0.5}
+                  onChange={(v) => patchKey("bidFactAbovePlan", { thresholdPct: v })}
+                  ariaLabel="Bid Fact threshold, percent above plan"
+                />
+              </Field>
+              <DefaultNote
+                value={num(draft.alerts.bidFactAbovePlan.thresholdPct)}
+                fallback={`${DEFAULT_ALERTS.bidFactAbovePlan.thresholdPct}% above plan`}
               />
-              <span>window, by</span>
-              <NumField
-                value={draft.alerts.bidFactAbovePlan.thresholdPct}
-                step={0.5}
-                onChange={(v) => patchKey("bidFactAbovePlan", { thresholdPct: v })}
-                ariaLabel="Bid Fact threshold, percent above plan"
-              />
-              <span className="palerts__unit">%</span>
             </AlertRow>
 
-            <AlertRow name="Rate cost above plan" tag="CPC/CPV" {...rowProps("rateCostAbovePlan")}>
-              <span>by</span>
-              <NumField
-                value={draft.alerts.rateCostAbovePlan.thresholdPct}
-                onChange={(v) => patchKey("rateCostAbovePlan", { thresholdPct: v })}
-                ariaLabel="Rate cost threshold, percent above plan"
-              />
-              <span className="palerts__unit">%</span>
+            <AlertRow
+              name="Rate cost above plan"
+              tag="CPC/CPV"
+              condition={`More than ${num(draft.alerts.rateCostAbovePlan.thresholdPct)}% above plan`}
+              {...rowProps("rateCostAbovePlan")}
+            >
+              <Field label="Above plan by" unit="%">
+                <NumField
+                  value={draft.alerts.rateCostAbovePlan.thresholdPct}
+                  onChange={(v) => patchKey("rateCostAbovePlan", { thresholdPct: v })}
+                  ariaLabel="Rate cost threshold, percent above plan"
+                />
+              </Field>
             </AlertRow>
 
-            <AlertRow name="Spend overspend" {...rowProps("spendOverspend")}>
-              <span>warn at</span>
-              <NumField
-                value={draft.alerts.spendOverspend.warnPct}
-                onChange={(v) => patchKey("spendOverspend", { warnPct: v })}
-                ariaLabel="Spend warning threshold, percent of cost budget"
-              />
-              <span className="palerts__unit">%,</span>
-              <span>critical at</span>
-              <NumField
-                value={draft.alerts.spendOverspend.badPct}
-                onChange={(v) => patchKey("spendOverspend", { badPct: v })}
-                ariaLabel="Spend critical threshold, percent of cost budget"
-              />
-              <span className="palerts__unit">%</span>
+            <AlertRow
+              name="Spend overspend"
+              condition={`Warning > ${num(draft.alerts.spendOverspend.warnPct)}% · Critical > ${num(draft.alerts.spendOverspend.badPct)}% of cost budget`}
+              {...rowProps("spendOverspend")}
+            >
+              <Field label="Warning above" unit="% of cost budget">
+                <NumField
+                  value={draft.alerts.spendOverspend.warnPct}
+                  onChange={(v) => patchKey("spendOverspend", { warnPct: v })}
+                  ariaLabel="Spend warning threshold, percent of cost budget"
+                />
+              </Field>
+              <Field label="Critical above" unit="% of cost budget">
+                <NumField
+                  value={draft.alerts.spendOverspend.badPct}
+                  onChange={(v) => patchKey("spendOverspend", { badPct: v })}
+                  ariaLabel="Spend critical threshold, percent of cost budget"
+                />
+              </Field>
             </AlertRow>
 
-            <AlertRow name="Stale data" {...rowProps("staleData")}>
-              <span>after</span>
-              <NumField
-                value={draft.alerts.staleData.days}
-                onChange={(v) => patchKey("staleData", { days: v })}
-                ariaLabel="Stale data threshold, days"
-              />
-              <span className="palerts__unit">days</span>
+            <AlertRow
+              name="Stale data"
+              condition={`Latest data at least ${plural(num(draft.alerts.staleData.days), "day")} old`}
+              {...rowProps("staleData")}
+            >
+              <Field label="Data age at least" unit="days">
+                <NumField
+                  value={draft.alerts.staleData.days}
+                  onChange={(v) => patchKey("staleData", { days: v })}
+                  ariaLabel="Stale data threshold, days"
+                />
+              </Field>
             </AlertRow>
           </section>
 
           <section className="palerts__sect">
             <h4 className="palerts__sect-title">Info</h4>
 
-            <AlertRow name="Data gap" {...rowProps("dataGap")}>
-              <span>missing longer than</span>
-              <NumField
-                value={draft.alerts.dataGap.gapDays}
-                onChange={(v) => patchKey("dataGap", { gapDays: v })}
-                ariaLabel="Data gap threshold, days"
+            <AlertRow
+              name="Data gap"
+              condition={`More than ${plural(dataGapDays, "missing day")} between data dates`}
+              {...rowProps("dataGap")}
+            >
+              <Field label="Missing more than" unit="days">
+                <NumField
+                  value={draft.alerts.dataGap.gapDays}
+                  onChange={(v) => patchKey("dataGap", { gapDays: v })}
+                  ariaLabel="Data gap threshold, days"
+                />
+              </Field>
+              <p className="palerts__note">Counts missing days between dates that have data.</p>
+              <DefaultNote
+                value={num(draft.alerts.dataGap.gapDays)}
+                fallback={`${DEFAULT_ALERTS.dataGap.gapDays} missing day`}
               />
-              <span className="palerts__unit">day(s)</span>
             </AlertRow>
           </section>
 
