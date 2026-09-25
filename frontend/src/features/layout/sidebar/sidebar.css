@@ -385,38 +385,6 @@
   flex-direction: column;
   gap: 14px;
 }
-.sidebar__theme-toggle {
-  background: var(--n-100);
-  border-radius: var(--radius);
-  padding: 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sidebar__theme-opt {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  border-radius: var(--radius);
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--muted-strong);
-  width: 100%;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background .15s, color .15s;
-}
-.sidebar__theme-opt svg {
-  width: 16px;
-  height: 16px;
-}
-.sidebar__theme-opt--active {
-  background: var(--primary-fill);
-  color: var(--color-accent-contrast);
-}
 .sidebar__collapse-btn {
   align-self: center;
   width: 30px;
@@ -445,10 +413,62 @@
   gap: 11px;
   padding: 4px 6px;
 }
+/* The Account Settings trigger: a dedicated icon button at the trailing edge of the row, next to
+   (never wrapping) the Clerk UserButton, which stays its own click target. It reuses
+   MoreVerticalIcon - already this app's "more actions" glyph in team-management, campaigns and
+   pacing row menus - so it never means two different things at once the way SettingsIcon (already
+   the Pacing-admin nav glyph) or a bare caret (read as "wrong" twice) did. Unlike those row-menu
+   kebabs, which stay borderless until hover, this one carries a visible border and background AT
+   REST (same chrome as .sidebar__collapse-btn right above it in this footer) so it reads as a
+   pressable chip before anyone points at it - hover/focus only deepen that, they don't create it. */
+.sidebar__user-trigger {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted-strong);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.sidebar__user-trigger:hover {
+  background: var(--n-100);
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+.sidebar__user-trigger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.sidebar__user-trigger svg {
+  width: 16px;
+  height: 16px;
+}
+/* Collapsed-sidebar stand-in for the name/role text - same monogram treatment as the brand mark and
+   agency avatars. Purely decorative now (the trigger above is its own button, always visible
+   whether or not the sidebar is collapsed), so collapsing only ever loses the label, never the way
+   to open Account Settings. */
+.sidebar__user-initials {
+  display: none;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  background: var(--primary-soft);
+  color: var(--primary);
+  place-items: center;
+}
 .sidebar__user-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 .sidebar__user-name {
   font-weight: 700;
@@ -477,7 +497,6 @@
 .sidebar--collapsed .sidebar__agency-dots,
 .sidebar--collapsed .sidebar__clients,
 .sidebar--collapsed .sidebar__more-row,
-.sidebar--collapsed .sidebar__theme-opt span,
 .sidebar--collapsed .sidebar__user-meta {
   display: none;
 }
@@ -502,14 +521,14 @@
   padding-left: 0;
   padding-right: 0;
 }
-.sidebar--collapsed .sidebar__theme-opt {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
-}
 .sidebar--collapsed .sidebar__user {
+  flex-direction: column;
+  gap: 8px;
   justify-content: center;
   padding: 4px 0;
+}
+.sidebar--collapsed .sidebar__user-initials {
+  display: grid;
 }
 .sidebar--collapsed .sidebar__collapse-btn svg {
   transform: rotate(180deg);

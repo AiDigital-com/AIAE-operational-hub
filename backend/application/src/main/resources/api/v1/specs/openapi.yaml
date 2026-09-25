@@ -59,6 +59,13 @@ tags:
       it again if it somehow did. Deletion is irreversible - it removes the pacing's delivery history
       and journal along with it - and is never triggered from this API without the caller's own
       explicit confirmation on the Hub's admin screen.
+  - name: pacingAccount
+    description: >
+      A person's own Pacing account preferences: where their Daily Summary is delivered, and their
+      own private Slack group (Account Settings, "Daily Summary"). Pacing owns and validates both
+      (`access.users.notify_destination` / `slack_channel_id`), including checking a changed group
+      id against Slack itself - the Hub signs the caller's own assertion, forwards the request and
+      maps the result, the same thin-passthrough shape as every other pacing tag.
 paths:
   /api/v1/auth/me:
     get:
@@ -3849,6 +3856,73 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/account:
+    get:
+      tags:
+        - pacingAccount
+      operationId: getPacingAccount
+      description: >
+        The current user's Daily Summary delivery preference and Slack group id, as Pacing has
+        them stored (`access.users.notify_destination` / `slack_channel_id`) - seeds the Account
+        Settings modal.
+      responses:
+        '200':
+          description: The account preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingAccountV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    patch:
+      tags:
+        - pacingAccount
+      operationId: updatePacingAccount
+      description: >
+        Changes where the current user's Daily Summary is delivered, and/or their own private
+        Slack group. `notifyDestination` alone (the segmented control) saves immediately - there
+        is no separate save step. `slackChannelId` gets its own save action and its own result,
+        because Pacing checks a changed value against Slack synchronously before storing it: it
+        refuses (400) an id that does not resolve, is not a private group, or one the bot or the
+        person is not a member of, each with a specific reason in `detail`; a value Pacing could
+        not check at all (Slack unreachable) is saved anyway, flagged by `slackWarning` on the 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingAccountUpdateV1'
+      responses:
+        '200':
+          description: The preference and/or Slack group id were saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingAccountV1'
+        '400':
+          description: >-
+            `notifyDestination` was not one of `auto`/`dm`/`off`, or `slackChannelId` changed to a
+            value Pacing could not verify against Slack - `detail` names which and why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
         '503':
           description: >-
             The Pacing service could not be reached (connection failure or timeout).
@@ -8243,6 +8317,53 @@ components:
           type: boolean
       required:
         - saved
+    PacingNotifyDestinationV1:
+      type: string
+      enum: ["auto", "dm", "off"]
+      description: >
+        Where a person's Daily Summary is delivered. `auto` sends it to their private Slack group
+        (see `PacingAccountV1.slackChannelId`), falling back to a direct message when none is set;
+        `dm` always sends a direct message; `off` sends nothing.
+    PacingAccountV1:
+      type: object
+      description: The current user's own Pacing account preferences (Account Settings).
+      properties:
+        notifyDestination:
+          $ref: '#/components/schemas/PacingNotifyDestinationV1'
+        slackChannelId:
+          type: string
+          description: >
+            The id of the person's own private Slack group - only they can set it, since only they
+            know which group is theirs. Empty when none is set, in which case `auto` behaves like
+            `dm`. Find it from Slack's own "Copy link" on the group: the `C…`/`G…` tail of that URL.
+          example: G0123456789
+        slackWarning:
+          type: string
+          nullable: true
+          description: >
+            Set only on the response to a PATCH that changed `slackChannelId`, and only when Pacing
+            could not check it against Slack (an outage, or no bot token configured on Pacing's
+            side). The value was still saved - this is why it could not be confirmed to work yet.
+      required:
+        - notifyDestination
+        - slackChannelId
+    PacingAccountUpdateV1:
+      type: object
+      description: >
+        Always carries both fields: the caller round-trips whichever one it is not changing, taken
+        from the same `PacingAccountV1` the modal already loaded. This matters for
+        `slackChannelId` - Pacing only re-verifies it against Slack when the value actually
+        changes, so an unrelated `notifyDestination` change can never be blocked by a group that
+        has since gone stale (bot removed, person left).
+      properties:
+        notifyDestination:
+          $ref: '#/components/schemas/PacingNotifyDestinationV1'
+        slackChannelId:
+          type: string
+          description: The Slack group id, or an empty string to clear it.
+      required:
+        - notifyDestination
+        - slackChannelId
     PacingDataSourceV1:
       type: string
       description: >

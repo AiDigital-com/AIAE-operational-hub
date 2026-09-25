@@ -5,6 +5,7 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -65,6 +66,7 @@ public class PacingClientImpl implements PacingClient {
 	private static final String DELEGATIONS_PATH = "/api/delegations";
 	private static final String LIBRARY_PATH = "/api/library";
 	private static final String ADMIN_REFRESH_ALL_PATH = "/api/admin/refresh-all-dashboards";
+	private static final String ME_PATH = "/api/me";
 
 	private final RestClient restClient;
 	private final HubAssertionSigner assertionSigner;
@@ -985,6 +987,67 @@ public class PacingClientImpl implements PacingClient {
 		}
 	}
 
+	@Override
+	public PacingAccount getAccount(HubAssertion assertion) {
+		String header = assertionSigner.sign(assertion);
+		try {
+			MeResponse response = restClient.get()
+					.uri(ME_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(MeResponse.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER, "Pacing request failed: GET " + ME_PATH + " returned an empty body");
+			}
+			// slackWarning is null here on purpose - Pacing never sets it on a GET, only on a PATCH
+			// that just changed the value (see PacingAccount's own doc).
+			return new PacingAccount(response.notify_destination(), nullToEmpty(response.slack_channel_id()), null);
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("GET", ME_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + ME_PATH, ex);
+		}
+	}
+
+	@Override
+	public PacingAccount updateAccount(HubAssertion assertion, String notifyDestination, String slackChannelId) {
+		String header = assertionSigner.sign(assertion);
+		AccountUpdateRequest request = new AccountUpdateRequest(notifyDestination, slackChannelId);
+		try {
+			AccountUpdateResponse response = restClient.patch()
+					.uri(ME_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.body(AccountUpdateResponse.class);
+			if (response == null) {
+				return new PacingAccount(notifyDestination, nullToEmpty(slackChannelId), null);
+			}
+			return new PacingAccount(
+					response.notify_destination(), nullToEmpty(response.slack_channel_id()), response.slack_warning());
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("PATCH", ME_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: PATCH " + ME_PATH, ex);
+		}
+	}
+
+	/**
+	 * Pacing's {@code slack_channel_id} is SQL NULL until someone sets it; this contract's
+	 * {@code PacingAccountV1.slackChannelId} is required and non-nullable, so every read coerces
+	 * NULL to an empty string rather than pushing the nullability down into the generated model.
+	 *
+	 * @param value the raw value from Pacing, possibly null
+	 * @return {@code value}, or {@code ""} if it was null
+	 */
+	private String nullToEmpty(String value) {
+		return value == null ? "" : value;
+	}
+
 	private LineItemCreateRequest toWireLineItem(PacingCreateLineItem li) {
 		return new LineItemCreateRequest(
 				li.lineItemId(), li.channel(), li.flightStart(), li.flightEnd(), li.rateType(), li.nativeBudget(),
@@ -1296,6 +1359,7 @@ public class PacingClientImpl implements PacingClient {
 			case "mapping_not_portable" ->
 					"this widget's mapping is pinned to a specific pacing and cannot be shared";
 			case "bad_seed_display" -> "the pacing's default layout could not be seeded";
+			case "invalid_notify_destination" -> "the Daily Summary delivery option must be auto, dm or off";
 			default -> errorCode;
 		};
 	}
@@ -1684,5 +1748,43 @@ public class PacingClientImpl implements PacingClient {
 	 * @param new_owner_id the recipient's Pacing user id (UUID)
 	 */
 	private record OwnerTransferRequest(String new_owner_id) {
+	}
+
+	/**
+	 * Shape of Pacing's {@code GET /api/me} response body. Pacing also returns {@code user_id},
+	 * {@code name}, {@code email}, {@code can_create} and {@code scope} - none of them read here,
+	 * since the Hub already knows all of them from its own RBAC - {@code ignoreUnknown} so their
+	 * presence does not fail deserialization.
+	 *
+	 * @param notify_destination where the Daily Summary is delivered: {@code auto}, {@code dm}, or
+	 *                           {@code off}
+	 * @param slack_channel_id   the person's own private Slack group id, or SQL NULL if none is set
+	 */
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+	private record MeResponse(String notify_destination, String slack_channel_id) {
+	}
+
+	/**
+	 * Shape of the {@code PATCH /api/me} request body. Always carries both fields - see
+	 * {@code PacingAccountUpdateV1}'s own description for why the caller round-trips whichever one
+	 * it is not changing.
+	 *
+	 * @param notify_destination {@code auto}, {@code dm}, or {@code off}
+	 * @param slack_channel_id   the Slack group id, or an empty string to clear it
+	 */
+	private record AccountUpdateRequest(String notify_destination, String slack_channel_id) {
+	}
+
+	/**
+	 * Shape of Pacing's {@code PATCH /api/me} success response body. Pacing also returns {@code ok};
+	 * not read here, since a non-2xx status already answers whether the save happened.
+	 *
+	 * @param notify_destination the value Pacing now has stored
+	 * @param slack_channel_id   the value Pacing now has stored, or SQL NULL if cleared/never set
+	 * @param slack_warning      set only when {@code slack_channel_id} changed and Pacing could not
+	 *                           check it against Slack; null on every other response
+	 */
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+	private record AccountUpdateResponse(String notify_destination, String slack_channel_id, String slack_warning) {
 	}
 }

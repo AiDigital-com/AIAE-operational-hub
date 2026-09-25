@@ -4,6 +4,7 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -2677,6 +2678,153 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	@Test
+	void shouldReturnAccountAndAttachSignedAssertionHeaderTest() {
+		// Given: Pacing's GET /api/me also returns identity fields the Hub never reads (user_id, name,
+		// email, slack_channel_id, can_create, scope) - present here to pin that they are ignored,
+		// not that they fail deserialization.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andExpect(method(GET))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess(
+						"{\"user_id\":\"u1\",\"name\":\"Me\",\"email\":\"me@aidigital.com\","
+								+ "\"slack_channel_id\":null,\"notify_destination\":\"auto\","
+								+ "\"can_create\":true,\"scope\":{\"kind\":\"all\"}}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingAccount result = client.getAccount(assertion);
+
+		// Then: a NULL slack_channel_id from Pacing is coerced to "" - the contract's field is
+		// required and non-nullable.
+		assertThat(result.notifyDestination()).isEqualTo("auto");
+		assertThat(result.slackChannelId()).isEqualTo("");
+		assertThat(result.slackWarning()).isNull();
+		server.verify();
+	}
+
+	@Test
+	void shouldUpdateAccountRoundTrippingBothFieldsAndAttachSignedAssertionHeaderTest() {
+		// Given: only notifyDestination is changing, but slackChannelId is still sent (round-tripped
+		// by the caller) - see PacingAccountUpdateV1's own description for why.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(content().json("{\"notify_destination\":\"dm\",\"slack_channel_id\":\"G123\"}"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"notify_destination\":\"dm\",\"slack_channel_id\":\"G123\"}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingAccount result = client.updateAccount(assertion, "dm", "G123");
+
+		// Then: the values Pacing echoed back, not just the ones sent - what actually got stored.
+		assertThat(result.notifyDestination()).isEqualTo("dm");
+		assertThat(result.slackChannelId()).isEqualTo("G123");
+		assertThat(result.slackWarning()).isNull();
+		server.verify();
+	}
+
+	@Test
+	void shouldCarryASlackUnreachableWarningThroughOnAnOtherwiseSuccessfulSaveTest() {
+		// Given: Pacing could not check the new slackChannelId against Slack (an outage on its side)
+		// but saved it anyway - the warning must reach the caller on the 200, not get dropped.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"notify_destination\":\"auto\",\"slack_channel_id\":\"G123\","
+								+ "\"slack_warning\":\"Slack couldn't be reached to check this just now\"}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingAccount result = client.updateAccount(assertion, "auto", "G123");
+
+		// Then:
+		assertThat(result.slackWarning()).isEqualTo("Slack couldn't be reached to check this just now");
+		server.verify();
+	}
+
+	@Test
+	void shouldMapInvalidNotifyDestinationToBadRequestTest() {
+		// Given: dash-gate's 400 on anything outside auto/dm/off.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":\"invalid_notify_destination\"}"));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.updateAccount(assertion, "carrier-pigeon", ""))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_BAD_REQUEST);
+	}
+
+	@Test
+	void shouldMapASlackChannelRefusalToBadRequestWithPacingsOwnDetailTest() {
+		// Given: dash-gate's 400 when a changed slackChannelId does not verify against Slack - the
+		// detail is what makes it into the exception (and, downstream, back to the person as words).
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":\"slack_channel_invalid\",\"reason\":\"not_private\","
+								+ "\"detail\":\"That's not a private group - pick a private group's ID, not a public channel.\"}"));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.updateAccount(assertion, "auto", "C_PUBLIC"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason(), ex -> ((PacingExternalException) ex).getDetail())
+				.containsExactly(
+						PacingFailureReason.UPSTREAM_BAD_REQUEST,
+						"That's not a private group - pick a private group's ID, not a public channel.");
+	}
+
+	@Test
+	void shouldClassifyAccountConnectionFailureAsUnreachableTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/me"))
+				.andRespond(request -> {
+					throw new SocketTimeoutException("Read timed out");
+				});
+
+		// When-Then:
+		assertThatThrownBy(() -> client.getAccount(assertion))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UNREACHABLE);
 	}
 
 	@Test

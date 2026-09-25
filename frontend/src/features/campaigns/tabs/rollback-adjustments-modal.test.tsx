@@ -51,9 +51,10 @@ function renderModal(
 
 /** The counts paragraph's own text - queried by class rather than by content, whose two `<strong>`
  * digits (3, 1) collide with substrings of the rendered date window ("...-31", "...-01") under a plain
- * text-content regex match. */
-function countsText(container: HTMLElement): string {
-  return container.querySelector(".rollback-adjustments-modal__counts")?.textContent ?? "";
+ * text-content regex match. Queried from `document`, not the render's own container: `Modal` portals
+ * to `document.body`, so the dialog is a sibling of that container, not a descendant of it. */
+function countsText(): string {
+  return document.querySelector(".rollback-adjustments-modal__counts")?.textContent ?? "";
 }
 
 describe("RollbackAdjustmentsModal", () => {
@@ -113,15 +114,15 @@ describe("RollbackAdjustmentsModal", () => {
     });
 
     // When:
-    const { container } = renderModal();
+    renderModal();
 
     // Then:
     expect(screen.getByText("barr_SCOT_Fall Campaign_Display")).toBeInTheDocument();
     expect(screen.getByText("2026-01-01 – 2026-01-31")).toBeInTheDocument();
-    await waitFor(() => expect(countsText(container)).toContain("delivery adjustment row"));
-    expect(countsText(container)).toContain("3");
-    expect(countsText(container)).toContain("conversions adjustment row");
-    expect(countsText(container)).toContain("1");
+    await waitFor(() => expect(countsText()).toContain("delivery adjustment row"));
+    expect(countsText()).toContain("3");
+    expect(countsText()).toContain("conversions adjustment row");
+    expect(countsText()).toContain("1");
     expect(previewAdjustmentRollback).toHaveBeenCalledWith(42, {
       campaignConstructedNames: SCOPE_NAMES,
       constructedNamesLvl2: [],

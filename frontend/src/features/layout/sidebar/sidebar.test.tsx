@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { ThemeProvider } from "../../../shared/style/theme";
 import { ToastProvider } from "../../../shared/ui/toast/toast";
 import { searchAgencies } from "../../agencies/api";
 import { searchClients } from "../../clients/api";
+import * as accountApi from "../account-settings/account-api";
 import { Sidebar } from "./sidebar";
 
 vi.mock("@clerk/clerk-react", () => ({
@@ -20,6 +21,11 @@ vi.mock("../../agencies/api", () => ({
 
 vi.mock("../../clients/api", () => ({
   searchClients: vi.fn(),
+}));
+
+vi.mock("../account-settings/account-api", () => ({
+  getAccount: vi.fn(),
+  updateAccount: vi.fn(),
 }));
 
 // Testing Library's default text matcher only reads an element's own direct text-node children, not
@@ -177,6 +183,48 @@ describe("Sidebar", () => {
     // Then: expanding costs nothing - a request here would only be told there is no second page
     expect(searchClients).not.toHaveBeenCalled();
     expect(document.querySelector(".sidebar__clients-more")).toBeNull();
+  });
+
+  it("should open Account Settings from its own trigger button beside the user row", async () => {
+    // Given:
+    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1());
+    vi.mocked(accountApi.getAccount).mockResolvedValue({ notifyDestination: "auto", slackChannelId: "" });
+    renderSidebar("/");
+
+    // Then: the name/role text renders in the row, and the trigger is its own adjacent button - not
+    // a wrapper around that text
+    expect(screen.getByText("Admin")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Account settings" });
+    expect(within(trigger).queryByText("Admin")).not.toBeInTheDocument();
+
+    // When: it is pressed
+    await userEvent.click(trigger);
+
+    // Then: the modal opens and seeds from the stored preference
+    expect(await screen.findByRole("dialog", { name: "Account Settings" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Auto", pressed: true })).toBeInTheDocument();
+  });
+
+  it("should show the Account Settings trigger as pressable at rest, and open it from the keyboard", async () => {
+    // Given:
+    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1());
+    vi.mocked(accountApi.getAccount).mockResolvedValue({ notifyDestination: "auto", slackChannelId: "" });
+    renderSidebar("/");
+    const trigger = screen.getByRole("button", { name: "Account settings" });
+
+    // Then: its icon is visible without hovering or focusing first - not only a hover/focus tint -
+    // and decorative, since the button's own accessible name already says what it does
+    const icon = trigger.querySelector("svg");
+    expect(icon).toBeInTheDocument();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+
+    // When: reached by keyboard and activated without a mouse
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+
+    // Then: the modal opens the same as a click would
+    expect(await screen.findByRole("dialog", { name: "Account Settings" })).toBeInTheDocument();
   });
 
   it("should link the brand back to the overview", () => {
