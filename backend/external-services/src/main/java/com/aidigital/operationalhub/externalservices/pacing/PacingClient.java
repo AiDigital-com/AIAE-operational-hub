@@ -11,6 +11,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSett
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
@@ -360,6 +361,58 @@ public interface PacingClient {
 	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail} naming the field
 	 */
 	void saveNotifySettings(HubAssertion assertion, String slug, PacingNotifySettings settings);
+
+	/**
+	 * Adds a free-text note to a pacing (§15 of the migration plan, US-139): {@code POST
+	 * /api/dashboards/:slug/journal} on the Pacing side, which rate-limits journal writes on its own
+	 * side and stamps the author from the assertion. Returns the whole fresh journal, not just the
+	 * entry that was added - the same read-after-write shape {@link #getDashboardData} embeds, so a
+	 * caller can patch its cached dashboard with the result instead of re-fetching it.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param message   the note text; rejected with a 400 if blank after trimming
+	 * @param date      the note's own date ({@code YYYY-MM-DD}), or null to default to today
+	 * @return the pacing's whole journal after the add, never {@code null}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	List<PacingJournalEntry> addJournalEntry(HubAssertion assertion, String slug, String message, String date);
+
+	/**
+	 * Edits a journal entry in place (§15, US-139): {@code PATCH
+	 * /api/dashboards/:slug/journal/:entryId} on the Pacing side, author-or-admin only - enforced in
+	 * Pacing's own SQL, not repeated here. Stamps {@code edited_at}. Tags written inline in the message
+	 * ({@code #type:value}) re-parse automatically since they live in the text itself.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param entryId   the journal entry id
+	 * @param message   the note text; rejected with a 400 if blank after trimming
+	 * @param date      the note's own date ({@code YYYY-MM-DD}), or null to leave the stored date
+	 *                  unchanged
+	 * @return the pacing's whole journal after the edit, never {@code null}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - including a 403 when the caller is
+	 *         neither the entry's author nor an admin
+	 */
+	List<PacingJournalEntry> updateJournalEntry(
+			HubAssertion assertion, String slug, String entryId, String message, String date);
+
+	/**
+	 * Soft-deletes a journal entry (§15, US-139): {@code DELETE
+	 * /api/dashboards/:slug/journal/:entryId} on the Pacing side. Deliberately no author check on
+	 * either side - anyone with dashboard access to this pacing may delete any entry, the reference
+	 * behaviour, kept on purpose. Pacing stamps {@code deleted_at} rather than removing the row.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param entryId   the journal entry id
+	 * @return the pacing's whole journal after the delete, never {@code null}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	List<PacingJournalEntry> deleteJournalEntry(HubAssertion assertion, String slug, String entryId);
 
 	/**
 	 * The delegations in force for the caller (§12 of the migration plan, US-135) - both the ones

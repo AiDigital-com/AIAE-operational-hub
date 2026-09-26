@@ -1,0 +1,50 @@
+/* The DateRangePicker's wrapper as a flex item inside `.fb-seg`'s segmented group - stretches to
+   the group's height so its trigger button sits flush with its siblings, same as any other
+   `.fb-seg__btn`. */
+.fb-seg__custom-wrap {
+  display: flex;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+/* The Custom segment doubles as the calendar trigger AND the readout of the picked range (owner
+   ask 2026-09-11, carried over from the reference's own comment on this exact rule). A fixed
+   floor lets "Custom" and a typical readout ("Sep 1 – Sep 10") share one width, so the segmented
+   group does not visibly jump the moment a range lands - only a range that needs a year outgrows
+   it. */
+.fb-seg__custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 118px;
+  justify-content: center;
+}
+.fb-seg__custom-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.fb-seg__btn--active .fb-seg__custom-icon {
+  color: var(--primary);
+}
+/* Open, but nothing picked yet: an outline only - the segment is not "selected" until a COMPLETE
+   range lands (customRangePatch's no-dangling-custom rule; see date-range-control.tsx's own
+   comment on this state). */
+.fb-seg__custom--open {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.fb-seg__custom--open .fb-seg__custom-icon {
+  color: var(--primary);
+}
+
+/* `.fb__controls` wraps onto a new line rather than overflow (`filter-bar.css`'s own `flex-wrap:
+   wrap`); the floor width is lifted here, with the icon, purely to keep the idle segment itself
+   narrow on a phone-width screen rather than forcing an early wrap. */
+@media (max-width: 560px) {
+  .fb-seg__custom {
+    min-width: 0;
+  }
+  .fb-seg__custom-icon {
+    display: none;
+  }
+}

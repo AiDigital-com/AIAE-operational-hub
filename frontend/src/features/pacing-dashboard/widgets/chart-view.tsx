@@ -395,10 +395,17 @@ export function ChartViewRenderer({
   view,
   rows,
   scalars,
+  journalHighlight = null,
 }: {
   view: ChartView;
   rows: readonly SeriesRow[];
   scalars: Record<string, number>;
+  /** The journal's highlighted-entry date (§15 follow-up, from `pacing-dashboard.tsx`'s page-level
+   *  state) - draws a vertical marker on this view when its own spec carries `journal: true`. Every
+   *  view this renderer draws already plots one row per day (`dataKey="date"` below), so the
+   *  reference's "date axis only" rule holds trivially here - there is no categorical-axis chart on
+   *  this side to accidentally draw it on. */
+  journalHighlight?: string | null;
 }) {
   const dates = useMemo(() => rows.map((r) => r.date), [rows]);
 
@@ -482,6 +489,16 @@ export function ChartViewRenderer({
             const s = series.find((x) => x.key === value);
             return s?.label ?? value;
           }} />}
+          {view.journal && journalHighlight && (
+            <ReferenceLine
+              yAxisId="left"
+              x={journalHighlight}
+              stroke="var(--attention)"
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+              label={{ value: "Journal", position: "insideTopLeft", fill: "var(--attention)", fontSize: 10 }}
+            />
+          )}
           {series.map((s) => {
             const common = { dataKey: s.key, name: s.key, yAxisId: s.axis, connectNulls: false };
             if (s.kind === "bar") {

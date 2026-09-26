@@ -1,0 +1,255 @@
+/* Journal panel (§15, US-139). Background tints and full-cell fills only - no left-rail accents,
+   per the project's standing ban on vertical colour stripes. */
+
+.journal-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.journal-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--n-100);
+}
+
+.journal-panel__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+}
+
+.journal-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-strong);
+}
+
+.journal-panel__form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Both the width and the min-height are here to beat app/styles.css's app-wide
+   `input, select { width: 100%; min-height: 42px }`:
+     - without the width, the date field claimed the whole first line of this wrapping flex row
+       and pushed the note box and the Add button onto a second. 148px is the retired SPA's own
+       picker width, which kept date, note and button on ONE row;
+     - without the `min-height`, `height: 34px` lost outright - a min-height always beats a
+       height - so the field rendered 42px tall next to a 34px textarea and a 34px button. The
+       row is `align-items: flex-end`, so their bottoms lined up and the date alone stuck out 8px
+       above the other two. Set both, or neither does anything. */
+.journal-panel__date-input,
+.journal-entry__date-input {
+  width: 148px;
+  min-width: 148px;
+  flex: 0 0 148px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.journal-panel__textarea,
+.journal-entry__textarea {
+  flex: 1;
+  min-width: 200px;
+  min-height: 34px;
+  max-height: 160px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.journal-panel__error,
+.journal-entry__error {
+  margin: 6px 18px 0;
+  font-size: 12px;
+  color: var(--bad);
+}
+
+.journal-panel__toast {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--good);
+}
+
+.journal-panel__empty {
+  margin: 0;
+  padding: 20px 18px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.journal-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.journal-panel__footer {
+  display: flex;
+  justify-content: center;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.journal-panel__toggle {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.journal-panel__toggle:hover {
+  background: var(--n-200);
+}
+
+/* ── entry row ── */
+
+.journal-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.journal-entry:last-child {
+  border-bottom: none;
+}
+.journal-entry--editing {
+  background: var(--n-100);
+}
+.journal-entry--clickable {
+  cursor: pointer;
+}
+.journal-entry--clickable:hover {
+  background: var(--n-100);
+}
+
+.journal-entry__meta {
+  flex-shrink: 0;
+  width: 108px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.journal-entry__date {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.journal-entry__author {
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journal-entry__edited {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.journal-entry__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.journal-entry__message {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.journal-entry__actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.journal-entry:hover .journal-entry__actions,
+.journal-entry__actions:focus-within {
+  opacity: 1;
+}
+.journal-entry__action {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.journal-entry__action:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.journal-entry__action--confirm,
+.journal-entry__action--confirm:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+
+.journal-entry__editor {
+  flex: 1;
+  min-width: 0;
+}
+.journal-entry__editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.journal-entry__hint {
+  font-size: 10.5px;
+  color: var(--muted);
+}

@@ -42,6 +42,7 @@ import static com.aidigital.operationalhub.service.exception.enums.OperationalHu
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_055;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_056;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_057;
+import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_058;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
@@ -83,6 +84,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	 * is likewise not passed through as 403: that would read as "you are forbidden", when the truth is
 	 * "the Hub knows you but Pacing's user mirror does not yet" - a sync gap, not an authorization
 	 * decision. Mapped to 409 with the distinct {@code OPH_053} code instead.
+	 *
+	 * <p>{@link PacingFailureReason#UPSTREAM_RATE_LIMITED} (Pacing answered 429/{@code too_fast} on a
+	 * journal write or a library action) is mapped to 429, not 500 - it is an honest "slow down", not
+	 * a failure.
 	 */
 	private static final Map<PacingFailureReason, HttpStatus> PACING_FAILURE_STATUSES = Map.of(
 			PacingFailureReason.UNREACHABLE, SERVICE_UNAVAILABLE,
@@ -91,6 +96,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 			PacingFailureReason.UPSTREAM_NOT_FOUND, NOT_FOUND,
 			PacingFailureReason.UPSTREAM_BAD_REQUEST, BAD_REQUEST,
 			PacingFailureReason.UPSTREAM_FORBIDDEN, FORBIDDEN,
+			PacingFailureReason.UPSTREAM_RATE_LIMITED, TOO_MANY_REQUESTS,
 			PacingFailureReason.OTHER, INTERNAL_SERVER_ERROR);
 
 	private static final Map<PacingFailureReason, OperationalHubErrorReason> PACING_FAILURE_CODES = Map.of(
@@ -100,6 +106,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 			PacingFailureReason.UPSTREAM_NOT_FOUND, OPH_054,
 			PacingFailureReason.UPSTREAM_BAD_REQUEST, OPH_056,
 			PacingFailureReason.UPSTREAM_FORBIDDEN, OPH_057,
+			PacingFailureReason.UPSTREAM_RATE_LIMITED, OPH_058,
 			PacingFailureReason.OTHER, OPH_055);
 
 	private final GlobalExceptionResponseHelper responseHelper;

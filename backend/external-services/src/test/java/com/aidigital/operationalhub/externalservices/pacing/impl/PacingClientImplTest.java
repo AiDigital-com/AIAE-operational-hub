@@ -14,6 +14,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSett
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
@@ -61,6 +62,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpMethod.DELETE;
 import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.http.HttpMethod.PATCH;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -249,8 +251,9 @@ class PacingClientImplTest {
 	 *     <li>401 (shared-secret mismatch) -&gt; {@link PacingFailureReason#UPSTREAM_UNAUTHORIZED},
 	 *     mapped by {@code GlobalExceptionHandler} to 500, deliberately not 401 - see that class for why
 	 *     (a 401 from the Hub logs the caller out).</li>
-	 *     <li>403 ({@code unknown_user}) -&gt; {@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED},
-	 *     mapped to 409, not 403.</li>
+	 *     <li>403 with no body (Pacing's real {@code unknown_user} 403 carries no {@code error} field
+	 *     the Hub reads for this row, so a missing/unreadable error also has to default to the sync-gap
+	 *     reading) -&gt; {@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED}, mapped to 409, not 403.</li>
 	 *     <li>404 -&gt; {@link PacingFailureReason#UPSTREAM_NOT_FOUND}, mapped to 404.</li>
 	 *     <li>an unrecognized non-2xx (422 here) -&gt; {@link PacingFailureReason#OTHER}, mapped to 500.</li>
 	 * </ul>
@@ -282,6 +285,50 @@ class PacingClientImplTest {
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(expectedReason);
 		server.verify();
+	}
+
+	@Test
+	void shouldMapListPacingsUnknownUserTo409ConflictTest() {
+		// Given: the real unknown_user shape, with the error field the sync-gap default above only
+		// approximates.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"unknown_user\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.listPacings(assertion))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
+	}
+
+	@Test
+	void shouldMapListPacingsRealRefusalTo403ForbiddenTest() {
+		// Given: a 403 that names a real reason other than unknown_user is a genuine authorization
+		// decision, not a sync gap.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"no_access\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.listPacings(assertion))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
 	}
 
 	@Test
@@ -551,6 +598,50 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	@Test
+	void shouldMapDashboardDataUnknownUserTo409ConflictTest() {
+		// Given: dashboardFailure's uniform 403 rule (shared by every /api/dashboards/* read/write) - a
+		// sync gap here, not a refusal.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"unknown_user\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.getDashboardData(assertion, "nike-ss26"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
+	}
+
+	@Test
+	void shouldMapDashboardDataNoAccessTo403ForbiddenTest() {
+		// Given: a real authorization decision Pacing made about this specific dashboard, distinct from
+		// the unknown_user sync-gap case above.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_OWNERS, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"no_access\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.getDashboardData(assertion, "nike-ss26"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
 	}
 
 	@Test
@@ -1119,7 +1210,8 @@ class PacingClientImplTest {
 	@Test
 	void shouldMapLibraryTooFastRateLimitOnCreateTest() {
 		// Given: too_fast is not a structured conflict the caller reacts to distinctly - it's still a
-		// thrown failure, just with the retry-after seconds folded into the message
+		// thrown failure, just with the retry-after seconds folded into the message. It maps to the
+		// typed UPSTREAM_RATE_LIMITED reason (429), not OTHER (500): a rate limit is not a server error.
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
 		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
@@ -1135,7 +1227,7 @@ class PacingClientImplTest {
 		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of()))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
-				.isEqualTo(PacingFailureReason.OTHER);
+				.isEqualTo(PacingFailureReason.UPSTREAM_RATE_LIMITED);
 	}
 
 	@Test
@@ -1198,6 +1290,50 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	@Test
+	void shouldClassifyLibrary403WithNoErrorFieldAsUserNotSyncedTest() {
+		// Given: a 403 whose body carries no readable `error`. The library endpoints reach the same
+		// auth boundary every other Pacing call does, and that boundary's unknown_user 403 is the one
+		// refusal that can land on any endpoint - so an unnamed 403 reads as the sync gap here exactly
+		// as it does on the dashboard, journal, admin and create paths.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/library/e1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN).body("").contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.deleteLibraryEntry(assertion, "e1", "t1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
+	}
+
+	@Test
+	void shouldClassifyLibrary403NamingARealReasonAsForbiddenTest() {
+		// Given: a 403 that names a reason other than unknown_user is a genuine authorization decision
+		// Pacing made about this request, passed through as a real 403 rather than a sync gap.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/library/e1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"ok\":false,\"error\":\"not_yours\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.deleteLibraryEntry(assertion, "e1", "t1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
 	}
 
 	@Test
@@ -2381,10 +2517,10 @@ class PacingClientImplTest {
 
 	@Test
 	void shouldMapDeletePacingAdminOnlyForbiddenAsUpstreamForbiddenTest() {
-		// Given: unlike most 403s from Pacing, admin_only is a real authorization decision, not a sync
-		// gap - it must map to UPSTREAM_FORBIDDEN, not UPSTREAM_USER_NOT_SYNCED. The Hub's own
-		// requireAdmin gate should stop a non-admin before this is ever sent, so this only guards the
-		// mapping itself.
+		// Given: admin_only is a real authorization decision, not a sync gap - it must map to
+		// UPSTREAM_FORBIDDEN, not UPSTREAM_USER_NOT_SYNCED. The Hub's own requireAdmin gate should stop a
+		// non-admin before this is ever sent, so this only guards the mapping itself. Also proves the
+		// message now names the real error, rather than the old hardcoded "(admin_only)" literal.
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
 		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
@@ -2399,8 +2535,31 @@ class PacingClientImplTest {
 		// When-Then:
 		assertThatThrownBy(() -> client.deletePacing(assertion, "p1"))
 				.isInstanceOf(PacingExternalException.class)
+				.hasMessageContaining("(admin_only)")
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
+	}
+
+	@Test
+	void shouldMapDeletePacingUnknownUserTo409ConflictTest() {
+		// Given: server.mjs's unknown_user gate runs ahead of routing, so it applies to admin/delete
+		// endpoints too - a sync gap, distinct from the admin_only refusal above.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"unknown_user\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.deletePacing(assertion, "p1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
 	}
 
 	@Test
@@ -2843,6 +3002,221 @@ class PacingClientImplTest {
 
 		// When-Then:
 		assertThatThrownBy(() -> client.getNsDiff(assertion, "p1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	// ── Journal (§15 of the migration plan, US-139) ──
+
+	@Test
+	void shouldAddJournalEntryAndReturnTheWholeFreshJournalTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(content().json("{\"message\":\"Kicked off\",\"date\":null}"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"journal\":[{\"id\":\"j1\",\"ts\":\"2026-08-05\",\"msg\":\"Kicked off\","
+								+ "\"uid\":\"me@aidigital.com\",\"user_id\":\"pu-1\",\"edited_at\":null}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		List<PacingJournalEntry> result = client.addJournalEntry(assertion, "nike-ss26", "Kicked off", null);
+
+		// Then: the whole fresh journal comes back, not just an acknowledgement - unlike savePlan/
+		// saveDisplay, this endpoint has something to return besides "ok".
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0).id()).isEqualTo("j1");
+		assertThat(result.get(0).msg()).isEqualTo("Kicked off");
+		assertThat(result.get(0).userId()).isEqualTo("pu-1");
+		server.verify();
+	}
+
+	@Test
+	void shouldUpdateJournalEntryAtItsOwnPathWithTheGivenDateTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
+				.andExpect(method(PATCH))
+				.andExpect(content().json("{\"message\":\"Edited\",\"date\":\"2026-08-06\"}"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"journal\":[{\"id\":\"j1\",\"ts\":\"2026-08-06\",\"msg\":\"Edited\","
+								+ "\"uid\":\"me@aidigital.com\",\"user_id\":\"pu-1\",\"edited_at\":\"2026-08-07T10:00:00.000Z\"}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		List<PacingJournalEntry> result =
+				client.updateJournalEntry(assertion, "nike-ss26", "j1", "Edited", "2026-08-06");
+
+		// Then:
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0).msg()).isEqualTo("Edited");
+		assertThat(result.get(0).editedAt()).isEqualTo("2026-08-07T10:00:00.000Z");
+		server.verify();
+	}
+
+	@Test
+	void shouldMapJournalEditAuthorOrAdminRejectionAsUpstreamForbiddenNotUnsyncedUserTest() {
+		// Given: Pacing's own SQL refuses an edit from someone who is neither the entry's author nor an
+		// admin with a plain 403 { error: 'entry_not_found_or_not_yours' } - a real authorization
+		// decision, not a sync gap (see journalFailure's own javadoc for the uniform rule it now shares
+		// with dashboardFailure).
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"ok\":false,\"error\":\"entry_not_found_or_not_yours\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.updateJournalEntry(assertion, "nike-ss26", "j1", "Edited", null))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
+	}
+
+	@Test
+	void shouldMapJournalUnknownUserTo409ConflictTest() {
+		// Given: unknown_user applies to journal writes too, same as every other endpoint - a sync gap,
+		// not the entry-author refusal the test above covers.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"error\":\"unknown_user\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.updateJournalEntry(assertion, "nike-ss26", "j1", "Edited", null))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
+	}
+
+	@Test
+	void shouldDeleteJournalEntryAtItsOwnPathTest() {
+		// Given: no author check on delete, by design - the request carries no body at all.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
+				.andExpect(method(DELETE))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess("{\"ok\":true,\"journal\":[]}", MediaType.APPLICATION_JSON));
+
+		// When:
+		List<PacingJournalEntry> result = client.deleteJournalEntry(assertion, "nike-ss26", "j1");
+
+		// Then:
+		assertThat(result).isEmpty();
+		server.verify();
+	}
+
+	@Test
+	void shouldMapJournalDeleteNoAccessAsUpstreamForbiddenTest() {
+		// Given: the plain no-access 403 every /api/dashboards/* route answers - also a real
+		// authorization decision, never an unsynced-user case.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_OWNERS, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN)
+						.body("{\"ok\":false,\"error\":\"no_access\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.deleteJournalEntry(assertion, "nike-ss26", "j1"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
+	}
+
+	@Test
+	void shouldMapJournalAddBlankMessageBadRequestTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
+						.body("{\"ok\":false,\"error\":\"missing_message\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.addJournalEntry(assertion, "nike-ss26", "", null))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_BAD_REQUEST);
+	}
+
+	@Test
+	void shouldMapJournalAddTooFastAsUpstreamRateLimitedTest() {
+		// Given: dash-gate's `journal` bucket refuses a seventh write in a minute with 429 too_fast -
+		// mapped to its own reason, not collapsed into OTHER/500 (libraryFailure's 429 maps the same
+		// way; only pacingActionFailure's validate/create 429 stays OTHER, deliberately).
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+						.body("{\"ok\":false,\"error\":\"too_fast\",\"retry_after\":60}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.addJournalEntry(assertion, "nike-ss26", "Kicked off", null))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_RATE_LIMITED);
+	}
+
+	@Test
+	void shouldClassifyJournalConnectionFailureAsUnreachableTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
+				.andRespond(request -> {
+					throw new SocketTimeoutException("Read timed out");
+				});
+
+		// When-Then:
+		assertThatThrownBy(() -> client.addJournalEntry(assertion, "nike-ss26", "Kicked off", null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);

@@ -19,10 +19,15 @@ import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
 import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
 import { computeHasVideo } from "./alerts-panel";
+import { JournalPanel } from "./journal/journal-panel";
 import type { PacingDataShape, PacingDisplayShape } from "./types";
 import type { BrickCtx } from "./widgets/brick-data";
 import { WidgetBoard, type WidgetRenderContext } from "./widgets/widget-engine";
-import type { PacingMetricsBag } from "./types-metrics";
+import { buildPacingMetrics } from "./engine/build-metrics";
+import { buildPacingAlerts } from "./engine/build-alerts";
+import { deriveHeroHealth } from "./pacing-dashboard-health";
+import { FilterBar } from "./filters/filter-bar";
+import { useUrlFilters } from "./filters/use-url-filters";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-dashboard.css";
 
@@ -64,6 +69,10 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  // The journal's highlighted-entry date (§15 follow-up): clicking a journal row sets this, and any
+  // chart view whose own spec carries `journal: true` draws a vertical marker at it. Page-level state,
+  // not a store - there is only ever one pacing dashboard mounted at a time.
+  const [journalHighlight, setJournalHighlight] = useState<string | null>(null);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
   // rather than re-arming itself on the next status fetch.
@@ -86,30 +95,50 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   }, [cooldownUntil]);
 
   const statusStyle = PACE_STATUS_COLOR;
-  const paceStatus = row.paceStatus ?? "no_data";
-  const alerts = row.alerts;
 
   const data = dashboardQuery.data;
+  const { filters, setFilters } = useUrlFilters();
 
-  // Everything below is READ, not derived. Pacing computes this pacing's figures
-  // with the one engine that has always computed them (shared/dashboard-metrics.js)
-  // and sends them on `metrics`; this screen draws what it is given. A second
-  // implementation over here is what the previous pass had, and it reported a
-  // larger delivery than Pacing did because it summed fact rows that fall outside
-  // a line item's flight — the sort of disagreement that is invisible until
-  // somebody reconciles a number against the service.
-  const metrics = (data?.metrics ?? null) as PacingMetricsBag | null;
+  // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
+  // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
+  // no URL filter ever reaches it, so it used to sit still while every other figure on the page
+  // moved under a filter. `buildPacingAlerts` (`./engine/build-alerts.ts`) is the browser port of
+  // the retired SPA's own `computeDashboardAlerts`, sharing `buildPacingMetrics`'s engine and its
+  // `effLIs` Scope split - a Scope filter changes the alert set, a Lens filter does not, same as the
+  // KPI strip below. Falls back to `row.alerts` while the dashboard query has not resolved yet (no
+  // engine input to compute from), so the block does not flash empty then fill in on every open.
+  const alerts = useMemo(
+    () => (data ? buildPacingAlerts(data, filters) : (row.alerts ?? [])),
+    [data, filters, row.alerts]
+  );
+
+  // Computed HERE now, not read off `data.metrics` (Operational Hub migration, filters): Pacing's
+  // engine (shared/dashboard-metrics.js) moved into the browser byte-identical
+  // (./engine/vendor/), so a filter change can recompute these figures instantly instead of
+  // needing a server round trip that had no filters to answer to begin with. `buildPacingMetrics`
+  // is the same four-piece computation `dash-gate/lib/merge.mjs`'s `buildMetricBag` runs
+  // server-side, parametrized by `effLIs`/`range` derived from `filters` - see its own docblock,
+  // including the crown-test guarantee that with every filter at default this equals
+  // `data.metrics` byte-for-byte. `data.metrics` itself is still sent and still unused here on
+  // purpose (§ "leave buildMetricBag in the Pacing service alone" - removing it is a later, separate
+  // step the owner deliberately sequenced after this one).
+  const metrics = useMemo(() => buildPacingMetrics(data, filters), [data, filters]);
   const scalars = metrics?.scalars ?? {};
 
   const brickCtx: BrickCtx = useMemo(
     () => ({ metrics, currency: data?.campaign?.currency ?? null }),
     [metrics, data]
   );
-  const widgetCtx: WidgetRenderContext = useMemo(() => ({ brickCtx, metrics }), [brickCtx, metrics]);
+  const widgetCtx: WidgetRenderContext = useMemo(
+    () => ({ brickCtx, metrics, journalHighlight }),
+    [brickCtx, metrics, journalHighlight]
+  );
 
   const spendToDate = scalars.sp ?? null;
   const cpmToDate = (metrics?.campaign?.cpm as number | undefined) ?? null;
   const planBudgetTotal = scalars.budget ?? null;
+  // Pace/Margin below read this, not `row.*` directly - see pacing-dashboard-health.ts's docblock.
+  const heroHealth = deriveHeroHealth(metrics, row);
 
   async function handleRefresh() {
     setRefreshError(null);
@@ -196,27 +225,54 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
         {refreshError && <span className="pdash__refresh-error">{refreshError}</span>}
       </div>
 
+      {/* §6/filters: the seven-filter bar (range, channels, labels, platforms, selection,
+          brk/brkf) ported from the retired SPA's FilterBar.jsx. Sits directly under the pacing
+          header, above the KPI strip and the alert rows (owner ask, 2026-09-25) - everything from
+          here down, including the KPI strip's Pace/Margin, reads `metrics`, which already reflects
+          the current `filters` above. */}
+      {dashboardQuery.isSuccess && data && (
+        <FilterBar
+          filters={filters}
+          setFilters={setFilters}
+          liPlan={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
+          factsDaily={data.factsDaily}
+          minDate={data.campaign?.startDate}
+          maxDate={metrics?.asOf ?? data.campaign?.endDate}
+        />
+      )}
+
+      {/* Pace/Margin are filter-aware (owner ask, 2026-09-25): they read `heroHealth`, derived
+          from `metrics.campaign` (`deriveHeroHealth`, `pacing-dashboard-health.ts`) - the SAME
+          Scope/Lens split `build-metrics.ts` already applies (a channel/label/selection/range
+          filter moves these; a platform/breakdown filter does not, exactly like the widgets
+          beside them). Budget/Spend already came from the dashboard query, not `row`, so they are
+          unchanged. `paceStatus`/`marginTargetPct` still fall back to `row.*` while `metrics` is
+          unavailable (loading, or the pacing is Complete/Archive - see that file's docblock). */}
       <div className="pdash__hero">
         <div className="pdash__hero-card">
           <div className="pdash__hero-label">Pace</div>
-          {row.pacingDeviationPct == null ? (
+          {heroHealth.pacingDeviationPct == null ? (
             <div className="pdash__hero-value pdash__hero-value--na">No data</div>
           ) : (
-            <div className="pdash__hero-value" style={{ color: statusStyle[paceStatus] }}>
-              {row.pacingDeviationPct > 0 ? "+" : ""}
-              {row.pacingDeviationPct.toFixed(1)}pp
+            <div className="pdash__hero-value" style={{ color: statusStyle[heroHealth.paceStatus] }}>
+              {heroHealth.pacingDeviationPct > 0 ? "+" : ""}
+              {heroHealth.pacingDeviationPct.toFixed(1)}pp
             </div>
           )}
-          <div className="pdash__hero-sub">{PACE_STATUS_LABEL[paceStatus]}</div>
+          <div className="pdash__hero-sub">{PACE_STATUS_LABEL[heroHealth.paceStatus]}</div>
         </div>
         <div className="pdash__hero-card">
           <div className="pdash__hero-label">Margin</div>
-          <MarginCell actual={row.marginActualPct ?? null} target={row.marginTargetPct ?? 0} className="pdash__hero-margin" />
+          <MarginCell actual={heroHealth.marginActualPct} target={heroHealth.marginTargetPct} className="pdash__hero-margin" />
         </div>
         <div className="pdash__hero-card">
           <div className="pdash__hero-label">Budget</div>
-          <div className="pdash__hero-value">{fmtBudget(row.budgetTotal ?? 0)}</div>
-          <div className="pdash__hero-sub">Plan total {fmtBudget(planBudgetTotal)}</div>
+          {/* Reads the SAME filtered source the old subline did (`planBudgetTotal` = `scalars.budget`,
+              already Scope-filtered) instead of `row.budgetTotal` (server-computed, unfiltered) - the
+              two disagreed under a filter (e.g. `?ch=Display`: "$100.0K" over "Plan total $12.7K" for
+              the same card). One figure now, so the subline that used to justify itself against a
+              different number is gone - it would just repeat this one (owner ask, 2026-09-25). */}
+          <div className="pdash__hero-value">{fmtBudget(planBudgetTotal)}</div>
         </div>
         <div className="pdash__hero-card">
           <div className="pdash__hero-label">Spend to date</div>
@@ -266,21 +322,16 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 
-          {data.journal.length > 0 && (
-            <section className="pdash__section">
-              <h2 className="pdash__section-title">Journal</h2>
-              <ul className="pdash__journal">
-                {data.journal.map((entry) => (
-                  <li key={entry.id} className="pdash__journal-item">
-                    <span className="pdash__journal-meta">
-                      {entry.ts} {entry.uid ? `· ${entry.uid}` : ""}
-                    </span>
-                    <span className="pdash__journal-msg">{entry.msg}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <JournalPanel
+            slug={slug ?? ""}
+            journal={data.journal}
+            flightStart={row.flightStart}
+            flightEnd={row.flightEnd}
+            planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
+            factsDaily={data.factsDaily}
+            onHighlightDate={setJournalHighlight}
+            setFilters={setFilters}
+          />
 
           <ContainersTable metrics={metrics} />
 

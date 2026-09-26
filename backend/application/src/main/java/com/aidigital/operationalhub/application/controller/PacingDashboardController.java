@@ -29,10 +29,13 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.domain.entity.HubUser;
+import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
+import com.aidigital.operationalhub.service.rbac.model.PacingScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -60,12 +63,27 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final PacingDashboardContractMapper mapper;
 	private final PacingPlanContractMapper planMapper;
 	private final PacingNsDiffContractMapper nsDiffMapper;
+	private final HubUserService hubUserService;
 
 	@Override
 	public ResponseEntity<PacingDashboardV1> getPacingDashboard(String slug) {
-		HubAssertion assertion = signCurrentUser();
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
+		HubAssertion assertion = assertionMapper.toAssertion(user, entitlement);
 		PacingDashboardData data = pacingClient.getDashboardData(assertion, slug);
-		return ResponseEntity.ok(mapper.toV1(data));
+		return ResponseEntity.ok(mapper.toV1(
+				data, resolveOwnPacingUserId(user), PacingScope.KIND_ALL.equals(entitlement.scope().kind())));
+	}
+
+	/**
+	 * The current user's own Pacing {@code user_id} ({@code hub_users.pacing_user_id}), for the
+	 * journal's {@code canEdit} computation - null when the §2 employee sync has not reached them yet.
+	 *
+	 * @param user the current user
+	 * @return the Pacing user id, or null if unresolved
+	 */
+	String resolveOwnPacingUserId(CurrentUserModel user) {
+		return hubUserService.findByClerkUserId(user.clerkUserId()).map(HubUser::getPacingUserId).orElse(null);
 	}
 
 	@Override

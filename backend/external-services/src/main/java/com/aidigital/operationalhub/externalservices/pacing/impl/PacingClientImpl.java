@@ -15,6 +15,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSett
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
@@ -29,7 +30,6 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirr
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserSyncEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -108,6 +108,16 @@ public class PacingClientImpl implements PacingClient {
 			// Pacing answered, just not with 2xx: the status code it sent tells us which honest response
 			// the Hub's own caller should get (see PacingFailureReason and GlobalExceptionHandler).
 			int statusCode = ex.getStatusCode().value();
+			JsonNode body = readBody(ex);
+			String error = textField(body, "error");
+			if (statusCode == 403 && error != null && !"unknown_user".equals(error)) {
+				// server.mjs's unknown_user gate runs ahead of routing, so it can land on any endpoint - a
+				// 403 with a genuine other reason here is a real authorization refusal, not a sync gap. An
+				// absent/unreadable error (like unknown_user itself) defaults to the sync-gap reading below.
+				throw new PacingExternalException(
+						PacingFailureReason.UPSTREAM_FORBIDDEN,
+						"Pacing request failed: GET " + PACINGS_PATH + " returned HTTP 403 (" + error + ")");
+			}
 			PacingFailureReason reason = switch (statusCode) {
 				case 401 -> PacingFailureReason.UPSTREAM_UNAUTHORIZED;
 				case 403 -> PacingFailureReason.UPSTREAM_USER_NOT_SYNCED;
@@ -601,6 +611,70 @@ public class PacingClientImpl implements PacingClient {
 	}
 
 	@Override
+	public List<PacingJournalEntry> addJournalEntry(HubAssertion assertion, String slug, String message, String date) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/journal";
+		JournalWriteRequest request = new JournalWriteRequest(message, date);
+		try {
+			JournalResponse response = restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.body(JournalResponse.class);
+			return response == null || response.journal() == null ? List.of() : response.journal();
+		} catch (RestClientResponseException ex) {
+			throw journalFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	@Override
+	public List<PacingJournalEntry> updateJournalEntry(
+			HubAssertion assertion, String slug, String entryId, String message, String date) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/journal/" + entryId;
+		JournalWriteRequest request = new JournalWriteRequest(message, date);
+		try {
+			JournalResponse response = restClient.patch()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.body(JournalResponse.class);
+			return response == null || response.journal() == null ? List.of() : response.journal();
+		} catch (RestClientResponseException ex) {
+			throw journalFailure("PATCH", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: PATCH " + path, ex);
+		}
+	}
+
+	@Override
+	public List<PacingJournalEntry> deleteJournalEntry(HubAssertion assertion, String slug, String entryId) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/journal/" + entryId;
+		try {
+			JournalResponse response = restClient.delete()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(JournalResponse.class);
+			return response == null || response.journal() == null ? List.of() : response.journal();
+		} catch (RestClientResponseException ex) {
+			throw journalFailure("DELETE", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: DELETE " + path, ex);
+		}
+	}
+
+	@Override
 	public List<PacingDelegation> listDelegations(HubAssertion assertion) {
 		String header = assertionSigner.sign(assertion);
 		try {
@@ -1058,16 +1132,17 @@ public class PacingClientImpl implements PacingClient {
 
 	/**
 	 * Maps a non-2xx {@code POST /api/pacings/validate} or {@code POST /api/pacings} response (§8 of
-	 * the migration plan) to a {@link PacingExternalException}. Distinct from {@link #dashboardFailure}
-	 * because a 403 here is a REAL authorization decision ({@code no_create_permission}: the caller's
-	 * assertion does not carry {@code canCreate}) alongside the usual sync-gap one
-	 * ({@code unknown_user}, create only) - unlike the dashboard/refresh endpoints, where every 403
-	 * means the latter.
+	 * the migration plan) to a {@link PacingExternalException}. A 403 here follows the same uniform
+	 * rule every mapper in this class now applies (see {@link PacingFailureReason}): {@code unknown_user}
+	 * (which only occurs on create, from {@code server.mjs}'s pre-routing user-mirror check) is a sync
+	 * gap, not a refusal; any other reason - most notably {@code no_create_permission}, the caller's
+	 * assertion not carrying {@code canCreate} - is a real authorization decision.
 	 *
-	 * <p>A 429 ({@code rate_limit_exceeded}) collapses to {@link PacingFailureReason#OTHER} (500) same
-	 * as {@code libraryFailure}'s 429 handling - not the nicer typed cooldown outcome
-	 * {@link #refreshPacing} returns, since validate/create's rate limit is a per-minute abuse guard,
-	 * not a "you just did this" cooldown with a countdown worth showing.
+	 * <p>A 429 ({@code rate_limit_exceeded}) collapses to {@link PacingFailureReason#OTHER} (500) -
+	 * unlike {@code libraryFailure}'s 429 handling, which now maps to the typed
+	 * {@link PacingFailureReason#UPSTREAM_RATE_LIMITED}, this one stays generic: validate/create's rate
+	 * limit is a per-minute abuse guard, not a "you just did this" cooldown with a countdown worth
+	 * showing.
 	 *
 	 * @param method the HTTP method that was called
 	 * @param path   the path that was called
@@ -1078,10 +1153,10 @@ public class PacingClientImpl implements PacingClient {
 		int statusCode = ex.getStatusCode().value();
 		JsonNode body = readBody(ex);
 		String error = textField(body, "error");
-		if (statusCode == 403 && "no_create_permission".equals(error)) {
+		if (statusCode == 403 && error != null && !"unknown_user".equals(error)) {
 			return new PacingExternalException(
 					PacingFailureReason.UPSTREAM_FORBIDDEN,
-					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (no_create_permission)");
+					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
 		}
 		if (statusCode == 400) {
 			// Some 400 bodies carry a proper `detail` (e.g. invalid_order_number/invalid_line_item_id);
@@ -1099,8 +1174,8 @@ public class PacingClientImpl implements PacingClient {
 		}
 		PacingFailureReason reason = switch (statusCode) {
 			case 401 -> PacingFailureReason.UPSTREAM_UNAUTHORIZED;
-			// unknown_user only occurs on create (the user-row lookup) - no_create_permission (checked
-			// above) is validate/create's other, unrelated 403.
+			// Reached only when error was unknown_user (or unreadable) - the 403 branch above already
+			// claimed every other reason.
 			case 403 -> PacingFailureReason.UPSTREAM_USER_NOT_SYNCED;
 			case 404 -> PacingFailureReason.UPSTREAM_NOT_FOUND;
 			default -> PacingFailureReason.OTHER;
@@ -1178,7 +1253,10 @@ public class PacingClientImpl implements PacingClient {
 	/**
 	 * Maps a non-2xx {@code /api/dashboards/*} or {@code /api/pacings/:id/refresh} response to a
 	 * {@link PacingExternalException}, forwarding Pacing's own {@code error}/{@code detail} for a 400
-	 * so the caller sees which part of the request was rejected.
+	 * so the caller sees which part of the request was rejected. A 403 follows the uniform rule
+	 * documented on {@link PacingFailureReason}: {@code unknown_user} is a sync gap
+	 * ({@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED}), any other reason is a real authorization
+	 * decision ({@link PacingFailureReason#UPSTREAM_FORBIDDEN}).
 	 *
 	 * @param method the HTTP method that was called
 	 * @param path   the path that was called
@@ -1202,13 +1280,73 @@ public class PacingClientImpl implements PacingClient {
 	private PacingExternalException dashboardFailure(
 			String method, String path, RestClientResponseException ex, JsonNode body) {
 		int statusCode = ex.getStatusCode().value();
+		String error = textField(body, "error");
 		if (statusCode == 400) {
 			String detail = textField(body, "detail");
-			String error = textField(body, "error");
 			return new PacingExternalException(
 					PacingFailureReason.UPSTREAM_BAD_REQUEST,
 					"Pacing request failed: " + method + " " + path + " returned HTTP 400",
 					detail != null ? detail : describeErrorCode(error));
+		}
+		if (statusCode == 403 && error != null && !"unknown_user".equals(error)) {
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_FORBIDDEN,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
+		}
+		PacingFailureReason reason = switch (statusCode) {
+			case 401 -> PacingFailureReason.UPSTREAM_UNAUTHORIZED;
+			case 403 -> PacingFailureReason.UPSTREAM_USER_NOT_SYNCED;
+			case 404 -> PacingFailureReason.UPSTREAM_NOT_FOUND;
+			default -> PacingFailureReason.OTHER;
+		};
+		return new PacingExternalException(
+				reason, "Pacing request failed: " + method + " " + path + " returned HTTP " + statusCode, ex);
+	}
+
+	/**
+	 * Maps a non-2xx {@code /api/dashboards/:slug/journal[/:entryId]} response (§15, US-139) to a
+	 * {@link PacingExternalException}. A 403 follows the same uniform rule as the rest of this class
+	 * (see {@link PacingFailureReason}): {@code unknown_user} is a sync gap
+	 * ({@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED}); anything else - {@code no_access} (the
+	 * caller has no dashboard access to this pacing at all), or on the edit path "neither this entry's
+	 * author nor an admin" - is a real authorization decision
+	 * ({@link PacingFailureReason#UPSTREAM_FORBIDDEN}).
+	 *
+	 * <p>A 429 ({@code too_fast}, the {@code journal} bucket's 6/min-per-user cap - POST and PATCH only,
+	 * dash-gate does not rate-limit DELETE) maps to {@link PacingFailureReason#UPSTREAM_RATE_LIMITED}, not
+	 * {@link PacingFailureReason#OTHER}: a person writing a seventh note in a minute should see "wait a
+	 * moment", not "something went wrong" ({@link #libraryFailure}'s 429 now maps the same way). The
+	 * countdown itself ({@code retry_after}) is not surfaced here: the typed cooldown outcome
+	 * {@link #refreshPacing} uses would require changing this method's return type, which is out of
+	 * scope for this fix.
+	 *
+	 * @param method the HTTP method that was called
+	 * @param path   the path that was called
+	 * @param ex     the response exception
+	 * @return the mapped exception, ready to throw
+	 */
+	PacingExternalException journalFailure(String method, String path, RestClientResponseException ex) {
+		int statusCode = ex.getStatusCode().value();
+		JsonNode body = readBody(ex);
+		String error = textField(body, "error");
+		if (statusCode == 400) {
+			String detail = textField(body, "detail");
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_BAD_REQUEST,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 400",
+					detail != null ? detail : describeErrorCode(error));
+		}
+		if (statusCode == 403 && error != null && !"unknown_user".equals(error)) {
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_FORBIDDEN,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
+		}
+		if (statusCode == 429) {
+			int retryAfterSeconds = intField(body, "retry_after", 60);
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_RATE_LIMITED,
+					"Pacing request failed: " + method + " " + path
+							+ " returned HTTP 429 (too_fast, retry after " + retryAfterSeconds + "s)");
 		}
 		PacingFailureReason reason = switch (statusCode) {
 			case 401 -> PacingFailureReason.UPSTREAM_UNAUTHORIZED;
@@ -1222,10 +1360,12 @@ public class PacingClientImpl implements PacingClient {
 
 	/**
 	 * Maps a non-2xx {@code /api/pacings/:id} (delete) or {@code /api/admin/*} response to a
-	 * {@link PacingExternalException}. Unlike {@link #dashboardFailure}, a plain 403 here is treated as
-	 * a real authorization decision ({@link PacingFailureReason#UPSTREAM_FORBIDDEN}, i.e.
-	 * {@code admin_only}) rather than {@code UPSTREAM_USER_NOT_SYNCED} - these endpoints have no
-	 * unsynced-user 403 case at all, only the admin gate, so there is no sync-gap reading to protect.
+	 * {@link PacingExternalException}. A 403 follows the same uniform rule as the rest of this class
+	 * (see {@link PacingFailureReason}): {@code unknown_user} - {@code server.mjs}'s pre-routing
+	 * user-mirror check, which can land on any endpoint - is a sync gap
+	 * ({@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED}); any other reason, most commonly this
+	 * pair's own {@code admin_only} gate, is a real authorization decision
+	 * ({@link PacingFailureReason#UPSTREAM_FORBIDDEN}).
 	 *
 	 * @param method the HTTP method that was called
 	 * @param path   the path that was called
@@ -1250,9 +1390,15 @@ public class PacingClientImpl implements PacingClient {
 			String method, String path, RestClientResponseException ex, JsonNode body) {
 		int statusCode = ex.getStatusCode().value();
 		if (statusCode == 403) {
+			String error = textField(body, "error");
+			if (error != null && !"unknown_user".equals(error)) {
+				return new PacingExternalException(
+						PacingFailureReason.UPSTREAM_FORBIDDEN,
+						"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
+			}
 			return new PacingExternalException(
-					PacingFailureReason.UPSTREAM_FORBIDDEN,
-					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (admin_only)");
+					PacingFailureReason.UPSTREAM_USER_NOT_SYNCED,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 403", ex);
 		}
 		if (statusCode == 404) {
 			return new PacingExternalException(
@@ -1276,7 +1422,14 @@ public class PacingClientImpl implements PacingClient {
 	/**
 	 * Maps a non-2xx {@code /api/library*} response that is not one of the structured conflicts
 	 * {@link #libraryConflict} already peeled off (a plain validation failure, an author check, a not
-	 * found, a rate limit or anything unrecognized) to a {@link PacingExternalException}.
+	 * found, a rate limit or anything unrecognized) to a {@link PacingExternalException}. A 403 follows
+	 * the uniform rule documented on {@link PacingFailureReason}: {@code unknown_user} is a sync gap
+	 * ({@link PacingFailureReason#UPSTREAM_USER_NOT_SYNCED}), any other reason is a real authorization
+	 * decision ({@link PacingFailureReason#UPSTREAM_FORBIDDEN}).
+	 *
+	 * <p>A 429 ({@code too_fast}) maps to {@link PacingFailureReason#UPSTREAM_RATE_LIMITED}, not the
+	 * generic default: a library save/create/update/delete/like that is merely rate-limited is not a
+	 * server error, and the caller should see a typed cooldown rather than a 500.
 	 *
 	 * @param method the HTTP method that was called
 	 * @param path   the path that was called
@@ -1294,7 +1447,7 @@ public class PacingClientImpl implements PacingClient {
 					"Pacing request failed: " + method + " " + path + " returned HTTP 400",
 					detail != null ? detail : describeErrorCode(error));
 		}
-		if (statusCode == 403 && !"unknown_user".equals(error)) {
+		if (statusCode == 403 && error != null && !"unknown_user".equals(error)) {
 			return new PacingExternalException(
 					PacingFailureReason.UPSTREAM_FORBIDDEN,
 					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
@@ -1302,7 +1455,7 @@ public class PacingClientImpl implements PacingClient {
 		if (statusCode == 429) {
 			int retryAfterSeconds = intField(body, "retry_after", 60);
 			return new PacingExternalException(
-					PacingFailureReason.OTHER,
+					PacingFailureReason.UPSTREAM_RATE_LIMITED,
 					"Pacing request failed: " + method + " " + path
 							+ " returned HTTP 429 (too_fast, retry after " + retryAfterSeconds + "s)");
 		}
@@ -1362,429 +1515,5 @@ public class PacingClientImpl implements PacingClient {
 			case "invalid_notify_destination" -> "the Daily Summary delivery option must be auto, dm or off";
 			default -> errorCode;
 		};
-	}
-
-	/**
-	 * Shape of Pacing's {@code POST /api/dashboards/:slug/settings} request body, for a display-only
-	 * save (the Hub never writes any of the other config fields that endpoint also accepts).
-	 *
-	 * @param display     the display patch being saved
-	 * @param display_rev the revision this save was read at, matched against Pacing's own CAS counter
-	 * @param display_writer which display grammar this client can write. Transport, never stored, and
-	 *                       NOT optional: a save that changes a v2 widget without it comes back 409
-	 *                       {@code v2_writer_required}, which reads to a user as "the editor needs to
-	 *                       reload" — a stale-bundle message for a bundle that is not stale. The
-	 *                       values are Pacing's own, echoed from the dashboard payload's
-	 *                       {@code capabilities}, so this client never asserts a version it invented.
-	 */
-	private record DisplaySettingsRequest(
-			Map<String, Object> display, int display_rev, Map<String, Object> display_writer) {
-	}
-
-	/**
-	 * Shape of the parts of Pacing's settings-save success response the Hub reads.
-	 *
-	 * @param display the saved display, echoed back by Pacing
-	 */
-	private record DisplaySettingsResponse(Map<String, Object> display) {
-	}
-
-	/**
-	 * Shape of the {@code POST /api/library} request body.
-	 *
-	 * @param kind        {@code widget}, {@code block} or {@code layout}
-	 * @param name        entry display name
-	 * @param description entry description, or null
-	 * @param definition  the canonical widget/block/layout definition
-	 * @param writer      the fixed v2 writer capability marker, see {@link #V2_WRITER}
-	 */
-	private record LibraryCreateRequest(
-			String kind, String name, String description, Map<String, Object> definition, Map<String, Object> writer) {
-	}
-
-	/**
-	 * Shape of the {@code PUT /api/library/:id} request body.
-	 *
-	 * @param name        entry display name
-	 * @param description entry description, or null
-	 * @param definition  the canonical widget definition
-	 * @param updated_at  the entry's {@code updatedAt} as last read by the caller (the CAS stamp)
-	 */
-	private record LibraryUpdateRequest(
-			String name, String description, Map<String, Object> definition, String updated_at) {
-	}
-
-	/**
-	 * Shape of the {@code DELETE /api/library/:id} request body.
-	 *
-	 * @param updated_at the entry's {@code updatedAt} as last read by the caller (the CAS stamp)
-	 */
-	private record LibraryDeleteRequest(String updated_at) {
-	}
-
-	/**
-	 * Shape of a library create/update success response.
-	 *
-	 * @param entry the saved entry
-	 */
-	private record LibraryEntryResponse(PacingLibraryEntry entry) {
-	}
-
-	/**
-	 * Shape of a library delete success response.
-	 *
-	 * @param id the removed entry's id
-	 */
-	private record LibraryDeleteResponse(String id) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code GET /api/library} response body.
-	 *
-	 * @param entries the matching library entries
-	 */
-	private record LibraryListResponse(List<PacingLibraryEntry> entries) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code POST /api/pacings/:pacingId/revalidate} response body. Pacing also
-	 * returns {@code ok}; it carries no information beyond the 200 itself and is not read here.
-	 *
-	 * @param changed  whether anything was written back to the pacing's configuration
-	 * @param changes  the field names and line item ids that were updated
-	 * @param warnings non-fatal problems met during the re-pull
-	 */
-	private record RevalidateResponse(boolean changed, List<String> changes, List<String> warnings) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code GET /api/pacings} response body.
-	 *
-	 * @param pacings the visible pacings, each row as returned by Pacing
-	 */
-	private record PacingsResponse(List<PacingRow> pacings) {
-	}
-
-	/**
-	 * Shape of the {@code POST /api/internal/users/sync} request body.
-	 *
-	 * @param users the employees to sync
-	 */
-	private record UsersSyncRequest(List<PacingUserSyncEntry> users) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code GET /api/internal/users} response body.
-	 *
-	 * @param users every row of Pacing's user mirror
-	 */
-	private record InternalUsersResponse(List<PacingUserMirrorEntry> users) {
-	}
-
-	/**
-	 * Shape of the {@code POST /api/pacings/validate} request body for the campaign-scoped selector
-	 * (§8 of the migration plan) - the only selector the Hub uses.
-	 *
-	 * @param campaign_id the NetSuite campaign id to validate
-	 */
-	private record ValidateRequest(String campaign_id) {
-	}
-
-	/**
-	 * Shape of one line item in the {@code POST /api/pacings} request body (§8, US-123/124) - field
-	 * names match dash-gate's own create route exactly, same snake_case-field convention as the other
-	 * outbound request records in this class (e.g. {@link DisplaySettingsRequest}).
-	 *
-	 * @param line_item_id        NetSuite line item id
-	 * @param channel             delivery channel / media tactic
-	 * @param flight_start        flight start date (YYYY-MM-DD)
-	 * @param flight_end          flight end date (YYYY-MM-DD)
-	 * @param rate_type           billing rate type (CPM/CPC/CPV/Flat)
-	 * @param native_budget       the budget in its native currency
-	 * @param description         line item description
-	 * @param currency            the line item's native currency
-	 * @param exchange_rate       the exchange rate for {@code currency}
-	 * @param campaign_id         NetSuite campaign id
-	 * @param campaign_name       NetSuite campaign name
-	 * @param order_number        NetSuite insertion order number
-	 * @param mpo_team_lead       who NetSuite records as running the campaign (§11, US-132), stored so
-	 *                            the new pacing can show the owner-vs-NetSuite comparison at once
-	 * @param target_impressions  the plan's target impressions, as confirmed by the caller
-	 * @param margin_percent      the plan's target margin percentage, as confirmed by the caller
-	 * @param target_ctr          the plan's target CTR percentage, as confirmed by the caller
-	 * @param target_vcr          the plan's target VCR percentage, as confirmed by the caller
-	 */
-	private record LineItemCreateRequest(
-			String line_item_id,
-			String channel,
-			String flight_start,
-			String flight_end,
-			String rate_type,
-			Double native_budget,
-			String description,
-			String currency,
-			Double exchange_rate,
-			String campaign_id,
-			String campaign_name,
-			String order_number,
-			String mpo_team_lead,
-			Double target_impressions,
-			Double margin_percent,
-			Double target_ctr,
-			Double target_vcr) {
-	}
-
-	/**
-	 * Shape of the {@code POST /api/pacings} request body (§8, US-123).
-	 *
-	 * @param pacing_name display name for the new pacing
-	 * @param line_items  the selected line items
-	 */
-	private record CreateRequest(String pacing_name, List<LineItemCreateRequest> line_items) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code POST /api/pacings} success (201) response body.
-	 *
-	 * @param pacingId serialized as {@code pacing_id}
-	 * @param dashSlug serialized as {@code dash_slug}
-	 */
-	private record CreateResponse(
-			@JsonProperty("pacing_id") String pacingId, @JsonProperty("dash_slug") String dashSlug) {
-	}
-
-	/**
-	 * Shape of one line item in the plan-only {@code POST /api/dashboards/:slug/settings} request body
-	 * (§9, US-125/126/127) - field names match dash-gate's own settings route exactly, same
-	 * snake_case-field convention as {@link LineItemCreateRequest}. {@code containers} rides through
-	 * as opaque JSON: Jackson serializes each entry's {@code Map<String, Object>} verbatim, so a
-	 * client-built {@code __action}/{@code __source_id}/{@code __scale} duplicate-container marker
-	 * (dash-gate's own existing duplicate mechanism) reaches Pacing unchanged.
-	 *
-	 * @param line_item_id        NetSuite line item id
-	 * @param channel             delivery channel / media tactic; required when adding a new id
-	 * @param description         line item description
-	 * @param campaign_id         NetSuite campaign id
-	 * @param campaign_name       NetSuite campaign name
-	 * @param order_number        NetSuite insertion order number
-	 * @param rate_type           billing rate type (CPM/CPC/CPV/Flat)
-	 * @param native_budget       the plan's target spend, in the line item's native currency
-	 * @param target_impressions  the plan's target impressions
-	 * @param margin_percent      the plan's target margin percentage
-	 * @param target_ctr          the plan's target CTR percentage
-	 * @param target_vcr          the plan's target VCR percentage
-	 * @param flight_start        flight start date (YYYY-MM-DD); required when adding a new id
-	 * @param flight_end          flight end date (YYYY-MM-DD); required when adding a new id
-	 * @param containers          date-based plan overrides (§9), opaque - forwarded byte-for-byte
-	 */
-	// NON_NULL (not the class-wide default of always-include): dash-gate's own merge checks
-	// `'channel' in newLi` / `'description' in newLi` / `'campaign_id' in newLi` /
-	// `'campaign_name' in newLi` to decide whether to PRESERVE the stored value for an id already on
-	// the pacing (db.mjs saveSettings) - a JSON key present with an explicit null answers that check
-	// true and would overwrite the stored value with null, the opposite of "the Hub never edits this
-	// field for an existing line item" (PacingLineItemPlanUpdateV1's own contract). The Hub leaves
-	// these four null for every id it did not just look up fresh (an existing line item's plan edit),
-	// so they must be OMITTED, not nulled, whenever that happens.
-	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-	private record LineItemPlanUpdateRequest(
-			String line_item_id,
-			String channel,
-			String description,
-			String campaign_id,
-			String campaign_name,
-			String order_number,
-			String rate_type,
-			Double native_budget,
-			Double target_impressions,
-			Double margin_percent,
-			Double target_ctr,
-			Double target_vcr,
-			String flight_start,
-			String flight_end,
-			List<Map<String, Object>> containers) {
-	}
-
-	/**
-	 * Shape of the plan-only {@code POST /api/dashboards/:slug/settings} request body (§9,
-	 * US-125/126/127) - carries {@code line_items} only, never {@code display}, so a plan save can
-	 * never accidentally touch the widget/layout configuration §6's display save owns.
-	 *
-	 * @param line_items the whole line-item set to persist
-	 */
-	private record PlanSettingsRequest(List<LineItemPlanUpdateRequest> line_items) {
-	}
-
-	/**
-	 * One delegation as Pacing's {@code GET /api/delegations} returns it - {@code SELECT d.*} plus the
-	 * joined names, so the field names are the column names.
-	 *
-	 * @param delegation_id     the grant's id
-	 * @param delegator_id      who gave the access
-	 * @param delegator_name    their name
-	 * @param delegator_email   their email
-	 * @param delegate_id       who received it
-	 * @param delegate_name     their name
-	 * @param delegate_email    their email
-	 * @param starts_at         when the grant opens
-	 * @param expires_at        when it closes
-	 * @param reason            free text, or null
-	 * @param pacing_id         the scoped pacing, or null for everything the delegator owns
-	 * @param scope_pacing_name that pacing's name
-	 * @param scope_dash_slug   that pacing's slug
-	 * @param pacing_count      how many pacings the delegator owns
-	 */
-	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-	private record DelegationRow(
-			String delegation_id,
-			String delegator_id,
-			String delegator_name,
-			String delegator_email,
-			String delegate_id,
-			String delegate_name,
-			String delegate_email,
-			String starts_at,
-			String expires_at,
-			String reason,
-			String pacing_id,
-			String scope_pacing_name,
-			String scope_dash_slug,
-			Integer pacing_count) {
-	}
-
-	/**
-	 * The {@code GET /api/delegations} envelope.
-	 *
-	 * @param delegations the rows
-	 */
-	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-	private record DelegationListResponse(List<DelegationRow> delegations) {
-	}
-
-	/**
-	 * The {@code POST /api/delegations} body.
-	 *
-	 * <p>NON_NULL for {@link LineItemPlanUpdateRequest}'s reason: Pacing reads an ABSENT
-	 * {@code starts_at} as "now" and an absent {@code pacing_ids} as "everything I own", and both of
-	 * those are decisions - sending them as explicit nulls would have Pacing parse a null date and
-	 * scope a grant to nothing.
-	 *
-	 * @param delegate_id who receives the access
-	 * @param starts_at   date-only, or absent for now
-	 * @param expires_at  date-only and inclusive
-	 * @param reason      free text, or absent
-	 * @param pacing_ids  the scoped pacings, or absent for everything the delegator owns
-	 */
-	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-	private record DelegationCreateRequest(
-			String delegate_id,
-			String starts_at,
-			String expires_at,
-			String reason,
-			List<String> pacing_ids) {
-	}
-
-	/**
-	 * The {@code PATCH /api/delegations/:id} body - only the end date can move.
-	 *
-	 * @param expires_at the new end date, date-only and inclusive
-	 */
-	private record DelegationExtendRequest(String expires_at) {
-	}
-
-	/**
-	 * Shape of the {@code data} object inside a data-settings save, under the snake_case names
-	 * Pacing's {@code config.data} namespace stores.
-	 *
-	 * <p>NON_NULL, and load-bearing for the same reason {@link LineItemPlanUpdateRequest} carries it:
-	 * Pacing's merge gates each key on {@code hasOwnProperty}, so a key present with an explicit null
-	 * is an instruction to WRITE null, not an absent field. The Hub sends nulls for every setting its
-	 * caller did not touch, so they have to be omitted rather than serialized - otherwise saving the
-	 * BigQuery source alone would blank the pacing's fetch toggles and delete its dimension sources.
-	 *
-	 * @param source            the BigQuery table delivery is read from
-	 * @param fetch_creatives   whether DSP creative assets are fetched with it
-	 * @param fetch_conversions whether conversions are fetched with it
-	 * @param dim_sources       the whole dimension-source list, opaque - forwarded byte-for-byte
-	 */
-	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-	private record DataNamespaceRequest(
-			String source,
-			Boolean fetch_creatives,
-			Boolean fetch_conversions,
-			List<Map<String, Object>> dim_sources) {
-	}
-
-	/**
-	 * Shape of the data-only {@code POST /api/dashboards/:slug/settings} request body - carries
-	 * {@code data} only, never {@code display} or {@code line_items}, so a settings save can never
-	 * accidentally touch the widget configuration or the plan.
-	 *
-	 * @param data the data namespace to merge into the stored one
-	 */
-	private record DataSettingsRequest(DataNamespaceRequest data) {
-	}
-
-	/**
-	 * Shape of the {@code POST /api/pacings/validate} request body for the line-item-id selector (§9,
-	 * US-126's add-by-id path) - the sibling of {@link ValidateRequest}'s {@code campaign_id} selector.
-	 *
-	 * @param line_item_ids the line item ids to look up
-	 */
-	private record LineItemsValidateRequest(List<String> line_item_ids) {
-	}
-
-	/**
-	 * Shape of the {@code PATCH /api/pacings/:id/status} request body (§9, US-128).
-	 *
-	 * @param status {@code Live}, {@code Paused}, {@code Complete} or {@code Archive}
-	 */
-	private record StatusUpdateRequest(String status) {
-	}
-
-	/**
-	 * Shape of the {@code PATCH /api/pacings/:id/owner} request body (§11, US-131). Snake_case on the
-	 * wire: Pacing reads {@code body.new_owner_id}.
-	 *
-	 * @param new_owner_id the recipient's Pacing user id (UUID)
-	 */
-	private record OwnerTransferRequest(String new_owner_id) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code GET /api/me} response body. Pacing also returns {@code user_id},
-	 * {@code name}, {@code email}, {@code can_create} and {@code scope} - none of them read here,
-	 * since the Hub already knows all of them from its own RBAC - {@code ignoreUnknown} so their
-	 * presence does not fail deserialization.
-	 *
-	 * @param notify_destination where the Daily Summary is delivered: {@code auto}, {@code dm}, or
-	 *                           {@code off}
-	 * @param slack_channel_id   the person's own private Slack group id, or SQL NULL if none is set
-	 */
-	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-	private record MeResponse(String notify_destination, String slack_channel_id) {
-	}
-
-	/**
-	 * Shape of the {@code PATCH /api/me} request body. Always carries both fields - see
-	 * {@code PacingAccountUpdateV1}'s own description for why the caller round-trips whichever one
-	 * it is not changing.
-	 *
-	 * @param notify_destination {@code auto}, {@code dm}, or {@code off}
-	 * @param slack_channel_id   the Slack group id, or an empty string to clear it
-	 */
-	private record AccountUpdateRequest(String notify_destination, String slack_channel_id) {
-	}
-
-	/**
-	 * Shape of Pacing's {@code PATCH /api/me} success response body. Pacing also returns {@code ok};
-	 * not read here, since a non-2xx status already answers whether the save happened.
-	 *
-	 * @param notify_destination the value Pacing now has stored
-	 * @param slack_channel_id   the value Pacing now has stored, or SQL NULL if cleared/never set
-	 * @param slack_warning      set only when {@code slack_channel_id} changed and Pacing could not
-	 *                           check it against Slack; null on every other response
-	 */
-	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-	private record AccountUpdateResponse(String notify_destination, String slack_channel_id, String slack_warning) {
 	}
 }

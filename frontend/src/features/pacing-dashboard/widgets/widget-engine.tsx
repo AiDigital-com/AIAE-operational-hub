@@ -26,6 +26,10 @@ export interface WidgetRenderContext {
   /** Everything Pacing computed for this pacing — figures, per-day series and the
    *  resolved bindings. Null while it loads, and on a pacing with no delivery. */
   metrics: PacingMetricsBag | null;
+  /** The journal's highlighted-entry date (§15 follow-up), page-level state in `pacing-dashboard.tsx`
+   *  - forwarded to every chart view so a view whose own spec carries `journal: true` can draw its
+   *  vertical marker. `null`/absent when no entry is highlighted. */
+  journalHighlight?: string | null;
 }
 
 function renderBrick(brick: Brick, ctx: BrickCtx, key: string) {
@@ -111,7 +115,12 @@ export function WidgetTile({ widget, ctx }: { widget: PacingWidgetInstance; ctx:
             if (isChartView(view))
               return (
                 <div key={key}>
-                  <ChartViewRenderer view={view} rows={ctx.metrics?.series ?? []} scalars={ctx.metrics?.scalars ?? {}} />
+                  <ChartViewRenderer
+                    view={view}
+                    rows={ctx.metrics?.series ?? []}
+                    scalars={ctx.metrics?.scalars ?? {}}
+                    journalHighlight={ctx.journalHighlight ?? null}
+                  />
                 </div>
               );
             if (isKpiView(view)) return <div key={key}>{renderKpiView(view, ctx.brickCtx)}</div>;

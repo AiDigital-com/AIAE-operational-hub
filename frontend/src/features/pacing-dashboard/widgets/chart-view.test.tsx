@@ -4,6 +4,15 @@ import { ChartViewRenderer, expectedCurve } from "./chart-view";
 import type { ChartView } from "./widget-types";
 import type { SeriesRow } from "../types-metrics";
 
+// jsdom lays out nothing, so Recharts' ResponsiveContainer (which reads getBoundingClientRect, not
+// the offsetWidth/offsetHeight the global test setup stubs) sees a 0x0 box and renders no chart
+// children at all - which would make the journal marker below untestable, since it renders nothing
+// to assert on. A fixed non-zero rect is enough for Recharts to lay out its children for real.
+Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+  configurable: true,
+  value: () => ({ width: 800, height: 240, top: 0, left: 0, bottom: 240, right: 800, x: 0, y: 0, toJSON() {} }),
+});
+
 /**
  * Which row field a chart's expected curve reads.
  *
@@ -178,5 +187,40 @@ describe("expectedCurve", () => {
 
   it("should answer nothing for a basis with no expected curve", () => {
     expect(expectedCurve("cv", "perDay", ROWS_CUM)).toBeNull();
+  });
+});
+
+/**
+ * The journal's vertical marker (§15 follow-up), ported from the reference's `ReportChart.jsx`: a
+ * chart view whose own spec carries `journal: true` draws an amber dashed line at the highlighted
+ * entry's date. Every view here already plots one row per day (`dataKey="date"`), so the reference's
+ * "date axis only" rule (`shared/report-v2.js`: "the journal overlay needs a date axis") holds
+ * trivially on this side - there is no categorical-axis chart to accidentally draw it on.
+ */
+describe("journal marker", () => {
+  function ctrView(journal: boolean): ChartView {
+    return {
+      kind: "chart",
+      id: "v1",
+      journal,
+      series: [{ id: "actual", kind: "value", label: "Actual", value: { kind: "metric", metric: "im" }, axis: "left" }],
+    } as unknown as ChartView;
+  }
+
+  it("draws the marker when the view opts in and a date is highlighted", () => {
+    const { container } = render(<ChartViewRenderer view={ctrView(true)} rows={ROWS} scalars={{}} journalHighlight="2026-08-01" />);
+    expect(container.querySelector(".recharts-reference-line")).not.toBeNull();
+    expect(screen.getByText("Journal")).toBeInTheDocument();
+  });
+
+  it("draws nothing when the view does not carry journal: true", () => {
+    const { container } = render(<ChartViewRenderer view={ctrView(false)} rows={ROWS} scalars={{}} journalHighlight="2026-08-01" />);
+    expect(container.querySelector(".recharts-reference-line")).toBeNull();
+    expect(screen.queryByText("Journal")).not.toBeInTheDocument();
+  });
+
+  it("draws nothing when no entry is highlighted, even on an opted-in view", () => {
+    const { container } = render(<ChartViewRenderer view={ctrView(true)} rows={ROWS} scalars={{}} journalHighlight={null} />);
+    expect(container.querySelector(".recharts-reference-line")).toBeNull();
   });
 });

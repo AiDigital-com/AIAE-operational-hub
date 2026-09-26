@@ -1,0 +1,321 @@
+/* Ported from FilterBar.jsx's inline styles to BEM, using this project's own design tokens
+   (src/app/tokens.css) instead of the retired SPA's (--surface-alt/--status-blue/--dash-radius-*
+   etc. don't exist here). No vertical colour stripes: active state reads through fill/border/text
+   weight only, never a left rail. */
+
+/* Sticky, like the reference's FilterBar (`position: sticky; top: 0; zIndex: 40`): the controls
+   that decide what every figure below means have to stay reachable while reading those figures,
+   otherwise changing a filter means scrolling back to the top first. The background must stay
+   opaque - the widgets scroll underneath it. */
+.fb {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.16s ease, border-radius 0.18s ease, box-shadow 0.18s ease;
+}
+.fb--active {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+/* Pinned to the viewport's top edge: square off the top corners so the bar reads as attached to
+   it rather than floating, and deepen the shadow so the content passing underneath stays legible
+   as content. Same two cues the reference's `stuck` state uses. */
+.fb--stuck {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: 0 8px 18px var(--shadow-color, rgb(15 23 42 / 12%));
+}
+
+.fb__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.fb__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Shared control chrome (multiselect trigger, segmented buttons). */
+.fb-control {
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background-color 0.16s ease;
+}
+.fb-control:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.fb-control--active {
+  border-color: var(--primary);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Segmented range group. */
+.fb-seg {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  height: 34px;
+  border-radius: var(--radius);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+}
+.fb-seg__btn {
+  height: 100%;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.fb-seg__btn:hover {
+  color: var(--ink);
+}
+.fb-seg__btn--active {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+/* The Custom segment's own styling (`.fb-seg__custom`, `.fb-seg__custom-icon`, `.fb-seg__custom--
+   open`) now lives in `date-range-control.css`, beside the component that owns that shape - the
+   segment is a button + a real calendar popup now (Task 2, 2026-09-25 brief), not the bordered
+   pair of `<input type="date">` this rule used to style. */
+
+/* MultiSelect dropdown. */
+.fb-multiselect {
+  position: relative;
+}
+.fb-multiselect__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+  white-space: nowrap;
+}
+.fb-multiselect__label {
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fb-multiselect__caret {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.fb-control--active .fb-multiselect__caret {
+  color: var(--primary);
+}
+
+.fb-multiselect__popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(300px, calc(100vw - 32px));
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.fb-multiselect__popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--n-100);
+}
+.fb-multiselect__popup-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fb-multiselect__popup-clear {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fb-multiselect__search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+/* `min-height` alongside `height` for the same reason the journal's date field needs it: a
+   min-height always beats a height, and app/styles.css sets `input, select { min-height: 42px }`
+   app-wide, so `height: 32px` alone renders a 42px box. Latent rather than visible today - this
+   search only appears once a list passes eight options, which no pacing on screen has yet. */
+.fb-multiselect__search input {
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--n-100);
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+.fb-multiselect__list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.fb-multiselect__empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fb-multiselect__option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.fb-multiselect__option:hover {
+  background: var(--n-100);
+}
+.fb-multiselect__option--active {
+  background: var(--primary-soft);
+}
+/* The app-wide `input, select { width: 100%; min-height: 42px; padding: 0 13px }` in
+   app/styles.css applies to checkboxes too: unchecked, the box stretched to the row's full
+   width and 42px tall, shoving the label against the right edge with no room left, where
+   `word-break` then chopped it mid-word ("Audi/o", "Displ/ay"). Same fix, same numbers, as
+   every other checkbox in this app (reporting-tab.css, pacing-settings.css, dashboards-tab.css). */
+.fb-multiselect__option input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  flex: 0 0 18px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.fb-multiselect__option span {
+  font-size: 12px;
+  color: var(--ink);
+  /* Wrap between words, never inside one - a long channel name may still need two lines. */
+  overflow-wrap: break-word;
+}
+
+/* Chips row: applied filters, plain and full-fill only - never a left rail. */
+.fb__chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.fb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border-strong);
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fb-chip--range {
+  color: var(--attention-text);
+  background: color-mix(in srgb, var(--attention) 16%, var(--surface));
+  border-color: var(--attention);
+}
+.fb-chip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.72;
+  font-size: 13px;
+}
+.fb-chip button:hover {
+  opacity: 1;
+}
+
+.fb__clear {
+  margin-left: auto;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--pill);
+  padding: 0 8px;
+  height: 26px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fb__clear:hover {
+  background: var(--n-100);
+}
+
+/* The sticky bar's pinned-state probe: 1px tall and pulled back out of the flow, so it occupies
+   no space and shifts nothing on its OWN account. See FilterBar's own comment for why it stays a
+   direct flex child of `.pdash` (a wrapping element breaks the sticky bar's pin - short version:
+   the wrapper becomes the sticky containing block, and a 52px-tall one gives it nowhere to
+   travel).
+   Being a separate flex child means `.pdash`'s `gap` lands on BOTH sides of it (once above, once
+   below the sentinel) where every other pair of siblings only gets it once - a 44px gap above the
+   bar instead of the page's 22px rhythm (found live, 2026-09-25). `margin-top` cancels exactly
+   one of those two gap slots, pulling the sentinel flush against the element above it; the
+   sentinel's own height still nets to 0 via `margin-bottom`, so the bar ends up exactly ONE
+   `--pdash-gap` below its previous sibling, same as everywhere else on the page. Reads
+   `--pdash-gap` (declared on `.pdash`, inherited down to this direct child) rather than a bare
+   22px so the two numbers can never drift apart - the fallback here matches `.pdash`'s only for
+   the case this rule is ever exercised outside that container (e.g. in isolation in a test). */
+.fb__sentinel {
+  height: 1px;
+  margin-top: calc(-1 * var(--pdash-gap, 22px));
+  margin-bottom: -1px;
+}
