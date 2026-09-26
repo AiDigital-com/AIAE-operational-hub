@@ -66,3 +66,10 @@ Common top-level areas:
   no explicit design, follow the installed frontend design guidance.
 - Frontend styles follow BEM and semantic CSS tokens; do not introduce Tailwind, CSS Modules, styled-components, Emotion, or CSS-in-JS.
 - Frontend tests follow the project style from `.claude/rules/50-frontend-tests.md`.
+- **`frontend/src/features/pacing-dashboard/engine/vendor/` is not ours to edit.** Those six files
+  are byte-identical copies of Pacing's calculation engine, taken from the `AIAE-paicing`
+  repository, so this app computes filtered dashboard figures with the same implementation that
+  service runs rather than a second version of the maths. No reformatting, no TypeScript
+  conversion, no lint fixes, no small improvements — read `engine/vendor/SOURCE.md` before going
+  near them. Nothing automated compares the two copies, in either repository; a stale copy passes
+  every test here, including the crown test.

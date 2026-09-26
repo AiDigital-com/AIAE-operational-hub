@@ -59,6 +59,32 @@ diff -q /Users/azatnabiev/Desktop/work/paicing-azat/AIAE-operational-hub/fronten
 (That diff will always show extra files on the `AIAE-paicing/shared` side — only these six are
 vendored here; that's expected. What matters is that the six shared file names report no diff.)
 
+The obligation runs the other way too, and is written down on that side: `AIAE-paicing`'s
+`.claude/rules/shared-lib-sync.md` loads whenever someone works on `shared/` and tells them this
+copy exists and has to move with theirs.
+
+## Why there is no package (2026-09-26)
+
+Do not re-propose publishing the engine as a shared dependency as if it were a fresh idea — it was
+built, it works, and it is blocked on something no amount of code will fix.
+
+`shared/` was packaged as a private npm package (`@aidigital-com/pacing-engine`): manifest, publish
+workflow, a CI guard that fails a PR changing a packaged file without a version bump, and a full
+rehearsal in this repository — typecheck clean, 330 tests green including the crown test, production
+build correct, and all six modules loading in a real browser through the package's `exports` map.
+The publish is refused by the registry: `403 … Account has reached its billing limit`. The Pacing
+repository is private, the organisation's GitHub Packages quota is exhausted, and raising it is an
+organisation-owner action.
+
+A git dependency was verified as a workaround (a root manifest that packs only `shared/` installs
+cleanly and pins to a commit SHA, no registry involved) and was rejected by the owner: it drags
+token handling and git credentials into this repository's install path, for a file set that changes
+rarely and that the owner prefers to control by hand.
+
+So the copy in this directory is deliberate, not neglect. If the quota is ever raised, the package
+work is all ten files of commit `e6306af` in `AIAE-paicing` (`git show e6306af`) — restore it rather
+than rebuild it.
+
 ## Why these six and not the whole engine
 
 `dashboard-metrics.js` (5547 lines) is itself already the merge of the retired SPA's
