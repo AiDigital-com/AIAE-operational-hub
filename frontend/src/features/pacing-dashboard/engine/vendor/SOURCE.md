@@ -60,8 +60,8 @@ diff -q /Users/azatnabiev/Desktop/work/paicing-azat/AIAE-operational-hub/fronten
 vendored here; that's expected. What matters is that the six shared file names report no diff.)
 
 The obligation runs the other way too, and is written down on that side: `AIAE-paicing`'s
-`.claude/rules/shared-lib-sync.md` loads whenever someone works on `shared/` and tells them this
-copy exists and has to move with theirs.
+`CLAUDE.md` has a section "The engine has a second copy, in another repository" saying this copy
+exists and has to move with theirs.
 
 ## Why there is no package (2026-09-26)
 
