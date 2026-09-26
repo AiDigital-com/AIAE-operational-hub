@@ -460,7 +460,7 @@ export function aPacingJournalEntryV1(overrides: Partial<PacingJournalEntryV1> =
     ts: "2026-08-05",
     msg: randomString("Note"),
     uid: "azat@aidigital.com",
-    editedAt: null,
+    canEdit: true,
     ...overrides,
   };
 }

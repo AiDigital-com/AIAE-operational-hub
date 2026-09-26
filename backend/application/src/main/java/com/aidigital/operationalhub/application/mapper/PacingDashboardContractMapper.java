@@ -64,10 +64,16 @@ public class PacingDashboardContractMapper {
 	/**
 	 * Builds the {@code GET /api/v1/pacing/dashboards/{slug}} response.
 	 *
-	 * @param data the dashboard payload Pacing returned
+	 * @param data              the dashboard payload Pacing returned
+	 * @param ownPacingUserId   the current user's own Pacing user id ({@code hub_users.pacing_user_id}),
+	 *                          or null if not yet synced - used to compute each journal entry's
+	 *                          {@code canEdit}
+	 * @param unrestrictedScope whether the current user's resolved Pacing scope is unfiltered
+	 *                          ({@code kind=all}) - such a user can edit every journal entry, mirroring
+	 *                          the admin half of Pacing's own author-or-admin rule
 	 * @return the generated {@link PacingDashboardV1}
 	 */
-	public PacingDashboardV1 toV1(PacingDashboardData data) {
+	public PacingDashboardV1 toV1(PacingDashboardData data, String ownPacingUserId, boolean unrestrictedScope) {
 		return new PacingDashboardV1()
 				.campaign(toCampaignV1(data.campaign()))
 				.planByLineItem(toPlanByLineItemV1(data.planByLineItem()))
@@ -88,7 +94,7 @@ public class PacingDashboardContractMapper {
 				// from a namespace that exists and happens to be empty.
 				.data(data.data())
 				.notify(data.notifySettings() == null ? null : toV1(data.notifySettings()))
-				.journal(toJournalV1(data.journal()));
+				.journal(toJournalV1(data.journal(), ownPacingUserId, unrestrictedScope));
 	}
 
 	/**
@@ -294,6 +300,7 @@ public class PacingDashboardContractMapper {
 				.startDate(parseDate(campaign.startDate()))
 				.endDate(parseDate(campaign.endDate()))
 				.currency(campaign.currency())
+				.rate(campaign.rate())
 				.status(campaign.status())
 				.orderNumber(campaign.orderNumber());
 	}
@@ -312,6 +319,8 @@ public class PacingDashboardContractMapper {
 				.lineItemId(plan.lineItemId())
 				.channel(plan.channel())
 				.dsp(plan.dsp())
+				.labels(plan.labels() == null ? List.of() : plan.labels())
+				.description(plan.description())
 				.rateType(plan.rateType())
 				.clientBudget(plan.clientBudget())
 				.plannedImpressions(plan.plannedImpressions())
@@ -321,7 +330,10 @@ public class PacingDashboardContractMapper {
 				.flightStart(parseDate(plan.flightStart()))
 				.flightEnd(parseDate(plan.flightEnd()))
 				.containers(plan.containers() == null ? List.of() : plan.containers())
-				.nativeBudget(plan.nativeBudget());
+				.nativeBudget(plan.nativeBudget())
+				.costCoef(plan.costCoef())
+				.converted(plan.converted())
+				.currency(plan.currency());
 		if (plan.pauseIntervals() != null) {
 			for (PacingPauseInterval interval : plan.pauseIntervals()) {
 				v1.addPauseIntervalsItem(new PacingPauseIntervalV1()
@@ -332,18 +344,45 @@ public class PacingDashboardContractMapper {
 		return v1;
 	}
 
-	private List<PacingJournalEntryV1> toJournalV1(List<PacingJournalEntry> journal) {
+	/**
+	 * Builds the journal array shared by the {@code GET /api/v1/pacing/dashboards/{slug}} response and
+	 * the three {@code pacingJournal} write endpoints (§15, US-139), computing each entry's
+	 * {@code canEdit} from the caller's own identity rather than forwarding Pacing's raw author id.
+	 *
+	 * @param journal           the journal Pacing returned; null is treated as empty
+	 * @param ownPacingUserId   the current user's own Pacing user id, or null if not yet synced
+	 * @param unrestrictedScope whether the current user's resolved Pacing scope is unfiltered
+	 * @return the generated journal entries, in the same order
+	 */
+	public List<PacingJournalEntryV1> toJournalV1(
+			List<PacingJournalEntry> journal, String ownPacingUserId, boolean unrestrictedScope) {
 		if (journal == null) {
 			return List.of();
 		}
 		return journal.stream()
-				.map(entry -> new PacingJournalEntryV1()
-						.id(entry.id())
-						.ts(entry.ts())
-						.msg(entry.msg())
-						.uid(entry.uid())
-						.editedAt(entry.editedAt()))
+				.map(entry -> toJournalEntryV1(entry, ownPacingUserId, unrestrictedScope))
 				.toList();
+	}
+
+	/**
+	 * Builds one journal entry, per {@link #toJournalV1}.
+	 *
+	 * @param entry             the entry Pacing returned
+	 * @param ownPacingUserId   the current user's own Pacing user id, or null if not yet synced
+	 * @param unrestrictedScope whether the current user's resolved Pacing scope is unfiltered
+	 * @return the generated {@link PacingJournalEntryV1}
+	 */
+	PacingJournalEntryV1 toJournalEntryV1(
+			PacingJournalEntry entry, String ownPacingUserId, boolean unrestrictedScope) {
+		boolean canEdit = unrestrictedScope
+				|| (ownPacingUserId != null && ownPacingUserId.equals(entry.userId()));
+		return new PacingJournalEntryV1()
+				.id(entry.id())
+				.ts(entry.ts())
+				.msg(entry.msg())
+				.uid(entry.uid())
+				.editedAt(entry.editedAt())
+				.canEdit(canEdit);
 	}
 
 	/**

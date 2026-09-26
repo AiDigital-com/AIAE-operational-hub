@@ -5,6 +5,7 @@ export type PacingDashboardCampaignV1 = components["schemas"]["PacingDashboardCa
 export type PacingLineItemPlanV1 = components["schemas"]["PacingLineItemPlanV1"];
 export type PacingPauseIntervalV1 = components["schemas"]["PacingPauseIntervalV1"];
 export type PacingJournalEntryV1 = components["schemas"]["PacingJournalEntryV1"];
+export type PacingJournalEntryWriteV1 = components["schemas"]["PacingJournalEntryWriteV1"];
 export type PacingRefreshStatusV1 = components["schemas"]["PacingRefreshStatusV1"];
 export type PacingDisplayConflictV1 = components["schemas"]["PacingDisplayConflictV1"];
 export type PacingLibraryEntryV1 = components["schemas"]["PacingLibraryEntryV1"];

@@ -148,6 +148,11 @@ export interface ChartView {
   titleAuto?: boolean;
   series: ChartSeriesDef[];
   formats?: { left?: string; right?: string };
+  /** Draws the journal's highlighted-entry date as a vertical marker on this view (§15 follow-up) -
+   *  only meaningful on this chart's date axis (every view here plots one row per day; see
+   *  `ChartViewRenderer`'s `journalHighlight` prop). Ported from the reference's `report-v2.js`
+   *  grammar, which refuses this flag on anything but a date axis for the same reason. */
+  journal?: boolean;
   [key: string]: unknown;
 }
 

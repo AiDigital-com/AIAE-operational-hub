@@ -60,13 +60,15 @@ class PacingDashboardContractMapperTest {
 	void shouldMapFullDashboardPayloadTest() {
 		// Given:
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", "Live", "SO-1");
+				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1");
 		PacingLineItemPlan plan = new PacingLineItemPlan(
-				"111", "Display", "DV360", "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
+				"111", "Display", "DV360", List.of("VIP", "renewal"), "Nike SS26 - Display", "CPM", 5000.0,
+				1_000_000.0, 20.0, null, null,
 				"2026-08-01", "2026-09-30",
 				List.of(new PacingPauseInterval("2026-08-10", "2026-08-12")),
-				List.of(Map.of("target_impressions", 200_000)), null);
-		PacingJournalEntry journal = new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", null);
+				List.of(Map.of("target_impressions", 200_000)), null, false, false, null);
+		PacingJournalEntry journal =
+				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
 				"2026-08-05", Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
@@ -74,8 +76,8 @@ class PacingDashboardContractMapperTest {
 				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
 				List.of(journal));
 
-		// When:
-		PacingDashboardV1 result = mapper.toV1(data);
+		// When: the caller authored this journal entry themselves ("pu-1"), on a restricted scope.
+		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
 
 		// Then: the "id" field Pacing calls the campaign is renamed to "slug" on this contract
 		assertThat(result.getCampaign().getSlug()).isEqualTo("nike-ss26");
@@ -90,6 +92,8 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals()).hasSize(1);
 		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals().get(0).getFrom())
 				.isEqualTo(LocalDate.of(2026, 8, 10));
+		assertThat(result.getPlanByLineItem().get("111").getLabels()).containsExactly("VIP", "renewal");
+		assertThat(result.getPlanByLineItem().get("111").getDescription()).isEqualTo("Nike SS26 - Display");
 		assertThat(result.getFactsDaily()).hasSize(1);
 		assertThat(result.getAsOf()).isEqualTo("2026-08-05");
 		assertThat(result.getDisplay()).containsKey("widgets");
@@ -101,6 +105,44 @@ class PacingDashboardContractMapperTest {
 				.isEqualTo(Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true));
 		assertThat(result.getJournal()).hasSize(1);
 		assertThat(result.getJournal().get(0).getMsg()).isEqualTo("Kicked off");
+		assertThat(result.getJournal().get(0).getCanEdit()).isTrue();
+	}
+
+	@Test
+	void shouldDefaultLineItemPlanLabelsToEmptyListWhenPacingOmitsThemTest() {
+		// Given: a line item with no labels/description at all, exactly like every other optional
+		// field on this record - a missing labels array must not become a null on the contract
+		// (matching the existing `containers` default two lines above it in the mapper).
+		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
+				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1");
+		PacingLineItemPlan plan = new PacingLineItemPlan(
+				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
+				"2026-08-01", "2026-09-30", List.of(), List.of(), null, false, false, null);
+		PacingDashboardData data = new PacingDashboardData(
+				campaign, Map.of("111", plan), List.of(), "2026-08-05", Map.of(), Map.of(), Map.of(),
+				Map.of(), null, Map.of(), null, List.of());
+
+		// When:
+		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
+
+		// Then:
+		assertThat(result.getPlanByLineItem().get("111").getLabels()).isEmpty();
+		assertThat(result.getPlanByLineItem().get("111").getDescription()).isNull();
+	}
+
+	@Test
+	void shouldAllowEditOnlyForTheEntrysOwnAuthorOrAnUnrestrictedScopeTest() {
+		// Given: one entry authored by "pu-1".
+		PacingJournalEntry entry = new PacingJournalEntry("j1", "2026-08-05", "Note", "someone@aidigital.com", "pu-1", null);
+
+		// When/Then: a different, restricted-scope caller may not edit it.
+		assertThat(mapper.toJournalV1(List.of(entry), "pu-2", false).get(0).getCanEdit()).isFalse();
+		// When/Then: the entry's own author may.
+		assertThat(mapper.toJournalV1(List.of(entry), "pu-1", false).get(0).getCanEdit()).isTrue();
+		// When/Then: an unrestricted (admin) scope may edit any entry, authored by someone else.
+		assertThat(mapper.toJournalV1(List.of(entry), "pu-2", true).get(0).getCanEdit()).isTrue();
+		// When/Then: a caller not yet synced into Pacing (null own id) on a restricted scope may not.
+		assertThat(mapper.toJournalV1(List.of(entry), null, false).get(0).getCanEdit()).isFalse();
 	}
 
 	@Test
@@ -260,12 +302,12 @@ class PacingDashboardContractMapperTest {
 	void shouldDegradeMalformedFlightDatesToNullRatherThanFailTest() {
 		// Given: a defensive rule shared with PacingContractMapper's own date parsing
 		PacingDashboardCampaign campaign =
-				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", "Live", null);
+				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
 
 		// When:
-		PacingDashboardV1 result = mapper.toV1(data);
+		PacingDashboardV1 result = mapper.toV1(data, null, false);
 
 		// Then:
 		// Null stays null rather than flattening to an empty map, unlike display and

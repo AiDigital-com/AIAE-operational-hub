@@ -5,6 +5,8 @@ import type {
   PacingDashboardV1,
   PacingDataSettingsUpdateV1,
   PacingDisplaySaveOutcome,
+  PacingJournalEntryV1,
+  PacingJournalEntryWriteV1,
   PacingLibraryEntryV1,
   PacingLibraryKindV1,
   PacingLibrarySaveOutcome,
@@ -205,6 +207,59 @@ export async function deletePacingLibraryEntry(
     throw new ApiError(formatError(result.error), result.response.status);
   }
   return { status: "saved", result: result.data.id };
+}
+
+/**
+ * Adds a free-text journal note to a pacing (§15 of the migration plan, US-139). The response is the
+ * pacing's whole fresh journal, newest write included - callers patch it straight into the cached
+ * dashboard (`["pacing", "dashboard", slug]`) rather than refetching the multi-megabyte payload.
+ */
+export async function addPacingJournalEntry(
+  slug: string,
+  body: PacingJournalEntryWriteV1
+): Promise<PacingJournalEntryV1[]> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/journal", {
+    params: { path: { slug } },
+    body,
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data.journal;
+}
+
+/**
+ * Edits a journal entry in place (§15, US-139). Author-or-admin, enforced by Pacing and mirrored by
+ * each entry's `canEdit`. The response is the pacing's whole fresh journal.
+ */
+export async function updatePacingJournalEntry(
+  slug: string,
+  entryId: string,
+  body: PacingJournalEntryWriteV1
+): Promise<PacingJournalEntryV1[]> {
+  const result = await apiClient.PATCH("/api/v1/pacing/dashboards/{slug}/journal/{entryId}", {
+    params: { path: { slug, entryId } },
+    body,
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data.journal;
+}
+
+/**
+ * Soft-deletes a journal entry (§15, US-139). Deliberately no author check, on either side - anyone
+ * with dashboard access to this pacing may delete any entry, the reference behaviour, kept on purpose.
+ * The response is the pacing's whole fresh journal.
+ */
+export async function deletePacingJournalEntry(slug: string, entryId: string): Promise<PacingJournalEntryV1[]> {
+  const result = await apiClient.DELETE("/api/v1/pacing/dashboards/{slug}/journal/{entryId}", {
+    params: { path: { slug, entryId } },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data.journal;
 }
 
 /** Likes/unlikes a library entry (both idempotent) - US-118. */

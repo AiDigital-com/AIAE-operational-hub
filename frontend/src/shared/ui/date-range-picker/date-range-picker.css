@@ -1,0 +1,224 @@
+/* Ported from DateRangePicker.jsx's inline styles to BEM, this project's own design tokens
+   (src/app/tokens.css). No vertical colour stripes: the selected/in-range days read through a
+   full-cell fill/tint, never a rail.
+
+   2026-09-25 follow-up (item 5, "the calendar is too big"): the brief's own comparison point,
+   `workspace/src/components/ui/DatePicker.jsx:6` (`POPUP_W = 272`), is the wrong file - that
+   component is a SINGLE-date, ONE-month picker (used for a plain date field elsewhere), not the
+   range picker the FilterBar's Custom segment actually opens. The real reference for a RANGE is
+   `workspace/src/components/ui/DateRangePicker.jsx` - already this file's OWN named source above -
+   which is TWO months side by side at `width: 'min(560px, calc(100vw - 16px))'`, i.e. the same
+   560px this file already used before this pass. So there was no "roughly half" gap to close on
+   width or month count; both were already right. What WAS off, verified line-by-line against that
+   file's inline styles: nav buttons 26px vs its `w-7 h-7` (28px), the inter-month gap and column
+   floor 14px/240px vs its `gap-3`/`minmax(248px,...)` (12px/248px), and the footer's margins 10px
+   vs its `mt-3 pt-3`/`mb-2` (12px/8px) - all tightened below. Day cells stay fluid (`aspect-ratio:
+   1` in a 1fr column, ~37px) rather than switching to the reference's fixed `w-9 h-9` (36px): a
+   ~1px difference is not worth the realignment risk of the two sizing models disagreeing on how a
+   column's leftover space is distributed. */
+
+.drp {
+  position: relative;
+  display: inline-block;
+}
+.drp--full {
+  display: block;
+  width: 100%;
+}
+
+.drp__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 11px;
+  min-width: 200px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.drp--full .drp__trigger {
+  width: 100%;
+}
+.drp__trigger:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.drp__calendar-glyph {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.drp__trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Portal popup - positioned against the viewport (fixed), like Tooltip's own bubble, so a
+   scrolling ancestor anywhere between the trigger and <body> can never clip it. */
+.drp__popup {
+  position: fixed;
+  z-index: 120;
+  outline: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  width: min(560px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.drp__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.drp__nav-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 15px;
+  cursor: pointer;
+}
+.drp__nav-btn:hover:not(:disabled) {
+  background: var(--n-100);
+  color: var(--ink);
+}
+.drp__nav-btn:disabled {
+  color: var(--muted);
+  opacity: 0.35;
+  cursor: default;
+}
+.drp__nav-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.drp__months {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 12px;
+}
+.drp__month-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.drp__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 4px;
+}
+.drp__weekday {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 0;
+}
+.drp__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.drp__day {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.drp__day:hover:not(:disabled):not(.drp__day--anchor) {
+  background: var(--n-100);
+}
+.drp__day--outside {
+  color: var(--muted);
+  opacity: 0.72;
+}
+.drp__day:disabled {
+  color: var(--muted);
+  opacity: 0.32;
+  cursor: default;
+}
+/* Range fill and the two end-cap days: full-cell colour, never a side stripe. */
+.drp__day--in-range {
+  background: var(--primary-soft);
+  border-radius: 0;
+  font-weight: 600;
+}
+.drp__day--anchor {
+  background: var(--primary);
+  /* NOT --white: in dark mode --white is remapped to a dark surface colour (tokens.css's
+     [data-theme="dark"] block), which would put near-invisible dark text on this --primary fill.
+     --text-on-accent is the token this project already keeps theme-correct for text on an
+     accent-coloured fill. */
+  color: var(--text-on-accent, #fff);
+  font-weight: 700;
+}
+
+.drp__footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.drp__footer-status {
+  font-size: 11px;
+  color: var(--muted-strong);
+  margin-bottom: 8px;
+}
+.drp__footer-range {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.drp__footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.drp__btn {
+  padding: 6px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.drp__btn--reset {
+  color: var(--muted-strong);
+}
+.drp__btn--reset:hover {
+  background: var(--n-100);
+}
+.drp__btn--close {
+  color: var(--ink);
+  background: var(--n-100);
+}
+.drp__btn--close:hover {
+  border-color: var(--border-strong);
+}

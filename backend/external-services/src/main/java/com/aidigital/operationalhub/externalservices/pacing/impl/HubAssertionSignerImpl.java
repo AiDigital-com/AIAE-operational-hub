@@ -4,7 +4,6 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.config.PacingProperties;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -87,30 +86,5 @@ public class HubAssertionSignerImpl implements HubAssertionSigner {
 
 	private static String base64Url(byte[] bytes) {
 		return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-	}
-
-	/**
-	 * The signed JSON payload shape, field order matching dash-gate's assertion payload exactly.
-	 *
-	 * @param email     the asserted user's email
-	 * @param scope     the scope map ({@code kind}, then {@code ids} when present)
-	 * @param canCreate serialized as {@code can_create}
-	 * @param exp       expiry, epoch milliseconds
-	 */
-	private record Payload(
-			String email,
-			Map<String, Object> scope,
-			@JsonProperty("can_create") boolean canCreate,
-			long exp) {
-	}
-
-	/**
-	 * The signed JSON payload shape for {@link #signSystem()}: no email, no scope, no {@code can_create}
-	 * — just the fixed marker dash-gate's {@code verifySystemAssertion} requires.
-	 *
-	 * @param system always {@code true}
-	 * @param exp    expiry, epoch milliseconds
-	 */
-	private record SystemPayload(boolean system, long exp) {
 	}
 }

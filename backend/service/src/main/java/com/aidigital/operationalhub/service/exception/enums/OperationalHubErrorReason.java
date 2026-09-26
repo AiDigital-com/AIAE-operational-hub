@@ -308,10 +308,22 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	OPH_056("OPH_056", "The Pacing service rejected the request: %s."),
 
 	/**
-	 * Pacing answered 403 for a reason other than an unsynced user (§6, US-118): the current user is
-	 * neither this library entry's owner nor an admin.
+	 * Pacing answered 403 for a reason other than an unsynced user: a real authorization refusal made by
+	 * Pacing about this specific request (a library entry's owner check, §6/US-118; a journal entry's
+	 * author check, §15/US-139; an admin-only action; or a pacing the caller may not act on). Generic on
+	 * purpose - the exact cause lives in the server log, and the wording must read correctly regardless
+	 * of which of those endpoints produced it.
 	 */
-	OPH_057("OPH_057", "Only the owner of this library entry, or an admin, may change or remove it.");
+	OPH_057("OPH_057", "You don't have permission to make this change."),
+
+	/**
+	 * Pacing answered 429/{@code too_fast} on a journal write (§15, US-139) or a library action (a
+	 * save/create/update/delete/like under {@code /api/library*}): the current user is acting faster
+	 * than Pacing's per-minute rate limit allows. Not a server error - the caller should simply wait a
+	 * few seconds and retry. Generic on purpose, same reasoning as {@link #OPH_057}: the wording must
+	 * read correctly regardless of which of those endpoints produced it.
+	 */
+	OPH_058("OPH_058", "You're doing that too quickly. Please wait a moment and try again.");
 
 	private final String code;
 	private final String description;

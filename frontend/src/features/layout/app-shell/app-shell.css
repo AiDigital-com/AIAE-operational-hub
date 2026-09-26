@@ -38,11 +38,17 @@
 }
 
 /* ── content area ── */
+/* No `overflow-y: auto` here, deliberately. It used to be set, but this element is never given a
+   bounded height - `.app` caps at `min-height: 100vh`, a MINIMUM - so it always grows to its own
+   content and never actually scrolls; the document does. So the property bought no scrolling,
+   and it cost something real: an ancestor whose overflow is not `visible` becomes the scroll
+   container that `position: sticky` measures against, and a scroll container that never scrolls
+   pins nothing. That silently disabled sticky for every descendant on every page - found when the
+   pacing dashboard's filter bar would not stay on screen. */
 .app__content {
   flex: 1;
   min-width: 0;
   padding: 8px 40px 60px;
-  overflow-y: auto;
   max-width: 1320px;
 }
 

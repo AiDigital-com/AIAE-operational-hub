@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aPacingDashboardV1,
@@ -32,9 +33,11 @@ function renderDashboard(
   const row = aPacingRowV1(rowOverrides);
   const onBack = vi.fn();
   render(
-    <QueryClientProvider client={queryClient}>
-      <PacingDashboard row={row} onBack={onBack} watchFirstData={props.watchFirstData} />
-    </QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <PacingDashboard row={row} onBack={onBack} watchFirstData={props.watchFirstData} />
+      </QueryClientProvider>
+    </MemoryRouter>
   );
   return { row, onBack, queryClient };
 }
@@ -49,7 +52,7 @@ describe("PacingDashboard", () => {
     vi.useRealTimers();
   });
 
-  it("should show the health/margin/budget figures straight from the row (US-114: must match the existing tool)", async () => {
+  it("should show Pace/Margin straight from the row while loading (US-114), and Budget from the filtered metrics bag once loaded (owner ask, 2026-09-25)", async () => {
     // Given: the exact same server-computed figures the Overview/Pacing-tab row already showed
     vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1());
     vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1());
@@ -57,13 +60,22 @@ describe("PacingDashboard", () => {
       pacingDeviationPct: -12.3, marginActualPct: 18.5, marginTargetPct: 25, budgetTotal: 1_250_000,
     });
 
-    // When:
+    // When: before the dashboard query has resolved (no metrics bag yet)
     await screen.findByText(row.name);
 
     // Then: no re-derivation - the same numbers already shown on the row
     expect(screen.getByText("-12.3pp")).toBeInTheDocument();
     expect(screen.getByText(/18\.5%/)).toBeInTheDocument();
-    expect(screen.getByText(/\$1,250,000|\$1\.3M|\$1\.2M/)).toBeInTheDocument();
+
+    // When: the dashboard query resolves (the factory default: one $10,000 line item)
+    await waitFor(() => expect(screen.queryByText("Loading dashboard")).not.toBeInTheDocument());
+
+    // Then: Budget reads the SAME filtered source the old "Plan total" subline did
+    // (`scalars.budget`) - not `row.budgetTotal` ($1,250,000), which used to print a second,
+    // disagreeing number in the same card. One figure now, so the subline is gone too.
+    expect(screen.getByText("$10.0K")).toBeInTheDocument();
+    expect(screen.queryByText(/\$1,250,000|\$1\.3M|\$1\.2M/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Plan total/i)).not.toBeInTheDocument();
   });
 
   it("should show 'No data' rather than a fake 0% when there is no pacing deviation yet", async () => {

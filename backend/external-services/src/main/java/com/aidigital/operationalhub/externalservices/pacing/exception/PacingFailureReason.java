@@ -52,6 +52,14 @@ public enum PacingFailureReason {
 	UPSTREAM_FORBIDDEN,
 
 	/**
+	 * Pacing answered {@code 429} with {@code too_fast} on a journal write: the calling user has written
+	 * more journal notes than Pacing's per-minute rate limit allows (the {@code journal} bucket in
+	 * {@code dash-gate/lib/api-routes.mjs}, 6/min per user). Mapped to {@code 429}, not collapsed into
+	 * {@link #OTHER} - this is an honest "slow down and try again", not a server error.
+	 */
+	UPSTREAM_RATE_LIMITED,
+
+	/**
 	 * Any other non-2xx response from Pacing, or a failure that happened entirely on the Hub's side
 	 * (e.g. signing the assertion). Mapped to {@code 500}.
 	 */

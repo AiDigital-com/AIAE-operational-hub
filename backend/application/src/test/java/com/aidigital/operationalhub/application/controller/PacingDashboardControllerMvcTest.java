@@ -37,6 +37,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -114,6 +115,9 @@ class PacingDashboardControllerMvcTest {
 	@Mock
 	private PacingNsDiffContractMapper nsDiffMapper;
 
+	@Mock
+	private HubUserService hubUserService;
+
 	@InjectMocks
 	private PacingDashboardController controller;
 
@@ -133,9 +137,12 @@ class PacingDashboardControllerMvcTest {
 		PacingDashboardData data =
 				new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
+		// Unstubbed hubUserService.findByClerkUserId(...) answers Optional.empty() (Mockito's default for
+		// Optional-returning methods), so the resolved own-pacing-user-id is null here - an unrestricted
+		// (kind=all) scope from stubCurrentUser() still resolves canEdit to true regardless.
 		doReturn(new PacingDashboardV1().display(Map.of("widgets", List.of())).journal(List.of())
 				.planByLineItem(Map.of()).factsDaily(List.of()))
-				.when(mapper).toV1(data);
+				.when(mapper).toV1(data, null, true);
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:

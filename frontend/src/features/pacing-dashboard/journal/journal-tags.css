@@ -1,0 +1,242 @@
+/* Journal tag system (§15 follow-up): badges, the caret palette, and the filter pills row. Colors
+   come from the existing chart-color tokens in app/tokens.css (already theme-aware HSL triplets) -
+   full-fill chips and dots only, never a left-rail stripe, per the project's standing ban on vertical
+   colour accents. */
+
+/* ── tag badges (TaggedText, in entry bodies) ── */
+
+.jtag-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  margin: 0 1px;
+  border-radius: var(--radius);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.jtag-badge__type {
+  opacity: 0.65;
+  font-size: 9.5px;
+}
+.jtag-badge__unknown-mark {
+  opacity: 0.75;
+  font-size: 9.5px;
+}
+
+.jtag-badge--li {
+  color: hsl(var(--chart-sky));
+  background: hsl(var(--chart-sky) / 0.12);
+  border: 1px solid hsl(var(--chart-sky) / 0.38);
+}
+.jtag-badge--ch {
+  color: color-mix(in srgb, hsl(var(--chart-lime)) 60%, var(--ink));
+  background: hsl(var(--chart-lime) / 0.16);
+  border: 1px solid hsl(var(--chart-lime) / 0.4);
+}
+.jtag-badge--aud {
+  color: hsl(var(--chart-purple));
+  background: hsl(var(--chart-purple) / 0.12);
+  border: 1px solid hsl(var(--chart-purple) / 0.38);
+}
+.jtag-badge--dsp {
+  color: hsl(var(--chart-magenta));
+  background: hsl(var(--chart-magenta) / 0.12);
+  border: 1px solid hsl(var(--chart-magenta) / 0.38);
+}
+.jtag-badge--tactic {
+  color: hsl(var(--chart-cyan));
+  background: hsl(var(--chart-cyan) / 0.12);
+  border: 1px solid hsl(var(--chart-cyan) / 0.38);
+}
+.jtag-badge--dim {
+  color: var(--muted-strong);
+  background: var(--n-100);
+  border: 1px solid var(--border);
+}
+.jtag-badge--unknown {
+  color: var(--muted);
+  background: var(--n-100);
+  border: 1px dashed var(--border-strong);
+}
+
+/* ── caret palette ── */
+
+.jtag-palette {
+  position: fixed;
+  width: 300px;
+  z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+}
+.jtag-palette__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--n-100);
+  font-size: 12px;
+}
+.jtag-palette__search-icon {
+  opacity: 0.7;
+}
+.jtag-palette__query {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jtag-palette__query--placeholder {
+  color: var(--muted);
+}
+.jtag-palette__chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.jtag-palette__chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: var(--pill);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+}
+.jtag-palette__chip--active {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--color-accent-contrast);
+}
+.jtag-palette__results {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.jtag-palette__empty {
+  padding: 12px 14px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+.jtag-palette__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.jtag-palette__option--active {
+  background: var(--n-100);
+}
+.jtag-palette__option-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.jtag-palette__option-dot--LI {
+  background: hsl(var(--chart-sky));
+}
+.jtag-palette__option-dot--ch {
+  background: hsl(var(--chart-lime));
+}
+.jtag-palette__option-dot--aud {
+  background: hsl(var(--chart-purple));
+}
+.jtag-palette__option-dot--dsp {
+  background: hsl(var(--chart-magenta));
+}
+.jtag-palette__option-dot--tactic {
+  background: hsl(var(--chart-cyan));
+}
+.jtag-palette__option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.jtag-palette__option-recent,
+.jtag-palette__option-type {
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* ── filter pills row ── */
+
+.jtag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.jtag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--pill);
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+}
+.jtag-pill__type {
+  opacity: 0.65;
+  font-size: 10px;
+}
+.jtag-pill--li {
+  background: hsl(var(--chart-sky) / 0.14);
+  color: hsl(var(--chart-sky));
+  border-color: hsl(var(--chart-sky) / 0.4);
+}
+.jtag-pill--li.jtag-pill--active {
+  background: hsl(var(--chart-sky));
+  color: var(--white);
+}
+.jtag-pill--ch {
+  background: hsl(var(--chart-lime) / 0.18);
+  color: color-mix(in srgb, hsl(var(--chart-lime)) 55%, var(--ink));
+  border-color: hsl(var(--chart-lime) / 0.4);
+}
+.jtag-pill--ch.jtag-pill--active {
+  background: color-mix(in srgb, hsl(var(--chart-lime)) 55%, var(--ink));
+  color: var(--white);
+}
+.jtag-pill--aud {
+  background: hsl(var(--chart-purple) / 0.14);
+  color: hsl(var(--chart-purple));
+  border-color: hsl(var(--chart-purple) / 0.4);
+}
+.jtag-pill--aud.jtag-pill--active {
+  background: hsl(var(--chart-purple));
+  color: var(--white);
+}
+.jtag-pill--clear {
+  background: var(--n-100);
+  color: var(--muted-strong);
+  border-color: var(--border);
+}
+.jtag-pill--clear:hover {
+  background: var(--n-200);
+}

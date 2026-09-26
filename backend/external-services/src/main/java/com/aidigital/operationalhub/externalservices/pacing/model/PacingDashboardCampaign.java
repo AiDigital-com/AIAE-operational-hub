@@ -6,10 +6,12 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * (already camelCase on the wire - unlike most of Pacing's API this one is assembled by JS, not read
  * straight off a DB row - so no {@code @JsonProperty} translation is needed here).
  *
- * <p>Deliberately narrow: Pacing's real object also carries {@code rate}/{@code rateLocked}/
- * {@code nsRate}, {@code timezone}, {@code sourceUrl}, {@code periodScope}/{@code periodScopeKey},
- * {@code client}/{@code agency}, {@code links} and {@code notes}/{@code notesRich}; none of those are
- * read here because §6's dashboard view does not use them yet.
+ * <p>Deliberately narrow: Pacing's real object also carries {@code rateLocked}/{@code nsRate},
+ * {@code timezone}, {@code sourceUrl}, {@code periodScope}/{@code periodScopeKey}, {@code client}/
+ * {@code agency}, {@code links} and {@code notes}/{@code notesRich}; none of those are read here
+ * because §6's dashboard view does not use them yet. {@code rate} IS read: it is a MATH input to the
+ * browser-side metric engine ({@code Currency.currencyToUsd} converts delivery cost with it), not a
+ * display-only field, so it travels through to {@code PacingDashboardCampaignV1}.
  *
  * <p>Note the field Pacing calls {@code id} here is in fact the pacing's {@code dash_slug}, not its
  * {@code pacing_id} - the mapper renames it to {@code slug} on the way into the generated
@@ -21,6 +23,8 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * @param startDate   flight start date (YYYY-MM-DD), derived from the line items
  * @param endDate     flight end date (YYYY-MM-DD), derived from the line items
  * @param currency    the pacing's resolved currency code
+ * @param rate        the currency conversion rate (native -> USD); 1 for a USD campaign, always
+ *                    present (`resolveCampaignCurrency` defaults to `'USD'`/`1`)
  * @param status      administrative lifecycle status
  * @param orderNumber the insertion order number, if resolved
  */
@@ -31,6 +35,7 @@ public record PacingDashboardCampaign(
 		String startDate,
 		String endDate,
 		String currency,
+		Double rate,
 		String status,
 		String orderNumber) {
 }
