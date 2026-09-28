@@ -23,6 +23,13 @@ import type { FactRow, LiDaily, LiPlanMap } from "../engine/vendor-types";
  *  negative filter in the system, bound to one line item (`<dim>:__outside__@<liId>`). */
 export const OUTSIDE_KEY = "__outside__";
 
+/** The `brkf` pair for that filter. It carries the LINE ITEM because delivery is per line item, so
+ *  "everything the containers do not declare" only means something inside one of them. Producer for
+ *  `parseBreakdownFilters`'s own `<dim>:__outside__@<liId>` reader, which is why they sit together. */
+export function outsidePair(dim: string, liId: string): string {
+  return `${dim}:${OUTSIDE_KEY}@${liId}`;
+}
+
 // Namebuilder positions tracked as independent dim axes (per-position model).
 const OTHER_DIMS = ["comment", "geo", "creative", "message", "keyword", "flight", "language"];
 

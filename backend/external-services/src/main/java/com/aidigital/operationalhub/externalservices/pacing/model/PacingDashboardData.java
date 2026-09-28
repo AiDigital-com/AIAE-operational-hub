@@ -9,11 +9,12 @@ import java.util.Map;
  * A pacing's full dashboard payload, as {@code GET /api/dashboards/:slug/data} returns it (§6 of the
  * migration plan, US-114/115). Restricted to the fields the Pacing Dashboard screen needs; Pacing's
  * real response also carries {@code types}, {@code availableSplits}, {@code notify},
- * {@code third_party}, {@code mappings_v3}, {@code deliveryStats}, {@code creatives},
- * {@code conversions}, {@code dimSources} and {@code sourceFacts} - none of those are read here
- * because §6 does not use them yet. {@code data} WAS on that list until the Data panel: a pacing
- * whose source setting the Hub cannot show is a pacing whose delivery silently comes from the raw
- * mart because nobody could see, let alone change, which table it reads.
+ * {@code third_party}, {@code mappings_v3}, {@code deliveryStats} and {@code sourceFacts} - none of
+ * those are read here because §6 does not use them yet. {@code data} WAS on that list until the
+ * Data panel: a pacing whose source setting the Hub cannot show is a pacing whose delivery silently
+ * comes from the raw mart because nobody could see, let alone change, which table it reads.
+ * {@code creatives}, {@code conversions} and {@code dimSources} left it for the Breakdown panel,
+ * which offers a cut per dimension and cannot offer the ones fed by those files without them.
  *
  * <p>{@code display}/{@code aggregate}/{@code libraryEntries}/{@code metrics} are kept fully opaque:
  * their internal grammar belongs entirely to Pacing's own widget-spec engine, which this migration
@@ -23,6 +24,24 @@ import java.util.Map;
  * @param planByLineItem line item id (as text) to its plan
  * @param factsDaily     raw daily delivery facts, passed through byte-for-byte
  * @param asOf           the as-of date Pacing computed the facts against; null if unresolved
+ * @param creatives      DSP-native creative rows from Pacing's {@code <slug>.creatives.json} aux
+ *                       cache, passed through byte-for-byte. Null when the pacing has
+ *                       {@code data.fetch_creatives} off, or when that file does not match the
+ *                       current refresh - Pacing omits the key entirely in both cases, and the
+ *                       Breakdown's "Creative (asset)" cut is then not offered. Null rather than an
+ *                       empty list on purpose: "this pacing does not collect creatives" and "it
+ *                       collects them and none delivered" are different answers, and only the
+ *                       second one should show an empty cut
+ * @param conversions    conversion-mart rows from {@code <slug>.conversions.json}, under the same
+ *                       presence rule as {@code creatives} (gated on {@code data.fetch_conversions})
+ *                       and feeding the "Conversion Action" cut the same way
+ * @param dimSources     the per-pacing dimension sources that were actually loaded, keyed by source
+ *                       id - Devices and any sheet-backed source, each carrying its rows and the
+ *                       bookkeeping of the read that produced them. Kept opaque for
+ *                       {@code display}'s reason: the shape belongs to Pacing's own loader, and the
+ *                       Hub reads it rather than reinterpreting it. Null when this pacing has no
+ *                       source configured or none of their files matched - the Breakdown then
+ *                       offers no source cut, which is the correct outcome rather than an empty one
  * @param display        this pacing's opaque widget/layout selection object
  * @param aggregate      opaque per-pacing aggregate configuration
  * @param capabilities   what this Pacing build accepts on a settings save; echo it back as the
@@ -58,6 +77,9 @@ public record PacingDashboardData(
 		Map<String, PacingLineItemPlan> planByLineItem,
 		List<Map<String, Object>> factsDaily,
 		String asOf,
+		List<Map<String, Object>> creatives,
+		List<Map<String, Object>> conversions,
+		Map<String, Object> dimSources,
 		Map<String, Object> display,
 		Map<String, Object> aggregate,
 		Map<String, Object> capabilities,

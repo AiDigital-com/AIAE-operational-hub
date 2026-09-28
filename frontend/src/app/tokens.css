@@ -126,6 +126,22 @@
   --c-vcr-fill: rgba(139, 92, 246, 0.10);
   --c-cpm: #cf911d;
   --c-cpc: #cf911d;
+
+  /* Categorical ten - the Breakdown donut/table slice colours, same source and same order as the
+     SPA's `--pal-0 … --pal-9`, so a familiar cut keeps the hues people already read it by. Ten
+     because the panel shows ten rows before "Show all"; beyond that the sequence repeats, which is
+     the reference's behaviour too. */
+  --pal-0: #0009dc;
+  --pal-1: #78b41d;
+  --pal-2: #15213b;
+  --pal-3: #2a84ff;
+  --pal-4: #8b5cf6;
+  --pal-5: #df538f;
+  --pal-6: #0ea5c8;
+  --pal-7: #df7d1b;
+  --pal-8: #0d7f61;
+  --pal-9: #b53ed4;
+
   --radius-card: var(--radius-lg);
   --radius-control: var(--radius);
   --sidebar-width: var(--sidebar-w);
@@ -179,6 +195,19 @@
   --c-vcr-fill: rgba(176, 140, 255, 0.10);
   --c-cpm: #ffbe3b;
   --c-cpc: #ffbe3b;
+
+  /* Dark-mode categorical ten - lifted, not the light values reused: #15213b on a dark surface is
+     an invisible slice. Same source as the light block above. */
+  --pal-0: #6c7dff;
+  --pal-1: #aef33e;
+  --pal-2: #dfe7ff;
+  --pal-3: #38bdf8;
+  --pal-4: #b08cff;
+  --pal-5: #f472b6;
+  --pal-6: #67e8f9;
+  --pal-7: #ffbe3b;
+  --pal-8: #4ade80;
+  --pal-9: #ff8cb3;
 
   --surface-default: hsl(var(--gh-background));
   --surface-muted: hsl(var(--gh-secondary));
