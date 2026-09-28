@@ -135,7 +135,9 @@ class PacingDashboardControllerMvcTest {
 		// Given:
 		stubCurrentUser();
 		PacingDashboardData data =
-				new PacingDashboardData(null, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
+				new PacingDashboardData(
+						null, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+						null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
 		// Unstubbed hubUserService.findByClerkUserId(...) answers Optional.empty() (Mockito's default for
 		// Optional-returning methods), so the resolved own-pacing-user-id is null here - an unrestricted

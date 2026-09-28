@@ -1,0 +1,333 @@
+/* The Breakdown panel. No vertical colour stripes: an active row is a tinted fill across the whole
+   row, and its identity is the dot beside its name — never a bar down the left edge. */
+
+.pbrk__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+/* The heading already carries the section's bottom margin; inside this flex row that margin would
+   push the search input out of line with it. */
+.pbrk__head .pdash__section-title {
+  margin-bottom: 0;
+}
+
+.pbrk__search {
+  position: relative;
+}
+.pbrk__search input {
+  width: 200px;
+  height: 30px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  outline: none;
+}
+.pbrk__search input:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.pbrk__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Dimension tabs ─────────────────────────────────────────────────────── */
+
+.pbrk__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 16px;
+}
+/* One line, and the same height for every tab - a cut whose name needs explaining carries it in
+   the tooltip instead. It sits under a filter bar whose own controls are 34px, so anything taller
+   reads as the heavier control of the two when it is the lighter one. */
+.pbrk__tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  background: transparent;
+  color: var(--muted-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.pbrk__tab:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.pbrk__tab--active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.pbrk__tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ── Donut + table ──────────────────────────────────────────────────────── */
+
+.pbrk__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+.pbrk__donut {
+  flex: 0 0 180px;
+  width: 180px;
+  height: 180px;
+}
+/* Below this the donut and a nine-column table cannot share a line; the donut goes above, full
+   width, rather than squeezing the figures. */
+@media (max-width: 900px) {
+  .pbrk__body {
+    flex-direction: column;
+  }
+  .pbrk__donut {
+    align-self: center;
+  }
+}
+
+.pbrk__tip {
+  max-width: 220px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+}
+.pbrk__tip-label {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.pbrk__tip-value {
+  color: var(--muted-strong);
+}
+
+/* The table is wide. It scrolls inside its own box rather than making the page scroll sideways,
+   which is the project rule for any wide content. */
+.pbrk__table-wrap {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.pbrk__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--ink);
+}
+.pbrk__table thead th {
+  padding: 0 8px 5px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.pbrk__col--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pbrk__table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--n-200);
+}
+
+.pbrk__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pbrk__sort:hover {
+  color: var(--ink);
+}
+.pbrk__arrow {
+  font-size: 8px;
+  opacity: 0.35;
+}
+.pbrk__arrow--active {
+  opacity: 1;
+}
+
+.pbrk__row--clickable {
+  cursor: pointer;
+}
+.pbrk__row--clickable:hover {
+  background: var(--n-100);
+}
+.pbrk__row--residual {
+  color: var(--muted-strong);
+}
+/* A full-row tint, deliberately: the ban on left-rail accents is absolute in this project, and the
+   row also carries its own `aria-pressed` button for anyone who cannot see the tint at all. */
+.pbrk__row--active,
+.pbrk__row--active.pbrk__row--clickable:hover {
+  background: var(--primary-soft);
+}
+
+.pbrk__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pbrk__pick--inert {
+  cursor: default;
+}
+.pbrk__pick:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.pbrk__dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.pbrk__label {
+  /* A flex item will not shrink below its content width without this, so the ellipsis never
+     engages and a long value widens the column instead of truncating. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pbrk__share {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted-strong);
+}
+
+/* Best/worst is carried by the figure's own colour, never by a background that would read as a
+   second kind of selection beside the active-filter tint. */
+.pbrk__cell--best {
+  color: var(--good);
+  font-weight: 700;
+}
+.pbrk__cell--worst {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+.pbrk__totals td {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+
+.pbrk__more {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 2px;
+}
+.pbrk__empty {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted-strong);
+  text-align: center;
+}
+
+/* ── Outside splits ─────────────────────────────────────────────────────── */
+/* One line, not a table row: it is a complement of the rows above rather than one of them, and
+   putting it in the table would make it look like another value — and make the Total wrong. */
+.pbrk__outside {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0 2px;
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+.pbrk__outside-btn {
+  padding: 3px 10px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--muted-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  cursor: pointer;
+}
+.pbrk__outside-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.pbrk__outside-btn--on {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+.pbrk__outside-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.pbrk__outside-note {
+  color: var(--text-label);
+}
+
+/* ── A dimension source's own line ──────────────────────────────────────── */
+/* Only a source can say this; a built-in cut partitions delivery by construction and the line is
+   absent there, so nothing shifts on the tabs that do not have one. */
+.pbrk__coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: -6px 0 14px;
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+.pbrk__coverage-gap {
+  color: var(--ink);
+}
+.pbrk__coverage-window {
+  color: var(--text-label);
+}
+/* Amber, because this one IS about the data being older than it looks - but it is still a label,
+   not an alert: no icon, no background, no border. */
+.pbrk__coverage-stale {
+  color: var(--attention-text);
+}

@@ -129,6 +129,9 @@ interface DashboardMetricsEngine {
     basis?: string
   ): Record<string, unknown>[];
   isVcrEligible(plan: NormalizedLiPlan | undefined, daily: Record<string, FlowRow> | undefined): boolean;
+  /** The rate type most of `effLIs` are bought on - the Breakdown's primary unit comes from it, so a
+   *  clicks-bought campaign's cut is sized by clicks rather than impressions. Ties go CPC, then CPV. */
+  domRateType(liPlan: LiPlanMap, effLIs: readonly string[]): "CPM" | "CPC" | "CPV";
   buildRows(
     effLIs: string[],
     liDaily: LiDaily,

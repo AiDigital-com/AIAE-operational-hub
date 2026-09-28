@@ -9233,6 +9233,39 @@ components:
         asOf:
           type: string
           description: The as-of date Pacing computed this payload's facts against; null if unresolved.
+        creatives:
+          type: array
+          description: >
+            DSP-native creative rows, one per line item per creative per day, from Pacing's
+            `<slug>.creatives.json` aux cache. Present only when the pacing has
+            `data.fetch_creatives` on AND that file matches the current refresh - absent is the
+            normal state, and the Breakdown's "Creative (asset)" cut is simply not offered then.
+            Passed through byte-for-byte; the Hub does not reshape these.
+          items:
+            type: object
+            additionalProperties: true
+        conversions:
+          type: array
+          description: >
+            Conversion-mart rows, one per line item per conversion action per day, from Pacing's
+            `<slug>.conversions.json` aux cache. Same presence rule as `creatives` (gated on
+            `data.fetch_conversions`), and it feeds the Breakdown's "Conversion Action" cut the
+            same way.
+          items:
+            type: object
+            additionalProperties: true
+        dimSources:
+          type: object
+          description: >
+            Per-pacing dimension sources that were actually loaded, keyed by source id - the
+            catalogued Devices source and any Google-Sheet-backed one, from Pacing's
+            `<slug>.dim.<id>.json` aux caches. Each entry carries `rows` (date, line item,
+            dimension values, metrics) plus the read's own bookkeeping (`fetched_at`, `status`,
+            `behind`, `breakdowns`). Passed through opaquely; the configured LIST lives in
+            `data.dim_sources`, and a source appears here only when its file matched this pacing.
+            The Breakdown panel offers a cut per dimension these carry, with its own coverage line -
+            a source describes part of delivery, not a partition of it.
+          additionalProperties: true
         display:
           type: object
           description: >

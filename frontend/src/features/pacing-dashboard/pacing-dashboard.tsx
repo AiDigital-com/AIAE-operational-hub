@@ -26,6 +26,7 @@ import { WidgetBoard, type WidgetRenderContext } from "./widgets/widget-engine";
 import { buildPacingMetrics } from "./engine/build-metrics";
 import { buildPacingAlerts } from "./engine/build-alerts";
 import { deriveHeroHealth } from "./pacing-dashboard-health";
+import { BreakdownPanel } from "./breakdown/breakdown-panel";
 import { FilterBar } from "./filters/filter-bar";
 import { useUrlFilters } from "./filters/use-url-filters";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
@@ -300,6 +301,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             groups={((data.display ?? {}) as PacingDisplayShape).groups ?? []}
             ctx={widgetCtx}
           />
+
+          {/* Where the delivery above actually went, one tab per dimension this pacing carries.
+              Sits with the charts rather than down by the tables because it answers the same kind
+              of question they do — and because a click in it filters every one of them. */}
+          <BreakdownPanel data={data} filters={filters} setFilters={setFilters} />
 
           {/* Every per-pacing setting behind one gear, as the retired SPA had it: a right-hand
               drawer with a row of tabs and ONE Save over all of them. Three buttons opening three

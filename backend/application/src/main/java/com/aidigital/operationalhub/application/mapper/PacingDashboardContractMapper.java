@@ -79,6 +79,12 @@ public class PacingDashboardContractMapper {
 				.planByLineItem(toPlanByLineItemV1(data.planByLineItem()))
 				.factsDaily(data.factsDaily() == null ? List.of() : data.factsDaily())
 				.asOf(data.asOf())
+				// Null stays null, unlike factsDaily above: absent means this pacing does not collect
+				// the file at all, which is what tells the Breakdown panel not to OFFER that cut.
+				// An empty list would read as "collected, nothing delivered" and earn an empty tab.
+				.creatives(data.creatives())
+				.conversions(data.conversions())
+				.dimSources(data.dimSources())
 				.display(data.display() == null ? Map.of() : data.display())
 				.aggregate(data.aggregate() == null ? Map.of() : data.aggregate())
 				// Null is NOT flattened to an empty map, unlike display/aggregate above. Those two

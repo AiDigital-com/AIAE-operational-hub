@@ -71,7 +71,9 @@ class PacingDashboardContractMapperTest {
 				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
-				"2026-08-05", Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
+				"2026-08-05", List.of(Map.of("creative_name", "Hero 15s")), null,
+				Map.of("devices", Map.of("rows", List.of())),
+				Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
 				Map.of("campaign", Map.of("mA", 42.5)), null,
 				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
 				List.of(journal));
@@ -96,6 +98,12 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.getPlanByLineItem().get("111").getDescription()).isEqualTo("Nike SS26 - Display");
 		assertThat(result.getFactsDaily()).hasSize(1);
 		assertThat(result.getAsOf()).isEqualTo("2026-08-05");
+		// The two Breakdown aux feeds ride through byte-for-byte, and an ABSENT one stays absent:
+		// null is what tells the panel this pacing does not collect the file, so it must not offer
+		// that cut. Flattening it to an empty list would earn an empty tab instead.
+		assertThat(result.getCreatives()).containsExactly(Map.of("creative_name", "Hero 15s"));
+		assertThat(result.getConversions()).isNull();
+		assertThat(result.getDimSources()).containsKey("devices");
 		assertThat(result.getDisplay()).containsKey("widgets");
 		assertThat(result.getAggregate()).containsEntry("groupBy", "day");
 		assertThat(result.getLibraryEntries()).isNull();
@@ -119,8 +127,8 @@ class PacingDashboardContractMapperTest {
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
 				"2026-08-01", "2026-09-30", List.of(), List.of(), null, false, false, null);
 		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of("111", plan), List.of(), "2026-08-05", Map.of(), Map.of(), Map.of(),
-				Map.of(), null, Map.of(), null, List.of());
+				campaign, Map.of("111", plan), List.of(), "2026-08-05", null, null, null, Map.of(), Map.of(),
+				Map.of(), Map.of(), null, Map.of(), null, List.of());
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
@@ -304,7 +312,8 @@ class PacingDashboardContractMapperTest {
 		PacingDashboardCampaign campaign =
 				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null);
 		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of(), List.of(), null, Map.of(), Map.of(), null, null, null, null, null, List.of());
+				campaign, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				null, List.of());
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data, null, false);
