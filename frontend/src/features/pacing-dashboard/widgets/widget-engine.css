@@ -38,22 +38,41 @@
   color: var(--muted);
 }
 
+/* Rhythm is the reference's (`workspace/src/index.css` `.cmp`): 14px between rows and between
+   columns, 10px between the bricks inside a column (that 10 lives in `brick-kit.css`). */
 .wgt-layout { display: flex; flex-direction: column; gap: 14px; }
 .wgt-layout__row {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 14px;
+  /* The four Finance cards must end on one line. The reference gets this for free because its
+     card IS the grid item (`.cmp-row > .kit-card`, index.css:6600 `align-items: stretch`); here a
+     `.wgt-layout__col` wrapper carries the span, so the stretch has to be passed through it —
+     otherwise the wrapper grows to the tallest column and the card inside stays content-height,
+     which is exactly the ragged bottom edge this fixes. */
+  align-items: stretch;
 }
-.wgt-layout__col { min-width: 0; }
+.wgt-layout__col { display: flex; min-width: 0; }
+.wgt-layout__col > .wgt-col { flex: 1 1 auto; min-width: 0; }
 
+/* One lane below 700px, in reading order. `!important` beats the inline `grid-column: span N`
+   the renderer writes per column — a span is a wide-screen instruction (same reasoning, and the
+   same trick, as the reference's `.cmp-row` media rule). */
+@media (max-width: 700px) {
+  .wgt-layout__col { grid-column: 1 / -1 !important; }
+}
+
+/* A LITERAL column badge — "Client Side", "Rate Ceiling", "Actuals". Sentence case with a hairline
+   border, matching the reference's `.kit-card-badge`: these are words, not a status. A LIVE badge
+   comes through `StatusPill` instead, because a status is a tint. */
 .wgt-col__badge {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
   border-radius: var(--radius-sm, 4px);
+  white-space: nowrap;
   background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   color: var(--muted);
 }
 
