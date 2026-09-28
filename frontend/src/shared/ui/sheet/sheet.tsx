@@ -29,12 +29,21 @@ interface SheetProps {
 export function Sheet({ open, onClose, title, headerActions, tabs, footer, children, className }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Focus the first focusable ONCE per open - in its own effect, keyed on `open` alone. It used to
+  // share the keydown effect below, whose deps include `onClose`; a caller passing an inline close
+  // handler re-runs that effect on every one of its renders, and re-running this focus() mid-typing
+  // yanked the caret out of whatever field the user was in (first seen as the settings drawer's
+  // inputs losing focus after the first keystroke, when the dirty flag's re-render came through).
+  useEffect(() => {
+    if (!open) return;
+    const focusable = panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    focusable?.[0]?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return undefined;
 
     const panel = panelRef.current;
-    const focusable = panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-    focusable?.[0]?.focus();
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {

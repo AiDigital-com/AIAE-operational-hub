@@ -15,6 +15,8 @@ import { StatusControl } from "../pacing-plan/status-control";
 import { ContainersTable } from "./containers-table";
 import { DailyTable } from "./daily-table";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
+import { DocumentsChips } from "./documents/documents-chips";
+import type { SettingsTabId } from "./settings-section";
 import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
 import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
@@ -67,6 +69,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const isAdmin = isAdminUser(currentUser.data);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which tab the NEXT drawer open should land on: null means "wherever the user left off" (the
+  // gear's behaviour), "documents" is the header chips' promise. Consumed by the drawer on open.
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
@@ -192,7 +197,10 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           <button
             type="button"
             className="button button--ghost button--sm"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsTab(null);
+              setSettingsOpen(true);
+            }}
             aria-haspopup="dialog"
             aria-expanded={settingsOpen}
             title="Pacing settings"
@@ -210,6 +218,23 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             {inCooldown ? `Refresh (${cooldownSeconds}s)` : isRefreshing ? "Refreshing…" : "Refresh data"}
           </button>
         </div>
+
+        {/* §16: the campaign's reference links, on their own line under the title (full flex
+            basis, so appearing chips never push the Settings/Refresh buttons around) and above
+            the refresh-meta line below the header. Rendered only once the dashboard payload is
+            in - the same gate the FilterBar uses - so the row cannot flash "+ Add documents" at
+            a pacing whose links simply have not loaded yet. */}
+        {dashboardQuery.isSuccess && data && (
+          <DocumentsChips
+            links={data.campaign?.links}
+            orderNumber={data.campaign?.orderNumber}
+            sourceUrl={data.campaign?.sourceUrl}
+            onOpenDocuments={() => {
+              setSettingsTab("documents");
+              setSettingsOpen(true);
+            }}
+          />
+        )}
       </header>
 
       <div className="pdash__refresh-meta">
@@ -325,6 +350,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             libraryEntries={data.libraryEntries as Record<string, unknown> | undefined}
             notify={data.notify}
             hasVideo={computeHasVideo((data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>)}
+            links={data.campaign?.links}
+            orderNumber={data.campaign?.orderNumber}
+            initialTab={settingsTab}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 

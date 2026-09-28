@@ -30,6 +30,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
@@ -37,6 +38,9 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
+import com.aidigital.operationalhub.service.exception.BusinessException;
+import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
@@ -61,6 +65,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -117,6 +122,9 @@ class PacingDashboardControllerMvcTest {
 
 	@Mock
 	private HubUserService hubUserService;
+
+	@Mock
+	private CampaignLinksValidator campaignLinksValidator;
 
 	@InjectMocks
 	private PacingDashboardController controller;
@@ -231,6 +239,48 @@ class PacingDashboardControllerMvcTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.message")
 						.value("The Pacing service rejected the request: devices: unknown catalog."));
+	}
+
+	@Test
+	void shouldSaveCampaignLinksTest() throws Exception {
+		// Given: §16 - the Documents panel replacing the whole link list
+		stubCurrentUser();
+		List<PacingCampaignLink> links = List.of(
+				new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456"));
+		doReturn(links).when(mapper).toCampaignLinks(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: the validator clears the list first, and exactly that list is forwarded
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/links", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"links\":[{\"name\":\"Asana\",\"url\":\"https://app.asana.com/0/123/456\"}]}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.saved").value(true));
+		verify(campaignLinksValidator).validate(links);
+		verify(pacingClient).saveCampaignLinks(any(), eq("nike-ss26"), eq(links));
+	}
+
+	@Test
+	void shouldRejectCampaignLinksTheValidatorRefusesWithoutCallingPacingTest() throws Exception {
+		// Given: a javascript: URL - refused HERE (US-140/141's validation lives on the Hub because
+		// Pacing stores the array verbatim), and Pacing must never see the request
+		stubCurrentUser();
+		List<PacingCampaignLink> links = List.of(new PacingCampaignLink("IO", "javascript:alert(1)"));
+		doReturn(links).when(mapper).toCampaignLinks(any());
+		doThrow(new BusinessException(OperationalHubErrorReason.OPH_062, "IO"))
+				.when(campaignLinksValidator).validate(links);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/links", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"links\":[{\"name\":\"IO\",\"url\":\"javascript:alert(1)\"}]}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message")
+						.value("Campaign link 'IO': the URL must be a full http:// or https:// address."));
+		verify(pacingClient, times(0)).saveCampaignLinks(any(), any(), any());
 	}
 
 	@Test

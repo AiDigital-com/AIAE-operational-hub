@@ -17,6 +17,7 @@ import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 
 vi.mock("./api", () => ({
   savePacingDataSettings: vi.fn(),
+  savePacingCampaignLinks: vi.fn(),
   savePacingDisplay: vi.fn(),
   savePacingNotifySettings: vi.fn(),
   listPacingLibrary: vi.fn(),
@@ -71,6 +72,7 @@ describe("PacingSettingsDrawer", () => {
     vi.clearAllMocks();
     vi.mocked(dashApi.savePacingDataSettings).mockResolvedValue(undefined);
     vi.mocked(dashApi.savePacingNotifySettings).mockResolvedValue(undefined);
+    vi.mocked(dashApi.savePacingCampaignLinks).mockResolvedValue(undefined);
     vi.mocked(dashApi.listPacingLibrary).mockResolvedValue([]);
     vi.mocked(planApi.getAddablePacingLineItems).mockResolvedValue({ ok: true, addable: [], alreadyAdded: [] });
     vi.mocked(planApi.savePacingPlan).mockResolvedValue({ saved: true });
@@ -201,5 +203,56 @@ describe("PacingSettingsDrawer", () => {
     expect(Object.keys(body.alerts)).toHaveLength(14); // 13 detectors + the master switch
     expect(dashApi.savePacingDataSettings).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("should show a fifth Documents tab and write the whole link list alone when it is the only edit (§16)", async () => {
+    // Given: one stored link
+    const { onSaved } = renderDrawer({
+      links: [{ name: "Asana", url: "https://app.asana.com/0/1/2" }],
+      orderNumber: "SO-1",
+    });
+
+    // When: only the Documents tab is touched - a Media Plan URL is pasted
+    await userEvent.click(screen.getByRole("button", { name: /^Documents/ }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Media Plan URL" }),
+      "https://drive.google.com/mp"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: a whole-array replace carrying the untouched link too, and no other section written
+    await waitFor(() => expect(dashApi.savePacingCampaignLinks).toHaveBeenCalledTimes(1));
+    expect(dashApi.savePacingCampaignLinks).toHaveBeenCalledWith("nike-ss26", [
+      { name: "Asana", url: "https://app.asana.com/0/1/2" },
+      { name: "Media Plan", url: "https://drive.google.com/mp" },
+    ]);
+    expect(dashApi.savePacingDataSettings).not.toHaveBeenCalled();
+    expect(planApi.savePacingPlan).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("should name the Documents section when its validation refuses the save (US-141)", async () => {
+    // Given: a bad Asana URL - refused locally, before any request
+    renderDrawer({ links: [], orderNumber: undefined });
+    await userEvent.click(screen.getByRole("button", { name: /^Documents/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Asana URL" }), "https://example.com/x");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: the footer names the section and the sentence, and nothing was sent
+    expect(
+      await screen.findByText(/Documents: The Asana link must point at an Asana project/)
+    ).toBeInTheDocument();
+    expect(dashApi.savePacingCampaignLinks).not.toHaveBeenCalled();
+  });
+
+  it("should open on the Documents tab when the opener asks for it", () => {
+    // Given: the header's "+ Add documents" pill promises the Documents tab specifically
+    renderDrawer({ initialTab: "documents", links: [], orderNumber: undefined });
+
+    // Then: the Documents panel is the visible one
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("textbox", { name: "Asana URL" })).toBeVisible();
   });
 });

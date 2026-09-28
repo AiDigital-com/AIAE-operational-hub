@@ -1,12 +1,14 @@
 package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.PacingAdminApi;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingOrderNumberBackfillResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRevalidateResultV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -71,6 +73,19 @@ public class PacingAdminController implements PacingAdminApi {
 					.body(new PacingRetryAfterV1().retryAfterSeconds(outcome.retryAfterSeconds()));
 		}
 		return ResponseEntity.ok(new PacingRefreshTriggeredV1().started(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingOrderNumberBackfillResultV1> backfillOrderNumbers() {
+		HubAssertion assertion = signCurrentUserAsAdmin();
+		// Synchronous, unlike refreshAllDashboards: the pass is local to Pacing's database and
+		// finishes in the request - the 200 carries the run's final summary, never a "started".
+		PacingOrderNumberBackfillResult result = pacingClient.backfillOrderNumbers(assertion);
+		return ResponseEntity.ok(new PacingOrderNumberBackfillResultV1()
+				.scanned(result.scanned())
+				.filled(result.filled())
+				.alreadyHad(result.alreadyHad())
+				.skippedNoNumbers(result.skippedNoNumbers()));
 	}
 
 	@Override

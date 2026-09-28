@@ -7,6 +7,7 @@ import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExte
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
@@ -21,6 +22,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -66,11 +68,13 @@ public class PacingClientImpl implements PacingClient {
 	private static final String DELEGATIONS_PATH = "/api/delegations";
 	private static final String LIBRARY_PATH = "/api/library";
 	private static final String ADMIN_REFRESH_ALL_PATH = "/api/admin/refresh-all-dashboards";
+	private static final String ADMIN_BACKFILL_ORDER_NUMBERS_PATH = "/api/admin/backfill-order-numbers";
 	private static final String ME_PATH = "/api/me";
 
 	private final RestClient restClient;
 	private final HubAssertionSigner assertionSigner;
 	private final ObjectMapper objectMapper;
+	private final OrderNumberCollector orderNumberCollector;
 
 	@Override
 	public List<PacingRow> listPacings(HubAssertion assertion) {
@@ -504,7 +508,18 @@ public class PacingClientImpl implements PacingClient {
 			HubAssertion assertion, String pacingName, List<PacingCreateLineItem> lineItems) {
 		String header = assertionSigner.sign(assertion);
 		List<LineItemCreateRequest> wireLineItems = lineItems.stream().map(this::toWireLineItem).toList();
-		CreateRequest request = new CreateRequest(pacingName, wireLineItems);
+		// The campaign-level order-number pair, gathered from the line items the same way the
+		// retired SPA's create form sent it: insertion_order_id whenever a number exists (the
+		// first one - what buildCampaign's orderNumber displays), order_numbers only for a
+		// multi-IO campaign. Omitted entirely (never null'd) when no line item carries a number -
+		// Pacing's route gates both keys on presence. Without this pair a Hub-created pacing had
+		// no config_json.insertion_order_id at all, and its dashboard never showed an IO number.
+		List<String> orderNumbers = orderNumberCollector.collect(lineItems);
+		CreateRequest request = new CreateRequest(
+				pacingName,
+				wireLineItems,
+				orderNumbers.isEmpty() ? null : orderNumbers.get(0),
+				orderNumbers.size() > 1 ? orderNumbers : null);
 		try {
 			CreateResponse response = restClient.post()
 					.uri(PACINGS_PATH)
@@ -587,6 +602,27 @@ public class PacingClientImpl implements PacingClient {
 		return new DataNamespaceRequest(
 				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
 				settings.dimSources());
+	}
+
+	@Override
+	public void saveCampaignLinks(HubAssertion assertion, String slug, List<PacingCampaignLink> links) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
+		CampaignLinksRequest request = new CampaignLinksRequest(links);
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
 	}
 
 	@Override
@@ -1025,6 +1061,35 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + ADMIN_REFRESH_ALL_PATH, ex);
+		}
+	}
+
+	@Override
+	public PacingOrderNumberBackfillResult backfillOrderNumbers(HubAssertion assertion) {
+		String header = assertionSigner.sign(assertion);
+		try {
+			OrderNumberBackfillResponse response = restClient.post()
+					.uri(ADMIN_BACKFILL_ORDER_NUMBERS_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(OrderNumberBackfillResponse.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER,
+						"Pacing request failed: POST " + ADMIN_BACKFILL_ORDER_NUMBERS_PATH
+								+ " returned an empty body");
+			}
+			return new PacingOrderNumberBackfillResult(
+					response.scanned() == null ? 0 : response.scanned(),
+					response.filled() == null ? 0 : response.filled(),
+					response.alreadyHad() == null ? 0 : response.alreadyHad(),
+					response.skippedNoNumbers() == null ? 0 : response.skippedNoNumbers());
+		} catch (RestClientResponseException ex) {
+			throw adminActionFailure("POST", ADMIN_BACKFILL_ORDER_NUMBERS_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE,
+					"Pacing request failed: POST " + ADMIN_BACKFILL_ORDER_NUMBERS_PATH, ex);
 		}
 	}
 

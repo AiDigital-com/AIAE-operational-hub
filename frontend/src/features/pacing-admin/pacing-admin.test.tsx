@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aPacingListResponseV1, aPacingRowV1 } from "@/test/factories";
+import { ToastProvider } from "../../shared/ui/toast/toast";
 import { listPacingOverview } from "../pacing-overview/api";
 import * as adminApi from "./api";
 import { PacingAdmin } from "./pacing-admin";
@@ -14,6 +15,7 @@ vi.mock("../pacing-overview/api", () => ({
 vi.mock("./api", () => ({
   deletePacing: vi.fn(),
   refreshAllDashboards: vi.fn(),
+  backfillOrderNumbers: vi.fn(),
 }));
 
 // StatusControl (pacing-plan) is reused as-is and has its own test coverage - stubbed here to keep
@@ -26,7 +28,10 @@ function renderAdmin() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <PacingAdmin />
+      {/* ToastProvider: the Sync IO numbers button reports its summary and its errors as toasts. */}
+      <ToastProvider>
+        <PacingAdmin />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -201,5 +206,64 @@ describe("PacingAdmin", () => {
 
     // Then:
     await screen.findByRole("button", { name: /refresh all dashboards \(200s\)/i });
+  });
+
+  it("runs the IO-number sync and reports its summary in a toast", async () => {
+    // Given: the run's summary is the whole result - synchronous, unlike refresh-all
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    vi.mocked(adminApi.backfillOrderNumbers).mockResolvedValue({
+      scanned: 614,
+      filled: 12,
+      alreadyHad: 580,
+      skippedNoNumbers: 22,
+    });
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync IO numbers" });
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Sync IO numbers" }));
+
+    // Then: one request, and a human sentence out of the four counters
+    await waitFor(() => expect(adminApi.backfillOrderNumbers).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        "IO numbers: 12 filled in, 580 already had one, 22 have no order numbers on their line items (614 pacings checked)."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the skipped part out of the summary when nothing was skipped", async () => {
+    // Given: the common repeat-press outcome - fill-only means zero filled, nothing skipped
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    vi.mocked(adminApi.backfillOrderNumbers).mockResolvedValue({
+      scanned: 614,
+      filled: 0,
+      alreadyHad: 614,
+      skippedNoNumbers: 0,
+    });
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync IO numbers" });
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Sync IO numbers" }));
+
+    // Then: "0 have no order numbers" would be noise, so the sentence drops it
+    expect(
+      await screen.findByText("IO numbers: 0 filled in, 614 already had one (614 pacings checked).")
+    ).toBeInTheDocument();
+  });
+
+  it("reports an IO-number sync failure as an error toast", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    vi.mocked(adminApi.backfillOrderNumbers).mockRejectedValue(new Error("boom"));
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync IO numbers" });
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Sync IO numbers" }));
+
+    // Then:
+    expect(await screen.findByText("Could not sync IO numbers.")).toBeInTheDocument();
   });
 });

@@ -10,6 +10,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAle
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleThresholdPctV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleWindowThresholdV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
@@ -33,6 +35,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
@@ -308,7 +311,42 @@ public class PacingDashboardContractMapper {
 				.currency(campaign.currency())
 				.rate(campaign.rate())
 				.status(campaign.status())
-				.orderNumber(campaign.orderNumber());
+				.orderNumber(campaign.orderNumber())
+				.sourceUrl(campaign.sourceUrl())
+				.links(toLinksV1(campaign.links()));
+	}
+
+	/**
+	 * Maps the campaign's reference links (§16) onto the contract. Null (a pacing whose
+	 * {@code campaign_links} was never written - Pacing sends {@code []} in practice, but this
+	 * mapper does not rely on it) flattens to an empty list: to a reader "never written" and "none
+	 * kept" are the same answer, unlike the payload's measurement fields above.
+	 *
+	 * @param links the links Pacing returned, possibly null
+	 * @return the generated link list, never null
+	 */
+	List<PacingCampaignLinkV1> toLinksV1(List<PacingCampaignLink> links) {
+		if (links == null) {
+			return List.of();
+		}
+		return links.stream()
+				.map(link -> new PacingCampaignLinkV1().name(link.name()).url(link.url()))
+				.toList();
+	}
+
+	/**
+	 * Reads a campaign-links save request into the external-services model (§16, US-140/141).
+	 * Shape-only: validation (scheme, lengths, the Asana rule) belongs to
+	 * {@code CampaignLinksValidator}, which runs on THIS method's output so the model it clears is
+	 * exactly the model the client sends.
+	 *
+	 * @param body the request body
+	 * @return every link the pacing should keep, in the order the caller sent
+	 */
+	public List<PacingCampaignLink> toCampaignLinks(PacingCampaignLinksUpdateV1 body) {
+		return body.getLinks().stream()
+				.map(link -> new PacingCampaignLink(link.getName(), link.getUrl()))
+				.toList();
 	}
 
 	private Map<String, PacingLineItemPlanV1> toPlanByLineItemV1(Map<String, PacingLineItemPlan> planByLineItem) {

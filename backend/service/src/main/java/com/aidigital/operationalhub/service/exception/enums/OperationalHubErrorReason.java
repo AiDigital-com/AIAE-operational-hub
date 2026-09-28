@@ -323,7 +323,43 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * few seconds and retry. Generic on purpose, same reasoning as {@link #OPH_057}: the wording must
 	 * read correctly regardless of which of those endpoints produced it.
 	 */
-	OPH_058("OPH_058", "You're doing that too quickly. Please wait a moment and try again.");
+	OPH_058("OPH_058", "You're doing that too quickly. Please wait a moment and try again."),
+
+	/**
+	 * A campaign-links save (§16, US-140) carries more entries than a pacing may keep. Pacing itself
+	 * stores the array verbatim with no cap of its own, so the Hub is the only place this is bounded.
+	 */
+	OPH_059("OPH_059", "A pacing can keep at most %d campaign links."),
+
+	/**
+	 * A campaign link arrived without a usable name (§16, US-140): missing, or blank after trimming.
+	 * The name is the link's whole meaning - the header chip's text and the editor slot it fills - so
+	 * a nameless link would be an unclickable mystery pill.
+	 */
+	OPH_060("OPH_060", "Campaign link %d needs a name."),
+
+	/**
+	 * A campaign link's name exceeds the contract's cap (§16, US-140).
+	 */
+	OPH_061("OPH_061", "Campaign link '%s': the name is too long (at most %d characters)."),
+
+	/**
+	 * A campaign link arrived without a URL, or with a URL that is not an absolute http/https one
+	 * (§16, US-140). Refused rather than stored because the Hub renders these clickable: a
+	 * {@code javascript:} or {@code data:} URL stored today is a script click tomorrow.
+	 */
+	OPH_062("OPH_062", "Campaign link '%s': the URL must be a full http:// or https:// address."),
+
+	/**
+	 * A campaign link's URL exceeds the contract's cap (§16, US-140).
+	 */
+	OPH_063("OPH_063", "Campaign link '%s': the URL is too long (at most %d characters)."),
+
+	/**
+	 * The link in the {@code Asana} preset slot does not look like an Asana project link (§16,
+	 * US-141): its host is not Asana's, or it points at nothing inside Asana.
+	 */
+	OPH_064("OPH_064", "The Asana link must point at an Asana project (an app.asana.com URL).");
 
 	private final String code;
 	private final String description;

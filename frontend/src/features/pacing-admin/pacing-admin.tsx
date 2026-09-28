@@ -22,11 +22,22 @@ import { fmtDate } from "../pacing/mock/format";
 import { usePacingOverview } from "../pacing-overview/hooks";
 import type { PacingRowV1 } from "../pacing-overview/types";
 import { StatusControl } from "../pacing-plan/status-control";
-import { useRefreshAllDashboards } from "./hooks";
+import { useToast } from "../../shared/ui/toast/toast";
+import { useBackfillOrderNumbers, useRefreshAllDashboards } from "./hooks";
+import type { PacingOrderNumberBackfillResultV1 } from "./types";
 import { BulkDeletePacingModal, DeletePacingModal } from "./pacing-admin-delete-modals";
 import "./pacing-admin.css";
 
 const SEARCH_DEBOUNCE_MS = 300;
+
+/** One human sentence out of the sync run's four counters - what the success toast says. */
+function describeIoSync(summary: PacingOrderNumberBackfillResultV1): string {
+  const parts = [`${summary.filled} filled in`, `${summary.alreadyHad} already had one`];
+  if (summary.skippedNoNumbers > 0) {
+    parts.push(`${summary.skippedNoNumbers} have no order numbers on their line items`);
+  }
+  return `IO numbers: ${parts.join(", ")} (${summary.scanned} pacings checked).`;
+}
 
 function matchesSearch(row: PacingRowV1, term: string): boolean {
   if (!term) return true;
@@ -48,6 +59,8 @@ export function PacingAdmin() {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const refreshAll = useRefreshAllDashboards();
+  const syncIo = useBackfillOrderNumbers();
+  const toast = useToast();
 
   // Same tick-based countdown as pacing-dashboard's single-pacing refresh (US-119) - a live number,
   // not a static "try again later".
@@ -103,6 +116,17 @@ export function PacingAdmin() {
     }
   }
 
+  async function handleSyncIoNumbers() {
+    try {
+      const summary = await syncIo.mutateAsync();
+      // A toast, not an inline line: the run is synchronous and its summary IS the whole result -
+      // "0 filled" on a repeat press is a normal answer (fill-only), not a failure.
+      toast.showSuccess(describeIoSync(summary));
+    } catch (error) {
+      toast.showError(error instanceof ApiError ? formatError(error) : "Could not sync IO numbers.");
+    }
+  }
+
   const inCooldown = cooldownUntil != null && cooldownSeconds > 0;
 
   return (
@@ -139,6 +163,17 @@ export function PacingAdmin() {
                   : refreshAll.isPending
                     ? "Starting…"
                     : "Refresh all dashboards"}
+              </button>
+              {/* Fills the campaign-level IO number on pacings that lack one, from their own
+                  stored line items (local to Pacing's DB - no NetSuite call). Fill-only and
+                  idempotent, so it is safe to press again after new pacings appear. */}
+              <button
+                type="button"
+                className="button button--ghost button--sm"
+                onClick={() => void handleSyncIoNumbers()}
+                disabled={syncIo.isPending}
+              >
+                {syncIo.isPending ? "Syncing…" : "Sync IO numbers"}
               </button>
             </div>
           </div>

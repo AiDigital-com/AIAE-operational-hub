@@ -10,6 +10,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAle
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleThresholdPctV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleWindowThresholdV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSourceV1;
@@ -31,6 +33,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
@@ -60,7 +63,9 @@ class PacingDashboardContractMapperTest {
 	void shouldMapFullDashboardPayloadTest() {
 		// Given:
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1");
+				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
+				"https://docs.google.com/spreadsheets/d/abc",
+				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456")));
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", List.of("VIP", "renewal"), "Nike SS26 - Display", "CPM", 5000.0,
 				1_000_000.0, 20.0, null, null,
@@ -88,6 +93,12 @@ class PacingDashboardContractMapperTest {
 		// applied server-side and nowhere else.
 		assertThat(result.getMetrics()).isEqualTo(Map.of("campaign", Map.of("mA", 42.5)));
 		assertThat(result.getCampaign().getPacingId()).isEqualTo("p1");
+		// §16: the source URL and the reference links ride through verbatim - Pacing already dropped
+		// any link duplicating the source URL, so the mapper repeats no de-duplication.
+		assertThat(result.getCampaign().getSourceUrl()).isEqualTo("https://docs.google.com/spreadsheets/d/abc");
+		assertThat(result.getCampaign().getLinks()).hasSize(1);
+		assertThat(result.getCampaign().getLinks().get(0).getName()).isEqualTo("Asana");
+		assertThat(result.getCampaign().getLinks().get(0).getUrl()).isEqualTo("https://app.asana.com/0/123/456");
 		assertThat(result.getCampaign().getStartDate()).isEqualTo(LocalDate.of(2026, 8, 1));
 		assertThat(result.getPlanByLineItem()).containsKey("111");
 		assertThat(result.getPlanByLineItem().get("111").getPlannedImpressions()).isEqualTo(1_000_000.0);
@@ -122,7 +133,8 @@ class PacingDashboardContractMapperTest {
 		// field on this record - a missing labels array must not become a null on the contract
 		// (matching the existing `containers` default two lines above it in the mapper).
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1");
+				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
+				"", List.of());
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
 				"2026-08-01", "2026-09-30", List.of(), List.of(), null, false, false, null);
@@ -310,7 +322,8 @@ class PacingDashboardContractMapperTest {
 	void shouldDegradeMalformedFlightDatesToNullRatherThanFailTest() {
 		// Given: a defensive rule shared with PacingContractMapper's own date parsing
 		PacingDashboardCampaign campaign =
-				new PacingDashboardCampaign("slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null);
+				new PacingDashboardCampaign(
+						"slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null, null, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 				null, List.of());
@@ -361,5 +374,39 @@ class PacingDashboardContractMapperTest {
 		assertThat(v1.getUsage()).isEqualTo(5);
 		assertThat(listV1.getEntries()).hasSize(1);
 		assertThat(listV1.getEntries().get(0).getId()).isEqualTo("e1");
+	}
+
+	@Test
+	void shouldFlattenNullCampaignLinksToEmptyListTest() {
+		// Given: a pacing whose campaign_links was never written. "Never written" and "none kept"
+		// are the same answer to a reader, so null flattens - unlike the payload's measurement
+		// fields, whose absence carries meaning.
+		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
+				"slug", "p1", "Name", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", null, "", null);
+		PacingDashboardData data = new PacingDashboardData(
+				campaign, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				null, List.of());
+
+		// When:
+		PacingDashboardV1 result = mapper.toV1(data, null, false);
+
+		// Then:
+		assertThat(result.getCampaign().getLinks()).isEmpty();
+	}
+
+	@Test
+	void shouldReadCampaignLinksUpdateInOrderTest() {
+		// Given: a whole-array save (§16) - order is display order, so it must survive the mapping
+		PacingCampaignLinksUpdateV1 body = new PacingCampaignLinksUpdateV1().links(List.of(
+				new PacingCampaignLinkV1().name("DV360").url("https://displayvideo.google.com/#ng_nav/p/1"),
+				new PacingCampaignLinkV1().name("Asana").url("https://app.asana.com/0/123/456")));
+
+		// When:
+		List<PacingCampaignLink> result = mapper.toCampaignLinks(body);
+
+		// Then:
+		assertThat(result).containsExactly(
+				new PacingCampaignLink("DV360", "https://displayvideo.google.com/#ng_nav/p/1"),
+				new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456"));
 	}
 }

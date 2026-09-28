@@ -36,6 +36,7 @@ export const SETTINGS_TABS = [
   { id: "data", label: "Data" },
   { id: "widgets", label: "Widgets" },
   { id: "alerts", label: "Alerts" },
+  { id: "documents", label: "Documents" },
 ] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TABS)[number]["id"];

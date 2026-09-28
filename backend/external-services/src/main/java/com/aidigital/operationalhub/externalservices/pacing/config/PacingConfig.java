@@ -3,6 +3,7 @@ package com.aidigital.operationalhub.externalservices.pacing.config;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.impl.HubAssertionSignerImpl;
+import com.aidigital.operationalhub.externalservices.pacing.impl.OrderNumberCollector;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingClientImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -74,6 +75,8 @@ public class PacingConfig {
 				.baseUrl(properties.getBaseUrl())
 				.requestFactory(requestFactory)
 				.build();
-		return new PacingClientImpl(restClient, assertionSigner, objectMapper);
+		// The collector is a plain stateless collaborator of the client, constructed with it here
+		// rather than registered as its own bean - nothing else depends on it.
+		return new PacingClientImpl(restClient, assertionSigner, objectMapper, new OrderNumberCollector());
 	}
 }

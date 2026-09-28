@@ -9,7 +9,12 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
-import type { PacingRetryAfterV1, PacingRevalidateResultV1, RefreshAllOutcome } from "./types";
+import type {
+  PacingOrderNumberBackfillResultV1,
+  PacingRetryAfterV1,
+  PacingRevalidateResultV1,
+  RefreshAllOutcome,
+} from "./types";
 
 /**
  * Permanently deletes a pacing. Irreversible: Pacing removes the row (cascading to its journal) and
@@ -41,6 +46,21 @@ export async function refreshAllDashboards(): Promise<RefreshAllOutcome> {
     throw new ApiError(formatError(result.error), result.response.status);
   }
   return { status: "started" };
+}
+
+/**
+ * Fills the missing campaign-level IO number on every pacing that lacks one, from the order
+ * numbers already stored on its own line items - purely local to Pacing's database, no NetSuite
+ * or BigQuery behind it. Synchronous, unlike `refreshAllDashboards`: the 200 carries the run's
+ * final summary. Fill-only and idempotent on the Pacing side, so pressing it twice is safe - the
+ * second run just reports zero filled.
+ */
+export async function backfillOrderNumbers(): Promise<PacingOrderNumberBackfillResultV1> {
+  const result = await apiClient.POST("/api/v1/pacing/admin/backfill-order-numbers", {});
+  if (result.error || !result.response.ok || !result.data) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
 }
 
 /**
