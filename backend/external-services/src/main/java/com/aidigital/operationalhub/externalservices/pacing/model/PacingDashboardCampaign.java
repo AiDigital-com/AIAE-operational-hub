@@ -1,5 +1,7 @@
 package com.aidigital.operationalhub.externalservices.pacing.model;
 
+import java.util.List;
+
 /**
  * A pacing's campaign summary, as {@code GET /api/dashboards/:slug/data} returns it under
  * {@code campaign} (§6 of the migration plan). Built server-side by Pacing's own {@code buildCampaign}
@@ -7,11 +9,14 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * straight off a DB row - so no {@code @JsonProperty} translation is needed here).
  *
  * <p>Deliberately narrow: Pacing's real object also carries {@code rateLocked}/{@code nsRate},
- * {@code timezone}, {@code sourceUrl}, {@code periodScope}/{@code periodScopeKey}, {@code client}/
- * {@code agency}, {@code links} and {@code notes}/{@code notesRich}; none of those are read here
- * because §6's dashboard view does not use them yet. {@code rate} IS read: it is a MATH input to the
+ * {@code timezone}, {@code periodScope}/{@code periodScopeKey}, {@code client}/
+ * {@code agency} and {@code notes}/{@code notesRich}; none of those are read here
+ * because the migrated screens do not use them yet. {@code rate} IS read: it is a MATH input to the
  * browser-side metric engine ({@code Currency.currencyToUsd} converts delivery cost with it), not a
- * display-only field, so it travels through to {@code PacingDashboardCampaignV1}.
+ * display-only field, so it travels through to {@code PacingDashboardCampaignV1}. {@code sourceUrl}
+ * and {@code links} joined for §16 (Documents and Links): the Hub's header chips and Documents
+ * editor read them, and {@code buildCampaign} already drops any link whose URL duplicates
+ * {@code sourceUrl}, so no de-duplication is repeated on this side.
  *
  * <p>Note the field Pacing calls {@code id} here is in fact the pacing's {@code dash_slug}, not its
  * {@code pacing_id} - the mapper renames it to {@code slug} on the way into the generated
@@ -27,6 +32,10 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  *                    present (`resolveCampaignCurrency` defaults to `'USD'`/`1`)
  * @param status      administrative lifecycle status
  * @param orderNumber the insertion order number, if resolved
+ * @param sourceUrl   the pacing's Source spreadsheet URL; Pacing sends {@code ""} when none is
+ *                    connected (never null on its side, but treated as optional here anyway)
+ * @param links       the campaign's reference links (§16), verbatim from
+ *                    {@code config_json.campaign_links} minus the source-URL duplicate
  */
 public record PacingDashboardCampaign(
 		String id,
@@ -37,5 +46,7 @@ public record PacingDashboardCampaign(
 		String currency,
 		Double rate,
 		String status,
-		String orderNumber) {
+		String orderNumber,
+		String sourceUrl,
+		List<PacingCampaignLink> links) {
 }

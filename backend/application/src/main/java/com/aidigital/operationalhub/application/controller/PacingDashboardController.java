@@ -2,6 +2,8 @@ package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.PacingDashboardApi;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
@@ -24,6 +26,7 @@ import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
@@ -31,12 +34,15 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshO
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.service.entity.HubUserService;
+import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import com.aidigital.operationalhub.service.rbac.model.PacingScope;
 import lombok.RequiredArgsConstructor;
+
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,6 +70,7 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final PacingPlanContractMapper planMapper;
 	private final PacingNsDiffContractMapper nsDiffMapper;
 	private final HubUserService hubUserService;
+	private final CampaignLinksValidator campaignLinksValidator;
 
 	@Override
 	public ResponseEntity<PacingDashboardV1> getPacingDashboard(String slug) {
@@ -153,6 +160,19 @@ public class PacingDashboardController implements PacingDashboardApi {
 		HubAssertion assertion = signCurrentUser();
 		pacingClient.saveNotifySettings(assertion, slug, mapper.toNotifySettings(body));
 		return ResponseEntity.ok(new PacingNotifySettingsUpdateResultV1().saved(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingCampaignLinksUpdateResultV1> updatePacingCampaignLinks(
+			String slug, PacingCampaignLinksUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		List<PacingCampaignLink> links = mapper.toCampaignLinks(body);
+		// Validated HERE, not on the Pacing side (§16): Pacing stores campaign_links verbatim with no
+		// schema of its own, and the Hub renders every URL clickable - a refused javascript: URL or a
+		// non-Asana "Asana" link (US-141) is a 400 from the validator, never a stored bookmark.
+		campaignLinksValidator.validate(links);
+		pacingClient.saveCampaignLinks(assertion, slug, links);
+		return ResponseEntity.ok(new PacingCampaignLinksUpdateResultV1().saved(true));
 	}
 
 	@Override

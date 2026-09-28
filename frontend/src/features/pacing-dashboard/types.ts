@@ -2,6 +2,7 @@ import type { components } from "../../shared/api/generated/schema";
 
 export type PacingDashboardV1 = components["schemas"]["PacingDashboardV1"];
 export type PacingDashboardCampaignV1 = components["schemas"]["PacingDashboardCampaignV1"];
+export type PacingCampaignLinkV1 = components["schemas"]["PacingCampaignLinkV1"];
 export type PacingLineItemPlanV1 = components["schemas"]["PacingLineItemPlanV1"];
 export type PacingPauseIntervalV1 = components["schemas"]["PacingPauseIntervalV1"];
 export type PacingJournalEntryV1 = components["schemas"]["PacingJournalEntryV1"];

@@ -2,6 +2,7 @@ import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
+  PacingCampaignLinkV1,
   PacingDashboardV1,
   PacingDataSettingsUpdateV1,
   PacingDisplaySaveOutcome,
@@ -70,6 +71,26 @@ export async function savePacingNotifySettings(slug: string, settings: PacingNot
   const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/notify-settings", {
     params: { path: { slug } },
     body: settings,
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
+/**
+ * Saves the campaign's reference links (§16 of the migration plan, US-140/141) - the bookmarks the
+ * header chips show and the Documents panel edits.
+ *
+ * A WHOLE-ARRAY replace, like `savePacingNotifySettings` and unlike the data-settings patch: Pacing
+ * stores `campaign_links` as one unit, so `links` must be every link the pacing should keep - an
+ * entry left out is an entry deleted. The Hub's backend validates the list (http/https only, the
+ * Asana rule of US-141, length/count caps) and answers 400 naming the offending link; Pacing itself
+ * stores the array verbatim.
+ */
+export async function savePacingCampaignLinks(slug: string, links: PacingCampaignLinkV1[]): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/links", {
+    params: { path: { slug } },
+    body: { links },
   });
   if (result.error || !result.response.ok) {
     throw new ApiError(formatError(result.error), result.response.status);

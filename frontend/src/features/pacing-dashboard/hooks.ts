@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   getPacingDashboard,
   getPacingRefreshStatus,
+  savePacingCampaignLinks,
   savePacingDataSettings,
   savePacingNotifySettings,
 } from "./api";
-import type { PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
+import type { PacingCampaignLinkV1, PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
 
 /**
  * The pacing dashboard payload (§6 of the migration plan, US-114/115) - one request per pacing, same
@@ -49,6 +50,24 @@ export function useSavePacingNotifySettings(slug: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: PacingNotifySettingsV1) => savePacingNotifySettings(slug as string, settings),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+    },
+  });
+}
+
+/**
+ * Saves the campaign's reference links (§16 of the migration plan).
+ *
+ * Invalidates only this pacing's dashboard, the same as `useSavePacingDataSettings`: links change no
+ * figure any list shows, but both the header chips and the Documents panel hydrate from the
+ * payload's `campaign.links`, so without the re-read a saved link would not appear in the header
+ * until something else refetched.
+ */
+export function useSavePacingCampaignLinks(slug: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (links: PacingCampaignLinkV1[]) => savePacingCampaignLinks(slug as string, links),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
     },

@@ -7,6 +7,7 @@ import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -120,6 +121,47 @@ class PacingAdminControllerTest {
 		mockMvc.perform(delete("/api/v1/pacing/admin/pacings/missing"))
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.code").value("OPH_054"));
+	}
+
+	@Test
+	void shouldRunOrderNumberBackfillAndReturnItsSummaryTest() throws Exception {
+		// Given: unlike refresh-all this is synchronous - the 200 IS the run's final summary.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(new PacingOrderNumberBackfillResult(614, 12, 580, 22))
+				.when(pacingClient).backfillOrderNumbers(assertion);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/admin/backfill-order-numbers"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.scanned").value(614))
+				.andExpect(jsonPath("$.filled").value(12))
+				.andExpect(jsonPath("$.alreadyHad").value(580))
+				.andExpect(jsonPath("$.skippedNoNumbers").value(22));
+		verify(rbacAuthorizationService).requireAdmin(user);
+	}
+
+	@Test
+	void shouldRefuseOrderNumberBackfillForNonAdminWithoutCallingPacingTest() throws Exception {
+		// Given: same rule as delete - the Hub refuses before Pacing is ever called.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doThrow(new AccessDeniedException("User is not an administrator."))
+				.when(rbacAuthorizationService).requireAdmin(user);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/admin/backfill-order-numbers"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("OPH_015"));
+		verify(pacingClient, never()).backfillOrderNumbers(any());
 	}
 
 	@Test

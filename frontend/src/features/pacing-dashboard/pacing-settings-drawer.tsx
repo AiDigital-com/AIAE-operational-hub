@@ -6,9 +6,10 @@ import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
 import { PacingAlertsSection } from "./alerts-panel";
 import { PacingDataSection } from "./data-panel";
+import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
-import type { PacingDataShape, PacingDisplayShape, PacingNotifySettingsV1 } from "./types";
+import type { PacingCampaignLinkV1, PacingDataShape, PacingDisplayShape, PacingNotifySettingsV1 } from "./types";
 import type { WidgetRenderContext } from "./widgets/widget-engine";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-settings-drawer.css";
@@ -50,12 +51,25 @@ export interface PacingSettingsDrawerProps {
   notify: PacingNotifySettingsV1 | undefined;
   /** Whether this pacing has a video line item - gates the Alerts tab's two VCR-only rows. */
   hasVideo: boolean;
+  /** The stored campaign links (§16), straight off the dashboard payload's `campaign.links`. */
+  links: PacingCampaignLinkV1[] | undefined;
+  /** The IO number, shown read-only on the Documents tab. */
+  orderNumber: string | undefined;
+  /** Which tab to land on when the drawer opens; null keeps whatever tab was last shown. Set by
+   *  the header's "+ Add documents" pill, which promises the Documents tab specifically. */
+  initialTab?: SettingsTabId | null;
   /** Re-read the dashboard after a save that landed. */
   onSaved: () => void;
 }
 
 type DirtyMap = Record<SettingsTabId, boolean>;
-const NOTHING_DIRTY: DirtyMap = { plan: false, data: false, widgets: false, alerts: false };
+const NOTHING_DIRTY: DirtyMap = {
+  plan: false,
+  data: false,
+  widgets: false,
+  alerts: false,
+  documents: false,
+};
 
 export function PacingSettingsDrawer({
   open,
@@ -71,6 +85,9 @@ export function PacingSettingsDrawer({
   libraryEntries,
   notify,
   hasVideo,
+  links,
+  orderNumber,
+  initialTab = null,
   onSaved,
 }: PacingSettingsDrawerProps) {
   const [tab, setTab] = useState<SettingsTabId>("plan");
@@ -86,8 +103,9 @@ export function PacingSettingsDrawer({
   const dataSection = useRef<SettingsSectionHandle>(null);
   const widgets = useRef<SettingsSectionHandle>(null);
   const alerts = useRef<SettingsSectionHandle>(null);
+  const documents = useRef<SettingsSectionHandle>(null);
   const handles = useMemo(
-    () => ({ plan, data: dataSection, widgets, alerts }) as Record<SettingsTabId, typeof plan>,
+    () => ({ plan, data: dataSection, widgets, alerts, documents }) as Record<SettingsTabId, typeof plan>,
     []
   );
 
@@ -98,6 +116,9 @@ export function PacingSettingsDrawer({
     setSeedKey((n) => n + 1);
     setDirty(NOTHING_DIRTY);
     setErrors([]);
+    // Only when the opener promised a tab: the gear keeps the last-shown tab, the way it always
+    // has, while "+ Add documents" must land on Documents rather than wherever the user left off.
+    if (initialTab) setTab(initialTab);
   } else if (!open && openedRef.current) {
     openedRef.current = false;
   }
@@ -108,6 +129,10 @@ export function PacingSettingsDrawer({
   const markData = useCallback((v: boolean) => setDirty((d) => (d.data === v ? d : { ...d, data: v })), []);
   const markWidgets = useCallback((v: boolean) => setDirty((d) => (d.widgets === v ? d : { ...d, widgets: v })), []);
   const markAlerts = useCallback((v: boolean) => setDirty((d) => (d.alerts === v ? d : { ...d, alerts: v })), []);
+  const markDocuments = useCallback(
+    (v: boolean) => setDirty((d) => (d.documents === v ? d : { ...d, documents: v })),
+    []
+  );
 
   const dirtyTabs = SETTINGS_TABS.filter((t) => dirty[t.id]).map((t) => t.id);
   const anyDirty = dirtyTabs.length > 0;
@@ -249,6 +274,16 @@ export function PacingSettingsDrawer({
             hasVideo={hasVideo}
             seedKey={seedKey}
             onDirtyChange={markAlerts}
+          />
+        </div>
+        <div className={cn("psettings__panel", tab !== "documents" && "psettings__panel--hidden")}>
+          <PacingDocumentsSection
+            ref={documents}
+            slug={slug}
+            links={links}
+            orderNumber={orderNumber}
+            seedKey={seedKey}
+            onDirtyChange={markDocuments}
           />
         </div>
       </Sheet>

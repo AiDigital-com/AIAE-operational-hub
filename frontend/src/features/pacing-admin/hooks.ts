@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { deletePacing, refreshAllDashboards, revalidatePacing } from "./api";
+import { backfillOrderNumbers, deletePacing, refreshAllDashboards, revalidatePacing } from "./api";
 
 /**
  * Deletes a pacing. On success invalidates every "pacing"-prefixed query - the admin table itself
@@ -21,6 +21,21 @@ export function useDeletePacing() {
  *  n8n, it does not change anything the Hub already has cached. */
 export function useRefreshAllDashboards() {
   return useMutation({ mutationFn: refreshAllDashboards });
+}
+
+/**
+ * Fills missing IO numbers across all pacings. On success invalidates the "pacing" prefix like a
+ * revalidate does: a filled insertion_order_id changes what each dashboard's campaign.orderNumber
+ * reads, so the cached dashboards (and their header IO chips) are stale the moment it lands.
+ */
+export function useBackfillOrderNumbers() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: backfillOrderNumbers,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pacing"] });
+    },
+  });
 }
 
 /**

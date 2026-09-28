@@ -1,0 +1,111 @@
+/* Documents chips (§16): a wrapping cloud of text pills under the pacing title.
+   DSP links get their own first row with a background tint - never a side stripe. */
+
+.pdocs {
+  /* Sits inside .pdash__header (a wrapping flex row): full basis pushes the chip rows onto
+     their own line under the title + actions, without a second header container. */
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pdocs__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pdocs__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Link chips hold a plain text node, and `text-overflow` does not ellipsize a flex container's
+   anonymous items - so links (the only chips that can carry a long free-text name) render as a
+   block box instead. Same padding/line-height as the flex-based chips, so both kinds sit at the
+   same height on the row. */
+.pdocs__chip--link {
+  display: block;
+}
+.pdocs__chip--link:hover {
+  text-decoration: underline;
+  border-color: var(--muted);
+}
+/* Link-ness on hover, not a persistent icon per pill - the row stays quiet until pointed at.
+   The arrow's space is RESERVED (opacity, not content-on-hover): appearing content would widen
+   the pill on hover and shove every chip after it sideways. */
+.pdocs__chip--link::after {
+  content: " \2197";
+  font-size: 10px;
+  color: var(--muted-strong);
+  opacity: 0;
+}
+.pdocs__chip--link:hover::after {
+  opacity: 1;
+}
+
+/* DSP pills: the row's primary jump, accented with a full-pill tint (no stripes anywhere). */
+.pdocs__chip--dsp {
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.pdocs__chip--io {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pdocs__chip--io:hover {
+  border-color: var(--muted);
+}
+.pdocs__io-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+}
+.pdocs__io-number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* The mocked Data source slot: exists, not connected (see documents-chips.tsx for why). Grey and
+   inert, with the explanation in its title - a dimmed pill, never a stripe or a badge rail. */
+.pdocs__chip--disabled {
+  color: var(--muted);
+  background: var(--n-100);
+  border-color: var(--border);
+  cursor: default;
+}
+
+.pdocs__chip--add {
+  color: var(--muted-strong);
+  border-style: dashed;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pdocs__chip--add:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}

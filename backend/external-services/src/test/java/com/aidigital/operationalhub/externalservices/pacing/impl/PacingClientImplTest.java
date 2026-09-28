@@ -6,6 +6,7 @@ import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExte
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
@@ -31,6 +32,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsCo
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -66,6 +68,7 @@ import static org.springframework.http.HttpMethod.PATCH;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -91,7 +94,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -117,7 +120,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings?campaign_id=40539"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -142,7 +145,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings?campaign_id=40539"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND));
 
@@ -162,7 +165,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withSuccess(
 						"""
@@ -213,7 +216,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
@@ -232,7 +235,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings")).andRespond(withServerError());
 
 		// When-Then:
@@ -275,7 +278,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.valueOf(pacingStatus)));
 
@@ -296,7 +299,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -318,7 +321,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"no_access\"}")
@@ -340,7 +343,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -360,7 +363,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		List<PacingUserSyncEntry> users = List.of(new PacingUserSyncEntry("a@x.com", "A", true, null));
 		server.expect(requestTo(BASE_URL + "/api/internal/users/sync"))
 				.andExpect(method(POST))
@@ -387,7 +390,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		List<PacingUserSyncEntry> users = List.of(new PacingUserSyncEntry("a@x.com", "A", true, null));
 		server.expect(requestTo(BASE_URL + "/api/internal/users/sync"))
 				.andRespond(request -> {
@@ -416,7 +419,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		List<PacingUserSyncEntry> users = List.of(new PacingUserSyncEntry("a@x.com", "A", true, null));
 		server.expect(requestTo(BASE_URL + "/api/internal/users/sync")).andRespond(withStatus(HttpStatus.BAD_REQUEST));
 
@@ -435,7 +438,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		List<PacingUserSyncEntry> users = List.of(new PacingUserSyncEntry("a@x.com", "A", true, null));
 		server.expect(requestTo(BASE_URL + "/api/internal/users/sync")).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
 
@@ -454,7 +457,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		List<PacingUserSyncEntry> users = List.of(new PacingUserSyncEntry("a@x.com", "A", true, null));
 		server.expect(requestTo(BASE_URL + "/api/internal/users/sync"))
 				.andRespond(request -> {
@@ -480,7 +483,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/internal/users"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -503,7 +506,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/internal/users"))
 				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
@@ -521,7 +524,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/internal/users")).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
 
 		// When-Then:
@@ -538,7 +541,7 @@ class PacingClientImplTest {
 		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/internal/users"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -561,7 +564,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -590,7 +593,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/missing/data")).andRespond(withStatus(HttpStatus.NOT_FOUND));
 
 		// When-Then:
@@ -609,7 +612,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -631,7 +634,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"no_access\"}")
@@ -652,7 +655,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/refresh-status"))
 				.andExpect(method(GET))
 				.andRespond(withSuccess(
@@ -678,7 +681,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/refresh"))
 				.andExpect(method(POST))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
@@ -700,7 +703,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/refresh"))
 				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
 						.body("{\"error\":\"refresh_in_progress\",\"retry_after_sec\":42}")
@@ -722,7 +725,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/refresh"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"pacing_not_live\"}")
@@ -743,7 +746,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(method(POST))
 				.andExpect(content().json("{\"display\":{\"widgets\":[]},\"display_rev\":3}"))
@@ -767,7 +770,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"error\":\"stale_settings\",\"rev\":7}")
@@ -793,7 +796,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library?q=budget&sort=likes&shelf=mine&kind=widget"))
 				.andExpect(method(GET))
 				.andRespond(withSuccess(
@@ -820,7 +823,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andExpect(method(POST))
 				.andRespond(withStatus(HttpStatus.CREATED)
@@ -846,7 +849,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"ok\":false,\"error\":\"library_full\",\"limit\":200}")
@@ -869,7 +872,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andExpect(method(PUT))
 				.andRespond(withSuccess(
@@ -895,7 +898,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"ok\":false,\"error\":\"stale_entry\",\"updated_at\":\"t3\"}")
@@ -920,7 +923,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"ok\":false,\"error\":\"not_yours\"}")
@@ -941,7 +944,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andExpect(method(DELETE))
 				.andRespond(withSuccess("{\"ok\":true,\"id\":\"e1\"}", MediaType.APPLICATION_JSON));
@@ -963,7 +966,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1/like"))
 				.andExpect(method(POST))
 				.andRespond(withSuccess("{\"ok\":true,\"liked\":true,\"likes\":4}", MediaType.APPLICATION_JSON));
@@ -985,7 +988,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1/like"))
 				.andExpect(method(DELETE))
 				.andRespond(withSuccess("{\"ok\":true,\"liked\":false,\"likes\":3}", MediaType.APPLICATION_JSON));
@@ -1007,7 +1010,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/p1/data"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1028,7 +1031,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/p1/refresh-status")).andRespond(withServerError());
 
 		// When-Then:
@@ -1046,7 +1049,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/p1/settings"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1067,7 +1070,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/p1/settings"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"error\":\"v2_writer_required\"}")
@@ -1089,7 +1092,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withSuccess("{\"ok\":true,\"entries\":[]}", MediaType.APPLICATION_JSON));
 
@@ -1109,7 +1112,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1130,7 +1133,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1151,7 +1154,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"bad_library\",\"detail\":\"name is required\"}")
@@ -1172,7 +1175,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"mapping_not_portable\"}")
@@ -1193,7 +1196,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"error\":\"v2_writer_required\"}")
@@ -1217,7 +1220,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library"))
 				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
 						.body("{\"error\":\"too_fast\",\"retry_after\":60}")
@@ -1238,7 +1241,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/refresh"))
 				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).body("not json").contentType(MediaType.TEXT_PLAIN));
 
@@ -1258,7 +1261,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1279,7 +1282,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND)
 						.body("{\"error\":\"not_found\"}")
@@ -1303,7 +1306,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN).body("").contentType(MediaType.APPLICATION_JSON));
 
@@ -1323,7 +1326,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"ok\":false,\"error\":\"not_yours\"}")
@@ -1344,7 +1347,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1365,7 +1368,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1/like"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1386,7 +1389,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1/like"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -1407,7 +1410,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/refresh"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1430,7 +1433,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -1479,7 +1482,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andRespond(withSuccess(
 						"{\"ok\":false,\"error\":\"Mixed currencies across line items (CAD, EUR).\","
@@ -1503,7 +1506,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"no_create_permission\"}")
@@ -1524,7 +1527,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"invalid_line_item_id\","
@@ -1547,7 +1550,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"pacing_name and line_items required\"}")
@@ -1568,7 +1571,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"mixed_currency\",\"details\":\"CAD, EUR\"}")
@@ -1589,13 +1592,18 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
 				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				// One IO across the line items: insertion_order_id travels (that is what
+				// buildCampaign's orderNumber displays), order_numbers does not - it is a
+				// multi-IO-only key, and Pacing gates it on presence.
+				.andExpect(jsonPath("$.insertion_order_id").value("TM-271064"))
+				.andExpect(jsonPath("$.order_numbers").doesNotExist())
 				.andExpect(content().json(
 						"{\"pacing_name\":\"2026_Campaign\",\"line_items\":[{\"line_item_id\":\"599852\","
 								+ "\"channel\":\"DOOH\",\"flight_start\":\"2026-03-01\","
@@ -1623,6 +1631,150 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldSendFirstOrderNumberAndTheWholeDedupedListForAMultiIoCreateTest() throws Exception {
+		// Given: three line items across two insertion orders, the first order repeated - the
+		// retired SPA's create form sent insertion_order_id = the first number plus order_numbers
+		// with all of them, and Pacing persists both (config_json.insertion_order_id for the
+		// legacy display path, order_numbers for the campaign path).
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingCreateLineItem first = new PacingCreateLineItem(
+				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null);
+		PacingCreateLineItem second = new PacingCreateLineItem(
+				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
+				"40539", "2026_Campaign", "TM-282075", null, 200000.0, 15.5, null, null);
+		PacingCreateLineItem repeat = new PacingCreateLineItem(
+				"333", "DOOH", "2026-03-01", "2026-03-31", "CPM", null, 3000.0, "USD", 1.0,
+				"40539", "2026_Campaign", "TM-271064", null, 300000.0, 15.5, null, null);
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andExpect(method(POST))
+				// Raw-body assertions, not object ones: the wire keys are snake_case and the pair's
+				// shape (first + all, duplicates collapsed, order of first appearance kept) is the
+				// whole contract.
+				.andExpect(jsonPath("$.insertion_order_id").value("TM-271064"))
+				.andExpect(content().json(
+						"{\"insertion_order_id\":\"TM-271064\","
+								+ "\"order_numbers\":[\"TM-271064\",\"TM-282075\"]}"))
+				.andRespond(withStatus(HttpStatus.CREATED)
+						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createPacing(assertion, "2026_Campaign", List.of(first, second, repeat));
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitBothOrderNumberKeysWhenNoLineItemCarriesOneTest() throws Exception {
+		// Given: line items with a null and a blank order number - Pacing's route gates both keys
+		// on presence, so they must be ABSENT from the body, never explicit nulls.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingCreateLineItem noNumber = new PacingCreateLineItem(
+				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
+				"40539", "2026_Campaign", null, null, 100000.0, 15.5, null, null);
+		PacingCreateLineItem blankNumber = new PacingCreateLineItem(
+				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
+				"40539", "2026_Campaign", "  ", null, 200000.0, 15.5, null, null);
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.insertion_order_id").doesNotExist())
+				.andExpect(jsonPath("$.order_numbers").doesNotExist())
+				.andRespond(withStatus(HttpStatus.CREATED)
+						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createPacing(assertion, "2026_Campaign", List.of(noNumber, blankNumber));
+		server.verify();
+	}
+
+	@Test
+	void shouldPassASpacedOrderNumberThroughVerbatimTest() throws Exception {
+		// Given: a NetSuite number with spaces and dashes. Pacing runs the SHARED order-number gate
+		// on its side; a private sanitizer on this side is exactly the bug that once dropped every
+		// spaced number ("SY-Bretts RV-0426") - so the value must arrive untouched.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingCreateLineItem lineItem = new PacingCreateLineItem(
+				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
+				"40539", "Bretts RV", "SY-Bretts RV-0426", null, 100000.0, 15.5, null, null);
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.insertion_order_id").value("SY-Bretts RV-0426"))
+				.andExpect(jsonPath("$.order_numbers").doesNotExist())
+				.andRespond(withStatus(HttpStatus.CREATED)
+						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createPacing(assertion, "2026_Campaign", List.of(lineItem));
+		server.verify();
+	}
+
+	@Test
+	void shouldRunOrderNumberBackfillAndParseItsSummaryTest() {
+		// Given: dash-gate's snake_case summary on the admin backfill route
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/admin/backfill-order-numbers"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"scanned\":614,\"filled\":12,\"already_had\":580,"
+								+ "\"skipped_no_numbers\":22}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingOrderNumberBackfillResult result = client.backfillOrderNumbers(assertion);
+
+		// Then:
+		assertThat(result).isEqualTo(new PacingOrderNumberBackfillResult(614, 12, 580, 22));
+		server.verify();
+	}
+
+	@Test
+	void shouldTranslateAFailedOrderNumberBackfillTest() {
+		// Given: dash-gate 500s mid-pass (backfill_failed)
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/admin/backfill-order-numbers"))
+				.andRespond(withServerError()
+						.body("{\"error\":\"backfill_failed\",\"details\":\"boom\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.backfillOrderNumbers(assertion))
+				.isInstanceOf(PacingExternalException.class);
+	}
+
+	@Test
 	void shouldMapCreateUnknownUserTo409ConflictTest() {
 		// Given: create's own user-row lookup miss - a sync gap, distinct from no_create_permission.
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
@@ -1630,7 +1782,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -1651,7 +1803,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -1675,7 +1827,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
 				"2026-01-01", "2026-01-31", List.of(Map.of("id", "c1", "target_impressions", 100000)));
@@ -1704,7 +1856,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
 				"2026-01-01", "2026-01-31", List.of());
@@ -1735,7 +1887,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
 				new PacingDataSettings("platform_mart_adjustments_view", null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
@@ -1765,7 +1917,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
 				null, false, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
@@ -1780,6 +1932,77 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldSaveCampaignLinksAsAWholeArrayUnderTheSnakeCaseKeyTest() {
+		// Given: §16 - the links-only settings save. The body must carry campaign_links and NOTHING
+		// else: any sibling key on this write path would touch a namespace this save has no business
+		// in (display would even bump its revision).
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		List<PacingCampaignLink> links = List.of(
+				new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456"),
+				new PacingCampaignLink("DV360", "https://displayvideo.google.com/ng_nav/p/1"));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(content().json(
+						"{\"campaign_links\":[" +
+								"{\"name\":\"Asana\",\"url\":\"https://app.asana.com/0/123/456\"}," +
+								"{\"name\":\"DV360\",\"url\":\"https://displayvideo.google.com/ng_nav/p/1\"}]}",
+						true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.saveCampaignLinks(assertion, "nike-ss26", links);
+		server.verify();
+	}
+
+	@Test
+	void shouldSendAnEmptyCampaignLinksArrayWhenClearingTest() {
+		// Given: deleting the last link. The save is a whole-array replace, so "[]" is a value to
+		// write - dropping the key instead would leave the stored links untouched.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{\"campaign_links\":[]}", true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.saveCampaignLinks(assertion, "nike-ss26", List.of());
+		server.verify();
+	}
+
+	@Test
+	void shouldTranslateAFailedCampaignLinksSaveTest() {
+		// Given: Pacing 404s an unknown slug on this write path, like every other dashboard save
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/gone/settings"))
+				.andRespond(withStatus(HttpStatus.NOT_FOUND)
+						.body("{\"ok\":false,\"error\":\"pacing_not_found\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.saveCampaignLinks(
+				assertion, "gone", List.of(new PacingCampaignLink("IO", "https://example.com"))))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+	}
+
+	@Test
 	void shouldReportTheDetailWhenPacingRefusesADimensionSourceTest() {
 		// Given: dash-gate refuses a malformed dim_sources array rather than dropping it, and names what
 		// was wrong in `detail` - a user has to learn WHICH source was refused, not that "a save failed".
@@ -1788,7 +2011,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\",\"detail\":\"devices: unknown catalog\"}")
@@ -1811,7 +2034,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
 				.andRespond(withSuccess(
 						"{\"campaign\":{\"id\":\"nike-ss26\"},\"planByLineItem\":{},\"factsDaily\":[],"
@@ -1860,7 +2083,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingNotifySettings settings = sampleNotifySettings();
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
@@ -1891,7 +2114,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_notify\","
@@ -1936,7 +2159,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/delegations"))
 				.andRespond(withSuccess("{\"delegations\":[{"
 						+ "\"delegation_id\":\"d1\",\"delegator_id\":\"u1\",\"delegator_name\":\"Lead\","
@@ -1968,7 +2191,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/delegations"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -1993,7 +2216,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/delegations"))
 				.andExpect(content().json("{\"delegate_id\":\"u2\",\"pacing_ids\":[\"p1\",\"p2\"]}"))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
@@ -2014,7 +2237,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/delegations"))
 				.andRespond(withStatus(HttpStatus.CONFLICT)
 						.body("{\"error\":\"would_shorten_active\",\"existing_expires_at\":\"2026-10-05\"}")
@@ -2037,7 +2260,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/delegations/d1"))
 				.andExpect(content().json("{\"expires_at\":\"2026-09-25\"}"))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
@@ -2060,7 +2283,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"7", "Display", "New line item", "40539", "2026_Campaign", "TM-1", "CPM", 1000.0,
 				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", List.of());
@@ -2084,7 +2307,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":["
@@ -2111,7 +2334,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":["
@@ -2137,7 +2360,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":[]}")
@@ -2161,7 +2384,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\"}")
@@ -2184,7 +2407,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/gone/settings"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND)
 						.body("{\"error\":\"pacing_not_found\"}")
@@ -2205,7 +2428,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2228,7 +2451,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/addable-line-items"))
 				.andExpect(method(GET))
 				.andRespond(withSuccess(
@@ -2258,7 +2481,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/gone/addable-line-items"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND)
 						.body("{\"ok\":false,\"error\":\"pacing_not_found\"}")
@@ -2279,7 +2502,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/addable-line-items"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2302,7 +2525,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andExpect(method(POST))
 				.andExpect(content().json("{\"line_item_ids\":[\"12345\"]}"))
@@ -2333,7 +2556,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"no_create_permission\"}")
@@ -2354,7 +2577,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2377,7 +2600,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		// snake_case on the wire: Pacing reads body.new_owner_id, not newOwnerId.
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/owner"))
 				.andExpect(content().json("{\"new_owner_id\":\"11111111-1111-1111-1111-111111111111\"}"))
@@ -2398,7 +2621,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/owner"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"new owner is outside your scope\"}")
@@ -2419,7 +2642,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/status"))
 				.andExpect(content().json("{\"status\":\"Archive\"}"))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
@@ -2439,7 +2662,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/status"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"error\":\"Status must be Live, Paused, Complete, or Archive\"}")
@@ -2460,7 +2683,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/status"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2483,7 +2706,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
 				.andExpect(method(DELETE))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -2502,7 +2725,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND)
 						.body("{\"error\":\"pacing_not_found\"}")
@@ -2526,7 +2749,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"admin_only\"}")
@@ -2549,7 +2772,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -2570,7 +2793,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2591,7 +2814,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/admin/refresh-all-dashboards"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -2616,7 +2839,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/admin/refresh-all-dashboards"))
 				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
 						.body("{\"error\":\"refresh_in_progress\",\"retry_after_sec\":180}")
@@ -2638,7 +2861,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/admin/refresh-all-dashboards"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"admin_only\"}")
@@ -2659,7 +2882,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/admin/refresh-all-dashboards"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2680,7 +2903,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -2706,7 +2929,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
 				.andRespond(withSuccess(
 						"{\"ok\":true,\"changed\":false,\"changes\":[],\"warnings\":[]}",
@@ -2725,7 +2948,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/revalidate"))
 				.andRespond(withStatus(HttpStatus.BAD_GATEWAY)
 						.body("{\"error\":\"ns_master_error\",\"details\":\"timeout\"}")
@@ -2746,7 +2969,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/missing/revalidate"))
 				.andRespond(withStatus(HttpStatus.NOT_FOUND)
 						.body("{\"error\":\"pacing_not_found\"}")
@@ -2769,7 +2992,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/ns-diff"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -2829,7 +3052,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/missing/ns-diff")).andRespond(withStatus(HttpStatus.NOT_FOUND));
 
 		// When-Then:
@@ -2849,7 +3072,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andExpect(method(GET))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -2879,7 +3102,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
 				.andExpect(content().json("{\"notify_destination\":\"dm\",\"slack_channel_id\":\"G123\"}"))
@@ -2906,7 +3129,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andRespond(withSuccess(
 						"{\"ok\":true,\"notify_destination\":\"auto\",\"slack_channel_id\":\"G123\","
@@ -2929,7 +3152,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
 						.body("{\"error\":\"invalid_notify_destination\"}"));
@@ -2950,7 +3173,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
 						.body("{\"error\":\"slack_channel_invalid\",\"reason\":\"not_private\","
@@ -2973,7 +3196,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/me"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -2994,7 +3217,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/pacings/p1/ns-diff"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");
@@ -3017,7 +3240,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -3047,7 +3270,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
 				.andExpect(method(PATCH))
 				.andExpect(content().json("{\"message\":\"Edited\",\"date\":\"2026-08-06\"}"))
@@ -3078,7 +3301,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"ok\":false,\"error\":\"entry_not_found_or_not_yours\"}")
@@ -3100,7 +3323,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"error\":\"unknown_user\"}")
@@ -3121,7 +3344,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
 				.andExpect(method(DELETE))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -3144,7 +3367,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal/j1"))
 				.andRespond(withStatus(HttpStatus.FORBIDDEN)
 						.body("{\"ok\":false,\"error\":\"no_access\"}")
@@ -3165,7 +3388,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"missing_message\"}")
@@ -3188,7 +3411,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
 				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
 						.body("{\"ok\":false,\"error\":\"too_fast\",\"retry_after\":60}")
@@ -3209,7 +3432,7 @@ class PacingClientImplTest {
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper());
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/journal"))
 				.andRespond(request -> {
 					throw new SocketTimeoutException("Read timed out");

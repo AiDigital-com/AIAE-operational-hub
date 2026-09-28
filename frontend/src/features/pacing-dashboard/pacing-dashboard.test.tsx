@@ -11,10 +11,12 @@ import {
   aPacingRowV1,
 } from "@/test/factories";
 import * as api from "./api";
+import { ToastProvider } from "../../shared/ui/toast/toast";
 import { PacingDashboard } from "./pacing-dashboard";
 
 vi.mock("./api", () => ({
   getPacingDashboard: vi.fn(),
+  savePacingCampaignLinks: vi.fn(),
   getPacingRefreshStatus: vi.fn(),
   triggerPacingRefresh: vi.fn(),
   savePacingDisplay: vi.fn(),
@@ -35,7 +37,10 @@ function renderDashboard(
   render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
-        <PacingDashboard row={row} onBack={onBack} watchFirstData={props.watchFirstData} />
+        {/* ToastProvider: the header's Documents chips (§16) confirm an IO copy with a toast. */}
+        <ToastProvider>
+          <PacingDashboard row={row} onBack={onBack} watchFirstData={props.watchFirstData} />
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>
   );

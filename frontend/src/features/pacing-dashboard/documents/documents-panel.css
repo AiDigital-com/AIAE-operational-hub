@@ -1,0 +1,160 @@
+/* Documents panel (§16): the campaign's reference links inside the settings drawer.
+   Follows the Data panel's section rhythm so the drawer's tabs read as one surface. */
+
+.pdocsp__io {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--n-100);
+}
+.pdocsp__io-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.pdocsp__io-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pdocsp__io + .pdocsp__section {
+  margin-top: 24px;
+}
+.pdocsp__section + .pdocsp__section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+.pdocsp__heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pdocsp__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Two-dimensional rows (label/name | url | clear) - grid, so every URL field starts on the same
+   column and the clear button's fixed slot keeps rows the same width whether or not it shows. */
+.pdocsp__preset-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+}
+.pdocsp__custom-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+}
+
+.pdocsp__preset-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+}
+.pdocsp__preset-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 6px;
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* The global `input` rule makes fields 42px tall and 100% wide; inside these dense rows a lower
+   profile keeps four presets + customs visible without scrolling. */
+.pdocsp__url-input,
+.pdocsp__name-input {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.pdocsp__url-input[aria-invalid="true"],
+.pdocsp__name-input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.pdocsp__clear-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+.pdocsp__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pdocsp__clear:hover {
+  background: var(--n-100);
+  color: var(--ink);
+}
+
+.pdocsp__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdocsp__add:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.pdocsp__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
+.pdocsp__hint--block {
+  margin: 12px 0 0;
+}
+
+.pdocsp__error {
+  margin: 16px 0 0;
+}

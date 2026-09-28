@@ -3,6 +3,7 @@ package com.aidigital.operationalhub.externalservices.pacing;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
@@ -17,6 +18,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -363,6 +365,34 @@ public interface PacingClient {
 	void saveNotifySettings(HubAssertion assertion, String slug, PacingNotifySettings settings);
 
 	/**
+	 * Saves a pacing's campaign reference links (§16 of the migration plan, US-140/141): the whole
+	 * {@code campaign_links} array - insertion order, media plan, Asana project, Slack channel, DSP
+	 * consoles. {@code POST /api/dashboards/:slug/settings} on the Pacing side carrying only the
+	 * {@code campaign_links} fragment - the fifth caller of that one write path, beside
+	 * {@link #saveDisplay}, {@link #savePlan}, {@link #saveDataSettings} and
+	 * {@link #saveNotifySettings}.
+	 *
+	 * <p>Like {@link #saveNotifySettings} and unlike {@link #saveDataSettings}, a WHOLE-ARRAY
+	 * replace: Pacing overwrites the stored array with exactly this list, so {@code links} must be
+	 * every link the pacing should keep after the save - an entry left out is an entry deleted.
+	 *
+	 * <p>Pacing stores the array verbatim, with no validation of its own (the links are pure
+	 * bookmarks nothing on that side ever follows), which is why the Hub validates the list BEFORE
+	 * calling this - see the service layer's {@code CampaignLinksValidator}. This method itself
+	 * forwards whatever it is given.
+	 *
+	 * <p>Like {@link #saveDataSettings} there is no revision and so no conflict outcome: Pacing does
+	 * not version-guard {@code campaign_links}, and last write wins.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param links     every link the pacing should keep, in display-order as entered
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	void saveCampaignLinks(HubAssertion assertion, String slug, List<PacingCampaignLink> links);
+
+	/**
 	 * Adds a free-text note to a pacing (§15 of the migration plan, US-139): {@code POST
 	 * /api/dashboards/:slug/journal} on the Pacing side, which rate-limits journal writes on its own
 	 * side and stamps the author from the assertion. Returns the whole fresh journal, not just the
@@ -564,6 +594,25 @@ public interface PacingClient {
 	 *         on any other non-2xx response or network failure (unchecked)
 	 */
 	PacingRefreshOutcome refreshAllDashboards(HubAssertion assertion);
+
+	/**
+	 * Fills the missing campaign-level IO number on every pacing that lacks one (same admin screen
+	 * as {@link #refreshAllDashboards}): {@code POST /api/admin/backfill-order-numbers} on the
+	 * Pacing side. Purely local to Pacing's own database - it derives the number from the
+	 * {@code order_number} values already stored on each pacing's line items, so unlike the Daily
+	 * Build there is nothing fire-and-forget about it: the call runs the whole pass and the response
+	 * is its final summary.
+	 *
+	 * <p>Fill-only and idempotent on the Pacing side: a pacing that already has an
+	 * {@code insertion_order_id} is never touched, and a second run reports zero filled.
+	 *
+	 * @param assertion who is calling - must carry an unfiltered ({@code kind=all}) scope, or Pacing
+	 *                  answers 403 {@code admin_only}
+	 * @return the run's summary (scanned / filled / already had / skipped for lack of numbers)
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingOrderNumberBackfillResult backfillOrderNumbers(HubAssertion assertion);
 
 	/**
 	 * Re-pulls a pacing's configuration from the NetSuite master and patches it into the pacing

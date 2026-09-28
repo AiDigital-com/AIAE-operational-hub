@@ -3647,6 +3647,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/links:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingCampaignLinks
+      description: >
+        Saves the campaign's reference links (§16 of the migration plan, US-140/141): insertion
+        order, media plan, Asana project, Slack channel, DSP consoles - the bookmarks the team keeps
+        beside the numbers so nobody hunts through email and drives. Pure bookmarks: Pacing never
+        follows them and no calculation reads them. Reaches Pacing as POST .../settings carrying
+        only the `campaign_links` fragment - the same single write path the display, plan, data and
+        notify saves use.
+
+        A WHOLE-ARRAY replace, like the notify save and unlike the data save: Pacing stores
+        `campaign_links` as one unit, so the body must carry every link the pacing should keep
+        after the save - an entry left out is an entry deleted.
+
+        The one settings fragment the Hub validates itself rather than deferring to Pacing: Pacing
+        stores this array verbatim, with no schema of its own, and the Hub renders every URL as a
+        clickable link - so a `javascript:` URL, a blank label or an Asana slot that does not point
+        at Asana (US-141) is refused HERE with 400 rather than stored. Unlike the display save this
+        endpoint carries no revision: Pacing does not version-guard `campaign_links`, so a
+        concurrent edit by another user is not detected - last write wins.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingCampaignLinksUpdateV1'
+      responses:
+        '200':
+          description: The campaign links were saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingCampaignLinksUpdateResultV1'
+        '400':
+          description: >
+            The list was refused: a link with a blank name, a URL that is not absolute
+            `http`/`https`, an over-long name or URL, more than 50 links, or an `Asana` link that
+            does not look like an Asana project link (US-141). `message` names what was wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving the campaign links failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/dashboards/{slug}/addable-line-items:
     get:
       tags:
@@ -4468,6 +4548,52 @@ paths:
                 $ref: '#/components/schemas/PacingRetryAfterV1'
         '500':
           description: Triggering the Daily Build failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/backfill-order-numbers:
+    post:
+      tags:
+        - pacingAdmin
+      operationId: backfillOrderNumbers
+      description: >
+        Fills the missing campaign-level IO number on every pacing that lacks one (admin only) -
+        POST /api/admin/backfill-order-numbers on the Pacing side. Purely local to Pacing's own
+        database: the number is derived from the `order_number` values already stored on each
+        pacing's line items (saved at create, refreshed by revalidate), so no NetSuite, BigQuery or
+        n8n call is involved and the pass finishes synchronously - the 200 carries the final
+        summary, not a "started" acknowledgement.
+
+        Exists because pacings created through the Hub historically got no
+        `config_json.insertion_order_id` at all (the create request did not carry the pair), which
+        left the dashboard's "IO number" blank. Fill-only: a pacing that already has a number is
+        never touched - the stored value may be the NetSuite-validated canonical one - which also
+        makes the button safe to press twice; a second run reports zero filled.
+      responses:
+        '200':
+          description: The backfill ran to completion; the body is its summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingOrderNumberBackfillResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The backfill failed; nothing may be assumed about how far it got.
           content:
             application/json:
               schema:
@@ -9140,10 +9266,78 @@ components:
           type: string
         orderNumber:
           type: string
+        sourceUrl:
+          type: string
+          description: >
+            The pacing's Source spreadsheet URL (the per-pacing Google Sheet backup mirror), or an
+            empty string when none is connected. Pacing itself already de-duplicates: any entry of
+            `links` whose URL equals this one is dropped server-side before the payload leaves
+            Pacing, so a client never has to. NOTE: in the current deployment nothing writes the
+            column this comes from (the n8n source-manager workflow is not deployed), so this is
+            empty in practice today - the Hub renders a disabled "Data source" chip for it and the
+            chip comes alive by itself once a later ticket starts writing the column.
+        links:
+          type: array
+          description: >
+            The campaign's reference links (§16 of the migration plan, US-140/141) - insertion
+            order, media plan, Asana project, Slack channel, DSP consoles, anything the team keeps
+            beside the numbers. Pure bookmarks: Pacing stores them as `config_json.campaign_links`
+            verbatim, never follows them, and no calculation reads them. Written whole via
+            `POST /api/v1/pacing/dashboards/{slug}/links`.
+          items:
+            $ref: '#/components/schemas/PacingCampaignLinkV1'
       required:
         - slug
         - pacingId
         - name
+    PacingCampaignLinkV1:
+      type: object
+      description: >
+        One campaign reference link (§16, US-140): a free-text label and the URL it opens. The
+        label doubles as the link's meaning - the four preset names (`Asana`, `IO`, `Media Plan`,
+        `Slack`) fill labelled slots in the editor, a name recognised as a DSP ("DV360", "TTD", ...)
+        is surfaced first in the header, and anything else is a custom link.
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          description: The link's label. Blank after trimming is rejected with 400.
+        url:
+          type: string
+          maxLength: 2048
+          description: >
+            Where the link points. Must be an absolute `http`/`https` URL - anything else
+            (`javascript:`, `data:`, a bare word) is rejected with 400, because the Hub renders
+            these clickable. A link named `Asana` must additionally look like an Asana project link
+            (an `app.asana.com` URL pointing inside Asana) per US-141.
+      required:
+        - name
+        - url
+    PacingCampaignLinksUpdateV1:
+      type: object
+      description: >
+        The campaign's WHOLE link list to store (§16, US-140/141). A whole-array replace, matching
+        how Pacing writes `config_json.campaign_links`: send every link the pacing should keep, not
+        only the ones that changed - an entry absent from this list is an entry the pacing loses.
+      properties:
+        links:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/PacingCampaignLinkV1'
+      required:
+        - links
+    PacingCampaignLinksUpdateResultV1:
+      type: object
+      description: >
+        Acknowledges a successful campaign-links save. Carries no echoed list for
+        `PacingDataSettingsUpdateResultV1`'s reason: the caller re-reads the dashboard, whose
+        `campaign.links` is the stored truth (including Pacing's own source-URL de-duplication).
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
     PacingJournalEntryV1:
       type: object
       description: >
@@ -9378,6 +9572,37 @@ components:
         - changed
         - changes
         - warnings
+    PacingOrderNumberBackfillResultV1:
+      type: object
+      description: >
+        Summary of an IO-number backfill run. The four counters partition the scanned set:
+        scanned = filled + alreadyHad + skippedNoNumbers.
+      properties:
+        scanned:
+          type: integer
+          format: int32
+          description: How many pacings were examined (all of them - the pass is a full scan).
+        filled:
+          type: integer
+          format: int32
+          description: How many were given an insertion_order_id by this run.
+        alreadyHad:
+          type: integer
+          format: int32
+          description: >
+            How many already had one and were left untouched (fill-only) - on a repeat run this is
+            the bulk of the set.
+        skippedNoNumbers:
+          type: integer
+          format: int32
+          description: >
+            How many could not be filled because none of their line items carries an order number
+            (e.g. manually entered line items with no NetSuite order behind them).
+      required:
+        - scanned
+        - filled
+        - alreadyHad
+        - skippedNoNumbers
     PacingRetryAfterV1:
       type: object
       description: >
