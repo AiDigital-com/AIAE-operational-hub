@@ -2675,6 +2675,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/sync/pacing-audience:
+    post:
+      tags:
+        - pacingAudienceSync
+      operationId: syncPacingAudience
+      description: >
+        Eagerly runs the Pacing audience push (POST /api/internal/pacing-audience on the Pacing
+        side): resolves each pacing's Hub RBAC audience and pushes the per-pacing email lists so
+        Pacing's mirror Google Sheets stay shared with the same people who can see the pacing in
+        the app. The same run the 01:45 scheduler performs. Requires manage-roles permission.
+      responses:
+        '200':
+          description: The audience push completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingAudienceSyncSummaryV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: >
+            Pushing to Pacing failed. Also returned, deliberately, when Pacing answers 401 (the
+            two services' shared HMAC secrets disagree - a server misconfiguration) rather than
+            passing that 401 through, for the same reason as GET /api/v1/pacing/pacings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/pacings:
     get:
       tags:
@@ -5087,6 +5129,41 @@ components:
         - deactivated
         - unchanged
         - idsWritten
+    PacingAudienceSyncSummaryV1:
+      type: object
+      description: >
+        Summary of a Pacing audience push run. created/replaced/unknown are Pacing's own account of
+        what the push did (only Pacing sees whether a pacing already had a stored audience row), not
+        the Hub's guess from what it sent.
+      properties:
+        pacingsSent:
+          type: integer
+          format: int32
+          description: Number of pacings included in the push.
+        created:
+          type: integer
+          format: int32
+          description: Pacings that received their first-ever audience row.
+        replaced:
+          type: integer
+          format: int32
+          description: Pacings whose stored list was replaced (the routine daily case).
+        unknown:
+          type: integer
+          format: int32
+          description: Entries Pacing skipped as unknown pacing ids (roster drift; logged).
+        ownersUnresolved:
+          type: integer
+          format: int32
+          description: >-
+            Pacings whose owner id matched no Hub employee's pacing_user_id - still pushed with a
+            globals-only audience; usually means the pacing user sync is behind.
+      required:
+        - pacingsSent
+        - created
+        - replaced
+        - unknown
+        - ownersUnresolved
     PacingDriftRowV1:
       type: object
       description: >

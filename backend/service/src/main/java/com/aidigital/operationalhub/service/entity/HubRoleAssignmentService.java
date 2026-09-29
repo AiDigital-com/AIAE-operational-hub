@@ -42,6 +42,15 @@ public interface HubRoleAssignmentService {
 	List<HubRoleAssignment> findAllByUserIds(Collection<Long> userIds);
 
 	/**
+	 * Lists every active role assignment across all users, for whole-org resolution jobs (the daily
+	 * Pacing audience push) that need "who holds anything" once per run rather than one per-user query
+	 * per employee.
+	 *
+	 * @return every active role assignment
+	 */
+	List<HubRoleAssignment> findAllActive();
+
+	/**
 	 * Lists active role assignments scoped to any of the given scope ids under a scope type, e.g. every
 	 * active assignment scoped to one of a set of teams.
 	 *

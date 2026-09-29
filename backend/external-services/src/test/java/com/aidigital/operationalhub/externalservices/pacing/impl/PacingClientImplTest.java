@@ -5,6 +5,9 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudienceEntry;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudiencePushResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
@@ -3443,5 +3446,110 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	@Test
+	void shouldListPacingOwnersSigningASystemAssertionTest() {
+		// Given: the internal pacing/owner read behind the audience push - a scheduler call with no
+		// acting user, so it must carry a SYSTEM assertion, never a per-user one
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/internal/pacings"))
+				.andExpect(method(GET))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andRespond(withSuccess(
+						"{\"pacings\":[{\"pacing_id\":\"aaaaaaaa-1111-1111-1111-111111111111\","
+								+ "\"owner_id\":\"11111111-1111-1111-1111-111111111111\"},"
+								+ "{\"pacing_id\":\"bbbbbbbb-2222-2222-2222-222222222222\",\"owner_id\":null}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		List<PacingOwnerEntry> result = client.listPacingOwners();
+
+		// Then:
+		assertThat(result).containsExactly(
+				new PacingOwnerEntry("aaaaaaaa-1111-1111-1111-111111111111", "11111111-1111-1111-1111-111111111111"),
+				new PacingOwnerEntry("bbbbbbbb-2222-2222-2222-222222222222", null));
+		server.verify();
+	}
+
+	@Test
+	void shouldPushPacingAudienceSigningASystemAssertionTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		List<PacingAudienceEntry> audiences = List.of(new PacingAudienceEntry(
+				"aaaaaaaa-1111-1111-1111-111111111111", List.of("admin@x.com", "mate@x.com")));
+		server.expect(requestTo(BASE_URL + "/api/internal/pacing-audience"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(jsonPath("$.audiences[0].pacing_id").value("aaaaaaaa-1111-1111-1111-111111111111"))
+				.andExpect(jsonPath("$.audiences[0].emails[0]").value("admin@x.com"))
+				.andRespond(withSuccess(
+						"{\"stats\":{\"created\":1,\"replaced\":0,\"unknown\":0},\"unknown_pacing_ids\":[]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingAudiencePushResult result = client.pushPacingAudience(audiences);
+
+		// Then:
+		assertThat(result.stats().created()).isEqualTo(1);
+		assertThat(result.unknownPacingIds()).isEmpty();
+		server.verify();
+	}
+
+	@Test
+	void shouldRetryTheAudiencePushOnceWhenUnreachableThenSucceedTest() {
+		// Given: same once-only retry contract as syncUsers - the push upserts by pacing id (full
+		// replacement), so resending after a timeout re-applies the same lists, never accumulates
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		List<PacingAudienceEntry> audiences = List.of(new PacingAudienceEntry(
+				"aaaaaaaa-1111-1111-1111-111111111111", List.of()));
+		server.expect(requestTo(BASE_URL + "/api/internal/pacing-audience"))
+				.andRespond(request -> {
+					throw new SocketTimeoutException("Read timed out");
+				});
+		server.expect(requestTo(BASE_URL + "/api/internal/pacing-audience"))
+				.andRespond(withSuccess(
+						"{\"stats\":{\"created\":0,\"replaced\":1,\"unknown\":0},\"unknown_pacing_ids\":[]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingAudiencePushResult result = client.pushPacingAudience(audiences);
+
+		// Then:
+		assertThat(result.stats().replaced()).isEqualTo(1);
+		server.verify();
+		verify(signer, times(1)).signSystem();
+	}
+
+	@Test
+	void shouldNotRetryTheAudiencePushOnANon2xxResponseTest() {
+		// Given: Pacing answered 400 (a malformed batch is a Hub-side bug) - retrying the identical
+		// request would only get the identical answer
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		when(signer.signSystem()).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/internal/pacing-audience"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+		// When / Then: exactly one request was expected and made (server.verify() fails on a second)
+		assertThatThrownBy(() -> client.pushPacingAudience(List.of()))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.OTHER);
+		server.verify();
 	}
 }

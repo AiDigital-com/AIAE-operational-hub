@@ -61,6 +61,19 @@ public interface HubRoleAssignmentRepository extends JpaRepository<HubRoleAssign
 	List<HubRoleAssignment> findAllByUserIdIn(Collection<Long> userIds);
 
 	/**
+	 * Lists every role assignment in a given status across all users — the whole-org read behind the
+	 * daily Pacing audience push (see {@code PacingAudienceResolver}), which inverts the per-user
+	 * question the queries above answer: not "what does this user hold" but "who holds anything", once
+	 * per day, where one full scan beats hundreds of per-user queries. Deliberately NOT query-cached
+	 * like its per-user siblings: it runs once a day, so a cache region would only hold a full copy of
+	 * the table for no hits.
+	 *
+	 * @param status the assignment status to match (e.g. {@code ACTIVE})
+	 * @return every matching role assignment
+	 */
+	List<HubRoleAssignment> findAllByStatus(String status);
+
+	/**
 	 * Finds active assignments scoped to any of the given scope ids under a given scope type, e.g. every
 	 * active assignment scoped to one of a set of teams — used to resolve which Hub users hold an
 	 * active role over those teams (see {@code PacingScopeResolver}, which turns this into the set of
