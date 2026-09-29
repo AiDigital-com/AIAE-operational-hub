@@ -3,6 +3,9 @@ package com.aidigital.operationalhub.externalservices.pacing;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudienceEntry;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudiencePushResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -99,6 +102,36 @@ public interface PacingClient {
 	 *         on a non-2xx response or network failure (unchecked)
 	 */
 	List<PacingUserMirrorEntry> listUsers();
+
+	/**
+	 * Fetches every pacing's id and owner ({@code GET /api/internal/pacings}), the read that lets the
+	 * daily audience push ({@link #pushPacingAudience}) be keyed by pacing id. Signs a SYSTEM
+	 * assertion, the same as {@link #listUsers}: the push runs from a scheduler with no acting user,
+	 * so the per-user {@link #listPacings} path is not usable for it.
+	 *
+	 * @return every pacing's id and owner, never {@code null}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	List<PacingOwnerEntry> listPacingOwners();
+
+	/**
+	 * Pushes the Hub-resolved audience of every pacing to Pacing
+	 * ({@code POST /api/internal/pacing-audience}): per pacing, the emails the Hub's RBAC entitles to
+	 * open it beyond the owner and delegates Pacing computes locally — admins, ALL-scoped roles, and
+	 * the owner's team co-members. Pacing stores each list whole (full replacement per pacing) and its
+	 * daily ACL sweep applies it to the pacing's mirror Google Sheet. Signs a SYSTEM assertion, the
+	 * same as {@link #syncUsers}.
+	 *
+	 * <p>Safe to retry: the endpoint upserts by pacing id, so re-sending the same batch after a timeout
+	 * re-applies the same lists, never duplicates or accumulates them.
+	 *
+	 * @param audiences the per-pacing audience lists; never {@code null}, may be empty
+	 * @return Pacing's account of what the upsert did, including any pacing ids it did not recognize
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingAudiencePushResult pushPacingAudience(List<PacingAudienceEntry> audiences);
 
 	/**
 	 * Fetches one pacing's full dashboard payload (§6 of the migration plan, US-114/115): campaign

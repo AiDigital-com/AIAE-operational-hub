@@ -7,6 +7,10 @@ import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExte
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAccount;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudienceEntry;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudiencePushResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudiencePushStats;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -64,6 +68,8 @@ public class PacingClientImpl implements PacingClient {
 	private static final String VALIDATE_PATH = "/api/pacings/validate";
 	private static final String USERS_SYNC_PATH = "/api/internal/users/sync";
 	private static final String INTERNAL_USERS_PATH = "/api/internal/users";
+	private static final String INTERNAL_PACINGS_PATH = "/api/internal/pacings";
+	private static final String PACING_AUDIENCE_PATH = "/api/internal/pacing-audience";
 	private static final String DASHBOARDS_PATH = "/api/dashboards";
 	private static final String DELEGATIONS_PATH = "/api/delegations";
 	private static final String LIBRARY_PATH = "/api/library";
@@ -215,6 +221,89 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + INTERNAL_USERS_PATH, ex);
+		}
+	}
+
+	@Override
+	public List<PacingOwnerEntry> listPacingOwners() {
+		String header = assertionSigner.signSystem();
+		try {
+			InternalPacingsResponse response = restClient.get()
+					.uri(INTERNAL_PACINGS_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(InternalPacingsResponse.class);
+			return response == null || response.pacings() == null ? List.of() : response.pacings();
+		} catch (RestClientResponseException ex) {
+			int statusCode = ex.getStatusCode().value();
+			// Same internal gate as listUsers: only ever a bad/missing system assertion (401) among
+			// non-2xx responses on this path.
+			PacingFailureReason reason =
+					statusCode == 401 ? PacingFailureReason.UPSTREAM_UNAUTHORIZED : PacingFailureReason.OTHER;
+			throw new PacingExternalException(
+					reason,
+					"Pacing request failed: GET " + INTERNAL_PACINGS_PATH + " returned HTTP " + statusCode,
+					ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + INTERNAL_PACINGS_PATH, ex);
+		}
+	}
+
+	@Override
+	public PacingAudiencePushResult pushPacingAudience(List<PacingAudienceEntry> audiences) {
+		String header = assertionSigner.signSystem();
+		PacingAudienceRequest request = new PacingAudienceRequest(audiences);
+		try {
+			return attemptPushPacingAudience(header, request);
+		} catch (PacingExternalException ex) {
+			if (ex.getReason() != PacingFailureReason.UNREACHABLE) {
+				// Pacing DID answer, just not with 2xx (e.g. a malformed batch): retrying the exact
+				// same request would only get the exact same answer.
+				throw ex;
+			}
+			// Same once-only retry contract as syncUsers, for the same reason: the endpoint upserts by
+			// pacing id (full replacement per pacing), so re-sending the batch after a connect/read
+			// timeout re-applies the same lists and can never duplicate or accumulate anything.
+			log.warn("Pacing audience push was unreachable; retrying once before giving up");
+			return attemptPushPacingAudience(header, request);
+		}
+	}
+
+	/**
+	 * One attempt at {@code POST /api/internal/pacing-audience}, translating non-2xx and transport
+	 * failures the same way {@code attemptSyncUsers} does for its sibling internal write.
+	 *
+	 * @param header  the signed system-assertion header value
+	 * @param request the audience batch
+	 * @return Pacing's account of what the upsert did
+	 */
+	PacingAudiencePushResult attemptPushPacingAudience(String header, PacingAudienceRequest request) {
+		try {
+			PacingAudiencePushResult response = restClient.post()
+					.uri(PACING_AUDIENCE_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.body(PacingAudiencePushResult.class);
+			return response == null
+					? new PacingAudiencePushResult(new PacingAudiencePushStats(0, 0, 0), List.of())
+					: response;
+		} catch (RestClientResponseException ex) {
+			int statusCode = ex.getStatusCode().value();
+			// Pacing's internal gate only ever answers 401 (bad/missing system assertion) or 400 (a
+			// malformed batch - which, since the Hub builds the batch itself, points at a Hub-side bug)
+			// among non-2xx responses.
+			PacingFailureReason reason =
+					statusCode == 401 ? PacingFailureReason.UPSTREAM_UNAUTHORIZED : PacingFailureReason.OTHER;
+			throw new PacingExternalException(
+					reason,
+					"Pacing request failed: POST " + PACING_AUDIENCE_PATH + " returned HTTP " + statusCode,
+					ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + PACING_AUDIENCE_PATH, ex);
 		}
 	}
 
