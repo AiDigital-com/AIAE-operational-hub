@@ -14,7 +14,6 @@ import {
   ChevronRightIcon,
   HomeIcon,
   MoreVerticalIcon,
-  PacingIcon,
   SearchIcon,
   SettingsIcon,
   TeamIcon,
@@ -214,10 +213,6 @@ function hideExtraAgencies() {
         <NavLink to="/" end className={navLinkClass}>
           <span className="sidebar__nav-icon" aria-hidden="true"><HomeIcon /></span>
           <span className="sidebar__nav-label">Overview</span>
-        </NavLink>
-        <NavLink to="/pacing" className={navLinkClass}>
-          <span className="sidebar__nav-icon" aria-hidden="true"><PacingIcon /></span>
-          <span className="sidebar__nav-label">Pacing</span>
         </NavLink>
         {isAdmin && (
           <NavLink to="/teams" className={navLinkClass}>

@@ -8,6 +8,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudience
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
@@ -301,9 +302,15 @@ public interface PacingClient {
 	 * as the caller confirmed them - this client computes, defaults or validates none of them beyond
 	 * what Pacing itself enforces.
 	 *
+	 * <p>{@code options} carries the optional create-time extras (client/agency, the pinned campaign
+	 * order, the {@code config.data} namespace, the exchange-rate override, campaign links and notes) -
+	 * see {@link PacingCreateOptions}. Null (or a record of nulls) means "send none of those keys":
+	 * Pacing gates each on presence and applies its own defaults.
+	 *
 	 * @param assertion  who is calling and whether they may create a pacing
 	 * @param pacingName display name for the new pacing
 	 * @param lineItems  the selected line items; never {@code null}, must be non-empty
+	 * @param options    the optional create-time extras; may be {@code null}
 	 * @return the new pacing's identifiers
 	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
 	 *         on a non-2xx response or network failure (unchecked) - including
@@ -312,7 +319,11 @@ public interface PacingClient {
 	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
 	 *         #UPSTREAM_USER_NOT_SYNCED} when Pacing does not recognize the current user yet
 	 */
-	PacingCreateResult createPacing(HubAssertion assertion, String pacingName, List<PacingCreateLineItem> lineItems);
+	PacingCreateResult createPacing(
+			HubAssertion assertion,
+			String pacingName,
+			List<PacingCreateLineItem> lineItems,
+			PacingCreateOptions options);
 
 	/**
 	 * Saves a pacing's plan (§9 of the migration plan, US-125/126/127): {@code POST
@@ -561,6 +572,21 @@ public interface PacingClient {
 	 *         on a non-2xx response or network failure (unchecked)
 	 */
 	PacingValidateResult validateLineItems(HubAssertion assertion, List<String> lineItemIds);
+
+	/**
+	 * Looks up every line item of one NetSuite insertion order - the standalone create screen's
+	 * insertion-order entry mode. Calls {@code POST /api/pacings/validate} on the Pacing side with an
+	 * {@code insertion_order_id} selector, the third sibling of {@link #validateCampaign}'s
+	 * {@code campaign_id} and {@link #validateLineItems}' {@code line_item_ids} selectors - same
+	 * response shape, same {@code canCreate} requirement, same {@code ok:false}-is-a-normal-200 rule.
+	 *
+	 * @param assertion        who is calling and whether they may create a pacing
+	 * @param insertionOrderId the NetSuite insertion-order number to look up; never blank
+	 * @return the validate result, never {@code null}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingValidateResult validateInsertionOrder(HubAssertion assertion, String insertionOrderId);
 
 	/**
 	 * Changes a pacing's administrative lifecycle status (§9 of the migration plan, US-128): {@code

@@ -1,25 +1,25 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Link, useLocation, useOutletContext } from "react-router-dom";
+import { Link, useLocation, useOutletContext, useSearchParams } from "react-router-dom";
 import { formatError } from "../../../shared/format/error";
 import { campaignDisplayName } from "../../../shared/format/names";
 import { cn } from "../../../shared/style/cn";
-import { ChevronDownIcon, MoreVerticalIcon } from "../../../shared/ui/icons/icons";
+import { MoreVerticalIcon } from "../../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../../shared/ui/loading-spinner/loading-spinner";
 import { useToast } from "../../../shared/ui/toast/toast";
 import { MarginCell } from "../../../shared/ui/margin-cell/margin-cell";
 import { StatusBadge } from "../../../shared/ui/status-badge/status-badge";
-// Money/date string helpers, shared with the Pacing Overview (§4) so the same figures read
-// identically on both screens.
-import { fmtBudget, fmtDate } from "../../pacing/mock/format";
-import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACE_STATUS_LABEL, PACING_STATUS_STYLE, groupAlertsBySeverity } from "../../pacing-overview/format";
+// Money string helper, shared with the Pacing Overview (§4) so the same figures read identically on
+// both screens.
+import { fmtBudget } from "../../pacing/mock/format";
+import { ALERT_SEVERITY_ORDER, PACE_STATUS_COLOR, PACING_STATUS_STYLE, groupAlertsBySeverity } from "../../pacing-overview/format";
 import { OwnerPicker } from "../../pacing-overview/owner-picker";
 import { netSuiteLeadMismatch } from "../../pacing-overview/format";
 import { useCampaignPacings } from "../../pacing-overview/hooks";
 import type { OpenPacingState } from "../../pacing-overview/navigation";
-import { AlertsBlock } from "../../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../../pacing-overview/types";
 import { PacingDashboard } from "../../pacing-dashboard/pacing-dashboard";
 import { triggerPacingRefresh } from "../../pacing-dashboard/api";
+import { clearFilterParams } from "../../pacing-dashboard/filters/use-url-filters";
 import { CreatePacingPanel } from "../../pacing-create/create-pacing-panel";
 // The one delete confirmation in the product (typed-name friction and all), owned by the Pacing
 // admin screen - this tab reuses it rather than growing a second, gentler way to delete a pacing.
@@ -66,18 +66,19 @@ function otherCampaignsOf(row: PacingRowV1, currentCampaignId: number) {
 }
 
 /**
- * One pacing on this campaign's tab. Collapsed, it reads like an Overview row; expanded ("shows its
- * detail in place", US-112) it adds flight/line-item detail, the full alert text, an "Open full
- * dashboard" action into §6's detail view, and — when this pacing covers more than one campaign
- * (US-113) — a notice naming the others, each a link that opens the SAME pacing on that campaign's own
- * Pacing tab.
+ * One pacing on this campaign's tab: a summary row that reads like an Overview row, and picks the
+ * pacing whose dashboard shows below the list.
+ *
+ * It used to expand in place - flight/line-item detail, the alert text, an "Open full dashboard"
+ * button - and opening that dashboard then replaced the whole list. Two steps to reach one pacing and
+ * two more to reach the next. The row is now a selector, like Reporting's report rows: one click, and
+ * §6's dashboard renders under the list with the same figures the expanded block used to repeat.
  */
 function PacingListItem({
   row,
   currentCampaignId,
-  expanded,
-  onToggle,
-  onOpenDashboard,
+  selected,
+  onSelect,
   itemRef,
   canDelete,
   canRevalidate,
@@ -92,9 +93,8 @@ function PacingListItem({
 }: {
   row: PacingRowV1;
   currentCampaignId: number;
-  expanded: boolean;
-  onToggle: () => void;
-  onOpenDashboard: () => void;
+  selected: boolean;
+  onSelect: () => void;
   itemRef?: React.Ref<HTMLLIElement>;
   canDelete: boolean;
   canRevalidate: boolean;
@@ -119,15 +119,20 @@ function PacingListItem({
   const inCooldown = refreshCooldownSeconds > 0;
 
   return (
-    <li className={cn("pacing-tab__item", expanded && "pacing-tab__item--open")} ref={itemRef}>
+    <li className={cn("pacing-tab__item", selected && "pacing-tab__item--selected")} ref={itemRef}>
       <div className="pacing-tab__item-row">
         <button
           type="button"
           className="pacing-tab__item-head"
-          onClick={onToggle}
-          aria-expanded={expanded}
+          onClick={onSelect}
+          // `aria-current`, not `aria-expanded`: the row no longer opens anything, it picks which
+          // pacing the dashboard below the list is showing.
+          aria-current={selected ? "true" : undefined}
         >
-          <ChevronDownIcon className={cn("pacing-tab__chevron", expanded && "pacing-tab__chevron--open")} />
+          {/* Fills the grid's first track, which the chevron used to hold - dropping the cell instead
+              would move every column left on this row only. A dot, not a rail down the row's edge:
+              side stripes are banned project-wide. */}
+          <span className="pacing-tab__item-dot" aria-hidden="true" />
           <span className="pacing-tab__item-name">
             {row.name}
             {otherCampaigns.length > 0 && (
@@ -180,7 +185,7 @@ function PacingListItem({
               {ALERT_SEVERITY_ORDER.filter((severity) => alertsBySeverity[severity]?.length).map((severity) => (
                 <span
                   key={severity}
-                  className={cn("pacing-overview__alert-badge", `pacing-overview__alert-badge--${severity}`)}
+                  className={cn("pacing-tab__alert-badge", `pacing-tab__alert-badge--${severity}`)}
                 >
                   {alertsBySeverity[severity].length}
                 </span>
@@ -239,80 +244,72 @@ function PacingListItem({
         </div>
       </div>
 
-      {expanded && (
-        <div className="pacing-tab__item-body">
-          <dl className="pacing-tab__detail-grid">
-            <div className="pacing-tab__detail-cell">
-              <dt>Flight</dt>
-              <dd>
-                {row.flightStart ? fmtDate(row.flightStart) : "—"} – {row.flightEnd ? fmtDate(row.flightEnd) : "—"}
-              </dd>
-            </div>
-            <div className="pacing-tab__detail-cell">
-              <dt>Line items</dt>
-              <dd>{row.lineItemCount}</dd>
-            </div>
-            <div className="pacing-tab__detail-cell">
-              <dt>Pace</dt>
-              <dd>{PACE_STATUS_LABEL[paceStatus]}</dd>
-            </div>
-            <div className="pacing-tab__detail-cell">
-              <dt>Margin target</dt>
-              <dd>{row.marginTargetPct != null ? `${row.marginTargetPct}%` : "—"}</dd>
-            </div>
-          </dl>
-
-          {/* §6 of the migration plan: the full health/financial/charts/widget-library view. Only
-              reachable when Pacing has resolved this row's dash_slug (see PacingRowV1.dashSlug's own
-              doc comment on when that can be absent). */}
-          {row.dashSlug && (
-            <button type="button" className="button button--sm pacing-tab__open-dashboard" onClick={onOpenDashboard}>
-              Open full dashboard
-            </button>
-          )}
-
-          <AlertsBlock alerts={alerts} />
-
-          {otherCampaigns.length > 0 && (
-            <p className="pacing-tab__notice">
-              This pacing also covers{" "}
-              {otherCampaigns.map((campaign, index) => {
-                const campaignId = Number(campaign.id);
-                const state: OpenPacingState = { openPacingId: row.id };
-                return (
-                  <span key={campaign.id}>
-                    {index > 0 && ", "}
-                    {Number.isFinite(campaignId) ? (
-                      <Link to={`/campaigns/${campaignId}/pacing`} state={state}>
-                        {campaignDisplayName(campaign.name)}
-                      </Link>
-                    ) : (
-                      campaignDisplayName(campaign.name)
-                    )}
-                  </span>
-                );
-              })}
-              .
-            </p>
-          )}
-        </div>
-      )}
     </li>
   );
 }
 
 /**
+ * US-113's "this pacing also covers …" notice, for the selected pacing. It sits with the dashboard
+ * below the list rather than inside the row: every row is now the same height, and this names what
+ * the panel underneath is showing. Each campaign is a link that opens the SAME pacing on that
+ * campaign's own Pacing tab. Renders nothing when the pacing covers only this campaign.
+ */
+function AlsoCoversNotice({ row, currentCampaignId }: { row: PacingRowV1; currentCampaignId: number }) {
+  const otherCampaigns = otherCampaignsOf(row, currentCampaignId);
+  if (otherCampaigns.length === 0) return null;
+  return (
+    <p className="pacing-tab__notice">
+      This pacing also covers{" "}
+      {otherCampaigns.map((campaign, index) => {
+        const campaignId = Number(campaign.id);
+        const state: OpenPacingState = { openPacingId: row.id };
+        return (
+          <span key={campaign.id}>
+            {index > 0 && ", "}
+            {Number.isFinite(campaignId) ? (
+              <Link to={`/campaigns/${campaignId}/pacing`} state={state}>
+                {campaignDisplayName(campaign.name)}
+              </Link>
+            ) : (
+              campaignDisplayName(campaign.name)
+            )}
+          </span>
+        );
+      })}
+      .
+    </p>
+  );
+}
+
+/**
  * A campaign's Pacing tab (§5 of the migration plan, US-112/US-113): every pacing whose stored
- * campaign set contains this campaign. Opening one expands it in place; arriving from the Overview
- * with a specific pacing to open (`location.state.openPacingId`, set by US-113's navigation) expands
- * and scrolls to that one automatically.
+ * campaign set contains this campaign, over the selected one's full dashboard (§6).
+ *
+ * The list and the dashboard are on screen together, the way the Reporting tab shows its report list
+ * over the selected report (`reporting-tab.tsx`, the `selected` fallback and the panel it gates).
+ * Switching pacings is one click and the list never leaves. Before, the row expanded to a summary,
+ * "Open full dashboard" REPLACED the list with the dashboard, and getting to the next pacing meant
+ * going back and doing both again.
+ *
+ * Arriving from the Overview with a pacing to open (`location.state.openPacingId`) selects and
+ * scrolls to that one instead of the first.
  */
 export function PacingTab() {
   const { campaign, agencyName, clientName } = useOutletContext<CampaignTabContext>();
   const location = useLocation();
-  const openPacingId = (location.state as OpenPacingState | null)?.openPacingId;
+  const navState = location.state as OpenPacingState | null;
+  const openPacingId = navState?.openPacingId;
+  const openJustCreated = navState?.justCreated === true;
   const pacingsQuery = useCampaignPacings(campaign.id);
-  const [expandedId, setExpandedId] = useState<string | null>(openPacingId ?? null);
+  // What the user has picked, which is NOT the same as what is showing: until they pick anything this
+  // stays null and the first row is shown (see `selectedRow` below). Reporting does the same.
+  const [pickedId, setPickedId] = useState<string | null>(openPacingId ?? null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The pacing just created - from this tab's own panel, or carried in by the Overview's Create
+  // Pacing modal's navigation (`OpenPacingState.justCreated`). Its first refresh runs fire-and-forget
+  // after create, so its dashboard can open before any data exists and should wait for that first
+  // build instead of rendering empty.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(openJustCreated ? (openPacingId ?? null) : null);
   const highlightedRef = useRef<HTMLLIElement | null>(null);
   // Reuses the same ["auth", "me"] cache app-shell.tsx already populated - never a second fetch.
   // Deleting and re-validating are admin-only on the Hub (PacingAdminController#requireAdmin) and on
@@ -331,18 +328,21 @@ export function PacingTab() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const toast = useToast();
 
-  // A fresh navigation (Overview, or an "also covers" link from another campaign's tab) always wins
-  // over whatever was expanded before — including re-opening the SAME pacing after following a link
-  // back and forth between two campaigns it covers.
+  // A fresh navigation (Overview, its Create Pacing modal, or an "also covers" link from
+  // another campaign's tab) always wins over whatever was selected before — including re-selecting the
+  // SAME pacing after following a link back and forth between two campaigns it covers.
   useEffect(() => {
-    if (openPacingId) setExpandedId(openPacingId);
-  }, [openPacingId]);
+    if (openPacingId) {
+      setPickedId(openPacingId);
+      if (openJustCreated) setJustCreatedId(openPacingId);
+    }
+  }, [openPacingId, openJustCreated]);
 
   useEffect(() => {
-    if (expandedId && highlightedRef.current) {
+    if (pickedId && highlightedRef.current) {
       highlightedRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [expandedId, pacingsQuery.data]);
+  }, [pickedId, pacingsQuery.data]);
 
   // An open row menu closes on an outside click, on Escape, and on any scroll or resize — it is
   // positioned fixed from the trigger's rect, so a scrolled page would leave it hanging over a row
@@ -457,32 +457,46 @@ export function PacingTab() {
   }
 
   const rows = pacingsQuery.data?.pacings ?? [];
-  const [openDashboardId, setOpenDashboardId] = useState<string | null>(null);
-  const openDashboardRow = rows.find((row) => row.id === openDashboardId);
-  // §8 (Create Pacing): swaps the list for the review/create panel in place, same pattern as
-  // openDashboardRow above - "Back to pacings" returns to exactly the list the user left.
+  // The first row when nothing has been picked, and again whenever the pick no longer exists (it was
+  // deleted, or the campaign's list changed under it) - so the panel below is never blank while there
+  // are pacings to show. Reporting resolves its selection the same way (`reporting-tab.tsx`).
+  //
+  // The one case that must NOT fall back is a pick that is still on its way: creating a pacing picks
+  // it and invalidates this list, and React Query serves the previous list until the refetch lands.
+  // Falling back there would flash the first pacing's dashboard - and fetch its data - for the one
+  // render before the new pacing appears.
+  const picked = pickedId != null ? rows.find((row) => row.id === pickedId) : undefined;
+  const awaitingPick = pickedId != null && picked === undefined && pacingsQuery.isFetching;
+  const selectedRow = picked ?? (awaitingPick ? undefined : rows[0]);
+  const selectedId = selectedRow?.id ?? null;
+
+  /**
+   * Picks a pacing, and drops the dashboard filters on the way.
+   *
+   * The filters live only in the query string, with no pacing in the key, and the dashboard below is
+   * no longer torn down between pacings. Left alone, the channels, labels and line-item selection
+   * chosen for one pacing would still be applied to the next - where they match nothing, so a
+   * perfectly healthy pacing would open empty. `replace` so this does not add a history entry per
+   * click.
+   */
+  function selectRow(rowId: string) {
+    if (rowId === selectedId) return;
+    setPickedId(rowId);
+    const next = new URLSearchParams(searchParams);
+    clearFilterParams(next);
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+  }
+
+  // §8 (Create Pacing): swaps the list for the review/create panel in place. Kept as it was - creating
+  // is a one-off errand with its own two steps, not something the user flips between, and the list is
+  // no use while filling the form in (owner, 2026-09-30).
   const [creating, setCreating] = useState(false);
-  // The pacing just created from this tab, if any. Its first refresh runs fire-and-forget after
-  // create, so its dashboard can open before any data exists and should wait for that first build.
-  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   // `?.` on scope as well as on data. Optional chaining short-circuits the whole
   // chain only when the value it is attached to is nullish, so `data?.scope.can_create`
   // still throws when the response arrives without a scope — and an uncaught
   // TypeError in render unmounts the tree, which is why a 404 from this endpoint
   // showed up as a blank page rather than an error state.
   const canCreate = pacingsQuery.data?.scope?.can_create ?? false;
-
-  // §6: opening a full dashboard replaces this tab's list in place (no route change) - "Back to
-  // pacings" returns to exactly the list/expansion state the user left, since it's all still here.
-  if (openDashboardRow) {
-    return (
-      <PacingDashboard
-        row={openDashboardRow}
-        watchFirstData={openDashboardRow.id === justCreatedId}
-        onBack={() => setOpenDashboardId(null)}
-      />
-    );
-  }
 
   if (creating) {
     return (
@@ -494,7 +508,8 @@ export function PacingTab() {
         onClose={() => setCreating(false)}
         onCreated={(pacingId) => {
           setCreating(false);
-          setExpandedId(pacingId);
+          // Selects it, so the new pacing's dashboard is what the list drops the user back onto.
+          setPickedId(pacingId);
           setJustCreatedId(pacingId);
         }}
       />
@@ -532,10 +547,9 @@ export function PacingTab() {
               key={row.id}
               row={row}
               currentCampaignId={campaign.id}
-              expanded={expandedId === row.id}
-              onToggle={() => setExpandedId((current) => (current === row.id ? null : row.id))}
-              onOpenDashboard={() => setOpenDashboardId(row.id)}
-              itemRef={expandedId === row.id ? highlightedRef : undefined}
+              selected={selectedId === row.id}
+              onSelect={() => selectRow(row.id)}
+              itemRef={selectedId === row.id ? highlightedRef : undefined}
               canDelete={isAdmin}
               canRevalidate={isAdmin && !ARCHIVED_STATUSES.has(row.status)}
               refreshCooldownSeconds={cooldownSecondsFor(row.id)}
@@ -549,6 +563,30 @@ export function PacingTab() {
             />
           ))}
         </ul>
+      )}
+
+      {/* §6's dashboard for the selected pacing, under the list rather than instead of it.
+          `key` matters: the dashboard holds its own state (settings drawer, refresh cooldown, the
+          first-data watch), and carrying one pacing's into the next is how a drawer stays open over
+          somebody else's plan. Remounting per pacing also keeps its data hooks honest. */}
+      {selectedRow && (
+        <div className="pacing-tab__detail">
+          <div className="pacing-tab__detail-sep" />
+          <AlsoCoversNotice row={selectedRow} currentCampaignId={campaign.id} />
+          {selectedRow.dashSlug ? (
+            <PacingDashboard
+              key={selectedRow.id}
+              row={selectedRow}
+              watchFirstData={selectedRow.id === justCreatedId}
+            />
+          ) : (
+            // Pacing has not resolved this row's dash_slug yet (see PacingRowV1.dashSlug). Said here
+            // rather than left blank: an empty panel under a selected row reads as a broken screen.
+            <p className="pacing-tab__detail-empty">
+              This pacing has no dashboard yet — its first data build has not produced one.
+            </p>
+          )}
+        </div>
       )}
 
       <PacingNsDiffSheet row={nsDiffTarget} onClose={() => setNsDiffTarget(null)} />

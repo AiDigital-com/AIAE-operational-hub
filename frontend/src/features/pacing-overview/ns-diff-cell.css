@@ -1,0 +1,29 @@
+/* NetSuite-diff cell (§13, US-136). Ported verbatim from the retired /pacing table's own rules.
+   "In sync" is plain coloured text, not a badge - a table full of healthy pacings should not compete
+   for attention with the ones that need it. A real count of differences gets a tinted pill:
+   background tint and mixed-toward-ink text, never a vertical stripe (banned project-wide) and never
+   a solid fill with white digits, which at 11px is the unreadable contrast this pattern was once
+   reported as. */
+.ns-diff__none {
+  color: var(--muted);
+}
+.ns-diff__ok {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--good);
+}
+.ns-diff__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--pill);
+  font-size: 11.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--bad) 15%, var(--surface));
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
+  cursor: default;
+}

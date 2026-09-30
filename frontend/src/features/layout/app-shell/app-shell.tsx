@@ -29,9 +29,6 @@ const CampaignTabRedirect = lazy(() =>
   import("../../campaigns/campaign-workspace").then((m) => ({ default: m.CampaignTabRedirect }))
 );
 const PacingTab = lazy(() => import("../../campaigns/tabs/pacing-tab").then((m) => ({ default: m.PacingTab })));
-const PacingOverview = lazy(() =>
-  import("../../pacing-overview/pacing-overview").then((m) => ({ default: m.PacingOverview }))
-);
 // Admin-only, not in the migration plan (see pacing-admin/pacing-admin.tsx's own header comment) -
 // code-split for the same reason as TeamManagement above: most visits never load it.
 const PacingAdmin = lazy(() =>
@@ -72,9 +69,8 @@ export function AppShell() {
   // default reading-width cap - see app-shell.css's `.app__content--wide`.
   const isCampaignsTable = useMatch("/agencies/:agencyId/clients/:clientId");
   const isCampaignWorkspace = useMatch("/campaigns/:campaignId/*");
-  const isPacingOverview = useMatch("/pacing");
   const isPacingAdmin = useMatch("/pacing-admin");
-  const isWide = isOverview || isCampaignsTable || isCampaignWorkspace || isPacingOverview || isPacingAdmin;
+  const isWide = isOverview || isCampaignsTable || isCampaignWorkspace || isPacingAdmin;
 
   if (token.error) {
     return <CenteredMessage danger title="Profile cannot be loaded" body={token.error} />;
@@ -118,7 +114,6 @@ export function AppShell() {
           <Suspense fallback={<LoadingBlock label="Loading" />}>
             <Routes>
               <Route path="/" element={<Overview />} />
-              <Route path="/pacing" element={<PacingOverview />} />
               <Route path="/agencies" element={<AgencyList />} />
               <Route path="/agencies/:agencyId" element={<AgencyClients />} />
               <Route path="/agencies/:agencyId/clients/:clientId" element={<Campaigns />} />

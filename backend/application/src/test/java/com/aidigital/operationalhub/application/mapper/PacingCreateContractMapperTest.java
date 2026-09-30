@@ -1,12 +1,17 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateDataV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateLineItemV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSourceV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftLineItemV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingInUseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingInsertionOrderV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingInUseEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingInsertionOrder;
@@ -276,6 +281,69 @@ class PacingCreateContractMapperTest {
 
 		// When / Then:
 		assertThat(mapper.toDraftV1(result).getInsertionOrders()).isEmpty();
+	}
+
+	@Test
+	void shouldForwardCostCoefVerbatimIncludingItsAbsenceTest() {
+		// Given/When/Then: the per-LI coefficient flag travels exactly as sent - true stays true,
+		// absent stays null (the client then OMITS the wire key; Pacing rejects an explicit null).
+		assertThat(mapper.toCreateLineItem(new PacingCreateLineItemV1().lineItemId("1").costCoef(true))
+				.costCoef()).isTrue();
+		assertThat(mapper.toCreateLineItem(new PacingCreateLineItemV1().lineItemId("1"))
+				.costCoef()).isNull();
+	}
+
+	@Test
+	void shouldCollectCreateOptionsVerbatimTest() {
+		// Given: the create screen's full settings block on the request body.
+		PacingCreateV1 body = new PacingCreateV1()
+				.pacingName("Pacing")
+				.client("Acme")
+				.agency("MediaCo")
+				.campaigns(List.of("40540", "40539"))
+				.data(new PacingCreateDataV1()
+						.source(PacingDataSourceV1.MART_ADJUSTMENTS_VIEW)
+						.fetchCreatives(true)
+						.fetchConversions(false)
+						.coefEnabled(true))
+				.rate(0.7345)
+				.rateLocked(true)
+				.campaignLinks(List.of(new PacingCampaignLinkV1().name("IO").url("https://drive.example/io")))
+				.campaignNotes("notes");
+
+		// When:
+		PacingCreateOptions options = mapper.toCreateOptions(body);
+
+		// Then: a straight copy - the pinned order untouched, the enum unwrapped to its wire string.
+		assertThat(options.campaigns()).containsExactly("40540", "40539");
+		assertThat(options.client()).isEqualTo("Acme");
+		assertThat(options.agency()).isEqualTo("MediaCo");
+		assertThat(options.data().source()).isEqualTo("platform_mart_adjustments_view");
+		assertThat(options.data().fetchCreatives()).isTrue();
+		assertThat(options.data().fetchConversions()).isFalse();
+		assertThat(options.data().coefEnabled()).isTrue();
+		assertThat(options.rate()).isEqualTo(0.7345);
+		assertThat(options.rateLocked()).isTrue();
+		assertThat(options.campaignLinks()).hasSize(1);
+		assertThat(options.campaignLinks().get(0).name()).isEqualTo("IO");
+		assertThat(options.campaignLinks().get(0).url()).isEqualTo("https://drive.example/io");
+		assertThat(options.campaignNotes()).isEqualTo("notes");
+	}
+
+	@Test
+	void shouldLeaveEveryUntouchedOptionNullTest() {
+		// Given/When: a body with only the required fields - the campaign tab's minimal create.
+		PacingCreateOptions options = mapper.toCreateOptions(new PacingCreateV1().pacingName("Pacing"));
+
+		// Then: all nulls, so the Pacing client omits every optional wire key.
+		assertThat(options.campaigns()).isNull();
+		assertThat(options.client()).isNull();
+		assertThat(options.agency()).isNull();
+		assertThat(options.data()).isNull();
+		assertThat(options.rate()).isNull();
+		assertThat(options.rateLocked()).isNull();
+		assertThat(options.campaignLinks()).isNull();
+		assertThat(options.campaignNotes()).isNull();
 	}
 
 	@Test

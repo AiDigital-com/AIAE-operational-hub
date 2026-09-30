@@ -1,0 +1,54 @@
+.kpi-spark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kpi-spark__na {
+  color: var(--muted);
+}
+.kpi-spark__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kpi-spark__item svg {
+  vertical-align: middle;
+  overflow: visible;
+}
+.kpi-spark__label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.kpi-spark__value {
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Same inverted bubble as the heatmap's. */
+.kpi-spark__tip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+.kpi-spark__tip-date {
+  font-weight: 700;
+}

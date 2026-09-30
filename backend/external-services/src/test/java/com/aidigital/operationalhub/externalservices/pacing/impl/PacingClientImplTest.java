@@ -10,7 +10,9 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudience
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
@@ -161,8 +163,8 @@ class PacingClientImplTest {
 	@Test
 	void shouldDeserializeCampaignsAndHealthWithAlertsTest() {
 		// Given: a row shaped like Pacing's real GET /api/pacings response (§4 of the migration plan) -
-		// snake_case top-level/health fields, already-camelCase campaigns/alerts, plus fields PacingRow
-		// deliberately does not read (owner_id, client, agency) that must not break deserialization.
+		// snake_case top-level/health fields, already-camelCase campaigns/alerts, plus a field PacingRow
+		// deliberately does not read (health.spend_pct) that must not break deserialization.
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
 		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
@@ -175,7 +177,7 @@ class PacingClientImplTest {
 						{"pacings":[{
 							"pacing_id":"p1","pacing_name":"Nike SS26 Display","status":"Live",
 							"flight_start":"2026-08-01","flight_end":"2026-09-30",
-							"owner_id":"ignored-uuid","owner_name":"Azat Nabiev",
+							"owner_id":"owner-uuid-1","owner_name":"Azat Nabiev",
 							"line_item_count":3,"client":"Nike","agency":"Demo Agency",
 							"campaigns":[{"id":"CAMP-NIKE","name":"Nike SS26"},{"id":"CAMP-OTHER","name":"Other"}],
 							"health":{"status":"over","pacing_pp":12.3,"spend_pct":40.0,
@@ -196,6 +198,9 @@ class PacingClientImplTest {
 		assertThat(row.pacingName()).isEqualTo("Nike SS26 Display");
 		assertThat(row.flightStart()).isEqualTo("2026-08-01");
 		assertThat(row.ownerName()).isEqualTo("Azat Nabiev");
+		assertThat(row.ownerId()).isEqualTo("owner-uuid-1");
+		assertThat(row.client()).isEqualTo("Nike");
+		assertThat(row.agency()).isEqualTo("Demo Agency");
 		assertThat(row.lineItemCount()).isEqualTo(3);
 		assertThat(row.campaigns()).extracting("id", "name")
 				.containsExactly(org.assertj.core.groups.Tuple.tuple("CAMP-NIKE", "Nike SS26"),
@@ -205,6 +210,7 @@ class PacingClientImplTest {
 		assertThat(row.health().marginActual()).isEqualTo(18.5);
 		assertThat(row.health().marginTarget()).isEqualTo(25.0);
 		assertThat(row.health().budgetTotal()).isEqualTo(50000.0);
+		assertThat(row.health().daysRemaining()).isEqualTo(10);
 		assertThat(row.health().alerts()).hasSize(1);
 		assertThat(row.health().alerts().get(0).type()).isEqualTo("pacing_off_pace");
 		assertThat(row.health().alerts().get(0).severity()).isEqualTo("critical");
@@ -1560,7 +1566,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createPacing(assertion, "", List.of()))
+		assertThatThrownBy(() -> client.createPacing(assertion, "", List.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("pacing_name and line_items required");
@@ -1581,7 +1587,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of()))
+		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("the selected line items span more than one non-USD currency; a pacing can only have one");
@@ -1598,7 +1604,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null);
+				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -1625,7 +1631,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When:
-		PacingCreateResult result = client.createPacing(assertion, "2026_Campaign", List.of(lineItem));
+		PacingCreateResult result = client.createPacing(assertion, "2026_Campaign", List.of(lineItem), null);
 
 		// Then:
 		assertThat(result.pacingId()).isEqualTo("p9");
@@ -1648,13 +1654,13 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem first = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null);
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null);
 		PacingCreateLineItem second = new PacingCreateLineItem(
 				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-282075", null, 200000.0, 15.5, null, null);
+				"40539", "2026_Campaign", "TM-282075", null, 200000.0, 15.5, null, null, null);
 		PacingCreateLineItem repeat = new PacingCreateLineItem(
 				"333", "DOOH", "2026-03-01", "2026-03-31", "CPM", null, 3000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", null, 300000.0, 15.5, null, null);
+				"40539", "2026_Campaign", "TM-271064", null, 300000.0, 15.5, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				// Raw-body assertions, not object ones: the wire keys are snake_case and the pair's
@@ -1669,7 +1675,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		client.createPacing(assertion, "2026_Campaign", List.of(first, second, repeat));
+		client.createPacing(assertion, "2026_Campaign", List.of(first, second, repeat), null);
 		server.verify();
 	}
 
@@ -1686,10 +1692,10 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem noNumber = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", null, null, 100000.0, 15.5, null, null);
+				"40539", "2026_Campaign", null, null, 100000.0, 15.5, null, null, null);
 		PacingCreateLineItem blankNumber = new PacingCreateLineItem(
 				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "  ", null, 200000.0, 15.5, null, null);
+				"40539", "2026_Campaign", "  ", null, 200000.0, 15.5, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(jsonPath("$.insertion_order_id").doesNotExist())
@@ -1699,7 +1705,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		client.createPacing(assertion, "2026_Campaign", List.of(noNumber, blankNumber));
+		client.createPacing(assertion, "2026_Campaign", List.of(noNumber, blankNumber), null);
 		server.verify();
 	}
 
@@ -1717,7 +1723,7 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "Bretts RV", "SY-Bretts RV-0426", null, 100000.0, 15.5, null, null);
+				"40539", "Bretts RV", "SY-Bretts RV-0426", null, 100000.0, 15.5, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(jsonPath("$.insertion_order_id").value("SY-Bretts RV-0426"))
@@ -1727,7 +1733,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		client.createPacing(assertion, "2026_Campaign", List.of(lineItem));
+		client.createPacing(assertion, "2026_Campaign", List.of(lineItem), null);
 		server.verify();
 	}
 
@@ -1792,7 +1798,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of()))
+		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
@@ -1813,10 +1819,164 @@ class PacingClientImplTest {
 				});
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of()))
+		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	@Test
+	void shouldSendEveryCreateOptionOnTheWireTest() throws Exception {
+		// Given: the standalone create screen's full settings block - client/agency, the pinned
+		// campaign order, the data namespace, a rate override, links and notes - every key
+		// snake_cased exactly as Pacing's create route reads it, plus the per-LI cost_coef flag.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingCreateLineItem lineItem = new PacingCreateLineItem(
+				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "CAD", 0.73,
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, true);
+		PacingCreateOptions options = new PacingCreateOptions(
+				List.of("40539", "40540"), "Acme", "MediaCo",
+				new PacingCreateData("platform_mart", true, false, true),
+				0.7345, true,
+				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/1/2/3")),
+				"launches mid-flight");
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andExpect(method(POST))
+				.andExpect(content().json(
+						"{\"pacing_name\":\"2026_Campaign\",\"client\":\"Acme\",\"agency\":\"MediaCo\","
+								+ "\"campaigns\":[\"40539\",\"40540\"],"
+								+ "\"data\":{\"source\":\"platform_mart\",\"fetch_creatives\":true,"
+								+ "\"fetch_conversions\":false,\"coef_enabled\":true},"
+								+ "\"rate\":0.7345,\"rate_locked\":true,"
+								+ "\"campaign_links\":[{\"name\":\"Asana\",\"url\":\"https://app.asana.com/1/2/3\"}],"
+								+ "\"campaign_notes\":\"launches mid-flight\"}"))
+				.andExpect(jsonPath("$.line_items[0].cost_coef").value(true))
+				.andRespond(withStatus(HttpStatus.CREATED)
+						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createPacing(assertion, "2026_Campaign", List.of(lineItem), options);
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitEveryOptionalCreateKeyWhenOptionsAreNullTest() throws Exception {
+		// Given: Pacing gates each optional key on PRESENCE (if (body.client), body.rate != null,
+		// Array.isArray(body.campaign_links)...) and validateCoefLi rejects an explicit null
+		// cost_coef - so a create that sets none of them must carry NONE of the keys, not nulls.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingCreateLineItem lineItem = new PacingCreateLineItem(
+				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null);
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.client").doesNotExist())
+				.andExpect(jsonPath("$.agency").doesNotExist())
+				.andExpect(jsonPath("$.campaigns").doesNotExist())
+				.andExpect(jsonPath("$.data").doesNotExist())
+				.andExpect(jsonPath("$.rate").doesNotExist())
+				.andExpect(jsonPath("$.rate_locked").doesNotExist())
+				.andExpect(jsonPath("$.campaign_links").doesNotExist())
+				.andExpect(jsonPath("$.campaign_notes").doesNotExist())
+				.andExpect(jsonPath("$.line_items[0].cost_coef").doesNotExist())
+				.andRespond(withStatus(HttpStatus.CREATED)
+						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.createPacing(assertion, "2026_Campaign", List.of(lineItem), null);
+		server.verify();
+	}
+
+	@Test
+	void shouldValidateInsertionOrderSendingTheSelectorTest() {
+		// Given: the create screen's IO mode - the third validate selector, same response shape.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(content().json("{\"insertion_order_id\":\"SY-Bretts RV-0426\"}"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"lineItems\":[],\"orderNumber\":\"SY-Bretts RV-0426\"}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingValidateResult result = client.validateInsertionOrder(assertion, "SY-Bretts RV-0426");
+
+		// Then:
+		assertThat(result.ok()).isTrue();
+		assertThat(result.orderNumber()).isEqualTo("SY-Bretts RV-0426");
+		server.verify();
+	}
+
+	@Test
+	void shouldMapValidate429ToRateLimitedTest() {
+		// Given: dash-gate allows 5 validates per user per minute; the standalone create screen's
+		// step 1 must see an honest 429 ("wait a moment"), never a 500.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/pacings/validate"))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+						.body("{\"error\":\"rate_limit_exceeded\",\"retry_after\":60}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.validateInsertionOrder(assertion, "TM-271064"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_RATE_LIMITED);
+	}
+
+	@Test
+	void shouldDescribeCoefErrorsPerLineItemOnCreateTest() {
+		// Given: Pacing's bad_coef_config carries a structured details array naming each offending
+		// line item - the detail must name them too, not collapse into one generic sentence, so the
+		// create screen can point at the right rows.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
+						.body("{\"error\":\"bad_coef_config\",\"details\":[{\"line_item_id\":\"599852\","
+								+ "\"errors\":[{\"code\":\"coef_margin_range\",\"where\":\"li\","
+								+ "\"value\":150}]}]}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of(), null))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getDetail())
+				.asString()
+				.contains("599852")
+				.contains("out of range");
 	}
 
 	// ── §9: plan save (US-125/126/127) ──
@@ -3407,8 +3567,8 @@ class PacingClientImplTest {
 	@Test
 	void shouldMapJournalAddTooFastAsUpstreamRateLimitedTest() {
 		// Given: dash-gate's `journal` bucket refuses a seventh write in a minute with 429 too_fast -
-		// mapped to its own reason, not collapsed into OTHER/500 (libraryFailure's 429 maps the same
-		// way; only pacingActionFailure's validate/create 429 stays OTHER, deliberately).
+		// mapped to its own reason, not collapsed into OTHER/500 (libraryFailure's and
+		// pacingActionFailure's 429s map the same way).
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
 		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
 		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);

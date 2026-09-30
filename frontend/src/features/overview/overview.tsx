@@ -1,34 +1,90 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgencyList, useAgencySearch } from "../agencies/hooks";
-import { useCampaignSetup } from "../campaigns/hooks";
-import type { CampaignSearchRequestV1, CampaignV1 } from "../campaigns/types";
+import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { BranchIcon, ChevronRightIcon, SearchIcon, SortIcon } from "../../shared/ui/icons/icons";
-import { LoadingBlock, LoadingOverlay, LoadingSpinner } from "../../shared/ui/loading-spinner/loading-spinner";
+import { SearchIcon } from "../../shared/ui/icons/icons";
+import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { MultiSelect, type MultiSelectOption } from "../../shared/ui/multi-select/multi-select";
+import { useToast } from "../../shared/ui/toast/toast";
+import { isAdminUser, useCurrentUser } from "../rbac/hooks";
+import { fmtBudget } from "../pacing/mock/format";
+// The one delete confirmation in the product (typed-name friction and all) and the one revalidate
+// modal, owned by the Pacing admin screen - reused rather than grown again here.
+import { DeletePacingModal } from "../pacing-admin/pacing-admin-delete-modals";
+import { RevalidatePacingModal } from "../pacing-admin/pacing-admin-revalidate-modal";
+import { triggerPacingRefresh } from "../pacing-dashboard/api";
+import { emptyScopeCopy } from "../pacing-overview/empty-scope";
+import { usePacingOverview } from "../pacing-overview/hooks";
+import { pacingRoute } from "../pacing-overview/navigation";
+import type { PacingRowV1 } from "../pacing-overview/types";
+import { RefreshLandingWatch } from "./refresh-watch";
+
+// The Create Pacing modal pulls in the whole review panel - code-split so the Overview's own chunk
+// does not carry it for the majority of visits that never create anything.
+const CreatePacingModal = lazy(() =>
+  import("../pacing-create/create-pacing-modal").then((m) => ({ default: m.CreatePacingModal }))
+);
+// §12, and the NetSuite diff sheet (§13): both arrived here when the `/pacing` screen was retired -
+// it was the only place either could be reached. Code-split for the same reason as the modal above:
+// most visits open neither.
+const DelegationsPanel = lazy(() =>
+  import("../pacing-overview/delegations-panel").then((m) => ({ default: m.DelegationsPanel }))
+);
+const PacingNsDiffSheet = lazy(() =>
+  import("../campaigns/tabs/pacing-ns-diff-sheet").then((m) => ({ default: m.PacingNsDiffSheet }))
+);
 import {
-  CAMPAIGN_STATUS_SEGMENTS,
-  StatusBadge,
-  displayStatusLabel,
-  resolveStatusStyle,
-} from "../../shared/ui/status-badge/status-badge";
-import { useCurrentUser } from "../rbac/hooks";
-import { fmtBudget, fmtDate } from "../pacing/mock/format";
-import { useOverviewPacing } from "../pacing/mock/hooks";
-import type { LineItem, OwnerCampaign } from "../pacing/mock/types";
+  buildOwnerGroups,
+  compareOverviewRows,
+  matchesAgencyFilter,
+  matchesOverviewSearch,
+  rowLiCount,
+  type OverviewSort,
+  type OverviewSortField,
+} from "./owner-groups";
+import { OwnerSection } from "./owner-section";
 import "./overview.css";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const ALL = "all";
 
 /**
+ * Pacing refuses a second refresh of the same pacing within two minutes (its double-launch guard).
+ * Held here too, so a refresh this screen just triggered greys its own menu item out for the same
+ * window instead of letting the user earn a 429 to find out.
+ */
+const REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
+
+/** One segmented-filter option over the pacing lifecycle statuses. `value` is the exact Pacing
+ *  status string ("" = no filter). */
+interface StatusSegment {
+  key: string;
+  label: string;
+  value: string;
+}
+
+/**
+ * The pacing lifecycle vocabulary as segmented-filter options — Pacing's own four statuses, not the
+ * NetSuite campaign set this page filtered by before the owner-grouped rebuild. "All" hides
+ * Archive; picking "Archived" explicitly is how an archived pacing stays findable (§9, US-128 —
+ * same rule as `/pacing`).
+ */
+export const OVERVIEW_STATUS_SEGMENTS: StatusSegment[] = [
+  { key: "all", label: "All", value: "" },
+  { key: "live", label: "Live", value: "Live" },
+  { key: "paused", label: "Paused", value: "Paused" },
+  { key: "complete", label: "Complete", value: "Complete" },
+  { key: "archive", label: "Archived", value: "Archive" },
+];
+
+/**
  * Reads the agency filter out of the URL, keeping only what could be an agency id.
  *
- * Validated rather than trusted: the query string is user-editable, and a non-numeric id would travel to
- * the backend as a filter value that matches nothing while looking like a filter that does.
+ * Validated rather than trusted: the query string is user-editable, and a non-numeric id would
+ * travel into the filter as a value that matches nothing while looking like a filter that does.
  *
  * @param raw the comma-separated ids from the query string
  * @returns the ids, or an empty list when there are none to read
@@ -42,16 +98,26 @@ function parseAgencyIds(raw: string | null): number[] {
 }
 
 /**
- * Reads the sort out of the URL, accepting only a column this table actually offers.
+ * Reads the sort out of the URL, accepting only a column the group tables actually offer.
  *
  * @param raw the `FIELD:DIRECTION` pair from the query string
- * @returns the sort, or null for the default flight-phase order
+ * @returns the sort, or null for the default status-priority order
  */
 function parseSort(raw: string | null): OverviewSort | null {
   const [field, direction] = (raw ?? "").split(":");
-  const fields: OverviewSortField[] = ["NAME", "STATUS", "START_DATE"];
+  const fields: OverviewSortField[] = ["NAME", "STATUS", "BUDGET", "MARGIN", "PACING", "FLIGHT", "LINE_ITEMS"];
   if (!fields.includes(field as OverviewSortField)) return null;
   return { field: field as OverviewSortField, direction: direction === "DESC" ? "DESC" : "ASC" };
+}
+
+/**
+ * Reads the status segment out of the URL, accepting only a key the segmented control offers.
+ *
+ * @param raw the segment key from the query string
+ * @returns the key, or "all" when it is not one
+ */
+function parseStatusKey(raw: string | null): string {
+  return OVERVIEW_STATUS_SEGMENTS.some((segment) => segment.key === raw) ? (raw as string) : ALL;
 }
 
 /** Where the last filter set is kept, so returning to the Overview by any route restores it. */
@@ -70,7 +136,7 @@ const FILTER_PARAM_KEYS = ["q", "status", "agency", "sort"] as const;
  * filters were being lost (PDI_097).
  *
  * Remembered per session and per user, not forever: a filter that outlives the tab greets the next visit
- * with campaigns silently missing and no clue why, and one that outlives the *account* does it to whoever
+ * with pacings silently missing and no clue why, and one that outlives the *account* does it to whoever
  * signs in next at that desk.
  *
  * @param params  the current query string
@@ -107,93 +173,19 @@ function rememberFilters(filters: URLSearchParams, userId: string | undefined): 
   }
 }
 
-/** The columns of the campaign table that can be ordered by, named as the sort contract names them. */
-type OverviewSortField = "NAME" | "STATUS" | "START_DATE";
-
-interface OverviewSort {
-  field: OverviewSortField;
-  direction: "ASC" | "DESC";
-}
-
 /**
- * A column header that orders the table by its own column.
+ * The Overview at `/`: every pacing the signed-in user is entitled to see, grouped by owner exactly
+ * as Pacing's own retired Overview grouped them (§4's owner-grouped rebuild) — group cards with
+ * under/over badges, rows that expand into per-line-item health with the 7-day delivery heatmap and
+ * KPI sparklines, off-pace row washes, delegation pills and period-scope markers.
  *
- * Three states, not two: ascending, descending, and off. Off matters more than it looks - it is how a user
- * gets back to the default order (live, then upcoming, then finished) without reloading the page, and that
- * order is the one worth returning to.
- */
-function SortableHeader({
-  label,
-  field,
-  sort,
-  onSort,
-  className,
-}: {
-  label: string;
-  field: OverviewSortField;
-  sort: OverviewSort | null;
-  onSort: (field: OverviewSortField) => void;
-  className?: string;
-}) {
-  const direction = sort?.field === field ? sort.direction : null;
-  return (
-    <th className={className} aria-sort={direction === "ASC" ? "ascending" : direction === "DESC" ? "descending" : "none"}>
-      <button type="button" className={cn("overview__sort", direction && "overview__sort--active")} onClick={() => onSort(field)}>
-        <span className="overview__sort-label">
-          {label}
-        </span>
-        <SortIcon active={direction === "ASC" ? "asc" : direction === "DESC" ? "desc" : undefined} />
-      </button>
-    </th>
-  );
-}
-
-/**
- * Builds the server-side search request from the Overview's controls: search, status, and agency all
- * move the filtering into BigQuery (see 01-MIGRATION-PLAN.md O1). Status filters on the exact real
- * NetSuite status string (EQUALS, case-insensitive) - a CONTAINS match on the segment's own label
- * (e.g. "complete") would never match the real value ("Finished").
- *
- * The search box uses SEARCH rather than NAME: it matches the campaign, client or agency name, since
- * people looking for a campaign here name it by whichever of the three they deal with (PDI_085).
- */
-function buildOverviewSearchBody(
-  search: string,
-  statusKey: string,
-  agencyIds: number[],
-  sort: OverviewSort | null
-): CampaignSearchRequestV1 {
-  const statusValue = CAMPAIGN_STATUS_SEGMENTS.find((segment) => segment.key === statusKey)?.value ?? "";
-  const filters = [
-    ...(search
-      ? [{ field: "SEARCH" as const, value: search, operation: "CONTAINS" as const, caseSensitive: false }]
-      : []),
-    ...(statusValue
-      ? [{ field: "STATUS" as const, value: statusValue, operation: "EQUALS" as const, caseSensitive: false }]
-      : []),
-    // One filter per selected agency: the backend ORs repeated AGENCY_ID filters into a single IN
-    // (see CampaignSearchRequestV1's description), intersected with the caller's own visibility.
-    ...agencyIds.map((agencyId) => ({
-      field: "AGENCY_ID" as const,
-      value: String(agencyId),
-      operation: "EQUALS" as const,
-      caseSensitive: false,
-    })),
-  ];
-  // No sorting field at all when the user has not chosen one, rather than a name sort: the server reads
-  // its absence as "order by what is happening to each campaign" - live, then upcoming, then finished.
-  return sort ? { filters, sorting: sort } : { filters };
-}
-
-/**
- * The operational pacing overview at `/`: a rollup summary and every accessible campaign. Entities are
- * real and RBAC-scoped; pacing is mocked on top of them (see 01-MIGRATION-PLAN.md O1).
- *
- * Campaigns load paginated (infinite scroll, like the Reporting tab) with search/status/agency filters
- * applied server-side via the same `searchCampaigns` the Campaigns page uses - never "all at once".
+ * One request for the whole scoped list (`usePacingOverview`); status, agency, search and sort all
+ * run against the loaded set. The filter toolbar keeps its URL + sessionStorage memory from the
+ * previous campaign-based Overview (PDI_097).
  */
 export function Overview() {
   const navigate = useNavigate();
+  const overview = usePacingOverview();
 
   // Filters live in the URL so a filtered view can be sent to someone and restored by the back button, and
   // in session storage so returning by any other route restores them too - the sidebar's "Overview" link
@@ -201,16 +193,90 @@ export function Overview() {
   const [params, setParams] = useSearchParams();
   // Read from the cache the app shell has already filled; `false` keeps this from being a second request
   // for the profile, and leaves the value undefined where nothing has loaded one.
-  const rememberedFor = useCurrentUser(false).data?.user_id;
+  const currentUser = useCurrentUser(false).data;
+  const rememberedFor = currentUser?.user_id;
   // Read once, on mount: after that the state below is the truth and the URL is written from it.
   const [initialParams] = useState(() => initialFilterParams(params, rememberedFor));
   const [searchInput, setSearchInput] = useState(() => initialParams.get("q") ?? "");
-  const search = useDebounce(searchInput, SEARCH_DEBOUNCE_MS);
-  const [status, setStatus] = useState<string>(() => initialParams.get("status") ?? ALL);
+  const search = useDebounce(searchInput, SEARCH_DEBOUNCE_MS).trim().toLowerCase();
+  const [status, setStatus] = useState<string>(() => parseStatusKey(initialParams.get("status")));
   const [agencyIds, setAgencyIds] = useState<number[]>(() => parseAgencyIds(initialParams.get("agency")));
   const [sort, setSort] = useState<OverviewSort | null>(() => parseSort(initialParams.get("sort")));
-  const [expandAll, setExpandAll] = useState(false);
-  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+
+  // Row kebab menu state. Deleting and re-validating are admin-only on the Hub
+  // (PacingAdminController#requireAdmin) and on Pacing itself, so a non-admin is not shown those two
+  // items rather than being offered an action that can only come back 403. Refreshing and
+  // transferring are not privileged and stay on every row.
+  const isAdmin = isAdminUser(currentUser);
+  const toast = useToast();
+  const [deleteTarget, setDeleteTarget] = useState<PacingRowV1 | null>(null);
+  const [revalidateTarget, setRevalidateTarget] = useState<PacingRowV1 | null>(null);
+  // When each pacing's refresh cooldown runs out, by pacing id. `nowMs` ticks once a second while
+  // any is running so the menu item counts DOWN rather than showing whatever second it was opened on.
+  const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Slugs whose just-triggered refresh is being watched until the build lands - one watcher per
+  // refreshed pacing, never a poller for rows nobody refreshed.
+  const [watchSlugs, setWatchSlugs] = useState<string[]>([]);
+  // Whether the Create Pacing modal is open. Mounted only while open, so every opening starts the
+  // two-step flow fresh at step 1.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [delegationsOpen, setDelegationsOpen] = useState(false);
+  const [nsDiffTarget, setNsDiffTarget] = useState<PacingRowV1 | null>(null);
+
+  // Ticks only while a cooldown is actually running - an interval that never stops would re-render
+  // the whole grouped list once a second for as long as the page is open.
+  useEffect(() => {
+    const anyRunning = Object.values(cooldownUntil).some((until) => until > Date.now());
+    if (!anyRunning) return undefined;
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [cooldownUntil, nowMs]);
+
+  /** Seconds left on this row's refresh cooldown, or 0 when it may be refreshed now. */
+  function cooldownSecondsFor(rowId: string): number {
+    const until = cooldownUntil[rowId];
+    if (until == null) return 0;
+    return Math.max(0, Math.ceil((until - nowMs) / 1000));
+  }
+
+  /**
+   * Triggers Pacing's own on-demand build for one row (US-119). Fire-and-forget upstream: a success
+   * here means "queued", never "done" - the per-row watcher below re-pulls the lists once the build
+   * actually lands. A refusal inside the two-minute window is not an error to dwell on: it comes
+   * back as the remaining seconds, which go straight into this row's countdown.
+   */
+  const refreshRow = useCallback(
+    async (row: PacingRowV1) => {
+      try {
+        const outcome = await triggerPacingRefresh(row.id);
+        // One timestamp for both the deadline and the clock it is measured against, so the countdown
+        // starts on the exact second asked for instead of a millisecond past it.
+        const startedAt = Date.now();
+        setNowMs(startedAt);
+        if (outcome.status === "cooldown") {
+          setCooldownUntil((current) => ({ ...current, [row.id]: startedAt + outcome.retryAfterSeconds * 1000 }));
+          toast.showError(`"${row.name}" was refreshed moments ago — try again in ${outcome.retryAfterSeconds}s.`);
+          return;
+        }
+        setCooldownUntil((current) => ({ ...current, [row.id]: startedAt + REFRESH_COOLDOWN_MS }));
+        const slug = row.dashSlug;
+        if (slug) setWatchSlugs((current) => (current.includes(slug) ? current : [...current, slug]));
+        toast.showSuccess(`Refresh started for "${row.name}". New data lands in a few minutes.`);
+      } catch (error) {
+        toast.showError(formatError(error));
+      }
+    },
+    [toast]
+  );
+
+  const askRevalidate = useCallback((row: PacingRowV1) => setRevalidateTarget(row), []);
+  const askDelete = useCallback((row: PacingRowV1) => setDeleteTarget(row), []);
+  const retireWatch = useCallback(
+    (slug: string) => setWatchSlugs((current) => current.filter((watched) => watched !== slug)),
+    []
+  );
 
   // Written from the debounced search rather than the raw input: a history entry per keystroke would make
   // the back button walk letter by letter out of a search nobody typed on purpose. `replace` for the same
@@ -225,19 +291,13 @@ export function Overview() {
     rememberFilters(next, rememberedFor);
   }, [search, status, agencyIds, sort, setParams, rememberedFor]);
 
-  // Ascending, then descending, then back to the default order.
+  // Ascending, then descending, then back to the status-priority order.
   const cycleSort = useCallback((field: OverviewSortField) => {
     setSort((current) => {
       if (current?.field !== field) return { field, direction: "ASC" };
       return current.direction === "ASC" ? { field, direction: "DESC" } : null;
     });
   }, []);
-
-  const searchBody = useMemo(
-    () => buildOverviewSearchBody(search, status, agencyIds, sort),
-    [search, status, agencyIds, sort]
-  );
-  const overview = useOverviewPacing(searchBody);
 
   // Agency filter options. The unsearched list shares the sidebar's own cache entry, so opening the
   // dropdown costs no request at all; typing runs the same server-side search the sidebar uses, which
@@ -256,88 +316,132 @@ export function Overview() {
     [agencyQuery.data]
   );
 
-  const campaigns = overview.data?.campaigns ?? [];
-  const summary = overview.data?.summary;
-  const tableReloading = overview.isFetching && !overview.isPending && !overview.isFetchingNextPage;
-  // Real campaigns, keyed by id as a string to match OwnerCampaign.id - lets an expanded row fetch its
-  // real line items (useCampaignSetup) instead of the mock pacing overlay's own synthetic ones.
-  const campaignsById = useMemo(
-    () => new Map((overview.campaigns ?? []).map((c) => [String(c.id), c])),
-    [overview.campaigns]
+  const rows = useMemo(() => overview.data?.pacings ?? [], [overview.data]);
+  const scope = overview.data?.scope;
+
+  const filtered = useMemo(() => {
+    const statusValue = OVERVIEW_STATUS_SEGMENTS.find((segment) => segment.key === status)?.value ?? "";
+    let next = rows;
+    // §9, US-128: an archived pacing drops out of the default view but stays findable — picking
+    // "Archived" explicitly still shows it; only the unfiltered "All" view hides it.
+    if (!statusValue) next = next.filter((row) => row.status !== "Archive");
+    else next = next.filter((row) => row.status === statusValue);
+    if (agencyIds.length > 0) next = next.filter((row) => matchesAgencyFilter(row, agencyIds));
+    if (search) next = next.filter((row) => matchesOverviewSearch(row, search));
+    return next;
+  }, [rows, status, agencyIds, search]);
+
+  const summary = useMemo(() => {
+    let lineItems = 0;
+    let budget = 0;
+    for (const row of filtered) {
+      lineItems += rowLiCount(row);
+      budget += row.budgetTotal ?? 0;
+    }
+    return { pacings: filtered.length, lineItems, budget };
+  }, [filtered]);
+
+  const compare = useMemo(
+    () => (sort ? (a: PacingRowV1, b: PacingRowV1) => compareOverviewRows(a, b, sort) : undefined),
+    [sort]
+  );
+  const groups = useMemo(
+    () => buildOwnerGroups(filtered, currentUser?.full_name, compare),
+    [filtered, currentUser?.full_name, compare]
   );
 
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && overview.hasNextPage && !overview.isFetchingNextPage) {
-          overview.fetchNextPage();
-        }
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-    // The sentinel <div> only mounts once `summary` is truthy (it's nested inside that gate below) -
-    // without depending on it here too, a render where `hasNextPage` flips true before `summary` does
-    // leaves this effect observing a stale (still-null) ref forever, since none of the other deps
-    // change again afterwards.
-  }, [overview.hasNextPage, overview.isFetchingNextPage, overview.fetchNextPage, Boolean(summary)]);
-
-  function isOpen(campaignId: string): boolean {
-    return expandAll || expandedCampaigns.has(campaignId);
-  }
-
-  // Stable identity (useCallback) so the memoized CampaignRows below can be passed this directly as a
-  // prop instead of a fresh per-row closure, letting React.memo actually skip unaffected rows.
-  const toggleCampaign = useCallback((campaignId: string) => {
-    setExpandedCampaigns((current) => {
+  const toggleRow = useCallback((pacingId: string) => {
+    setOpenIds((current) => {
       const next = new Set(current);
-      if (next.has(campaignId)) next.delete(campaignId);
-      else next.add(campaignId);
+      if (next.has(pacingId)) next.delete(pacingId);
+      else next.add(pacingId);
       return next;
     });
   }, []);
 
+  const toggleGroup = useCallback((pacingIds: string[], expand: boolean) => {
+    setOpenIds((current) => {
+      const next = new Set(current);
+      for (const id of pacingIds) {
+        if (expand) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const allExpanded = filtered.length > 0 && filtered.every((row) => openIds.has(row.id));
   function toggleExpandAll() {
-    setExpandAll((current) => !current);
-    setExpandedCampaigns(new Set());
+    setOpenIds((current) => {
+      if (allExpanded) return new Set<string>();
+      const next = new Set(current);
+      for (const row of filtered) next.add(row.id);
+      return next;
+    });
   }
 
-  const openCampaign = useCallback(
-    (row: OwnerCampaign) => {
-      const realCampaign = overview.campaigns?.find((c) => String(c.id) === row.id);
-      // W1 (not built yet) adds a "/pacing" sub-route; navigate to the existing campaign page for now.
-      navigate(`/campaigns/${row.id}`, {
-        state: {
-          campaign: realCampaign,
-          agencyId: realCampaign?.agency_id,
-          agencyName: row.agency,
-          clientId: realCampaign?.client_id,
-          clientName: row.client,
-        },
-      });
+  const openPacing = useCallback(
+    (row: PacingRowV1) => {
+      const target = pacingRoute(row);
+      if (target) navigate(target.path, { state: target.state });
     },
-    [overview.campaigns, navigate]
+    [navigate]
   );
+
+  function clearFilters() {
+    setSearchInput("");
+    setStatus(ALL);
+    setAgencyIds([]);
+  }
+
+  const hasActiveFilters = status !== ALL || agencyIds.length > 0 || Boolean(search);
 
   return (
     <section className="overview">
       <div className="overview__head">
         <h1 className="overview__title">Overview</h1>
+        {/* §8's second entry point: create a pacing without first navigating into a campaign,
+            in a modal right here - no route, no URL change. Gated on the same resolved
+            `can_create` the campaign tab's button reads; with no route of its own, this gate is
+            the whole gate. */}
+        <div className="overview__head-actions">
+          {/* §12. Delegations belong beside the list they affect: what a delegation does is add
+              somebody else's pacings to this very page, or hand yours to them. Not gated on
+              `can_create` — granting your own access is not creating a pacing, and everyone who can
+              see this page can do it. */}
+          <button
+            type="button"
+            className="button button--ghost"
+            onClick={() => setDelegationsOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={delegationsOpen}
+          >
+            Delegations
+          </button>
+          {scope?.can_create && (
+            <button type="button" className="button" onClick={() => setCreateOpen(true)}>
+              Create pacing
+            </button>
+          )}
+        </div>
       </div>
 
       {overview.isPending && <LoadingBlock label="Loading overview" />}
-      {overview.isError && <p className="form-error">{formatError(overview.error)}</p>}
 
-      {overview.isPending === false && overview.isError === false && summary && (
+      {overview.isError && (
+        <p className="form-error">
+          {overview.error instanceof ApiError && overview.error.status === 409
+            ? "Your account isn't synced to Pacing yet. This usually clears up after the next user sync — ask an admin if it persists."
+            : formatError(overview.error)}
+        </p>
+      )}
+
+      {overview.isSuccess && (
         <>
           <div className="overview__summary">
             <div className="overview__stat">
-              <span className="overview__stat-label">Campaigns</span>
-              <span className="overview__stat-value">{overview.totalElements}</span>
+              <span className="overview__stat-label">Pacings</span>
+              <span className="overview__stat-value">{summary.pacings}</span>
             </div>
             <div className="overview__stat">
               <span className="overview__stat-label">Line items</span>
@@ -354,14 +458,14 @@ export function Overview() {
               <SearchIcon />
               <input
                 type="search"
-                placeholder="Search campaigns, clients, agencies…"
-                aria-label="Search campaigns"
+                placeholder="Search pacings, owners, campaigns, agencies…"
+                aria-label="Search pacings"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
               />
             </label>
             <div className="overview__seg" role="group" aria-label="Filter by status">
-              {CAMPAIGN_STATUS_SEGMENTS.map((segment) => (
+              {OVERVIEW_STATUS_SEGMENTS.map((segment) => (
                 <button
                   key={segment.key}
                   type="button"
@@ -387,170 +491,106 @@ export function Overview() {
               onLoadMore={agencyQuery.fetchNextPage}
             />
             <button type="button" className="button button--ghost button--sm" onClick={toggleExpandAll}>
-              {expandAll ? "Collapse All" : "Expand All"}
+              {allExpanded ? "Collapse All" : "Expand All"}
             </button>
           </div>
 
+          {rows.length === 0 && (
+            <div className="overview__empty">
+              {(() => {
+                const { title, body } = emptyScopeCopy(scope);
+                return (
+                  <>
+                    <p className="overview__empty-title">{title}</p>
+                    <p className="overview__empty-body">{body}</p>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {rows.length > 0 && filtered.length === 0 && (
+            <div className="overview__empty">
+              <p className="overview__empty-title">No pacings match your filters</p>
+              <p className="overview__empty-body">
+                {rows.length} pacing{rows.length === 1 ? "" : "s"} loaded, but none match{" "}
+                {hasActiveFilters ? "the current search and filters" : "the current view"}.
+              </p>
+              {hasActiveFilters && (
+                <button type="button" className="button button--ghost button--sm" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="overview__groups">
-            {campaigns.length === 0 && (
-              <p className="overview__empty">No campaigns match the current filters.</p>
-            )}
-            {campaigns.length > 0 && (
-              <div className="overview__owner" aria-busy={tableReloading}>
-                {tableReloading && <LoadingOverlay label="Updating campaigns" className="overview__reload-overlay" />}
-                <table className="overview__camp-table">
-                  <thead>
-                    <tr>
-                      <SortableHeader label="Campaign" field="NAME" sort={sort} onSort={cycleSort} />
-                      <SortableHeader label="Status" field="STATUS" sort={sort} onSort={cycleSort} />
-                      <th className="overview__camp-table-num">Budget</th>
-                      <SortableHeader label="Flight" field="START_DATE" sort={sort} onSort={cycleSort} />
-                      <th className="overview__camp-table-num">LINE ITEMS</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {campaigns.map((campaign) => (
-                      <CampaignRows
-                        key={campaign.id}
-                        campaign={campaign}
-                        realCampaign={campaignsById.get(campaign.id)}
-                        open={isOpen(campaign.id)}
-                        onToggle={toggleCampaign}
-                        onOpen={openCampaign}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {overview.hasNextPage && (
-              <div ref={sentinelRef} className="overview__load-more">
-                {overview.isFetchingNextPage && <LoadingSpinner label="Loading more campaigns" size="sm" />}
-              </div>
-            )}
+            {groups.map((group) => (
+              <OwnerSection
+                key={group.owner}
+                group={group}
+                openIds={openIds}
+                onToggleRow={toggleRow}
+                onToggleGroup={toggleGroup}
+                onOpen={openPacing}
+                sort={sort}
+                onSort={cycleSort}
+                isAdmin={isAdmin}
+                cooldownSecondsFor={cooldownSecondsFor}
+                onRefresh={refreshRow}
+                onRevalidate={askRevalidate}
+                onDelete={askDelete}
+                onOpenNsDiff={setNsDiffTarget}
+              />
+            ))}
           </div>
+
+          {/* One watcher per just-refreshed pacing: re-pulls the lists when its build lands, then
+              retires. Renders nothing. */}
+          {watchSlugs.map((slug) => (
+            <RefreshLandingWatch key={slug} slug={slug} onDone={retireWatch} />
+          ))}
+
+          {deleteTarget && (
+            <DeletePacingModal
+              row={deleteTarget}
+              onClose={() => setDeleteTarget(null)}
+              // The Overview is not scoped to any campaign, so a pacing spanning several is worth
+              // spelling out - deleting it removes it from every one of them, journal and dashboard
+              // file included.
+              note={
+                (deleteTarget.campaigns ?? []).length > 1
+                  ? `This pacing covers ${(deleteTarget.campaigns ?? [])
+                      .map((campaign) => campaign.name)
+                      .join(", ")} — deleting it removes it from all of them.`
+                  : undefined
+              }
+            />
+          )}
+
+          {revalidateTarget && (
+            <RevalidatePacingModal row={revalidateTarget} onClose={() => setRevalidateTarget(null)} />
+          )}
         </>
+      )}
+
+      {createOpen && (
+        <Suspense fallback={null}>
+          <CreatePacingModal open onClose={() => setCreateOpen(false)} />
+        </Suspense>
+      )}
+
+      {delegationsOpen && (
+        <Suspense fallback={null}>
+          <DelegationsPanel open onClose={() => setDelegationsOpen(false)} />
+        </Suspense>
+      )}
+
+      {nsDiffTarget && (
+        <Suspense fallback={null}>
+          <PacingNsDiffSheet row={nsDiffTarget} onClose={() => setNsDiffTarget(null)} />
+        </Suspense>
       )}
     </section>
   );
 }
-
-/**
- * Memoized so an Overview re-render (search keystroke, unrelated group's expand/collapse) only
- * reconciles rows whose own props actually changed. Effective only because `onToggle`/`onOpen` are
- * passed straight through as stable (`useCallback`'d) references from the parent rather than
- * per-row closures - each row applies its own `campaign` argument when calling them.
- */
-const CampaignRows = memo(function CampaignRows({
-  campaign,
-  realCampaign,
-  open,
-  onToggle,
-  onOpen,
-}: {
-  campaign: OwnerCampaign;
-  realCampaign: CampaignV1 | undefined;
-  open: boolean;
-  onToggle: (campaignId: string) => void;
-  onOpen: (campaign: OwnerCampaign) => void;
-}) {
-  const statusStyle = resolveStatusStyle(campaign.status);
-  return (
-    <>
-      <tr className="overview__camp" onClick={() => onOpen(campaign)}>
-        <td>
-          <div className="overview__camp-name">
-            <button
-              type="button"
-              className={cn("overview__exp", open && "overview__exp--open")}
-              aria-label={open ? `Collapse ${campaign.name}` : `Expand ${campaign.name}`}
-              aria-expanded={open}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggle(campaign.id);
-              }}
-            >
-              <ChevronRightIcon />
-            </button>
-            <div>
-              <div className="overview__camp-title">{campaign.name}</div>
-              <div className="overview__camp-sub">{campaign.agency} · {campaign.client}</div>
-            </div>
-          </div>
-        </td>
-        <td><StatusBadge label={displayStatusLabel(campaign.status)} color={statusStyle.color} glow={statusStyle.glow} /></td>
-        <td className="overview__camp-table-num overview__camp-budget">{fmtBudget(campaign.budget)}</td>
-        <td className="overview__flight">
-          {campaign.flight}<span className="overview__days">{campaign.days}</span>
-        </td>
-        <td className="overview__camp-table-num overview__camp-budget">{campaign.li}</td>
-        <td>
-          <div className="overview__actions">
-            <button
-              type="button"
-              className="overview__open"
-              title="Open"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpen(campaign);
-              }}
-            >
-              <ChevronRightIcon />
-            </button>
-          </div>
-        </td>
-      </tr>
-      {open && <ExpandedLineItems campaign={realCampaign} />}
-    </>
-  );
-});
-
-/**
- * The expanded campaign row's real line items - fetched (not mocked) via the same
- * `["campaigns", "insertion-orders", campaignId]` query the Setup tab owns, only mounted while its
- * parent row is open so a page of collapsed campaigns never pays for their line-item data.
- */
-const ExpandedLineItems = memo(function ExpandedLineItems({ campaign }: { campaign: CampaignV1 | undefined }) {
-  const setup = useCampaignSetup(campaign);
-
-  if (setup.isPending) {
-    return (
-      <tr className="overview__li">
-        <td colSpan={6} className="overview__li-loading">
-          <LoadingSpinner label="Loading line items" size="sm" />
-        </td>
-      </tr>
-    );
-  }
-  if (setup.isError) {
-    return (
-      <tr className="overview__li">
-        <td colSpan={6} className="form-error">{formatError(setup.error)}</td>
-      </tr>
-    );
-  }
-  const lineItems = (setup.data?.ios ?? []).flatMap((io) => io.lis);
-  return <>{lineItems.map((li) => <LineItemRow key={li.id} li={li} />)}</>;
-});
-
-const LineItemRow = memo(function LineItemRow({ li }: { li: LineItem }) {
-  return (
-    <tr className="overview__li">
-      <td className="overview__li-name">
-        <BranchIcon className="overview__li-branch" />
-        <div>
-          <div className="overview__li-title">LI {li.id}</div>
-          <div className="overview__camp-sub">
-            {li.channel}{li.rateType ? ` · ${li.rateType}` : ""} · {fmtDate(li.start)} – {fmtDate(li.end)}
-          </div>
-        </div>
-      </td>
-      <td />
-      <td className="overview__camp-table-num overview__camp-budget">{fmtBudget(li.budget)}</td>
-      <td />
-      <td />
-      <td />
-    </tr>
-  );
-});

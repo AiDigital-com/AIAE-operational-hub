@@ -217,6 +217,37 @@ public class BigQueryCampaignService implements CampaignService {
 				});
 	}
 
+	@Override
+	public List<CampaignModel> getVisibleCampaignIdentities(CurrentUserModel user, List<Long> campaignIds) {
+		if (campaignIds == null || campaignIds.isEmpty()) {
+			return List.of();
+		}
+		AgencyVisibility visibility = agencyVisibilityService.resolveForCurrentUser(user);
+		if (visibility.seesNothing()) {
+			return List.of();
+		}
+		// The same identity-only projection getVisibleCampaignIdentity runs, widened to an IN over
+		// the whole batch - one BigQuery job however many campaigns the caller's pacings span. Ids
+		// outside the caller's visibility (or unknown) simply produce no row; the LIMIT matches the
+		// batch size because GROUP BY campaign_id can never yield more rows than ids asked for.
+		BqRequest.Builder query = new BqRequest.Builder()
+				.from(gateway.table())
+				.select(CAMPAIGN_ID, ALIAS_ID)
+				.selectAnyValue(CAMPAIGN, ALIAS_NAME)
+				.selectAnyValue(ADVERTISER_ID, ALIAS_CLIENT_ID)
+				.selectAnyValue(ADVERTISER, ALIAS_CLIENT_NAME)
+				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
+				.selectAnyValue(AGENCY, ALIAS_AGENCY_NAME)
+				.whereNotNull(CAMPAIGN_ID)
+				.whereIn(AGENCY_ID, visibility.agencyIds())
+				.whereIn(CAMPAIGN_ID, campaignIds)
+				.groupBy(CAMPAIGN_ID)
+				.limitOffset(campaignIds.size(), 0);
+		// Cached like the single-id identity read: the answer changes once a night, and every
+		// Overview load asks the same question for the same set of pacings.
+		return gateway.fetchCached(query.build(), this::toCampaignIdentity);
+	}
+
 	/**
 	 * Adds the campaign filters as SQL predicates.
 	 *

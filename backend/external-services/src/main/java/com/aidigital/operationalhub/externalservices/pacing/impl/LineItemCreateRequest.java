@@ -1,5 +1,7 @@
 package com.aidigital.operationalhub.externalservices.pacing.impl;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * Shape of one line item in the {@code POST /api/pacings} request body (§8, US-123/124) - field
  * names match dash-gate's own create route exactly, same snake_case-field convention as the other
@@ -23,6 +25,12 @@ package com.aidigital.operationalhub.externalservices.pacing.impl;
  * @param margin_percent      the plan's target margin percentage, as confirmed by the caller
  * @param target_ctr          the plan's target CTR percentage, as confirmed by the caller
  * @param target_vcr          the plan's target VCR percentage, as confirmed by the caller
+ * @param cost_coef           per-LI coefficient cost mode flag. NON_NULL at the field (the record is
+ *                            otherwise serialized with nulls, matching what Pacing has always
+ *                            received from the Hub): Pacing's {@code validateCoefLi} rejects an
+ *                            explicit {@code null} ({@code coef_not_boolean}) while an absent key is
+ *                            fine, so null here means "omit the key", keeping every pre-coef payload
+ *                            byte-identical
  */
 record LineItemCreateRequest(
 		String line_item_id,
@@ -41,5 +49,6 @@ record LineItemCreateRequest(
 		Double target_impressions,
 		Double margin_percent,
 		Double target_ctr,
-		Double target_vcr) {
+		Double target_vcr,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Boolean cost_coef) {
 }

@@ -1,0 +1,56 @@
+.heatmap-strip {
+  position: relative;
+  display: inline-block;
+}
+.heatmap-strip svg {
+  vertical-align: middle;
+  overflow: visible;
+}
+.heatmap-strip__na {
+  color: var(--muted);
+}
+
+/* Small inverted bubble above the strip, like the reference. The owner-group card deliberately
+   avoids overflow:hidden so this can escape a bottom row. */
+.heatmap-strip__tip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+.heatmap-strip__tip-date {
+  font-weight: 700;
+}
+.heatmap-strip__tip-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.heatmap-strip__swatch {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.heatmap-strip__swatch--fill {
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+}
+.heatmap-strip__swatch--bar {
+  width: 8px;
+  height: 3px;
+  border-radius: 0.5px;
+}

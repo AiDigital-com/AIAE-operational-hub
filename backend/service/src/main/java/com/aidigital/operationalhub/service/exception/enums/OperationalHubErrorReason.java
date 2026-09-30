@@ -359,7 +359,14 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * The link in the {@code Asana} preset slot does not look like an Asana project link (§16,
 	 * US-141): its host is not Asana's, or it points at nothing inside Asana.
 	 */
-	OPH_064("OPH_064", "The Asana link must point at an Asana project (an app.asana.com URL).");
+	OPH_064("OPH_064", "The Asana link must point at an Asana project (an app.asana.com URL)."),
+
+	/**
+	 * A direct NetSuite lookup ({@code POST /api/v1/pacing/line-items/validate}) carried both of its
+	 * mutually exclusive selectors, or neither. The contract requires exactly one of
+	 * {@code lineItemIds} / {@code insertionOrderId}.
+	 */
+	OPH_065("OPH_065", "Send exactly one selector: lineItemIds or insertionOrderId.");
 
 	private final String code;
 	private final String description;

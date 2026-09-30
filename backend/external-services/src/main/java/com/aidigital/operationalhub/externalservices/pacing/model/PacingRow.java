@@ -3,13 +3,14 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * One row of Pacing's {@code GET /api/pacings} response, restricted to the fields the Overview
  * screen (§4 of the migration plan, US-109/110/111) and the pacing administration screen need.
- * Pacing's actual row also carries {@code owner_id}, {@code client}, {@code agency},
- * {@code delegated_to}/{@code delegated_from}, {@code liNames}/{@code liDesc} and
- * {@code heatmapMode}; none of those are read here because neither screen uses them yet — see
+ * Pacing's actual row also carries {@code heatmapMode} and the raw {@code ns_diff} internals; the
+ * rest — owner id, client/agency, delegation decoration, per-line-item display labels — IS read
+ * here since the Overview's owner-grouped rebuild started showing them. See
  * {@code PacingContractMapper} for the public (Hub-facing) shape this is mapped to.
  *
  * @param pacingId       serialized as {@code pacing_id}
@@ -19,7 +20,13 @@ import java.util.List;
  * @param flightStart    serialized as {@code flight_start}; null if unresolved
  * @param flightEnd      serialized as {@code flight_end}; null if unresolved
  * @param ownerName      serialized as {@code owner_name}
+ * @param ownerId        serialized as {@code owner_id} — Pacing {@code access.users.user_id} (UUID)
+ *                       of the current owner, the stable key the Overview groups rows by (a display
+ *                       name can repeat; this cannot)
  * @param lineItemCount  serialized as {@code line_item_count}
+ * @param client         client display name from the pacing's own config; the row's subtitle
+ * @param agency         agency display name from the pacing's own config — a NAME, not a Hub agency
+ *                       id; the id the agency filter uses is Hub-resolved per campaign instead
  * @param campaigns      ordered campaigns this pacing belongs to (§3); null when campaign
  *                       resolution has not run for this pacing yet
  * @param health         health figures computed by {@code computeHealthBatch}; null only if Pacing
@@ -31,6 +38,13 @@ import java.util.List;
  *                       Pacing's own row; used only by the pacing administration screen (not in the
  *                       migration plan), which is the one place this project shows when a pacing was
  *                       created
+ * @param delegatedTo    serialized as {@code delegated_to} (§12, US-135) — everybody the owner has
+ *                       delegated this row to; null when nobody
+ * @param delegatedFrom  serialized as {@code delegated_from} — the delegator, on a row the caller
+ *                       sees via a delegation; null otherwise
+ * @param liNames        owner-assigned display names by line item id (the pacing's Display
+ *                       settings), for the expanded Overview row's caption; empty when none
+ * @param liDesc         line-item descriptions by line item id, for the expanded row's hover detail
  * @param nsDiffSummary  serialized as {@code ns_diff} (§13 of the migration plan, US-136); the
  *                       nightly job's frozen NetSuite-diff summary — see {@link PacingNsDiffSummary}'s
  *                       own javadoc for why it is not "current as of now". Null on a pacing the
@@ -43,10 +57,17 @@ public record PacingRow(
 		@JsonProperty("flight_start") String flightStart,
 		@JsonProperty("flight_end") String flightEnd,
 		@JsonProperty("owner_name") String ownerName,
+		@JsonProperty("owner_id") String ownerId,
 		@JsonProperty("line_item_count") Integer lineItemCount,
+		String client,
+		String agency,
 		List<PacingCampaignRef> campaigns,
 		PacingHealth health,
 		@JsonProperty("dash_slug") String dashSlug,
 		@JsonProperty("created_at") String createdAt,
+		@JsonProperty("delegated_to") List<PacingDelegationRef> delegatedTo,
+		@JsonProperty("delegated_from") PacingDelegationRef delegatedFrom,
+		Map<String, String> liNames,
+		Map<String, String> liDesc,
 		@JsonProperty("ns_diff") PacingNsDiffSummary nsDiffSummary) {
 }

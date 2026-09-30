@@ -18,7 +18,7 @@ class OrderNumberCollectorTest {
 	private PacingCreateLineItem lineItemWithOrder(String lineItemId, String orderNumber) {
 		return new PacingCreateLineItem(
 				lineItemId, "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", orderNumber, null, 100000.0, 15.5, null, null);
+				"40539", "2026_Campaign", orderNumber, null, 100000.0, 15.5, null, null, null);
 	}
 
 	@Test

@@ -21,13 +21,19 @@ export function usePacingDraft(campaignId: number | undefined) {
  * is the other screen the new pacing belongs on. Without that second line the Overview keeps serving
  * its cached list (staleTime 30s), so a pacing created here is missing from it until the cache goes
  * stale or the page is reloaded. Same pair useTransferPacingOwner already invalidates.
+ *
+ * The Overview's Create Pacing modal has no campaign of its own - it passes undefined,
+ * which widens the first invalidation to EVERY campaign's Pacing tab list: the new pacing's campaign
+ * set is only derived server-side, so no single campaign key can be named up front.
  */
 export function useCreatePacing(campaignId: number | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: PacingCreateV1) => createPacing(body),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pacing", "campaign", campaignId] });
+      void queryClient.invalidateQueries({
+        queryKey: campaignId !== undefined ? ["pacing", "campaign", campaignId] : ["pacing", "campaign"],
+      });
       void queryClient.invalidateQueries({ queryKey: ["pacing", "overview"] });
     },
   });

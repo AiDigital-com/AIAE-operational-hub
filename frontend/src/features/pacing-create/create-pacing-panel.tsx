@@ -35,7 +35,9 @@ import { fmtDate, fmtInt, fmtMoneyIn, parseEditableNumber } from "./format";
 import { useCreatePacing, usePacingDraft } from "./hooks";
 import { NumericField } from "./numeric-field";
 import type {
+  PacingCampaignLinkV1,
   PacingCreateLineItemV1,
+  PacingCreateV1,
   PacingDraftLineItemV1,
   PacingDraftV1,
   PacingInsertionOrderV1,
@@ -44,6 +46,67 @@ import type {
 import "./create-pacing-panel.css";
 
 const RATE_TYPES = ["CPM", "CPC", "CPV", "Flat"];
+
+/** The generated contract's closed data-source vocabulary (Pacing's own `ALLOWED_DATA_SOURCES`). */
+type PacingDataSourceValue = NonNullable<NonNullable<PacingCreateV1["data"]>["source"]>;
+
+/** Pacing's own data-source allowlist, labelled in plain words - a value outside it would be
+ *  silently replaced by Pacing, so the choice is closed here. */
+const DATA_SOURCES: ReadonlyArray<{ value: PacingDataSourceValue; label: string }> = [
+  { value: "platform_mart", label: "Platform mart (raw feed)" },
+  { value: "platform_mart_adjustments_view", label: "Platform mart + manual adjustments" },
+];
+
+/**
+ * One derived campaign of the current selection: the id/name plus how many selected line items
+ * belong to it - recomputed live as rows are ticked and unticked.
+ */
+interface DerivedCampaign {
+  id: string;
+  name: string | null;
+  count: number;
+}
+
+/**
+ * The campaign set the created pacing will be linked to, derived from the SELECTED line items
+ * exactly the way Pacing's own `CampaignSet.deriveCampaigns` does it: distinct campaign id in
+ * first-appearance order, line items with no campaign skipped (deliberate on the Pacing side - a
+ * misc/manual line item must not block the others). This is a preview of a decision Pacing makes
+ * itself; nothing here is sent as the set, only its ORDER can be pinned.
+ */
+function deriveCampaignSet(
+  lineItems: PacingDraftLineItemV1[],
+  selectedIds: Set<string>
+): { campaigns: DerivedCampaign[]; withoutCampaign: number } {
+  const byId = new Map<string, DerivedCampaign>();
+  let withoutCampaign = 0;
+  for (const li of lineItems) {
+    if (!selectedIds.has(li.lineItemId)) continue;
+    const id = li.campaignId == null || li.campaignId === "" ? null : String(li.campaignId);
+    if (!id) {
+      withoutCampaign += 1;
+      continue;
+    }
+    const existing = byId.get(id);
+    if (existing) existing.count += 1;
+    else byId.set(id, { id, name: li.campaignName || null, count: 1 });
+  }
+  return { campaigns: [...byId.values()], withoutCampaign };
+}
+
+/**
+ * A human rendering of an exchange rate: at most 6 decimals, trailing zeros trimmed - never a raw
+ * float like 0.704503184354 in a display field.
+ */
+function formatRate(rate: number): string {
+  return String(Number(rate.toFixed(6)));
+}
+
+/** One campaign-links editor row; kept as plain strings until submit filters the empty ones out. */
+interface LinkRow {
+  name: string;
+  url: string;
+}
 
 type FieldKey = BulkFieldKey | "rateType";
 
@@ -226,54 +289,71 @@ function groupByInsertionOrder(
 }
 
 interface CreatePacingPanelProps {
-  campaignId: number;
-  campaignName: string;
+  /** The campaign to fetch a draft for. Omitted by the Create Pacing modal, which passes `draft`. */
+  campaignId?: number;
+  /**
+   * An already-fetched draft (the Create Pacing modal's step-1 lookup result). When
+   * present, the panel fetches nothing of its own and reads campaign/client/agency off the draft.
+   */
+  draft?: PacingDraftV1;
+  campaignName?: string;
   clientName?: string;
   agencyName?: string;
+  /** The back button's label; defaults to the campaign tab's "Back to pacings". */
+  backLabel?: string;
   onClose: () => void;
-  onCreated: (pacingId: string) => void;
+  /**
+   * Called with the new pacing's id plus the primary campaign of the pinned set (null when the
+   * derived set was somehow empty) - what the Create Pacing modal navigates to. Callers that already
+   * know their campaign may ignore the second argument.
+   */
+  onCreated: (pacingId: string, primaryCampaignId: string | null) => void;
 }
 
 export function CreatePacingPanel({
   campaignId,
+  draft,
   campaignName,
   clientName,
   agencyName,
+  backLabel = "← Back to pacings",
   onClose,
   onCreated,
 }: CreatePacingPanelProps) {
-  const draftQuery = usePacingDraft(campaignId);
+  // Disabled entirely when a pre-fetched draft is passed - the hook's `enabled` gate reads undefined.
+  const draftQuery = usePacingDraft(draft ? undefined : campaignId);
+  const effectiveDraft = draft ?? draftQuery.data;
 
   return (
     <section className="pcreate">
       <header className="pcreate__header">
         <button type="button" className="button button--ghost button--sm" onClick={onClose}>
-          ← Back to pacings
+          {backLabel}
         </button>
         <h2 className="pcreate__title">Create Pacing</h2>
         <dl className="pcreate__context">
           <div className="pcreate__context-cell">
             <dt>Agency</dt>
-            <dd>{agencyName || draftQuery.data?.agency || "—"}</dd>
+            <dd>{agencyName || effectiveDraft?.agency || "—"}</dd>
           </div>
           <div className="pcreate__context-cell">
             <dt>Client</dt>
-            <dd>{clientName || draftQuery.data?.client || "—"}</dd>
+            <dd>{clientName || effectiveDraft?.client || "—"}</dd>
           </div>
           <div className="pcreate__context-cell">
             <dt>Campaign</dt>
-            <dd>{campaignName || "—"}</dd>
+            <dd>{campaignName || effectiveDraft?.campaign || "—"}</dd>
           </div>
         </dl>
       </header>
 
-      {draftQuery.isPending && <LoadingBlock label="Loading campaign line items" />}
-      {draftQuery.isError && <p className="form-error">{formatError(draftQuery.error)}</p>}
-      {draftQuery.isSuccess && (
+      {!draft && draftQuery.isPending && <LoadingBlock label="Loading campaign line items" />}
+      {!draft && draftQuery.isError && <p className="form-error">{formatError(draftQuery.error)}</p>}
+      {effectiveDraft && (
         <CreatePacingForm
           campaignId={campaignId}
-          defaultPacingName={draftQuery.data.campaign || campaignName}
-          draft={draftQuery.data}
+          defaultPacingName={effectiveDraft.campaign || campaignName || ""}
+          draft={effectiveDraft}
           onCreated={onCreated}
         />
       )}
@@ -293,10 +373,10 @@ function CreatePacingForm({
   draft,
   onCreated,
 }: {
-  campaignId: number;
+  campaignId?: number;
   defaultPacingName: string;
   draft: PacingDraftV1;
-  onCreated: (pacingId: string) => void;
+  onCreated: (pacingId: string, primaryCampaignId: string | null) => void;
 }) {
   const toast = useToast();
   const createMutation = useCreatePacing(campaignId);
@@ -308,6 +388,13 @@ function CreatePacingForm({
   // unknown/typo id - that reason only applies to a direct line-item-id selector this screen never
   // uses), so a fixed reason label is accurate, not a guess.
   const notFoundSet = useMemo(() => new Set(draft.notFoundIds ?? []), [draft.notFoundIds]);
+  // Ids the caller looked up that came back with NO row at all (only possible on the id-lookup
+  // selector): they cannot be shown as table rows, so they are named above the table instead of
+  // silently vanishing from what the user pasted.
+  const missingLookupIds = useMemo(() => {
+    const present = new Set(lineItems.map((li) => li.lineItemId));
+    return (draft.notFoundIds ?? []).filter((id) => !present.has(id));
+  }, [draft.notFoundIds, lineItems]);
   const groups = useMemo(
     () => groupByInsertionOrder(insertionOrders, lineItems, notFoundSet),
     [insertionOrders, lineItems, notFoundSet]
@@ -357,6 +444,47 @@ function CreatePacingForm({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
 
+  // ── Settings block (the reference create screen's, minus what this fork does not have) ──
+  const [dataSource, setDataSource] = useState<PacingDataSourceValue>("platform_mart");
+  const [fetchCreatives, setFetchCreatives] = useState(false);
+  const [fetchConversions, setFetchConversions] = useState(false);
+  // Coefficient cost mode: a master toggle. ON seeds every line item's flag true and reveals the
+  // per-row Coef column; OFF hides the column and clears the flags, so nothing the user set and then
+  // hid rides the payload ("visible is saved" - the retired SPA's exact behavior).
+  const [coefMode, setCoefMode] = useState(false);
+  const [coefFlags, setCoefFlags] = useState<Set<string>>(() => new Set());
+  // Campaign links / notes, stored on the new pacing's config verbatim.
+  const [links, setLinks] = useState<LinkRow[]>([]);
+  const [notes, setNotes] = useState("");
+  // Create-time exchange-rate override. Only meaningful for a non-USD draft - Pacing ignores
+  // body.rate for a USD campaign, so the control only renders when a converted line item exists.
+  const nonUsdLineItem = useMemo(
+    () => lineItems.find((li) => li.converted && li.currency && li.currency.toUpperCase() !== "USD") ?? null,
+    [lineItems]
+  );
+  const nsRate = nonUsdLineItem?.exchangeRate ?? null;
+  const [rateInput, setRateInput] = useState<string>(() => (nsRate != null ? formatRate(nsRate) : ""));
+  const [rateEdited, setRateEdited] = useState(false);
+
+  /** Flip the coefficient master toggle, seeding/clearing every row's flag with it. */
+  function toggleCoefMode(on: boolean) {
+    setCoefMode(on);
+    setCoefFlags(on ? new Set(lineItems.map((li) => li.lineItemId)) : new Set());
+  }
+
+  function toggleCoefFlag(id: string) {
+    setCoefFlags((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function updateLink(index: number, patch: Partial<LinkRow>) {
+    setLinks((cur) => cur.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
   function toggleIncluded(id: string) {
     setIncluded((cur) => {
       const next = new Set(cur);
@@ -397,7 +525,31 @@ function CreatePacingForm({
     () => new Set(lineItems.filter((li) => included.has(li.lineItemId) && hasFlightDates(values[li.lineItemId])).map((li) => li.lineItemId)),
     [lineItems, included, values]
   );
-  const canSubmit = submittableIds.size > 0 && pacingName.trim().length > 0 && !createMutation.isPending;
+
+  // ── The derived campaign set (§3 of the migration plan: derived, never picked) ──
+  // Recomputed live over exactly the line items the create body will carry, mirroring Pacing's own
+  // deriveCampaigns. Empty means the pacing would be linked to NO campaign - invisible to every
+  // Client Services user and inert on the pacing list - so Create is blocked below with the reason
+  // spelled out, not a generic validation error.
+  const { campaigns: derivedCampaigns, withoutCampaign } = useMemo(
+    () => deriveCampaignSet(lineItems, submittableIds),
+    [lineItems, submittableIds]
+  );
+  // Which derived campaign leads. The pin only ever REORDERS the derived set (Pacing's
+  // applyPinnedOrder ignores unknown ids and never changes membership); a pinned campaign whose
+  // last line item was just unticked simply falls back to the first derived one.
+  const [primaryPin, setPrimaryPin] = useState<string | null>(null);
+  const orderedCampaigns = useMemo(() => {
+    if (derivedCampaigns.length === 0) return [];
+    const primary = derivedCampaigns.find((c) => c.id === primaryPin) ?? derivedCampaigns[0];
+    return [primary, ...derivedCampaigns.filter((c) => c.id !== primary.id)];
+  }, [derivedCampaigns, primaryPin]);
+
+  const canSubmit =
+    submittableIds.size > 0 &&
+    derivedCampaigns.length > 0 &&
+    pacingName.trim().length > 0 &&
+    !createMutation.isPending;
 
   // Every visible row's current on-screen values, for the gap filter and its counts - live edits,
   // not the original draft response (a bulk-filled flight date must clear "missing" immediately).
@@ -537,16 +689,38 @@ function CreatePacingForm({
           marginPercent: parseEditableNumber(row.marginPercent),
           targetCtr: parseEditableNumber(row.targetCtr),
           targetVcr: parseEditableNumber(row.targetVcr),
+          // Always a boolean, exactly as the retired SPA sent it: master ON forwards the row's
+          // checkbox, master OFF forwards false - never whatever a hidden checkbox last held.
+          costCoef: coefMode ? coefFlags.has(li.lineItemId) : false,
         };
       });
 
+    // The rate override rides only for a non-USD draft (Pacing ignores it for USD), and only as a
+    // positive number: an emptied/garbled input falls back to the NetSuite-detected rate.
+    const parsedRate = Number(rateInput);
+    const effectiveRate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : nsRate;
+    const cleanLinks: PacingCampaignLinkV1[] = links
+      .map((row) => ({ name: row.name.trim(), url: row.url.trim() }))
+      .filter((row) => row.name && row.url);
+    const body: PacingCreateV1 = {
+      pacingName: pacingName.trim(),
+      lineItems: requestLineItems,
+      // The client/agency pair from the draft - without it the new pacing's config has neither until
+      // somebody runs Revalidate, and the Overview's "agency · client" subtitle renders blank.
+      ...(draft.client ? { client: draft.client } : {}),
+      ...(draft.agency ? { agency: draft.agency } : {}),
+      // The pinned ORDER of the derived set - first entry is the campaign the Hub navigates to when
+      // this pacing is opened. Pacing re-derives the set itself; this can only reorder it.
+      ...(orderedCampaigns.length > 0 ? { campaigns: orderedCampaigns.map((c) => c.id) } : {}),
+      data: { source: dataSource, fetchCreatives, fetchConversions, coefEnabled: coefMode },
+      ...(nonUsdLineItem && effectiveRate != null ? { rate: effectiveRate, rateLocked: rateEdited } : {}),
+      ...(cleanLinks.length > 0 ? { campaignLinks: cleanLinks } : {}),
+      ...(notes.trim() ? { campaignNotes: notes.trim() } : {}),
+    };
     try {
-      const result = await createMutation.mutateAsync({
-        pacingName: pacingName.trim(),
-        lineItems: requestLineItems,
-      });
+      const result = await createMutation.mutateAsync(body);
       toast.showSuccess(`Pacing "${pacingName.trim()}" created.`);
-      onCreated(result.pacingId);
+      onCreated(result.pacingId, orderedCampaigns[0]?.id ?? null);
     } catch (error) {
       toast.showError(formatError(error));
     }
@@ -579,6 +753,9 @@ function CreatePacingForm({
 
   return (
     <div className="pcreate__body">
+      {/* One header band, not two: the validated/ready counts AND the pacing name share the strip -
+          each on its own full-width row they were two of the five chrome bands that squeezed the
+          table down to a single visible line item. */}
       <div className="pcreate__result">
         <span className="pcreate__result-title">
           {lineItems.length} line item{lineItems.length === 1 ? "" : "s"} validated
@@ -589,6 +766,18 @@ function CreatePacingForm({
             {extraOrders > 0 ? ` (+${extraOrders})` : ""}
           </span>
         )}
+        <span className="pcreate__name-inline">
+          <label className="pcreate__name-label" htmlFor="pcreate-name">
+            Pacing name
+          </label>
+          <input
+            id="pcreate-name"
+            type="text"
+            className="pcreate__name-input"
+            value={pacingName}
+            onChange={(e) => setPacingName(e.target.value)}
+          />
+        </span>
         <span className="pcreate__result-counts">
           <span className="pcreate__count pcreate__count--ok">{readyCount} ready</span>
           <span className="pcreate__count pcreate__count--need">{needCount} need input</span>
@@ -599,22 +788,22 @@ function CreatePacingForm({
         </span>
       </div>
 
-      <div className="pcreate__name-row">
-        <label className="pcreate__name-label" htmlFor="pcreate-name">
-          Pacing name
-        </label>
-        <input
-          id="pcreate-name"
-          type="text"
-          className="pcreate__name-input"
-          value={pacingName}
-          onChange={(e) => setPacingName(e.target.value)}
-        />
-      </div>
-
       {(draft.warnings?.length ?? 0) > 0 && (
         <ul className="pcreate__warnings">
           {draft.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}
+        </ul>
+      )}
+
+      {/* Ids the lookup could not return a row for AT ALL (id-lookup mode: a typo, or a line item
+          NetSuite has no master row for). Distinct from a not-yet-delivered row, which IS in the
+          table below - un-ticked and marked, re-tickable to pace early. */}
+      {missingLookupIds.length > 0 && (
+        <ul className="pcreate__warnings">
+          <li>
+            {missingLookupIds.length === 1 ? "This id" : "These ids"} returned no NetSuite row and{" "}
+            {missingLookupIds.length === 1 ? "is" : "are"} not in the table: {missingLookupIds.join(", ")}. Check
+            {missingLookupIds.length === 1 ? " it" : " them"} in NetSuite.
+          </li>
         </ul>
       )}
 
@@ -740,6 +929,7 @@ function CreatePacingForm({
                 <col className="pcreate__col-impr" />
                 <col className="pcreate__col-rate" />
                 <col className="pcreate__col-pct" />
+                {coefMode && <col className="pcreate__col-coef" />}
                 <col className="pcreate__col-pct" />
                 <col className="pcreate__col-pct" />
                 <col className="pcreate__col-status" />
@@ -780,6 +970,10 @@ function CreatePacingForm({
                   <SortableHeader label="Impressions" sortKey="targetImpressions" sort={sort} onSort={toggleSort} required />
                   <SortableHeader label="Rate" sortKey="rateType" sort={sort} onSort={toggleSort} />
                   <SortableHeader label="Margin" sortKey="marginPercent" sort={sort} onSort={toggleSort} required />
+                  {/* Only rendered while the coefficient master toggle is on - the column disappears
+                      (and its flags clear) when the toggle goes off, so what is visible is exactly
+                      what the create body carries. */}
+                  {coefMode && <th className="pcreate__th-coef">Coef</th>}
                   <SortableHeader label="CTR" sortKey="targetCtr" sort={sort} onSort={toggleSort} />
                   <SortableHeader label="VCR" sortKey="targetVcr" sort={sort} onSort={toggleSort} />
                   <th>Status</th>
@@ -801,12 +995,211 @@ function CreatePacingForm({
                     onUpdateField={updateField}
                     inUse={inUse}
                     notFoundSet={notFoundSet}
+                    coefMode={coefMode}
+                    coefFlags={coefFlags}
+                    onToggleCoef={toggleCoefFlag}
                   />
                 ))}
               </tbody>
             </table>
           </div>
+
+          {/* ── The two config blocks share a row on a wide screen instead of stacking two
+                 full-width bands - the table above them is the content, these are its settings. ── */}
+          <div className="pcreate__blocks">
+          {/* ── The derived campaign set (§3): shown before commit, never picked. ── */}
+          <section className="pcreate__block" aria-labelledby="pcreate-campaigns-title">
+            <h3 id="pcreate-campaigns-title" className="pcreate__block-title">
+              Campaign link
+            </h3>
+            <p className="pcreate__block-hint">
+              Derived from the selected line items — ticking rows on or off updates it.
+            </p>
+            {derivedCampaigns.length === 0 ? (
+              <p
+                className={cn(
+                  "pcreate__campaigns-none",
+                  submittableIds.size === 0 && "pcreate__campaigns-none--empty"
+                )}
+              >
+                {submittableIds.size === 0
+                  ? "Select at least one line item to derive the campaign."
+                  : "None of the selected line items carries a NetSuite campaign, so this pacing would be " +
+                    "linked to no campaign: Client Services users would not see it, and it could not be " +
+                    "opened from the pacing list. Check these line items in NetSuite before creating."}
+              </p>
+            ) : (
+              <>
+                <ul className="pcreate__campaign-list">
+                  {orderedCampaigns.map((campaign, index) => (
+                    <li key={campaign.id} className="pcreate__campaign">
+                      {derivedCampaigns.length > 1 ? (
+                        <label className="pcreate__campaign-pick">
+                          <input
+                            type="radio"
+                            name="pcreate-primary-campaign"
+                            checked={index === 0}
+                            onChange={() => setPrimaryPin(campaign.id)}
+                          />
+                          <span className="pcreate__campaign-name">{campaign.name || `Campaign ${campaign.id}`}</span>
+                        </label>
+                      ) : (
+                        <span className="pcreate__campaign-name">{campaign.name || `Campaign ${campaign.id}`}</span>
+                      )}
+                      {index === 0 && <span className="pcreate__badge">Primary</span>}
+                      <span className="pcreate__campaign-count">
+                        {campaign.count} line item{campaign.count === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {derivedCampaigns.length > 1 && (
+                  <p className="pcreate__block-hint">
+                    Primary is the campaign this pacing opens under when someone opens it from a pacing
+                    list.
+                  </p>
+                )}
+                {withoutCampaign > 0 && (
+                  <p className="pcreate__block-hint">
+                    {withoutCampaign} selected line item{withoutCampaign === 1 ? " carries" : "s carry"} no
+                    campaign — {withoutCampaign === 1 ? "it" : "they"} will still be paced, but{" "}
+                    {withoutCampaign === 1 ? "does" : "do"} not affect the campaign link.
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+
+          {/* ── Settings (the reference create screen's block; net cost mode and the layout picker do
+                 not exist in this fork and are deliberately absent). ── */}
+          <section className="pcreate__block" aria-labelledby="pcreate-settings-title">
+            <h3 id="pcreate-settings-title" className="pcreate__block-title">
+              Settings
+            </h3>
+            <label className="pcreate__setting">
+              <span className="pcreate__setting-label">Data source</span>
+              <select
+                className="pcreate__select pcreate__select--auto"
+                value={dataSource}
+                onChange={(e) => setDataSource(e.target.value as typeof dataSource)}
+              >
+                {DATA_SOURCES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="pcreate__setting-check">
+              <input type="checkbox" checked={fetchCreatives} onChange={(e) => setFetchCreatives(e.target.checked)} />
+              <span>Fetch creatives (adds the Creative breakdown on refresh)</span>
+            </label>
+            <label className="pcreate__setting-check">
+              <input
+                type="checkbox"
+                checked={fetchConversions}
+                onChange={(e) => setFetchConversions(e.target.checked)}
+              />
+              <span>Fetch conversions (adds the Conversion Action breakdown)</span>
+            </label>
+            <label className="pcreate__setting-check">
+              <input type="checkbox" checked={coefMode} onChange={(e) => toggleCoefMode(e.target.checked)} />
+              <span>Coefficient cost mode (adds a per-row Coef column above; each line item starts on)</span>
+            </label>
+            {nonUsdLineItem && (
+              <div className="pcreate__setting">
+                <span className="pcreate__setting-label">
+                  Exchange rate ({nonUsdLineItem.currency} → USD)
+                </span>
+                <div className="pcreate__rate-row">
+                  {/* A plain input, not NumericField: its blurred display rounds to 2 decimals,
+                      which is far too coarse for an exchange rate (0.704503 must not read as 0.7). */}
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="pcreate__input pcreate__input--rate"
+                    value={rateInput}
+                    aria-label="Exchange rate override"
+                    onChange={(e) => {
+                      setRateInput(e.target.value);
+                      setRateEdited(true);
+                    }}
+                  />
+                  {nsRate != null && <span className="pcreate__field-hint">NetSuite rate: {formatRate(nsRate)}</span>}
+                  {rateEdited && nsRate != null && (
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setRateInput(formatRate(nsRate));
+                        setRateEdited(false);
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <span className="pcreate__field-hint">
+                  Sets every line item's USD budget. Editing locks the rate so a later revalidate keeps it.
+                </span>
+              </div>
+            )}
+            <div className="pcreate__setting">
+              <span className="pcreate__setting-label">Campaign links</span>
+              {links.map((row, index) => (
+                <div key={index} className="pcreate__link-row">
+                  <input
+                    className="pcreate__input pcreate__input--link-name"
+                    placeholder="Name (e.g. Asana, IO)"
+                    value={row.name}
+                    aria-label={`Link ${index + 1} name`}
+                    onChange={(e) => updateLink(index, { name: e.target.value })}
+                  />
+                  <input
+                    className="pcreate__input pcreate__input--link-url"
+                    placeholder="https://…"
+                    value={row.url}
+                    aria-label={`Link ${index + 1} URL`}
+                    onChange={(e) => updateLink(index, { url: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost button--sm"
+                    onClick={() => setLinks((cur) => cur.filter((_, i) => i !== index))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <div>
+                <button
+                  type="button"
+                  className="button button--ghost button--sm"
+                  onClick={() => setLinks((cur) => [...cur, { name: "", url: "" }])}
+                >
+                  Add link
+                </button>
+              </div>
+            </div>
+            <label className="pcreate__setting">
+              <span className="pcreate__setting-label">Campaign notes</span>
+              <textarea
+                className="pcreate__notes"
+                rows={3}
+                value={notes}
+                placeholder="Free-text notes stored with the pacing"
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </label>
+          </section>
+          </div>
         </>
+      )}
+
+      {/* Inline, not only a toast: a bad_coef_config answer names the offending line items and
+          fields, and a sentence that long has to stay on screen to be acted on. */}
+      {createMutation.isError && (
+        <p className="form-error pcreate__create-error">{formatError(createMutation.error)}</p>
       )}
 
       <footer className="pcreate__footer">
@@ -834,6 +1227,9 @@ function GroupRows({
   onUpdateField,
   inUse,
   notFoundSet,
+  coefMode,
+  coefFlags,
+  onToggleCoef,
 }: {
   group: LineItemGroup;
   expanded: boolean;
@@ -847,6 +1243,9 @@ function GroupRows({
   onUpdateField: (lineItemId: string, field: FieldKey, value: string) => void;
   inUse: Record<string, PacingInUseV1>;
   notFoundSet: Set<string>;
+  coefMode: boolean;
+  coefFlags: Set<string>;
+  onToggleCoef: (id: string) => void;
 }) {
   const order = group.order;
   const label = order ? `IO ${order.orderNumber ?? group.key}` : "No insertion order";
@@ -859,7 +1258,7 @@ function GroupRows({
   return (
     <>
       <tr className="pcreate__group-row">
-        <td colSpan={12}>
+        <td colSpan={coefMode ? 13 : 12}>
           <button type="button" className="pcreate__group-toggle" onClick={onToggle} aria-expanded={expanded}>
             <ChevronDownIcon className={cn("pcreate__chevron", expanded && "pcreate__chevron--open")} />
             <span className="pcreate__group-label">{label}</span>
@@ -900,6 +1299,9 @@ function GroupRows({
             onUpdateField={onUpdateField}
             inUseEntry={inUse[li.lineItemId]}
             notFound={notFoundSet.has(li.lineItemId)}
+            coefMode={coefMode}
+            coefChecked={coefFlags.has(li.lineItemId)}
+            onToggleCoef={() => onToggleCoef(li.lineItemId)}
           />
         ))}
     </>
@@ -917,6 +1319,9 @@ function LineItemRow({
   onUpdateField,
   inUseEntry,
   notFound,
+  coefMode,
+  coefChecked,
+  onToggleCoef,
 }: {
   li: PacingDraftLineItemV1;
   includedChecked: boolean;
@@ -928,6 +1333,9 @@ function LineItemRow({
   onUpdateField: (lineItemId: string, field: FieldKey, value: string) => void;
   inUseEntry?: PacingInUseV1;
   notFound: boolean;
+  coefMode: boolean;
+  coefChecked: boolean;
+  onToggleCoef: () => void;
 }) {
   const id = li.lineItemId;
   const missingFlight = !hasFlightDates(values);
@@ -1022,7 +1430,10 @@ function LineItemRow({
             <span className="pcreate__badge">Auto</span>
           )}
         </div>
-        {li.plannedUnits != null && (
+        {/* NetSuite's own reference figure, shown only once the plan value DIFFERS from it - while
+            they are equal (the pre-fill, untouched) the hint would repeat the input above it on
+            every row and double the row's height for nothing. */}
+        {li.plannedUnits != null && parseEditableNumber(values.targetImpressions) !== li.plannedUnits && (
           <span className="pcreate__field-hint">NetSuite MP units: {fmtInt(li.plannedUnits)}</span>
         )}
       </td>
@@ -1058,6 +1469,17 @@ function LineItemRow({
           {isAutoFilled(li.marginPercent, id, "marginPercent", dirty) && <span className="pcreate__badge">Auto</span>}
         </div>
       </td>
+      {coefMode && (
+        <td className="pcreate__cell-coef">
+          <input
+            type="checkbox"
+            checked={coefChecked}
+            disabled={!includedChecked}
+            onChange={onToggleCoef}
+            aria-label={`Coefficient cost mode for line item ${id}`}
+          />
+        </td>
+      )}
       <td className="pcreate__cell-pct">
         <div className="pcreate__field">
           <NumericField

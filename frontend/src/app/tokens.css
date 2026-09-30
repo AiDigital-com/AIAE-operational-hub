@@ -147,6 +147,14 @@
   --sidebar-width: var(--sidebar-w);
   --shadow-card: var(--shadow-sm);
   --shadow-pop: var(--shadow-lg);
+
+  /* Off-pace row washes for the Overview (ported from Pacing's retired SPA, where they were
+     rgba(207,77,89,.08) / rgba(207,145,29,.08)) - a full-row background tint, NOT a left stripe
+     (vertical colour stripes are banned project-wide). Mixed over transparent so they sit on any
+     surface; re-declared in the dark block below because a custom property referencing others is
+     computed where it is DECLARED, not consumed. */
+  --pace-under-bg: color-mix(in srgb, var(--bad) 8%, transparent);
+  --pace-over-bg: color-mix(in srgb, var(--attention) 10%, transparent);
 }
 
 [data-theme="dark"] {
@@ -266,4 +274,9 @@
   --color-success-text: color-mix(in srgb, var(--good) 70%, var(--ink));
   --color-danger-border: color-mix(in srgb, var(--bad) 42%, transparent);
   --color-danger-bg: color-mix(in srgb, var(--bad) 8%, var(--surface));
+
+  /* Off-pace row washes, recomputed against this theme's --bad/--attention (see the light block).
+     Slightly stronger than the SPA's dark values so they survive the dark surfaces here. */
+  --pace-under-bg: color-mix(in srgb, var(--bad) 10%, transparent);
+  --pace-over-bg: color-mix(in srgb, var(--attention) 10%, transparent);
 }

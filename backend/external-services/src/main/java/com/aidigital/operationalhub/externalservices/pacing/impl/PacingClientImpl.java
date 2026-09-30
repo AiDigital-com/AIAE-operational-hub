@@ -12,7 +12,9 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudience
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAudiencePushStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOwnerEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
@@ -594,7 +596,10 @@ public class PacingClientImpl implements PacingClient {
 
 	@Override
 	public PacingCreateResult createPacing(
-			HubAssertion assertion, String pacingName, List<PacingCreateLineItem> lineItems) {
+			HubAssertion assertion,
+			String pacingName,
+			List<PacingCreateLineItem> lineItems,
+			PacingCreateOptions options) {
 		String header = assertionSigner.sign(assertion);
 		List<LineItemCreateRequest> wireLineItems = lineItems.stream().map(this::toWireLineItem).toList();
 		// The campaign-level order-number pair, gathered from the line items the same way the
@@ -604,11 +609,26 @@ public class PacingClientImpl implements PacingClient {
 		// Pacing's route gates both keys on presence. Without this pair a Hub-created pacing had
 		// no config_json.insertion_order_id at all, and its dashboard never showed an IO number.
 		List<String> orderNumbers = orderNumberCollector.collect(lineItems);
+		// Every optional key below rides only when it has a value (the record is NON_NULL): Pacing
+		// gates each on presence - if (body.client), if (Array.isArray(body.campaign_links)), a
+		// data key absent means "apply the defaults", and body.rate != null is what makes the rate
+		// an override at all.
+		PacingCreateOptions opts = options == null
+				? new PacingCreateOptions(null, null, null, null, null, null, null, null)
+				: options;
 		CreateRequest request = new CreateRequest(
 				pacingName,
 				wireLineItems,
 				orderNumbers.isEmpty() ? null : orderNumbers.get(0),
-				orderNumbers.size() > 1 ? orderNumbers : null);
+				orderNumbers.size() > 1 ? orderNumbers : null,
+				opts.client(),
+				opts.agency(),
+				opts.campaigns(),
+				toWireCreateData(opts.data()),
+				opts.rate(),
+				opts.rateLocked(),
+				opts.campaignLinks(),
+				opts.campaignNotes());
 		try {
 			CreateResponse response = restClient.post()
 					.uri(PACINGS_PATH)
@@ -628,6 +648,47 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + PACINGS_PATH, ex);
+		}
+	}
+
+	/**
+	 * Renames the create-time data settings to the snake_case keys Pacing's {@code config.data}
+	 * namespace stores - {@link #toWireDataNamespace}'s create-time twin, carrying {@code coef_enabled}.
+	 *
+	 * @param data the settings to write, or null when the caller sent none
+	 * @return the wire shape of the create body's {@code data} object, or null to omit the key
+	 */
+	DataCreateRequest toWireCreateData(PacingCreateData data) {
+		if (data == null) {
+			return null;
+		}
+		return new DataCreateRequest(
+				data.source(), data.fetchCreatives(), data.fetchConversions(), data.coefEnabled());
+	}
+
+	@Override
+	public PacingValidateResult validateInsertionOrder(HubAssertion assertion, String insertionOrderId) {
+		String header = assertionSigner.sign(assertion);
+		InsertionOrderValidateRequest request = new InsertionOrderValidateRequest(insertionOrderId);
+		try {
+			PacingValidateResult response = restClient.post()
+					.uri(VALIDATE_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.body(PacingValidateResult.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER,
+						"Pacing request failed: POST " + VALIDATE_PATH + " returned an empty body");
+			}
+			return response;
+		} catch (RestClientResponseException ex) {
+			throw pacingActionFailure("POST", VALIDATE_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + VALIDATE_PATH, ex);
 		}
 	}
 
@@ -1281,7 +1342,7 @@ public class PacingClientImpl implements PacingClient {
 				li.lineItemId(), li.channel(), li.flightStart(), li.flightEnd(), li.rateType(), li.nativeBudget(),
 				li.description(), li.currency(), li.exchangeRate(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.mpoTeamLead(), li.targetImpressions(), li.marginPercent(), li.targetCtr(),
-				li.targetVcr());
+				li.targetVcr(), li.costCoef());
 	}
 
 	/**
@@ -1292,11 +1353,11 @@ public class PacingClientImpl implements PacingClient {
 	 * gap, not a refusal; any other reason - most notably {@code no_create_permission}, the caller's
 	 * assertion not carrying {@code canCreate} - is a real authorization decision.
 	 *
-	 * <p>A 429 ({@code rate_limit_exceeded}) collapses to {@link PacingFailureReason#OTHER} (500) -
-	 * unlike {@code libraryFailure}'s 429 handling, which now maps to the typed
-	 * {@link PacingFailureReason#UPSTREAM_RATE_LIMITED}, this one stays generic: validate/create's rate
-	 * limit is a per-minute abuse guard, not a "you just did this" cooldown with a countdown worth
-	 * showing.
+	 * <p>A 429 ({@code rate_limit_exceeded}) maps to the typed
+	 * {@link PacingFailureReason#UPSTREAM_RATE_LIMITED} (429 + "wait a moment"), same as
+	 * {@code libraryFailure}'s. It used to collapse to {@link PacingFailureReason#OTHER} (500) while
+	 * nothing user-facing called validate directly; the standalone create screen's step 1 does, and
+	 * a per-minute abuse guard must read as "slow down", not as a server error.
 	 *
 	 * @param method the HTTP method that was called
 	 * @param path   the path that was called
@@ -1313,18 +1374,37 @@ public class PacingClientImpl implements PacingClient {
 					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
 		}
 		if (statusCode == 400) {
+			// bad_coef_config carries a structured `details` array (one entry per offending line
+			// item), not a `detail` string - described per line item and field, same as the plan
+			// save's handling (US-125's "a message naming the field"), so the create screen can show
+			// the user WHICH rows to fix instead of one opaque sentence.
+			if ("bad_coef_config".equals(error)) {
+				return new PacingExternalException(
+						PacingFailureReason.UPSTREAM_BAD_REQUEST,
+						"Pacing request failed: " + method + " " + path + " returned HTTP 400 (bad_coef_config)",
+						describeCoefErrors(body.get("details")));
+			}
 			// Some 400 bodies carry a proper `detail` (e.g. invalid_order_number/invalid_line_item_id);
 			// others only carry `error`, and that value is itself already a full sentence for most of
 			// this pair's own validation failures ("pacing_name and line_items required", "every line
 			// item needs flight_start and flight_end (YYYY-MM-DD)") rather than a short machine code -
 			// forwarded as-is when it reads like one, falling back to describeErrorCode only for the
-			// genuine short codes (mixed_currency, bad_coef_config).
+			// genuine short codes (mixed_currency).
 			String detail = textField(body, "detail");
 			String message = detail != null ? detail : describePacingActionErrorCode(error);
 			return new PacingExternalException(
 					PacingFailureReason.UPSTREAM_BAD_REQUEST,
 					"Pacing request failed: " + method + " " + path + " returned HTTP 400",
 					message);
+		}
+		if (statusCode == 429) {
+			// validate/create allow a few calls per user per minute (dash-gate's checkRateLimit).
+			// Typed as UPSTREAM_RATE_LIMITED so the Hub answers 429 with its own "wait a moment"
+			// sentence - the standalone create screen's step 1 must read as "slow down", never as a
+			// server crash.
+			return new PacingExternalException(
+					PacingFailureReason.UPSTREAM_RATE_LIMITED,
+					"Pacing request failed: " + method + " " + path + " returned HTTP 429 (rate limited)");
 		}
 		PacingFailureReason reason = switch (statusCode) {
 			case 401 -> PacingFailureReason.UPSTREAM_UNAUTHORIZED;

@@ -14,9 +14,16 @@ import com.aidigital.operationalhub.application.mapper.PacingCreateContractMappe
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
+import com.aidigital.operationalhub.service.agency.CampaignService;
+import com.aidigital.operationalhub.service.exception.BusinessException;
+import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
+import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
+import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -28,6 +35,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * REST controller for {@code GET /api/v1/pacing/pacings}.
@@ -47,6 +59,8 @@ public class PacingController implements PacingApi {
 	private final PacingContractMapper mapper;
 	private final PacingCreateContractMapper createMapper;
 	private final AssignableOwnerService assignableOwnerService;
+	private final CampaignService campaignService;
+	private final CampaignLinksValidator campaignLinksValidator;
 
 	@Override
 	public ResponseEntity<PacingListResponseV1> listPacings() {
@@ -58,15 +72,47 @@ public class PacingController implements PacingApi {
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		List<PacingRow> pacings = pacingClient.listPacings(assertion);
 
-		// Do map&response:
-		return ResponseEntity.ok(mapper.toV1(entitlement, pacings));
+		// Do map&response, with each row's campaigns enriched with their Hub-resolved agency/client
+		// (what the Overview's agency filter runs on) - one bulk lookup for the whole list:
+		return ResponseEntity.ok(mapper.toV1(entitlement, pacings, resolveCampaignsById(user, pacings)));
+	}
+
+	/**
+	 * Resolves the Hub campaign identity (agency/client) of every campaign referenced across the
+	 * given pacing rows, in ONE BigQuery round trip — never one per pacing. Pacing's campaign ids
+	 * are NetSuite campaign ids, the same id space as the Hub's own campaigns.
+	 *
+	 * <p>Ids the campaign service does not answer for (unknown, non-numeric, or outside the caller's
+	 * agency visibility — the service enforces that itself) are simply absent from the map; the
+	 * mapper then leaves those campaign references unenriched rather than inventing an agency.
+	 *
+	 * @param user    the current user, whose agency visibility scopes the lookup
+	 * @param pacings the pacing rows whose campaign references need resolving
+	 * @return the visible campaigns by id; empty when no row references any campaign
+	 */
+	Map<Long, CampaignModel> resolveCampaignsById(CurrentUserModel user, List<PacingRow> pacings) {
+		List<Long> campaignIds = pacings.stream()
+				.flatMap(row -> row.campaigns() == null ? Stream.<PacingCampaignRef>empty() : row.campaigns().stream())
+				.map(ref -> mapper.parseCampaignId(ref.id()))
+				.filter(Objects::nonNull)
+				.distinct()
+				.toList();
+		if (campaignIds.isEmpty()) {
+			return Map.of();
+		}
+		return campaignService.getVisibleCampaignIdentities(user, campaignIds).stream()
+				.filter(campaign -> campaign.id() != null)
+				.collect(Collectors.toMap(CampaignModel::id, Function.identity(), (a, b) -> a));
 	}
 
 	/**
 	 * §8 of the migration plan (US-123/124): creates a pacing from the caller's reviewed, selected
-	 * line items. No business logic here either - Pacing is the one that enforces {@code canCreate}
-	 * (carried on the signed assertion) and every other create rule; this only signs, forwards and
-	 * maps the result.
+	 * line items plus the optional create-time extras (client/agency, pinned campaign order, data
+	 * settings, rate override, links, notes). Near-zero business logic - Pacing is the one that
+	 * enforces {@code canCreate} (carried on the signed assertion) and every other create rule; the
+	 * one Hub-side check is {@link CampaignLinksValidator} over {@code campaignLinks}, because Pacing
+	 * stores links verbatim while the Hub renders them clickable - the exact reasoning of the
+	 * settings-save links path, applied to the same data arriving one screen earlier.
 	 */
 	@Override
 	public ResponseEntity<PacingCreateResultV1> createPacing(PacingCreateV1 body) {
@@ -75,7 +121,12 @@ public class PacingController implements PacingApi {
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		List<PacingCreateLineItem> lineItems =
 				body.getLineItems().stream().map(createMapper::toCreateLineItem).toList();
-		PacingCreateResult result = pacingClient.createPacing(assertion, body.getPacingName(), lineItems);
+		PacingCreateOptions options = createMapper.toCreateOptions(body);
+		if (options.campaignLinks() != null) {
+			campaignLinksValidator.validate(options.campaignLinks());
+		}
+		PacingCreateResult result =
+				pacingClient.createPacing(assertion, body.getPacingName(), lineItems, options);
 		return ResponseEntity.status(HttpStatus.CREATED).body(createMapper.toCreateResultV1(result));
 	}
 
@@ -126,16 +177,26 @@ public class PacingController implements PacingApi {
 	}
 
 	/**
-	 * Looks up line items by id directly (§9 of the migration plan, US-126's add-by-id path) - the same
-	 * validate endpoint {@link #createPacing}'s draft screen (§8) uses, with a {@code lineItemIds}
-	 * selector instead of a campaign id, and therefore the exact same {@code canCreate} requirement.
+	 * Looks up line items directly, by exactly one of two selectors - {@code lineItemIds} (§9 of the
+	 * migration plan, US-126's add-by-id path) or {@code insertionOrderId} (the standalone create
+	 * screen's insertion-order mode). The same validate endpoint {@link #createPacing}'s draft screen
+	 * (§8) uses with a campaign selector, and therefore the exact same {@code canCreate} requirement.
+	 * Both selectors present, or neither, is a 400 here before Pacing is called - the contract says
+	 * exactly one, and guessing which one the caller meant is how a typo turns into a wrong lookup.
 	 */
 	@Override
 	public ResponseEntity<PacingDraftV1> validatePacingLineItems(PacingLineItemValidateV1 body) {
+		boolean hasIds = body.getLineItemIds() != null && !body.getLineItemIds().isEmpty();
+		boolean hasOrder = body.getInsertionOrderId() != null && !body.getInsertionOrderId().isBlank();
+		if (hasIds == hasOrder) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_065);
+		}
 		CurrentUserModel user = currentUserService.resolveCurrentUser();
 		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
-		PacingValidateResult result = pacingClient.validateLineItems(assertion, body.getLineItemIds());
+		PacingValidateResult result = hasIds
+				? pacingClient.validateLineItems(assertion, body.getLineItemIds())
+				: pacingClient.validateInsertionOrder(assertion, body.getInsertionOrderId().trim());
 		return ResponseEntity.ok(createMapper.toDraftV1(result));
 	}
 }

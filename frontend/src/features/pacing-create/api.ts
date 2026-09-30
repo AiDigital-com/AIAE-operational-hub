@@ -1,7 +1,7 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
-import type { PacingCreateResultV1, PacingCreateV1, PacingDraftV1 } from "./types";
+import type { PacingCreateResultV1, PacingCreateV1, PacingDraftV1, PacingLineItemValidateV1 } from "./types";
 
 /**
  * A campaign's insertion orders and line items for the Create Pacing review panel (§8 of the
@@ -25,6 +25,20 @@ export async function getPacingDraft(campaignId: number): Promise<PacingDraftV1>
  */
 export async function createPacing(body: PacingCreateV1): Promise<PacingCreateResultV1> {
   const result = await apiClient.POST("/api/v1/pacing/pacings", { body });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * The Create Pacing modal's step-1 lookup (opened from the Overview): exactly one selector - an
+ * insertion-order number, or a list of line item ids - answered with the same draft shape the
+ * campaign path gets. `ok: false` and an empty `lineItems` are both normal 200 responses the caller
+ * must handle on screen (stay on step 1 and say why), never silent empty tables.
+ */
+export async function validatePacingLookup(body: PacingLineItemValidateV1): Promise<PacingDraftV1> {
+  const result = await apiClient.POST("/api/v1/pacing/line-items/validate", { body });
   if (result.error || !result.response.ok || result.data === undefined) {
     throw new ApiError(formatError(result.error), result.response.status);
   }

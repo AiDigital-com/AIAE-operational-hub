@@ -4,6 +4,12 @@ export type PacingRowV1 = components["schemas"]["PacingRowV1"];
 export type CampaignRefV1 = components["schemas"]["CampaignRefV1"];
 export type PacingAlertV1 = components["schemas"]["PacingAlertV1"];
 export type PacingScopeV1 = components["schemas"]["PacingScopeV1"];
+// The owner-grouped Overview's expanded rows (per-LI health, heatmap days, KPI targets) and the
+// delegation pills.
+export type PacingLineItemHealthV1 = components["schemas"]["PacingLineItemHealthV1"];
+export type PacingRecentDayV1 = components["schemas"]["PacingRecentDayV1"];
+export type PacingKpiTargetV1 = components["schemas"]["PacingKpiTargetV1"];
+export type PacingDelegationRefV1 = components["schemas"]["PacingDelegationRefV1"];
 export type PacingListResponseV1 = components["schemas"]["PacingListResponseV1"];
 export type AssignableOwnerV1 = components["schemas"]["AssignableOwnerV1"];
 export type AssignableOwnerListV1 = components["schemas"]["AssignableOwnerListV1"];

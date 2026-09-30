@@ -34,6 +34,26 @@ export function writeFilterList(params: URLSearchParams, key: string, values: st
   }
 }
 
+/**
+ * Every query-string key this hook owns, both spellings of the list ones. The filters are keyed on
+ * nothing but the URL, so when one screen swaps the pacing under a mounted dashboard - the campaign
+ * Pacing tab, which keeps the dashboard below its list - the previous pacing's channels, labels and
+ * line-item selection would otherwise still be applied to the new one, and match nothing. That
+ * screen calls `clearFilterParams` as it switches. Keep this list in step with `setFilters` below.
+ */
+const FILTER_PARAM_KEYS = [
+  "range", "from", "to",
+  "ch", "ch[]",
+  "label", "label[]",
+  "platform", "platform[]",
+  "li", "brk", "brkf", "cols",
+];
+
+/** Strips every filter key from `params`, in place. Anything else on the URL is left alone. */
+export function clearFilterParams(params: URLSearchParams): void {
+  for (const key of FILTER_PARAM_KEYS) params.delete(key);
+}
+
 /** A patch to `setFilters` - every field optional; an omitted field is left untouched in the URL. */
 export type DashboardFiltersPatch = Partial<DashboardFilters>;
 

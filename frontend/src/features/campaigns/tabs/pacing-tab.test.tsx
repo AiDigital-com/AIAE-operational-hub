@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Outlet, Route, Routes, useParams } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1, aPacingNsDiffReportV1, aUserV1 } from "@/test/factories";
 import { ToastProvider } from "../../../shared/ui/toast/toast";
@@ -111,19 +111,29 @@ function aResponse(pacings: PacingRowV1[], canCreate = true): PacingListResponse
 function renderTab(options: { initialPath?: string; initialState?: unknown; campaign?: CampaignV1 } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const { initialPath = "/campaigns/42/pacing", initialState, campaign = aCampaign() } = options;
+  // Split, because MemoryRouter matches `pathname` literally: a query string left on it makes the
+  // route miss and the tab never render at all.
+  const [pathname, search = ""] = initialPath.split("?");
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={[{ pathname: initialPath, state: initialState }]}>
+        <MemoryRouter initialEntries={[{ pathname, search: search ? `?${search}` : "", state: initialState }]}>
           <Routes>
             <Route path="/campaigns/:campaignId" element={<CampaignRouteStub campaign={campaign} />}>
               <Route path="pacing" element={<PacingTab />} />
             </Route>
           </Routes>
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>
   );
+}
+
+/** Puts the live query string in the DOM, so a test can assert what the tab did to the URL. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-search">{location.search}</span>;
 }
 
 /**
@@ -201,28 +211,54 @@ describe("PacingTab", () => {
     expect(listCampaignPacings).toHaveBeenCalledWith(42);
   });
 
-  it("expands a pacing's detail in place when its row is opened, and collapses it again", async () => {
-    // Given:
+  it("selects the first pacing on arrival, and a click moves the selection without losing the list", async () => {
+    // Given: two pacings on this campaign
     vi.mocked(listCampaignPacings).mockResolvedValue(
-      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", lineItemCount: 7 })])
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" }), aPacing({ id: "p2", name: "Ourisman Ford Q2" })])
     );
+
+    // When:
     renderTab();
-    const row = await screen.findByRole("button", { name: /^Ourisman Ford Q1/ });
 
-    // When: opened
-    await userEvent.click(row);
+    // Then: the first row is selected with no click - the panel below is never blank on arrival
+    const first = await screen.findByRole("button", { name: /^Ourisman Ford Q1/ });
+    const second = screen.getByRole("button", { name: /^Ourisman Ford Q2/ });
+    expect(first).toHaveAttribute("aria-current", "true");
+    expect(second).not.toHaveAttribute("aria-current");
 
-    // Then: detail renders in place, no navigation away from the tab
-    expect(screen.getByText("Line items")).toBeInTheDocument();
-    expect(screen.getByText("7")).toBeInTheDocument();
-    expect(row).toHaveAttribute("aria-expanded", "true");
+    // When: picking the second
+    await userEvent.click(second);
 
-    // When: closed again
-    await userEvent.click(row);
+    // Then: the selection moves, and BOTH rows are still on screen - the list is not replaced, which
+    // is the whole point: the next pacing is one click away, not a round trip
+    expect(second).toHaveAttribute("aria-current", "true");
+    expect(first).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: /^Ourisman Ford Q1/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Ourisman Ford Q2/ })).toBeInTheDocument();
+  });
 
-    // Then:
-    expect(screen.queryByText("Line items")).not.toBeInTheDocument();
-    expect(row).toHaveAttribute("aria-expanded", "false");
+  it("drops the dashboard filters when the selection moves to another pacing", async () => {
+    // Given: a filtered dashboard - the filters live in the query string with no pacing in the key,
+    // and the dashboard below the list is no longer torn down between pacings
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1" }), aPacing({ id: "p2", name: "Ourisman Ford Q2" })])
+    );
+    renderTab({ initialPath: "/campaigns/42/pacing?range=30d&ch=Display&li=12345&tab=plan" });
+    await screen.findByRole("button", { name: /^Ourisman Ford Q1/ });
+
+    // When: picking the other pacing
+    await userEvent.click(screen.getByRole("button", { name: /^Ourisman Ford Q2/ }));
+
+    // Then: Q1's channels/range/line-item selection do not follow it over - left applied they match
+    // nothing on Q2, and a healthy pacing would open empty
+    await waitFor(() => {
+      const search = new URLSearchParams(screen.getByTestId("location-search").textContent ?? "");
+      expect(search.get("range")).toBeNull();
+      expect(search.get("ch")).toBeNull();
+      expect(search.get("li")).toBeNull();
+      // Anything that is not a filter is left alone
+      expect(search.get("tab")).toBe("plan");
+    });
   });
 
   it("names the other campaigns a multi-campaign pacing covers, and links to them (US-113)", async () => {
@@ -274,13 +310,14 @@ describe("PacingTab", () => {
     // When: following the "also covers" link to campaign 99
     await userEvent.click(screen.getByRole("link", { name: "Ourisman Toyota 2026" }));
 
-    // Then: campaign 99's own Pacing tab renders, with the SAME pacing already expanded
+    // Then: campaign 99's own Pacing tab renders, with the SAME pacing already selected - not the
+    // first row, which is what an unhandled arrival would land on
     expect(await screen.findByText("Toyota-only pacing")).toBeInTheDocument();
     const reopened = screen.getByRole("button", { name: /^Shared pacing/ });
-    expect(reopened).toHaveAttribute("aria-expanded", "true");
+    expect(reopened).toHaveAttribute("aria-current", "true");
   });
 
-  it("opens the full dashboard from an expanded row, and returns to the list on Back (§6)", async () => {
+  it("renders the selected pacing's dashboard under the list, with no back link (§6)", async () => {
     // Given: a row that has resolved a dash_slug (the dashboard needs it to call Pacing)
     vi.mocked(listCampaignPacings).mockResolvedValue(
       aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", dashSlug: "ourisman-ford-q1" })])
@@ -298,25 +335,21 @@ describe("PacingTab", () => {
       exists: false, refreshId: null, rowCount: 0, latestDate: null,
     });
     vi.mocked(pacingDashboardApi.listPacingLibrary).mockResolvedValue([]);
+
+    // When: arriving on the tab - no click, the row is selected already
     renderTab();
-    await userEvent.click(await screen.findByRole("button", { name: /^Ourisman Ford Q1/ }));
 
-    // When: opening the full dashboard
-    await userEvent.click(await screen.findByRole("button", { name: /open full dashboard/i }));
-
-    // Then: the tab's own list is replaced by the dashboard, in place (no route change)
-    expect(await screen.findByText(/back to pacings/i)).toBeInTheDocument();
-    expect(screen.queryByText("Ourisman Ford 2026")).not.toBeInTheDocument();
-
-    // When: going back
-    await userEvent.click(screen.getByText(/back to pacings/i));
-
-    // Then: the list (with the row still expanded) is showing again
-    expect(await screen.findByText("Line items")).toBeInTheDocument();
+    // Then: the dashboard is rendered below (its own heading, not the list row's label) ...
+    expect(await screen.findByRole("heading", { name: "Ourisman Ford Q1" })).toBeInTheDocument();
+    // ... the list is still above it ...
+    expect(screen.getByRole("button", { name: /^Ourisman Ford Q1/ })).toBeInTheDocument();
+    // ... and there is no back link, because nothing was left behind to go back to
+    expect(screen.queryByText(/back to pacings/i)).not.toBeInTheDocument();
   });
 
-  it("expands and scrolls to the pacing named by router state on arrival (US-113, from the Overview)", async () => {
-    // Given: the Overview navigated here after opening "Wanted pacing" specifically
+  it("selects and scrolls to the pacing named by router state on arrival (US-113, from the Overview)", async () => {
+    // Given: the Overview navigated here after opening "Wanted pacing" specifically - and it is the
+    // SECOND row, so the default-to-first selection would land on the wrong one
     vi.mocked(listCampaignPacings).mockResolvedValue(
       aResponse([aPacing({ id: "other", name: "Other pacing" }), aPacing({ id: "wanted", name: "Wanted pacing" })])
     );
@@ -324,10 +357,10 @@ describe("PacingTab", () => {
     // When:
     renderTab({ initialState: { openPacingId: "wanted" } });
 
-    // Then: the named pacing is expanded without any click
+    // Then: the named pacing is selected without any click, and the first row is not
     const wantedRow = await screen.findByRole("button", { name: /^Wanted pacing/ });
-    expect(wantedRow).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: /^Other pacing/ })).toHaveAttribute("aria-expanded", "false");
+    expect(wantedRow).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: /^Other pacing/ })).not.toHaveAttribute("aria-current");
   });
 
   it("shows the Create Pacing button when the caller may create, hides it otherwise (§8)", async () => {
@@ -393,21 +426,19 @@ describe("PacingTab", () => {
     vi.mocked(pacingDashboardApi.getPacingRefreshStatus).mockResolvedValue(emptyStatus);
     vi.mocked(pacingDashboardApi.listPacingLibrary).mockResolvedValue([]);
     renderTab();
-    await screen.findByText("Older empty pacing");
+    await screen.findByRole("button", { name: /^Older empty pacing/ });
 
-    // When: creating a pacing, then opening its dashboard from the list it returns to
+    // When: creating a pacing - the list it returns to selects the new one for us
     await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
     await screen.findByText("1");
     await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
-    await userEvent.click(await screen.findByRole("button", { name: /open full dashboard/i }));
 
-    // Then: it waits for that first build rather than reading as a pacing with nothing coming
+    // Then: its dashboard waits for that first build rather than reading as a pacing with nothing
+    // coming
     expect(await screen.findByText(/pulling delivery data/i)).toBeInTheDocument();
 
-    // When: going back and opening the older empty pacing instead
-    await userEvent.click(screen.getByText(/back to pacings/i));
+    // When: selecting the older empty pacing instead - one click, no round trip through a back link
     await userEvent.click(await screen.findByRole("button", { name: /^Older empty pacing/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /open full dashboard/i }));
 
     // Then: no claim that anything is being pulled for it
     expect(await screen.findByText("No data has been built for this pacing yet.")).toBeInTheDocument();

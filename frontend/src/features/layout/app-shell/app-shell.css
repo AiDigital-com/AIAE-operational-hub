@@ -18,12 +18,21 @@
 }
 
 /* ── topbar ── */
+/* Rendered on the Overview only (app-shell.tsx gates it on `isOverview`), which caps itself at
+   1560 and centres it - so this band carries the same cap, plus its own 40px gutters, and the
+   greeting keeps landing on the same left edge as the page title under it. `width: 100%` is
+   load-bearing: auto cross-axis margins switch `align-items: stretch` off for a flex item, so
+   without a definite width this would shrink to the greeting's own text and centre that instead
+   of the band. Below 1640px nothing is capped and the auto margins collapse to zero. */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 20px 40px;
   gap: 20px;
+  width: 100%;
+  max-width: 1640px;
+  margin-inline: auto;
 }
 
 .topbar__greeting {

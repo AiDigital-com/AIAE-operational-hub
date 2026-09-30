@@ -6,6 +6,8 @@ import com.aidigital.operationalhub.service.common.search.SearchCriteria;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import org.springframework.data.domain.Page;
 
+import java.util.List;
+
 /**
  * Reads campaigns from BigQuery, optionally filtered by client or agency.
  *
@@ -54,4 +56,26 @@ public interface CampaignService {
 	 * @throws com.aidigital.operationalhub.service.exception.BusinessException OPH_025 when no visible campaign matches
 	 */
 	CampaignModel getVisibleCampaignIdentity(CurrentUserModel user, long campaignId);
+
+	/**
+	 * Resolves who several campaigns are — the bulk counterpart of
+	 * {@link #getVisibleCampaignIdentity}, in ONE BigQuery round trip for the whole set. Built for
+	 * the pacing Overview, which needs the agency/client of every campaign across every pacing row
+	 * and must never pay one query per pacing.
+	 *
+	 * <p>Same visibility rule, different absence contract: an id that is unknown, or outside the
+	 * caller's agency visibility, is simply missing from the result rather than failing the whole
+	 * batch — one foreign campaign on one pacing must not blank the entire Overview. Callers treat a
+	 * missing id as "unresolved".
+	 *
+	 * <p>Identity fields only ({@code id}, {@code name}, client and agency); the unread fields come
+	 * back null, exactly like the single-id identity lookup.
+	 *
+	 * @param user        the current user
+	 * @param campaignIds the campaign ids to resolve; an empty list resolves to an empty result
+	 *                    without touching BigQuery
+	 * @return the visible campaigns' identities, in no particular order; never {@code null}
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException if the BigQuery read fails
+	 */
+	List<CampaignModel> getVisibleCampaignIdentities(CurrentUserModel user, List<Long> campaignIds);
 }

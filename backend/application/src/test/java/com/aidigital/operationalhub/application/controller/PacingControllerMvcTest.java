@@ -19,10 +19,15 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.Assignabl
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
+import com.aidigital.operationalhub.service.agency.CampaignService;
+import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
+import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -39,6 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -76,6 +82,12 @@ class PacingControllerMvcTest {
 	@Mock
 	private AssignableOwnerService assignableOwnerService;
 
+	@Mock
+	private CampaignService campaignService;
+
+	@Mock
+	private CampaignLinksValidator campaignLinksValidator;
+
 	@InjectMocks
 	private PacingController controller;
 
@@ -85,8 +97,18 @@ class PacingControllerMvcTest {
 		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
-		List<PacingRow> pacings =
-				List.of(new PacingRow("p1", "nike-ss26", "Live", null, null, null, 0, null, null, null, null, null));
+		// Two rows sharing one campaign plus a second campaign: the controller must resolve the
+		// distinct id set in ONE bulk lookup, never once per pacing.
+		List<PacingRow> pacings = List.of(
+				new PacingRow("p1", "nike-ss26", "Live", null, null, null, null, 0, null, null,
+						List.of(new PacingCampaignRef("310739", "Nike SS26", null)),
+						null, null, null, null, null, null, null, null),
+				new PacingRow("p2", "nike-oct", "Live", null, null, null, null, 0, null, null,
+						List.of(new PacingCampaignRef("310739", "Nike SS26", null),
+								new PacingCampaignRef("310740", "Nike Oct", null)),
+						null, null, null, null, null, null, null, null));
+		List<CampaignModel> identities = List.of(new CampaignModel(
+				310739L, "Nike SS26", 7L, "Nike Inc", 42L, "Initiative", null, null, null, null, null, null, null));
 		PacingListResponseV1 body = new PacingListResponseV1()
 				.scope(new PacingScopeV1().kind(PacingScopeV1.KindEnum.ALL).ids(List.of()).canCreate(true))
 				.pacings(List.of(new PacingRowV1()
@@ -96,13 +118,19 @@ class PacingControllerMvcTest {
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
 		doReturn(pacings).when(pacingClient).listPacings(assertion);
-		doReturn(body).when(mapper).toV1(entitlement, pacings);
+		doReturn(310739L).when(mapper).parseCampaignId("310739");
+		doReturn(310740L).when(mapper).parseCampaignId("310740");
+		doReturn(identities).when(campaignService).getVisibleCampaignIdentities(user, List.of(310739L, 310740L));
+		doReturn(body).when(mapper).toV1(entitlement, pacings, Map.of(310739L, identities.get(0)));
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:
 		mockMvc.perform(get("/api/v1/pacing/pacings"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.scope.kind").value(body.getScope().getKind().getValue()));
+
+		// Then: one bulk identity lookup for the whole list, distinct ids only.
+		verify(campaignService).getVisibleCampaignIdentities(user, List.of(310739L, 310740L));
 	}
 
 	@Test
@@ -147,18 +175,25 @@ class PacingControllerMvcTest {
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null);
+				"40539", "Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null);
 		doReturn(user).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
 		doReturn(lineItem).when(createMapper).toCreateLineItem(any(PacingCreateLineItemV1.class));
+		// The optional extras ride as one options record - here the standalone screen's picks:
+		// client/agency (the blank-subtitle fix), the pinned campaign order, and the data namespace.
+		PacingCreateOptions options = new PacingCreateOptions(
+				List.of("40539"), "Acme", "MediaCo", null, null, null, null, null);
+		doReturn(options).when(createMapper).toCreateOptions(any(PacingCreateV1.class));
 		doReturn(new PacingCreateResult("p9", "2026-campaign"))
-				.when(pacingClient).createPacing(eq(assertion), eq("2026_Campaign"), eq(List.of(lineItem)));
+				.when(pacingClient)
+				.createPacing(eq(assertion), eq("2026_Campaign"), eq(List.of(lineItem)), eq(options));
 		doReturn(new PacingCreateResultV1().pacingId("p9").dashSlug("2026-campaign"))
 				.when(createMapper).toCreateResultV1(any(PacingCreateResult.class));
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
-		String body = "{\"pacingName\":\"2026_Campaign\",\"lineItems\":[{\"lineItemId\":\"599852\","
+		String body = "{\"pacingName\":\"2026_Campaign\",\"client\":\"Acme\",\"agency\":\"MediaCo\","
+				+ "\"campaigns\":[\"40539\"],\"lineItems\":[{\"lineItemId\":\"599852\","
 				+ "\"flightStart\":\"2026-03-01\",\"flightEnd\":\"2026-03-31\"}]}";
 
 		// When / Then:
@@ -166,6 +201,7 @@ class PacingControllerMvcTest {
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.pacingId").value("p9"))
 				.andExpect(jsonPath("$.dashSlug").value("2026-campaign"));
+		verify(pacingClient).createPacing(assertion, "2026_Campaign", List.of(lineItem), options);
 	}
 
 	@Test
@@ -178,8 +214,10 @@ class PacingControllerMvcTest {
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(new HubAssertion(user.email(), PacingScope.KIND_OWNERS, List.of(), false))
 				.when(mapper).toAssertion(any(), any());
+		doReturn(new PacingCreateOptions(null, null, null, null, null, null, null, null))
+				.when(createMapper).toCreateOptions(any(PacingCreateV1.class));
 		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_FORBIDDEN, "no_create_permission"))
-				.when(pacingClient).createPacing(any(), any(), any());
+				.when(pacingClient).createPacing(any(), any(), any(), any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
 				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
 				.build();
@@ -315,6 +353,59 @@ class PacingControllerMvcTest {
 						.contentType(APPLICATION_JSON).content("{\"lineItemIds\":[\"12345\"]}"))
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("OPH_057"));
+	}
+
+	@Test
+	void shouldValidateByInsertionOrderTest() throws Exception {
+		// Given: the standalone create screen's IO mode - the same endpoint, the other selector.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		PacingValidateResult result = new PacingValidateResult(
+				true, null, List.of(), List.of(), null, null, null, null, null, null, null, null);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(result).when(pacingClient).validateInsertionOrder(eq(assertion), eq("TM-271064"));
+		doReturn(new PacingDraftV1().ok(true).lineItems(List.of()))
+				.when(createMapper).toDraftV1(result);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: the number arrives trimmed - what Pacing's charset gate expects to judge.
+		mockMvc.perform(post("/api/v1/pacing/line-items/validate")
+						.contentType(APPLICATION_JSON).content("{\"insertionOrderId\":\" TM-271064 \"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.ok").value(true));
+	}
+
+	@Test
+	void shouldRejectValidateCarryingBothSelectorsTest() throws Exception {
+		// Given: exactly one selector is the contract - guessing which one the caller meant is how a
+		// typo becomes a wrong lookup. Rejected before Pacing is called.
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/line-items/validate")
+						.contentType(APPLICATION_JSON)
+						.content("{\"lineItemIds\":[\"12345\"],\"insertionOrderId\":\"TM-271064\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("OPH_065"));
+	}
+
+	@Test
+	void shouldRejectValidateCarryingNeitherSelectorTest() throws Exception {
+		// Given: same rule, other side - an empty ids list is "no selector", not "look up nothing".
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/line-items/validate")
+						.contentType(APPLICATION_JSON).content("{\"lineItemIds\":[]}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("OPH_065"));
 	}
 }
 

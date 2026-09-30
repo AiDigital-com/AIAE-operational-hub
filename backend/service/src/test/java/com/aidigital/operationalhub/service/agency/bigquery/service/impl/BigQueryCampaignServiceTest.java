@@ -188,6 +188,55 @@ class BigQueryCampaignServiceTest {
 	}
 
 	@Test
+	void shouldResolveSeveralCampaignIdentitiesInOneQueryTest() {
+		// Given: the pacing Overview resolving every campaign its rows span - one IN query for the
+		// whole batch, an id nobody can see simply missing from the answer rather than failing it
+		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
+		Map<String, Object> row = new HashMap<>();
+		row.put("id", 46252L);
+		row.put("name", "Financial Partners Credit Union Summer 2026");
+		row.put("client_id", 10L);
+		row.put("client_name", "Financial Partners Credit Union");
+		row.put("agency_id", 20L);
+		row.put("agency_name", "ProximAgency");
+		when(bigQueryClient.query(anyString())).thenReturn(List.of(row));
+		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+
+		// When: two ids asked for, only one visible/known
+		List<CampaignModel> campaigns = service.getVisibleCampaignIdentities(null, List.of(46252L, 99999L));
+
+		// Then: one identity-only query over the whole set, nothing else paid for
+		assertThat(campaigns).hasSize(1);
+		assertThat(campaigns.get(0).id()).isEqualTo(46252L);
+		assertThat(campaigns.get(0).agencyId()).isEqualTo(20L);
+		assertThat(campaigns.get(0).budget()).isNull();
+		verify(bigQueryClient, times(1)).query(sql.capture());
+		assertThat(sql.getValue()).contains("`campaign_id` IN (46252, 99999)", "LIMIT 2");
+		assertThat(sql.getValue()).doesNotContain("SUM(", "ARRAY_AGG", "COUNT(", "ORDER BY");
+	}
+
+	@Test
+	void shouldResolveAnEmptyCampaignIdentityBatchWithoutQueryingTest() {
+		// When: no pacing references any campaign
+		List<CampaignModel> campaigns = service.getVisibleCampaignIdentities(null, List.of());
+
+		// Then: nothing to resolve costs nothing
+		assertThat(campaigns).isEmpty();
+		verifyNoInteractions(bigQueryClient);
+	}
+
+	@Test
+	void shouldResolveNoCampaignIdentitiesForAUserWhoSeesNothingTest() {
+		// Given: a user with no agency visibility at all
+		when(agencyVisibilityService.resolveForCurrentUser(null))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of()));
+
+		// When-Then: empty, not an error - the Overview list itself may still be visible
+		assertThat(service.getVisibleCampaignIdentities(null, List.of(1L))).isEmpty();
+		verifyNoInteractions(bigQueryClient);
+	}
+
+	@Test
 	void shouldSumTacticBudgetNotOrderBudgetTest() {
 		// Given: order_budget is order-level and repeated on every line-item row of that order - summing
 		// it directly over a group would over-count by the order's own line-item count, so the campaign

@@ -1,30 +1,44 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  aCampaignPageV1,
-  aCampaignV1,
+  aCampaignRefV1,
   anAgencyPageV1,
   anAgencyV1,
-  anInsertionOrderLineItemV1,
-  anInsertionOrderV1,
+  aPacingLineItemHealthV1,
+  aPacingListResponseV1,
+  aPacingRowV1,
+  aPacingScopeV1,
 } from "@/test/factories";
 import { ToastProvider } from "../../shared/ui/toast/toast";
 import { searchAgencies } from "../agencies/api";
-import { AGENCY_LIST_PAGE_SIZE, AGENCY_SEARCH_PAGE_SIZE } from "../agencies/hooks";
-import { listCampaignInsertionOrders, searchCampaigns } from "../campaigns/api";
-import { OVERVIEW_PAGE_SIZE } from "../pacing/mock/hooks";
+import { triggerPacingRefresh } from "../pacing-dashboard/api";
+import { listPacingOverview } from "../pacing-overview/api";
 import { Overview } from "./overview";
 
-vi.mock("../campaigns/api", () => ({
-  searchCampaigns: vi.fn(),
-  listCampaignInsertionOrders: vi.fn(),
+vi.mock("../pacing-overview/api", () => ({
+  listPacingOverview: vi.fn(),
+  listCampaignPacings: vi.fn(),
+  listAssignableOwners: vi.fn(),
+  transferPacingOwner: vi.fn(),
+  getPacingNsDiff: vi.fn(),
 }));
 
 vi.mock("../agencies/api", () => ({
   searchAgencies: vi.fn(),
+}));
+
+// The row menu's refresh path plus everything else the pacing-dashboard module graph exports that
+// this page's imports touch - a partial mock would make the whole table throw on import.
+vi.mock("../pacing-dashboard/api", () => ({
+  triggerPacingRefresh: vi.fn(),
+  getPacingDashboard: vi.fn(),
+  getPacingRefreshStatus: vi.fn(),
+  savePacingCampaignLinks: vi.fn(),
+  savePacingDataSettings: vi.fn(),
+  savePacingNotifySettings: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();
@@ -33,31 +47,21 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-let intersectionCallback: IntersectionObserverCallback | null = null;
-
-class MockIntersectionObserver implements IntersectionObserver {
-  root = null;
-  rootMargin = "";
-  thresholds = [];
-  constructor(callback: IntersectionObserverCallback) {
-    intersectionCallback = callback;
-  }
-  observe = vi.fn();
-  unobserve = vi.fn();
-  disconnect = vi.fn();
-  takeRecords = vi.fn(() => []);
-}
-
 /** Renders the current query string, so a test can assert what the page put in the address. */
 function LocationProbe() {
   return <div data-testid="location-search">{useLocation().search}</div>;
 }
 
-function renderOverview(url = "/", userId = "user_1") {
+function renderOverview(url = "/", user: { user_id?: string; full_name?: string; roles?: string[] } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // Seeded rather than fetched: the app shell holds Overview back until the profile is cached, and the
-  // remembered filters are scoped to whoever it names.
-  queryClient.setQueryData(["auth", "me"], { user_id: userId, email: "one@aidigital.com" });
+  // Seeded rather than fetched: the app shell holds Overview back until the profile is cached, and
+  // both the remembered filters and the own-group-first ordering are scoped to whoever it names.
+  queryClient.setQueryData(["auth", "me"], {
+    user_id: user.user_id ?? "user_1",
+    email: "one@aidigital.com",
+    full_name: user.full_name ?? "Azat Nabiev",
+    roles: user.roles ?? [],
+  });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -79,587 +83,612 @@ function renderOverview(url = "/", userId = "user_1") {
   );
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
-
-/** One agency with two clients, each with one real campaign. */
-function stubOneAgencyTwoCampaigns(overrides: { firstStatus?: string; secondStatus?: string } = {}) {
-  vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-    content: [
-      aCampaignV1({
-        id: 100,
-        name: "Summer Getaways",
-        agency_name: "Northstar Media",
-        client_name: "Acme Corp",
-        status: overrides.firstStatus ?? "Live",
-        budget: 50_000,
-        start_date: "2026-06-01",
-        end_date: "2026-08-31",
-      }),
-      aCampaignV1({
-        id: 200,
-        name: "Winter Push",
-        agency_name: "Northstar Media",
-        client_name: "Globex",
-        status: overrides.secondStatus ?? "Paused",
-        budget: 30_000,
-        start_date: "2026-01-01",
-        end_date: "2026-02-28",
-      }),
-    ],
-    totalElements: 2,
-  }));
-  vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-    content: [anAgencyV1({ id: 1, name: "Northstar Media" })],
-  }));
+/** The owner names in card order, for asserting group ordering. */
+function ownerNames(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll(".overview__owner-name")).map((el) => el.textContent ?? "");
 }
 
 describe("Overview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    intersectionCallback = null;
-    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
-    // The page remembers its filters across visits on purpose, and jsdom keeps one store for the whole
-    // file - so without this, one test's filter is the next test's starting state.
     sessionStorage.clear();
+    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({ content: [anAgencyV1({ id: 1, name: "Northstar Media" })] }));
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [aPacingRowV1()] }));
   });
 
-  it("should show a loading indicator while the accessible campaigns are being aggregated", async () => {
-    // Given: the underlying requests never resolve within this test
-    vi.mocked(searchCampaigns).mockReturnValue(new Promise(() => {}));
-    vi.mocked(searchAgencies).mockReturnValue(new Promise(() => {}));
-
+  it("should request the pacing list exactly once for the whole screen", async () => {
     // When:
     renderOverview();
+    await screen.findByRole("table");
+
+    // Then: one request, never one per row or per filter change
+    expect(listPacingOverview).toHaveBeenCalledTimes(1);
+  });
+
+  it("should group pacings by owner: the viewer's group first, others alphabetical, Unassigned last", async () => {
+    // Given: alphabetical order alone would put Boris first
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ ownerName: "Boris Antipov" }),
+          aPacingRowV1({ ownerName: undefined }),
+          aPacingRowV1({ ownerName: "Azat Nabiev" }),
+        ],
+      })
+    );
+
+    // When:
+    const { container } = renderOverview("/", { full_name: "Azat Nabiev" });
+    await screen.findAllByRole("table");
 
     // Then:
-    expect(screen.getByRole("status", { name: "Loading overview" })).toBeInTheDocument();
+    expect(ownerNames(container)).toEqual(["Azat Nabiev", "Boris Antipov", "Unassigned"]);
   });
 
-  it("should show a human-readable error when the accessible campaigns fail to load", async () => {
+  it("should render the row's figures: status, budget, margin, pacing bar, flight with countdown, LI count", async () => {
     // Given:
-    vi.mocked(searchCampaigns).mockRejectedValue(new Error("Something went wrong. Please try again."));
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({ content: [] }));
-
-    // When:
-    renderOverview();
-
-    // Then:
-    expect(await screen.findByText("Something went wrong. Please try again.")).toBeInTheDocument();
-  });
-
-  it("should render every real accessible campaign with its real agency/client names", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview();
-
-    // Then:
-    expect(await screen.findByText("Summer Getaways")).toBeInTheDocument();
-    expect(screen.getByText("Winter Push")).toBeInTheDocument();
-    expect(screen.getByText("Northstar Media · Acme Corp")).toBeInTheDocument();
-    expect(screen.getByText("Northstar Media · Globex")).toBeInTheDocument();
-  });
-
-  it("should request only page one, with no filters, on initial render", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // Then: exactly one request, for page one, with an empty filter set
-    expect(searchCampaigns).toHaveBeenCalledTimes(1);
-    expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, { filters: [] });
-  });
-
-  it("should show the summary strip", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // Then: labels/values are scoped to the summary strip, since column headers on the campaign
-    // table below coincidentally repeat the same words ("Budget")
-    const summary = document.querySelector(".overview__summary") as HTMLElement;
-    expect(within(summary).getByText("Campaigns")).toBeInTheDocument();
-    const campaignsStat = within(summary).getByText("Campaigns").closest(".overview__stat") as HTMLElement;
-    expect(within(campaignsStat).getByText("2")).toBeInTheDocument();
-    expect(within(summary).getByText("Line items")).toBeInTheDocument();
-    expect(within(summary).getByText("Budget")).toBeInTheDocument();
-  });
-
-  it("should filter campaigns by status segment on the server, not just the loaded page", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns({ firstStatus: "Live", secondStatus: "Paused" });
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-      content: [aCampaignV1({ id: 200, name: "Winter Push", agency_name: "Northstar Media", client_name: "Globex", status: "Paused" })],
-      totalElements: 1,
-    }));
-
-    // When:
-    await userEvent.click(screen.getByRole("button", { name: "Paused" }));
-
-    // Then: a fresh page-one request carries the exact real status (EQUALS, not a CONTAINS on the
-    // segment's own lowercase label - that would never match the real "Paused"/"Finished" values)
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [{ field: "STATUS", value: "Paused", operation: "EQUALS", caseSensitive: false }],
-    }));
-    expect(await screen.findByText("Winter Push")).toBeInTheDocument();
-    expect(screen.queryByText("Summer Getaways")).not.toBeInTheDocument();
-  });
-
-  it("should show a table overlay while a status change reloads the campaign table", async () => {
-    // Given: the initial table is rendered, and the next status-filtered request stays in flight
-    stubOneAgencyTwoCampaigns({ firstStatus: "Live", secondStatus: "Paused" });
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-    const reload = deferred<Awaited<ReturnType<typeof searchCampaigns>>>();
-    vi.mocked(searchCampaigns).mockReturnValueOnce(reload.promise);
-
-    // When:
-    await userEvent.click(screen.getByRole("button", { name: "Paused" }));
-
-    // Then: keepPreviousData leaves the previous rows visible, but the table clearly says it is updating
-    expect(screen.getByText("Summer Getaways")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Updating campaigns" })).toBeInTheDocument();
-
-    // And it goes away once the replacement page arrives
-    await act(async () => {
-      reload.resolve(aCampaignPageV1({
-        content: [
-          aCampaignV1({
-            id: 200,
-            name: "Winter Push",
-            agency_name: "Northstar Media",
-            client_name: "Globex",
-            status: "Paused",
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            name: "Nike SS26 Display",
+            status: "Live",
+            agency: "Initiative",
+            client: "Nike",
+            budgetTotal: 1_250_000,
+            marginActualPct: 18.5,
+            marginTargetPct: 25,
+            pacingDeviationPct: 12.3,
+            flightStart: "2026-08-01",
+            flightEnd: "2026-09-30",
+            daysRemaining: 14,
+            liCount: 4,
           }),
         ],
-        totalElements: 1,
-      }));
-    });
-    await waitFor(() => expect(screen.queryByRole("status", { name: "Updating campaigns" })).not.toBeInTheDocument());
-  });
-
-  it("should filter campaigns by agency id on the server", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-      content: [anAgencyV1({ id: 1, name: "Northstar Media" }), anAgencyV1({ id: 2, name: "Blue Chair" })],
-    }));
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-      content: [aCampaignV1({ id: 300, name: "Ford Promo", agency_name: "Blue Chair", client_name: "Ourisman Ford" })],
-      totalElements: 1,
-    }));
-
-    // When:
-    await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Blue Chair" }));
-
-    // Then:
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [{ field: "AGENCY_ID", value: "2", operation: "EQUALS", caseSensitive: false }],
-    }));
-    expect(await screen.findByText("Ford Promo")).toBeInTheDocument();
-    expect(screen.queryByText("Summer Getaways")).not.toBeInTheDocument();
-  });
-
-  it("should send one AGENCY_ID filter per selected agency, which the backend ORs into an IN", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-      content: [anAgencyV1({ id: 1, name: "Northstar Media" }), anAgencyV1({ id: 2, name: "Blue Chair" })],
-    }));
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-
-    // When: both agencies picked at once
-    await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Northstar Media" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Blue Chair" }));
-
-    // Then:
-    await waitFor(() => expect(searchCampaigns).toHaveBeenLastCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [
-        { field: "AGENCY_ID", value: "1", operation: "EQUALS", caseSensitive: false },
-        { field: "AGENCY_ID", value: "2", operation: "EQUALS", caseSensitive: false },
-      ],
-    }));
-  });
-
-  it("should restore the unfiltered list from cache when the agency selection is cleared", async () => {
-    // Given: one agency selected, which narrowed the list to its own campaign
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-      content: [anAgencyV1({ id: 2, name: "Blue Chair" })],
-    }));
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-      content: [aCampaignV1({ id: 300, name: "Ford Promo", agency_name: "Blue Chair" })],
-      totalElements: 1,
-    }));
-    await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Blue Chair" }));
-    await screen.findByText("Ford Promo");
-    vi.mocked(searchCampaigns).mockClear();
-
-    // When:
-    await userEvent.click(screen.getByRole("button", { name: "Clear All agencies" }));
-
-    // Then: back to the unfiltered rows, served from the cache the first render already populated
-    expect(await screen.findByText("Summer Getaways")).toBeInTheDocument();
-    expect(screen.queryByText("Ford Promo")).not.toBeInTheDocument();
-    expect(searchCampaigns).not.toHaveBeenCalled();
-  });
-
-  it("should restore the filters named in the URL rather than opening unfiltered", async () => {
-    // Given: the address a user comes back to when they leave a campaign page (PDI_097)
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview("/?q=summer&status=live&agency=1&sort=START_DATE:DESC");
-
-    // Then: the filters are in the very first request, not applied a render later - the page must not
-    // briefly read as unfiltered, and must not spend a request finding that out
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [
-        { field: "SEARCH", value: "summer", operation: "CONTAINS", caseSensitive: false },
-        { field: "STATUS", value: "Live", operation: "EQUALS", caseSensitive: false },
-        { field: "AGENCY_ID", value: "1", operation: "EQUALS", caseSensitive: false },
-      ],
-      sorting: { field: "START_DATE", direction: "DESC" },
-    }));
-  });
-
-  it("should ignore a sort column the table does not offer", async () => {
-    // Given: a hand-edited or stale address
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview("/?sort=DROP_TABLE:ASC");
-
-    // Then: the default order, not a field passed through to the API because it arrived in a URL
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, { filters: [] }));
-  });
-
-  it("should write a chosen filter into the URL", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // When: a status segment is chosen
-    await userEvent.click(screen.getByRole("button", { name: "Live" }));
-
-    // Then: the address carries it, which is what makes coming back to it work at all
-    await waitFor(() =>
-      expect(screen.getByTestId("location-search")).toHaveTextContent("status=live")
+      })
     );
-  });
-
-  it("should restore the last filters when it is reopened at a bare address", async () => {
-    // Given: a filter chosen on a previous visit
-    stubOneAgencyTwoCampaigns();
-    const first = renderOverview();
-    await screen.findByText("Summer Getaways");
-    await userEvent.click(screen.getByRole("button", { name: "Live" }));
-    await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("status=live"));
-    first.unmount();
-    vi.clearAllMocks();
-    stubOneAgencyTwoCampaigns();
-
-    // When: the page is reopened with no filters in the address - what the sidebar's own "Overview" link
-    // and the logo both navigate to, and how the filters were being lost even though the URL held them
-    renderOverview("/");
-
-    // Then: the filter is back, in the first request and in the address
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [{ field: "STATUS", value: "Live", operation: "EQUALS", caseSensitive: false }],
-    }));
-    expect(screen.getByTestId("location-search")).toHaveTextContent("status=live");
-  });
-
-  it("should let the address override what was remembered", async () => {
-    // Given: a remembered status filter
-    stubOneAgencyTwoCampaigns();
-    const first = renderOverview();
-    await screen.findByText("Summer Getaways");
-    await userEvent.click(screen.getByRole("button", { name: "Live" }));
-    await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("status=live"));
-    first.unmount();
-    vi.clearAllMocks();
-    stubOneAgencyTwoCampaigns();
-
-    // When: a link naming a different filter is opened
-    renderOverview("/?q=summer");
-
-    // Then: the link wins - it is what someone sent, and what the back button expresses
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [{ field: "SEARCH", value: "summer", operation: "CONTAINS", caseSensitive: false }],
-    }));
-  });
-
-  it("should not restore filters remembered for a different signed-in user", async () => {
-    // Given: one user's filter, and the tab reused by another - sessionStorage outlives a Clerk sign-out,
-    // which reloads the page rather than dropping the store
-    stubOneAgencyTwoCampaigns();
-    const first = renderOverview("/", "user_1");
-    await screen.findByText("Summer Getaways");
-    await userEvent.click(screen.getByRole("button", { name: "Live" }));
-    await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("status=live"));
-    first.unmount();
-    vi.clearAllMocks();
-    stubOneAgencyTwoCampaigns();
-
-    // When:
-    renderOverview("/", "user_2");
-
-    // Then: unfiltered, rather than campaigns quietly missing for someone who never chose that
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, { filters: [] }));
-  });
-
-  it("should not fetch its own copy of the agency list - it shares the sidebar's cached page", async () => {
-    // Given: the sidebar's agency list is already cached under its own key
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-      content: [anAgencyV1({ id: 1, name: "Northstar Media" })],
-    }));
 
     // When:
     renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // Then: exactly one agency request (the shared list's first page), for that shared page size -
-    // never a second, differently-sized directory fetch of its own
-    expect(searchAgencies).toHaveBeenCalledExactlyOnceWith(1, AGENCY_LIST_PAGE_SIZE, {
-      includeClients: true,
-      sorting: { field: "NAME", direction: "ASC" },
-    });
-  });
-
-  it("should search agencies on the server rather than filtering a preloaded list", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({
-      content: [anAgencyV1({ id: 1, name: "Northstar Media" })],
-    }));
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
-    vi.mocked(searchAgencies).mockClear();
-
-    // When:
-    await userEvent.type(screen.getByLabelText("Search all agencies"), "blue");
-
-    // Then: the term goes to the backend, so agencies beyond the first page are reachable
-    await waitFor(() => expect(searchAgencies).toHaveBeenCalledWith(1, AGENCY_SEARCH_PAGE_SIZE, {
-      includeClients: true,
-      search: "blue",
-      sorting: { field: "NAME", direction: "ASC" },
-    }));
-  });
-
-  it("should order by a clicked column, and return to the default order on the third click", async () => {
-    // Given: the table as it loads, in the server's own flight-phase order
-    stubOneAgencyTwoCampaigns();
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-
-    // When: the Flight column is clicked
-    await userEvent.click(screen.getByRole("button", { name: /Flight/ }));
-
-    // Then: the order is asked of the server, not applied to the page in hand - the table is paged, and
-    // sorting one loaded page would order a slice rather than the campaign list
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [],
-      sorting: { field: "START_DATE", direction: "ASC" },
-    }));
-
-    // When: clicked again
-    await userEvent.click(screen.getByRole("button", { name: /Flight/ }));
+    const row = (await screen.findByText("Nike SS26 Display")).closest("tr") as HTMLElement;
 
     // Then:
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [],
-      sorting: { field: "START_DATE", direction: "DESC" },
-    }));
-
-    // When: a third time
-    vi.mocked(searchCampaigns).mockClear();
-    await userEvent.click(screen.getByRole("button", { name: /Flight/ }));
-
-    // Then: the column reports no direction - the request body is back to carrying no sorting field, which
-    // is how the default order returns (live, then upcoming, then finished). Without a third state that
-    // order would be unreachable short of a page reload.
-    await waitFor(() =>
-      expect(screen.getByRole("columnheader", { name: /Flight/ })).toHaveAttribute("aria-sort", "none")
-    );
-    // And no request went out for it: that body is the one the page opened with, so the answer was already
-    // in hand. Re-fetching what is cached to show what was already shown would be the bug.
-    expect(searchCampaigns).not.toHaveBeenCalled();
+    expect(within(row).getByText("Live")).toBeInTheDocument();
+    expect(within(row).getByText("Initiative · Nike")).toBeInTheDocument();
+    expect(within(row).getByText("$1.3M")).toBeInTheDocument();
+    expect(within(row).getByText(/18\.5%/)).toBeInTheDocument();
+    expect(within(row).getByText(/\+12\.3 pp/)).toBeInTheDocument();
+    expect(within(row).getByText(/08\/01/)).toBeInTheDocument();
+    expect(within(row).getByText("14d")).toBeInTheDocument();
+    expect(within(row).getByText("4")).toBeInTheDocument();
   });
 
-  it("should filter campaigns by a search term on the server", async () => {
+  it("should show delegation pills and the period-scope marker", async () => {
     // Given:
-    stubOneAgencyTwoCampaigns();
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockClear();
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-      content: [aCampaignV1({ id: 100, name: "Summer Getaways", agency_name: "Northstar Media", client_name: "Acme Corp" })],
-      totalElements: 1,
-    }));
-
-    // When:
-    await userEvent.type(screen.getByLabelText("Search campaigns"), "summer");
-
-    // Then: SEARCH, not NAME - the term is matched against the campaign, client and agency name
-    // together, because that is what people type into a single box (PDI_085)
-    await waitFor(() => expect(searchCampaigns).toHaveBeenCalledWith(1, OVERVIEW_PAGE_SIZE, {
-      filters: [{ field: "SEARCH", value: "summer", operation: "CONTAINS", caseSensitive: false }],
-    }));
-    await waitFor(() => expect(screen.queryByText("Winter Push")).not.toBeInTheDocument());
-    expect(screen.getByText("Summer Getaways")).toBeInTheDocument();
-  });
-
-  it("should show an empty state when the filters match nothing", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({ content: [], totalElements: 0, totalPages: 0 }));
-
-    // When:
-    await userEvent.type(screen.getByLabelText("Search campaigns"), "zzz-no-match");
-
-    // Then:
-    expect(await screen.findByText("No campaigns match the current filters.")).toBeInTheDocument();
-  });
-
-  it("should show a scroll sentinel while more campaign pages remain", async () => {
-    // Given:
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({ pageNumber: 1, totalPages: 2 }));
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1());
-
-    // When:
-    renderOverview();
-
-    // Then:
-    await waitFor(() => expect(document.querySelector(".overview__load-more")).toBeInTheDocument());
-  });
-
-  it("should load page two and merge it into the campaign list when the scroll sentinel intersects", async () => {
-    // Given:
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1());
-    vi.mocked(searchCampaigns).mockImplementation((pageNumber) =>
-      Promise.resolve(pageNumber === 1
-        ? aCampaignPageV1({ pageNumber: 1, totalPages: 2, totalElements: 2, content: [aCampaignV1({ id: 100, name: "Summer Getaways" })] })
-        : aCampaignPageV1({ pageNumber: 2, totalPages: 2, totalElements: 2, content: [aCampaignV1({ id: 200, name: "Winter Push" })] })
-      )
-    );
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // When: the IntersectionObserver reports the sentinel is now visible
-    await act(async () => {
-      intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
-    });
-
-    // Then: both pages' campaigns render together
-    expect(await screen.findByText("Winter Push")).toBeInTheDocument();
-    expect(screen.getByText("Summer Getaways")).toBeInTheDocument();
-    expect(searchCampaigns).toHaveBeenCalledTimes(2);
-    expect(searchCampaigns).toHaveBeenNthCalledWith(2, 2, OVERVIEW_PAGE_SIZE, { filters: [] });
-  });
-
-  it("should keep the Campaigns stat at the server's full-dataset count, not just what's loaded", async () => {
-    // Given: 2 total campaigns server-side, but only 1 has loaded so far
-    vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1());
-    vi.mocked(searchCampaigns).mockResolvedValue(aCampaignPageV1({
-      pageNumber: 1, totalPages: 2, totalElements: 2, content: [aCampaignV1({ name: "Summer Getaways" })],
-    }));
-
-    // When:
-    renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // Then:
-    const summary = document.querySelector(".overview__summary") as HTMLElement;
-    const campaignsStat = within(summary).getByText("Campaigns").closest(".overview__stat") as HTMLElement;
-    expect(within(campaignsStat).getByText("2")).toBeInTheDocument();
-  });
-
-  it("should expand a campaign row to show its real line items, and collapse it again", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
-    vi.mocked(listCampaignInsertionOrders).mockResolvedValue([
-      anInsertionOrderV1({
-        order_id: 276198,
-        line_items: [
-          anInsertionOrderLineItemV1({
-            line_item_id: 1001,
-            media_tactic: "CTV/OTT",
-            rate_type: "Flat",
-            budget: 15000,
-            start_date: "2026-06-17",
-            end_date: "2026-09-17",
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            delegatedFrom: { name: "Daria Feofanova", expiresAt: "2026-10-01" },
+            delegatedTo: [{ name: "Bob Petrov", expiresAt: "2026-10-15" }],
+            periodScope: true,
+            periodScopeState: "ended",
+            periodLabel: "Sep 2026",
           }),
         ],
-      }),
-    ]);
+      })
+    );
+
+    // When:
     renderOverview();
-    const row = (await screen.findByText("Summer Getaways")).closest("tr") as HTMLElement;
+    await screen.findByRole("table");
 
-    // When: the row's own expand chevron is clicked (not the row itself, which navigates)
-    await userEvent.click(within(row).getByRole("button", { name: /Expand Summer Getaways/ }));
+    // Then:
+    expect(screen.getByText("← Daria Feofanova")).toBeInTheDocument();
+    expect(screen.getByText("→ Bob Petrov")).toBeInTheDocument();
+    expect(screen.getByText("Out of period · Sep 2026")).toBeInTheDocument();
+  });
 
-    // Then: the real line item renders - real id, real budget, no mocked pacing/CTR-VCR-ACR numbers
-    expect(await screen.findByText("LI 1001")).toBeInTheDocument();
-    expect(screen.getByText(/CTV\/OTT · Flat · Jun 17, 2026 – Sep 17, 2026/)).toBeInTheDocument();
-    expect(screen.getByText("$15.0K")).toBeInTheDocument();
-    expect(listCampaignInsertionOrders).toHaveBeenCalledWith(100);
+  it("should hide archived pacings under All and show them when Archived is picked (US-128)", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ name: "Running", status: "Live" }),
+          aPacingRowV1({ name: "Shelved", status: "Archive" }),
+        ],
+      })
+    );
+
+    // When:
+    renderOverview();
+    await screen.findByText("Running");
+
+    // Then: All hides Archive
+    expect(screen.queryByText("Shelved")).not.toBeInTheDocument();
+
+    // When: picking Archived explicitly
+    await userEvent.click(screen.getByRole("button", { name: "Archived" }));
+
+    // Then: the archived pacing is findable, the live one filtered out
+    expect(await screen.findByText("Shelved")).toBeInTheDocument();
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+  });
+
+  it("should filter by agency through any of a pacing's campaigns, dropping unresolved pacings", async () => {
+    // Given: one pacing resolved to agency 1, one whose campaigns never resolved
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ name: "Resolved", campaigns: [aCampaignRefV1({ agencyId: 1, agencyName: "Northstar Media" })] }),
+          aPacingRowV1({ name: "Unresolved", campaigns: undefined }),
+        ],
+      })
+    );
+    renderOverview();
+    await screen.findByText("Resolved");
+
+    // When: selecting the agency in the MultiSelect
+    await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
+    await userEvent.click(await screen.findByText("Northstar Media"));
+
+    // Then: the pacing with no resolvable agency honestly drops out
+    await waitFor(() => expect(screen.queryByText("Unresolved")).not.toBeInTheDocument());
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
+  });
+
+  it("should search across pacing name, owner, campaigns, agency and client", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ name: "First", client: "Globex Corp" }),
+          aPacingRowV1({ name: "Second", client: "Acme" }),
+        ],
+      })
+    );
+    renderOverview();
+    await screen.findByText("First");
+
+    // When: searching by the CLIENT name, which the old search never matched
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search pacings" }), "globex");
+
+    // Then:
+    await waitFor(() => expect(screen.queryByText("Second")).not.toBeInTheDocument());
+    expect(screen.getByText("First")).toBeInTheDocument();
+  });
+
+  it("should expand a row into its line items, with the heatmap and KPI sparkline", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            name: "Nike SS26 Display",
+            lineItems: [aPacingLineItemHealthV1({ lineItemId: "599888" })],
+            liNames: { "599888": "Prospecting" },
+            liDesc: { "599888": "NW | Native Display" },
+          }),
+        ],
+      })
+    );
+    const { container } = renderOverview();
+    await screen.findByText("Nike SS26 Display");
+
+    // Then: nothing expanded yet
+    expect(screen.queryByText("599888")).not.toBeInTheDocument();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Expand Nike SS26 Display" }));
+
+    // Then: the LI identity, its custom caption, the heatmap cells and the sparkline label
+    expect(await screen.findByText("599888")).toBeInTheDocument();
+    expect(screen.getByText("Prospecting")).toBeInTheDocument();
+    expect(container.querySelector(".heatmap-strip svg")).toBeInTheDocument();
+    expect(screen.getByText("CTR")).toBeInTheDocument();
+  });
+
+  it("should say so when an expanded pacing has no line item data", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Fresh", lineItems: undefined })] })
+    );
+    renderOverview();
+    await screen.findByText("Fresh");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Expand Fresh" }));
+
+    // Then:
+    expect(await screen.findByText("No line item data")).toBeInTheDocument();
+  });
+
+  it("should expand and collapse every row from the toolbar, and a whole group from its header", async () => {
+    // Given: two owners, one pacing each
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ name: "Mine", ownerName: "Azat Nabiev", lineItems: [aPacingLineItemHealthV1({ lineItemId: "111" })] }),
+          aPacingRowV1({ name: "Theirs", ownerName: "Boris Antipov", lineItems: [aPacingLineItemHealthV1({ lineItemId: "222" })] }),
+        ],
+      })
+    );
+    renderOverview();
+    await screen.findByText("Mine");
+
+    // When: the toolbar's Expand All
+    await userEvent.click(screen.getByRole("button", { name: "Expand All" }));
+
+    // Then: both groups' line items are open, and the button reads Collapse All
+    expect(await screen.findByText("111")).toBeInTheDocument();
+    expect(screen.getByText("222")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse All" }));
+    expect(screen.queryByText("111")).not.toBeInTheDocument();
+
+    // When: one group's own "Expand all"
+    await userEvent.click(screen.getAllByRole("button", { name: "Expand all" })[0]);
+
+    // Then: only that group's rows open
+    expect(await screen.findByText("111")).toBeInTheDocument();
+    expect(screen.queryByText("222")).not.toBeInTheDocument();
+  });
+
+  it("should navigate to the primary campaign's Pacing tab from the row's open button (US-113)", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [aPacingRowV1({ id: "p1", name: "Nike", campaigns: [aCampaignRefV1({ id: "310739" })] })],
+      })
+    );
+    renderOverview();
+    await screen.findByText("Nike");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Open pacing" }));
+
+    // Then:
+    expect(mockNavigate).toHaveBeenCalledWith("/campaigns/310739/pacing", { state: { openPacingId: "p1" } });
+  });
+
+  it("should compute the summary stats from the filtered set", async () => {
+    // Given: an archived pacing that the default view hides
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ status: "Live", liCount: 3, budgetTotal: 10_000 }),
+          aPacingRowV1({ status: "Archive", liCount: 9, budgetTotal: 90_000 }),
+        ],
+      })
+    );
+
+    // When:
+    renderOverview();
+    await screen.findByRole("table");
+
+    // Then: the archived row counts toward nothing
+    const pacingsStat = screen.getByText("Pacings", { selector: ".overview__stat-label" }).parentElement as HTMLElement;
+    expect(within(pacingsStat).getByText("1")).toBeInTheDocument();
+    const liStat = screen.getByText("Line items", { selector: ".overview__stat-label" }).parentElement as HTMLElement;
+    expect(within(liStat).getByText("3")).toBeInTheDocument();
+    const budgetStat = screen.getByText("Budget", { selector: ".overview__stat-label" }).parentElement as HTMLElement;
+    expect(within(budgetStat).getByText("$10.0K")).toBeInTheDocument();
+  });
+
+  it("should write the filters to the URL and remember them for the session (PDI_097)", async () => {
+    // Given:
+    renderOverview();
+    await screen.findByRole("table");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Archived" }));
+
+    // Then: the URL carries the filter, and the session remembers it for this user
+    await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("status=archive"));
+    await waitFor(() => {
+      const stored = JSON.parse(sessionStorage.getItem("overview-filters") ?? "{}") as { user?: string; filters?: string };
+      expect(stored.user).toBe("user_1");
+      expect(stored.filters).toContain("status=archive");
+    });
+  });
+
+  it("should restore this user's remembered filters when the URL carries none", async () => {
+    // Given: a filtered view remembered earlier this session
+    sessionStorage.setItem("overview-filters", JSON.stringify({ user: "user_1", filters: "status=archive" }));
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [aPacingRowV1({ name: "Running", status: "Live" }), aPacingRowV1({ name: "Shelved", status: "Archive" })],
+      })
+    );
+
+    // When: arriving by the sidebar's bare "/"
+    renderOverview("/", { user_id: "user_1" });
+
+    // Then: the archived-only view is restored
+    expect(await screen.findByText("Shelved")).toBeInTheDocument();
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+  });
+
+  it("should not restore another user's remembered filters", async () => {
+    // Given:
+    sessionStorage.setItem("overview-filters", JSON.stringify({ user: "someone_else", filters: "status=archive" }));
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Running", status: "Live" })] })
+    );
+
+    // When:
+    renderOverview("/", { user_id: "user_1" });
+
+    // Then: the default (All, Archive hidden) view opens
+    expect(await screen.findByText("Running")).toBeInTheDocument();
+  });
+
+  it("should explain an empty list from the asserted scope (US-111)", async () => {
+    // Given: a Client Services user whose campaign ownership is not resolved yet
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [], scope: aPacingScopeV1({ kind: "campaigns", ids: [] }) })
+    );
+
+    // When:
+    renderOverview();
+
+    // Then:
+    expect(await screen.findByText("Campaign ownership isn't resolved yet")).toBeInTheDocument();
+  });
+
+  it("should offer to clear the filters when they match nothing", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Only", status: "Live" })] })
+    );
+    renderOverview();
+    await screen.findByText("Only");
+
+    // When: a search that matches nothing
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search pacings" }), "zzz-no-match");
+    await screen.findByText("No pacings match your filters");
+
+    // Then: clearing restores the list
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Only")).toBeInTheDocument();
+  });
+
+  it("should sort rows within each group when a column header is clicked", async () => {
+    // Given: one owner, two pacings whose status order and budget order disagree
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({ name: "Small Live", status: "Live", budgetTotal: 100, ownerName: "A" }),
+          aPacingRowV1({ name: "Big Paused", status: "Paused", budgetTotal: 900, ownerName: "A" }),
+        ],
+      })
+    );
+    renderOverview();
+    await screen.findByText("Small Live");
+
+    // Then: default order is status priority (Live first)
+    const namesBefore = screen.getAllByText(/Small Live|Big Paused/).map((el) => el.textContent);
+    expect(namesBefore).toEqual(["Small Live", "Big Paused"]);
+
+    // When: sorting by budget descending (two clicks)
+    await userEvent.click(screen.getByRole("button", { name: "Budget" }));
+    await userEvent.click(screen.getByRole("button", { name: "Budget" }));
+
+    // Then:
+    const namesAfter = screen.getAllByText(/Small Live|Big Paused/).map((el) => el.textContent);
+    expect(namesAfter).toEqual(["Big Paused", "Small Live"]);
+    expect(screen.getByTestId("location-search")).toHaveTextContent("sort=BUDGET%3ADESC");
+  });
+
+  it("should offer a non-admin only Refresh and Transfer owner in the row menu", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike", status: "Live" })] })
+    );
+    renderOverview("/", { roles: [] });
+    await screen.findByText("Nike");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Nike" }));
+
+    // Then: refresh + transfer, and neither admin action - hidden, not disabled, since a non-admin
+    // can never reach them
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Refresh data" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Transfer owner" })).toBeInTheDocument();
+    expect(screen.queryByText("Revalidate from NS")).not.toBeInTheDocument();
+    expect(screen.queryByText("Delete")).not.toBeInTheDocument();
+  });
+
+  it("should additionally offer an admin Revalidate and Delete", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike", status: "Live" })] })
+    );
+    renderOverview("/", { roles: ["ADMIN"] });
+    await screen.findByText("Nike");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Nike" }));
+
+    // Then:
+    expect(screen.getByRole("menuitem", { name: "Refresh data" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Revalidate from NS" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Transfer owner" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  // ── §13's NetSuite diff, and §12's delegations: both moved here when /pacing was retired, which
+  //    was the only screen either could be reached from.
+  it("should show a pacing's NetSuite drift in its own column, and offer the diff to a non-admin", async () => {
+    // Given: one pacing checked and drifting, one checked and clean, one never checked
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [
+          aPacingRowV1({
+            id: "p1",
+            name: "Drifting",
+            // Off the factory default of 3, so the drift count below is unambiguous on screen.
+            lineItemCount: 9,
+            nsDiffSummary: {
+              inSync: false,
+              computedAt: "2026-09-29T02:00:00Z",
+              counts: {
+                missingInNetsuite: 0,
+                missingInPacing: 2,
+                fieldDiff: 1,
+                planDiff: 0,
+                foreignCampaign: 0,
+                ownerDiff: 0,
+              },
+            },
+          }),
+          aPacingRowV1({ id: "p2", name: "Clean", lineItemCount: 8, nsDiffSummary: { inSync: true, computedAt: "2026-09-29T02:00:00Z", counts: { missingInNetsuite: 0, missingInPacing: 0, fieldDiff: 0, planDiff: 0, foreignCampaign: 0, ownerDiff: 0 } } }),
+          aPacingRowV1({ id: "p3", name: "Unchecked", lineItemCount: 7 }),
+        ],
+      })
+    );
+
+    // When: a plain user opens the page
+    const { container } = renderOverview("/", { roles: [] });
+    await screen.findByText("Drifting");
+
+    // Then: the count is on the row, the clean one says so, and the never-checked one is a dash
+    // rather than a zero it has not earned
+    // Scoped to the badge: 3 is also a line-item count somewhere on this page, and the assertion is
+    // about the drift count specifically.
+    expect(container.querySelector(".ns-diff__badge")).toHaveTextContent("3");
+    expect(screen.getByText("In sync")).toBeInTheDocument();
+    expect(screen.getByTitle("Not yet checked against NetSuite")).toBeInTheDocument();
+
+    // And: the sheet is reachable from the row menu without being an admin - looking at a drift
+    // writes nothing back, unlike Revalidate
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Drifting" }));
+    expect(screen.getByRole("menuitem", { name: "NetSuite diff" })).toBeInTheDocument();
+  });
+
+  it("should open the delegations panel from the header", async () => {
+    // Given: a user with no create permission - granting your own access is not creating a pacing,
+    // so the button is not gated on it
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike" })], scope: aPacingScopeV1({ can_create: false }) })
+    );
+    renderOverview("/", { roles: [] });
+    await screen.findByText("Nike");
+
+    // Then: offered even though Create pacing is not
+    const button = screen.getByRole("button", { name: "Delegations" });
+    expect(screen.queryByRole("button", { name: "Create pacing" })).not.toBeInTheDocument();
+
+    // When:
+    await userEvent.click(button);
+
+    // Then: the panel opens in place, no navigation
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("should hide Revalidate on an archived pacing even for an admin", async () => {
+    // Given: nothing to re-seed on an archived pacing
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Old", status: "Archive" })] })
+    );
+    renderOverview("/?status=archive", { roles: ["ADMIN"] });
+    await screen.findByText("Old");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Old" }));
+
+    // Then:
+    expect(screen.queryByText("Revalidate from NS")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("should disable Refresh with a reason on a row that is not Live", async () => {
+    // Given: Pacing answers 400 pacing_not_live for anything else, so the item must be disabled -
+    // not hidden - with the reason said where the user is looking
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Held", status: "Paused" })] })
+    );
+    renderOverview("/?status=paused");
+    await screen.findByText("Held");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Held" }));
+
+    // Then:
+    expect(screen.getByRole("menuitem", { name: "Refresh data" })).toBeDisabled();
+    expect(screen.getByText("Only a Live pacing can be refreshed.")).toBeInTheDocument();
+    expect(triggerPacingRefresh).not.toHaveBeenCalled();
+  });
+
+  it("should put a cooldown answer's countdown into the Refresh label", async () => {
+    // Given: a refresh refused inside Pacing's two-minute window comes back as seconds, not an error
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike", status: "Live" })] })
+    );
+    vi.mocked(triggerPacingRefresh).mockResolvedValue({ status: "cooldown", retryAfterSeconds: 42 });
+    renderOverview();
+    await screen.findByText("Nike");
+
+    // When: refreshing, then reopening the menu
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Nike" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh data" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Nike" }));
+
+    // Then: the item is off for the remaining window and says for how long
+    const item = await screen.findByRole("menuitem", { name: /Refresh data \(4[12]s\)/ });
+    expect(item).toBeDisabled();
+  });
+
+  it("should not toggle the row's expansion when the kebab is clicked", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({
+        pacings: [aPacingRowV1({ name: "Nike", status: "Live", lineItems: [aPacingLineItemHealthV1({ lineItemId: "599888" })] })],
+      })
+    );
+    renderOverview();
+    await screen.findByText("Nike");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Nike" }));
+
+    // Then: the menu is open and the row stayed collapsed
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.queryByText("599888")).not.toBeInTheDocument();
+  });
+
+  it("shows the Create pacing button only when the resolved scope carries can_create, and it opens the modal in place", async () => {
+    // Given: §8's second entry point - creating without first navigating into a campaign.
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ scope: aPacingScopeV1({ can_create: true }), pacings: [aPacingRowV1()] })
+    );
+    renderOverview();
+
+    // When:
+    const button = await screen.findByRole("button", { name: "Create pacing" });
+    await userEvent.click(button);
+
+    // Then: the Create Pacing modal opens right here - no navigation, no URL change.
+    expect(await screen.findByRole("dialog", { name: "Create Pacing" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Insertion order number")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
 
-    // When: collapsed again
-    await userEvent.click(within(row).getByRole("button", { name: /Collapse Summer Getaways/ }));
+    // When: closing it (step 1 holds no work, so it closes without a confirm).
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
 
     // Then:
-    expect(screen.queryByText("LI 1001")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Create Pacing" })).not.toBeInTheDocument();
   });
 
-  it("should navigate to the campaign when its row is clicked", async () => {
-    // Given:
-    stubOneAgencyTwoCampaigns();
+  it("draws no Create pacing button for a scope without can_create", async () => {
+    // Given: the same gate the campaign tab's button reads - no door for a user who may not create.
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ scope: aPacingScopeV1({ can_create: false }), pacings: [aPacingRowV1()] })
+    );
     renderOverview();
-    await screen.findByText("Summer Getaways");
-
-    // When:
-    await userEvent.click(screen.getByText("Summer Getaways"));
+    await screen.findByText("Pacings");
 
     // Then:
-    expect(mockNavigate).toHaveBeenCalledWith("/campaigns/100", expect.objectContaining({
-      state: expect.objectContaining({ agencyName: "Northstar Media", clientName: "Acme Corp" }),
-    }));
+    expect(screen.queryByRole("button", { name: "Create pacing" })).not.toBeInTheDocument();
   });
 });

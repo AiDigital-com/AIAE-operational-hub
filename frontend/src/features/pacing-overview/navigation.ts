@@ -8,6 +8,13 @@ import type { CampaignRefV1, PacingRowV1 } from "./types";
  */
 export interface OpenPacingState {
   openPacingId: string;
+  /**
+   * Set by the Overview's Create Pacing modal when it navigates to the pacing it just created: the
+   * dashboard should show its "pulling first data" state (`watchFirstData`) while the fire-and-forget
+   * first refresh lands, instead of rendering empty and looking broken. Absent on every ordinary
+   * open-a-pacing navigation.
+   */
+  justCreated?: boolean;
 }
 
 /**
