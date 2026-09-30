@@ -40,8 +40,12 @@
   background: var(--surface);
   overflow: hidden;
 }
-.pacing-tab__item--open {
+/* The selected row - the one whose dashboard is showing below the list. Background tint plus a
+   stronger border, the same pair the Overview's rows use; Reporting marks its selected row with an
+   inset left rail, which is the side-stripe pattern this project bans, so that part is not copied. */
+.pacing-tab__item--selected {
   border-color: var(--border-strong);
+  background: var(--primary-soft);
 }
 
 /* ── row head (collapsed summary — one pacing per row) ── */
@@ -72,15 +76,19 @@
   color: var(--ink);
   cursor: pointer;
 }
-.pacing-tab__chevron {
-  width: 14px;
-  height: 14px;
-  color: var(--muted);
-  transition: transform .15s;
+/* Sits in the grid track the chevron used to hold, so the columns to its right keep their x whether
+   or not a row is selected. Invisible until selected - a marker on every row marks nothing. */
+.pacing-tab__item-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  justify-self: center;
   flex: 0 0 auto;
+  transition: background .15s;
 }
-.pacing-tab__chevron--open {
-  transform: rotate(180deg);
+.pacing-tab__item--selected .pacing-tab__item-dot {
+  background: var(--primary);
 }
 .pacing-tab__item-name {
   display: flex;
@@ -230,61 +238,27 @@
   background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 
-/* ── expanded detail ── */
-.pacing-tab__item-body {
-  padding: 4px 16px 18px 48px;
+/* ── the selected pacing's dashboard, under the list ── */
+/* Spacing mirrors Reporting's builder panel: a rule across the content, then the panel. */
+.pacing-tab__detail {
+  margin-top: 24px;
+}
+.pacing-tab__detail-sep {
   border-top: 1px solid var(--border);
+  margin-bottom: 24px;
 }
-.pacing-tab__detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 14px;
-  margin: 14px 0 0;
-}
-.pacing-tab__detail-cell dt {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 0 0 3px;
-}
-.pacing-tab__detail-cell dd {
+.pacing-tab__detail-empty {
   margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-.pacing-tab__detail-alerts {
-  list-style: none;
-  margin: 16px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.pacing-tab__detail-alert {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--n-100);
-  color: var(--ink);
-}
-.pacing-tab__detail-alert--critical {
-  background: color-mix(in srgb, var(--bad) 12%, transparent);
-  color: var(--bad);
-}
-.pacing-tab__detail-alert--warning {
-  background: color-mix(in srgb, var(--attention-text) 12%, transparent);
-  color: var(--attention-text);
-}
-.pacing-tab__open-dashboard {
-  margin-top: 14px;
+  padding: 28px 24px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13.5px;
 }
 .pacing-tab__notice {
-  margin: 16px 0 0;
+  margin: 0 0 16px;
   font-size: 13px;
   color: var(--muted-strong);
 }
@@ -314,4 +288,38 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── alert badges ──
+   Moved here when the /pacing screen was removed: these rules lived in `pacing-overview.css`, which
+   only that page imported, so deleting it would have left this tab's badges unstyled while every
+   test still passed. Renamed to this tab's own prefix at the same time — a class owned by the one
+   file that uses it.
+   Tinted pill, text mixed toward --ink, never a solid fill with white digits: white on the warning
+   colour is about 3:1, and 11px bold digits at 3:1 is the unreadable this was once reported as. No
+   vertical stripes — banned project-wide. */
+.pacing-tab__alert-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--pill);
+  font-size: 11.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.pacing-tab__alert-badge--critical {
+  background: color-mix(in srgb, var(--bad) 15%, var(--surface));
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
+}
+.pacing-tab__alert-badge--warning {
+  background: color-mix(in srgb, var(--attention) 22%, var(--surface));
+  color: color-mix(in srgb, var(--attention-text) 82%, var(--ink));
+}
+.pacing-tab__alert-badge--info {
+  background: color-mix(in srgb, var(--muted-strong) 13%, var(--surface));
+  color: var(--muted-strong);
 }

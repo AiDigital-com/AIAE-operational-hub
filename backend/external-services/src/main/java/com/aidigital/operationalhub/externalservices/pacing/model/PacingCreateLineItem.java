@@ -32,6 +32,9 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * @param marginPercent     the plan's target margin percentage, as confirmed by the caller
  * @param targetCtr         the plan's target CTR percentage, as confirmed by the caller
  * @param targetVcr         the plan's target VCR percentage, as confirmed by the caller
+ * @param costCoef          coefficient cost mode for this line item (Pacing's per-LI {@code cost_coef}
+ *                          flag). Null means "not sent" - the wire key is omitted, never null'd,
+ *                          because Pacing's {@code validateCoefLi} rejects a non-boolean value
  */
 public record PacingCreateLineItem(
 		String lineItemId,
@@ -50,5 +53,6 @@ public record PacingCreateLineItem(
 		Double targetImpressions,
 		Double marginPercent,
 		Double targetCtr,
-		Double targetVcr) {
+		Double targetVcr,
+		Boolean costCoef) {
 }

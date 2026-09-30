@@ -1,0 +1,303 @@
+/* The Create Pacing modal: card sizing through the Modal primitive's className hatch, the step
+   indicator, the step-1 input column, and the in-card discard confirm. Step 2's content is
+   CreatePacingPanel, which brings its own styles - only its modal-specific overrides live here. */
+
+/* ── the card: two deliberate sizes ──
+   Step 1 (the lookup) is a normal dialog: near the primitive's own default width, height driven by
+   its content. Step 2 (the review table) is the wide canvas. The growth on Validate is the step
+   change made visible - one fixed size for both steps left step 1's three controls floating in a
+   huge empty card. Height on the review card is a hard cap the default .modal__card lacks: the
+   overlay is fixed and the body scroll is locked, so a card taller than the viewport would be
+   unreachable at both ends - the review card lays out as a column and lets the TABLE take the
+   remaining height and scroll (.pcreate__table-wrap), everything else staying put. */
+.modal__card.pcreate-modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 100%;
+}
+.modal__card.pcreate-modal--input {
+  max-width: 560px;
+}
+.modal__card.pcreate-modal--review {
+  max-width: min(1400px, 100%);
+  height: min(100%, 920px);
+  padding: 18px 22px;
+}
+
+/* Everything above the scroll area (modal header, discard confirm, step indicator) keeps its size;
+   only the scroll area flexes. */
+.pcreate-modal > .modal__header {
+  flex-shrink: 0;
+}
+
+/* ── in-card discard confirm (background tint, no stripe) ── */
+.pcreate-modal__discard {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 6px 0 2px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--attention) 14%, transparent);
+  border-radius: var(--radius);
+}
+.pcreate-modal__discard-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.pcreate-modal__discard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── step indicator ── */
+.pcreate-modal__steps {
+  flex-shrink: 0;
+  margin: 2px 0 10px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.pcreate-modal__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.pcreate-modal__step + .pcreate-modal__step::before {
+  content: "→";
+  margin-right: 10px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.pcreate-modal__step--active {
+  color: var(--ink);
+}
+.pcreate-modal__step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--n-200);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+.pcreate-modal__step--active .pcreate-modal__step-num {
+  background: var(--primary);
+  color: var(--color-cta-text, #fff);
+}
+
+/* ── the body region ──
+   On step 1 it just holds the short form. On step 2 it is a flex column whose TABLE takes the
+   remaining height and scrolls both ways inside its own border (visible scrollbars); vertical
+   overflow here is only a safety net for very short viewports, and horizontal overflow is refused
+   so the table wrap is the only sideways scroller - the page body never scrolls sideways. */
+.pcreate-modal__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── step 1: a plain dialog form, proportioned to its 560px card ── */
+.pcreate-modal__step1 {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 2px 0 4px;
+}
+
+/* Segmented mode switch - same pattern as the Overview's status segments. */
+.pcreate-modal__modes {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 3px;
+  background: var(--n-100);
+  border-radius: var(--radius);
+  gap: 2px;
+}
+.pcreate-modal__mode-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pcreate-modal__mode-btn--active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.pcreate-modal__mode-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.pcreate-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pcreate-modal__field-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.pcreate-modal__io-input,
+.pcreate-modal__ids-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 14px;
+}
+.pcreate-modal__ids-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+.pcreate-modal__io-input:focus-visible,
+.pcreate-modal__ids-input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+/* The app's global placeholder rule covers `input::placeholder` only - a textarea's placeholder
+   would render at full text color and read as a value someone already typed. */
+.pcreate-modal__io-input::placeholder,
+.pcreate-modal__ids-input::placeholder {
+  color: var(--muted);
+}
+
+.pcreate-modal__error {
+  margin: 0;
+}
+
+.pcreate-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── step 2 overrides on CreatePacingPanel, scoped to the review card. The in-page rendering
+      (campaign tab) is untouched by everything below. ── */
+
+/* The modal header already says "Create Pacing"; the panel's own h2 would say it twice. The back
+   button and the agency/client/campaign context stay - on ONE compact row instead of two bands. */
+.pcreate-modal .pcreate__title {
+  display: none;
+}
+.pcreate-modal--review .pcreate {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pcreate-modal--review .pcreate__header {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.pcreate-modal--review .pcreate__context {
+  flex: 1;
+  padding: 6px 14px;
+  gap: 22px;
+}
+.pcreate-modal--review .pcreate__context-cell dt {
+  margin-bottom: 1px;
+}
+.pcreate-modal--review .pcreate__context-cell dd {
+  font-size: 13px;
+}
+
+/* The form column: every band keeps its natural height; the table wrap is the ONE element that
+   flexes and scrolls. */
+.pcreate-modal--review .pcreate__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pcreate-modal--review .pcreate__body > * {
+  flex: 0 0 auto;
+}
+.pcreate-modal--review .pcreate__result {
+  padding: 7px 12px;
+  margin-bottom: 8px;
+}
+
+.pcreate-modal--review .pcreate__bulk-bar {
+  padding: 7px 12px;
+}
+.pcreate-modal--review .pcreate__table-wrap {
+  flex: 1 1 auto;
+  min-height: 170px;
+  overflow: auto;
+}
+/* The column headers stay readable while the rows scroll under them. */
+.pcreate-modal--review .pcreate__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+/* The two config blocks share the leftover strip under the table; past their cap they scroll
+   internally rather than squeezing the table out of the card. */
+.pcreate-modal--review .pcreate__blocks {
+  flex: 0 1 auto;
+  margin-top: 10px;
+}
+/* Each block scrolls on its own past the cap - one shared scroller dragged the short campaign
+   block out of view while the taller settings block was being scrolled. */
+.pcreate-modal--review .pcreate__block {
+  padding: 10px 14px;
+  gap: 8px;
+  /* Viewport-aware cap: on a short screen the blocks yield their height to the table first. */
+  max-height: min(168px, 24vh);
+  overflow-y: auto;
+}
+.pcreate-modal--review .pcreate__block::-webkit-scrollbar {
+  width: 11px;
+}
+.pcreate-modal--review .pcreate__block::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--surface);
+  border-radius: 8px;
+}
+
+/* The footer sits below the flexing table, so it is always on screen; sticky only matters on the
+   very short viewports where the safety-net outer scroll engages. */
+.pcreate-modal--review .pcreate__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--surface);
+  margin-top: 10px;
+  padding-top: 10px;
+  padding-bottom: 2px;
+}

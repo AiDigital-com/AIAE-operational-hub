@@ -18,7 +18,10 @@ import type { ClientPageResponseV1, ClientV1 } from "../features/clients/types";
 import type {
   CampaignRefV1,
   PacingAlertV1,
+  PacingKpiTargetV1,
+  PacingLineItemHealthV1,
   PacingListResponseV1,
+  PacingRecentDayV1,
   PacingNsDiffCountsV1,
   PacingNsDiffCoveredByV1,
   PacingNsDiffForeignCampaignV1,
@@ -292,6 +295,57 @@ export function aPacingRowV1(overrides: Partial<PacingRowV1> = {}): PacingRowV1 
     paceStatus: "on_pace",
     budgetTotal: 10000,
     alerts: [],
+    ...overrides,
+  };
+}
+
+export function aPacingRecentDayV1(overrides: Partial<PacingRecentDayV1> = {}): PacingRecentDayV1 {
+  return {
+    date: "2026-09-28",
+    impr: 1000,
+    spend: 12.5,
+    clicks: 10,
+    completes: 5,
+    ctr: 1,
+    vcr: 0.5,
+    cpm: 12.5,
+    tgtCpm: 10,
+    tgtImpr: 900,
+    rateType: "CPM",
+    units: 1000,
+    tgtUnits: 900,
+    tgtUnitsReforecast: 950,
+    rate: 12.5,
+    tgtRate: 10,
+    ...overrides,
+  };
+}
+
+export function aPacingKpiTargetV1(overrides: Partial<PacingKpiTargetV1> = {}): PacingKpiTargetV1 {
+  return {
+    type: "CTR",
+    tgt: 0.12,
+    low: 0.7,
+    high: 2,
+    ...overrides,
+  };
+}
+
+export function aPacingLineItemHealthV1(overrides: Partial<PacingLineItemHealthV1> = {}): PacingLineItemHealthV1 {
+  return {
+    lineItemId: randomString("li"),
+    channel: "Display",
+    rateType: "CPM",
+    flightStart: "2026-08-01",
+    flightEnd: "2026-09-30",
+    budget: 5000,
+    marginActualPct: 22.5,
+    marginTargetPct: 25,
+    pacingIndex: 1.2,
+    isPaused: false,
+    costCoef: false,
+    recent: [aPacingRecentDayV1(), aPacingRecentDayV1({ date: "2026-09-27" })],
+    kpis: [aPacingKpiTargetV1()],
     ...overrides,
   };
 }

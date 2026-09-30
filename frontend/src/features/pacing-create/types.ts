@@ -7,3 +7,6 @@ export type PacingInUseV1 = components["schemas"]["PacingInUseV1"];
 export type PacingCreateLineItemV1 = components["schemas"]["PacingCreateLineItemV1"];
 export type PacingCreateV1 = components["schemas"]["PacingCreateV1"];
 export type PacingCreateResultV1 = components["schemas"]["PacingCreateResultV1"];
+export type PacingCreateDataV1 = components["schemas"]["PacingCreateDataV1"];
+export type PacingCampaignLinkV1 = components["schemas"]["PacingCampaignLinkV1"];
+export type PacingLineItemValidateV1 = components["schemas"]["PacingLineItemValidateV1"];

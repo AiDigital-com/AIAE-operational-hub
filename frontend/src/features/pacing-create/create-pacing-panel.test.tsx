@@ -263,10 +263,11 @@ describe("CreatePacingPanel", () => {
     const impressionsInput = screen.getByLabelText("Target impressions for line item 1");
     const marginInput = screen.getByLabelText("Target margin for line item 1");
 
-    // Then: both pre-filled fields carry the Auto badge, and the NetSuite reference figure is shown
-    // alongside the editable one rather than merged into it
+    // Then: both pre-filled fields carry the Auto badge. The NetSuite reference figure is NOT
+    // repeated below the input while the two are equal - the untouched pre-fill would just say the
+    // same number twice and double the row's height on every row.
     expect(impressionsInput).toHaveValue("1,432,875");
-    expect(screen.getByText("NetSuite MP units: 1,432,875")).toBeInTheDocument();
+    expect(screen.queryByText("NetSuite MP units: 1,432,875")).not.toBeInTheDocument();
     const impressionsCell = impressionsInput.closest("td") as HTMLElement;
     const marginCell = marginInput.closest("td") as HTMLElement;
     expect(within(impressionsCell).getByText("Auto")).toBeInTheDocument();
@@ -276,9 +277,12 @@ describe("CreatePacingPanel", () => {
     await userEvent.clear(impressionsInput);
     await userEvent.type(impressionsInput, "2000000");
 
-    // Then: only that field's badge disappears - margin's stays, since it was not touched
+    // Then: only that field's badge disappears - margin's stays, since it was not touched - and the
+    // NetSuite reference figure appears alongside the now-different plan value (US-124's "shown
+    // alongside, never merged").
     expect(within(impressionsCell).queryByText("Auto")).not.toBeInTheDocument();
     expect(within(marginCell).getByText("Auto")).toBeInTheDocument();
+    expect(screen.getByText("NetSuite MP units: 1,432,875")).toBeInTheDocument();
   });
 
   it("disables and un-ticks a line item missing flight dates, marking it distinctly", async () => {
@@ -323,7 +327,175 @@ describe("CreatePacingPanel", () => {
     expect(body.lineItems[0].lineItemId).toBe("1");
     expect(body.lineItems[0].nativeBudget).toBe(25000);
     expect(body.lineItems[0].targetImpressions).toBe(1432875);
-    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith("new-p1"));
+    // The second argument is the primary campaign of the pinned set - what the Create Pacing modal
+    // navigates to; this caller's campaign path simply ignores it.
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith("new-p1", li1.campaignId));
+  });
+
+  it("sends the draft's client/agency and the data namespace on every create (the blank-subtitle fix)", async () => {
+    // Given: without client/agency on the body, a Hub-created pacing has neither in its config until
+    // a revalidate, and the Overview's "agency · client" subtitle renders blank.
+    const li = aPacingDraftLineItemV1({ lineItemId: "1" });
+    vi.mocked(getPacingDraft).mockResolvedValue(
+      aPacingDraftV1({ client: "Acme", agency: "MediaCo", lineItems: [li] })
+    );
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1());
+    renderPanel();
+    await screen.findByText("1");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+
+    // Then: client/agency ride verbatim; the data namespace always travels with its on-screen
+    // values (defaults untouched here); untouched extras (rate, links, notes) are ABSENT, not null.
+    const body = vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1;
+    expect(body.client).toBe("Acme");
+    expect(body.agency).toBe("MediaCo");
+    expect(body.data).toEqual({
+      source: "platform_mart",
+      fetchCreatives: false,
+      fetchConversions: false,
+      coefEnabled: false,
+    });
+    expect(body.lineItems?.[0].costCoef).toBe(false);
+    expect("rate" in body).toBe(false);
+    expect("campaignLinks" in body).toBe(false);
+    expect("campaignNotes" in body).toBe(false);
+  });
+
+  it("derives the campaign set from the SELECTED rows, recomputing as rows are ticked (§3)", async () => {
+    // Given: two campaigns across three line items.
+    const li1 = aPacingDraftLineItemV1({ lineItemId: "1", campaignId: "100", campaignName: "Nike SS26" });
+    const li2 = aPacingDraftLineItemV1({ lineItemId: "2", campaignId: "100", campaignName: "Nike SS26" });
+    const li3 = aPacingDraftLineItemV1({ lineItemId: "3", campaignId: "200", campaignName: "Nike Oct" });
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [li1, li2, li3] }));
+    renderPanel();
+    await screen.findByText("Campaign link");
+
+    // Then: both campaigns derived, with per-campaign selected counts.
+    expect(screen.getByText("Nike SS26")).toBeInTheDocument();
+    expect(screen.getByText("Nike Oct")).toBeInTheDocument();
+    expect(screen.getByText("2 line items")).toBeInTheDocument();
+
+    // When: unticking the only line item of the second campaign...
+    await userEvent.click(screen.getByRole("button", { name: "Include line item 3" }));
+
+    // Then: ...that campaign leaves the derived set live, without a reload.
+    expect(screen.queryByText("Nike Oct")).not.toBeInTheDocument();
+    expect(screen.getByText("Nike SS26")).toBeInTheDocument();
+  });
+
+  it("blocks Create when the derived campaign set is empty, with a plain explanation", async () => {
+    // Given: a line item with no NetSuite campaign at all (campaign-backfill.mjs exists on the
+    // Pacing side precisely because such pacings are real, not hypothetical).
+    const li = aPacingDraftLineItemV1({ lineItemId: "1", campaignId: undefined, campaignName: undefined });
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [li] }));
+    renderPanel();
+    await screen.findByText("Campaign link");
+
+    // Then: the reason is spelled out - invisible to Client Services, unopenable from the list -
+    // and Create is disabled; nothing was submitted.
+    expect(screen.getByText(/linked to no campaign/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Pacing" })).toBeDisabled();
+    expect(createPacing).not.toHaveBeenCalled();
+  });
+
+  it("sends the pinned campaign order, primary first, and reports the primary to onCreated", async () => {
+    // Given: two derived campaigns - the first-appearance order puts 100 first.
+    const li1 = aPacingDraftLineItemV1({ lineItemId: "1", campaignId: "100", campaignName: "Nike SS26" });
+    const li2 = aPacingDraftLineItemV1({ lineItemId: "2", campaignId: "200", campaignName: "Nike Oct" });
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [li1, li2] }));
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1({ pacingId: "new-p1" }));
+    const { onCreated } = renderPanel();
+    await screen.findByText("Campaign link");
+
+    // When: picking the second campaign as primary, then creating.
+    await userEvent.click(screen.getByRole("radio", { name: "Nike Oct" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+
+    // Then: the pinned order rides the body primary-first - it can only ever REORDER the derived
+    // set (Pacing's applyPinnedOrder ignores unknown ids) - and onCreated learns the primary.
+    const body = vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1;
+    expect(body.campaigns).toEqual(["200", "100"]);
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith("new-p1", "200"));
+  });
+
+  it("reveals the Coef column from the master toggle and sends per-row flags ('visible is saved')", async () => {
+    // Given:
+    const li1 = aPacingDraftLineItemV1({ lineItemId: "1" });
+    const li2 = aPacingDraftLineItemV1({ lineItemId: "2" });
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [li1, li2] }));
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1());
+    renderPanel();
+    await screen.findByText("Campaign link");
+
+    // Then: no Coef column while the master toggle is off.
+    expect(screen.queryByLabelText("Coefficient cost mode for line item 1")).not.toBeInTheDocument();
+
+    // When: master ON seeds every row true; one row is individually unticked.
+    await userEvent.click(screen.getByLabelText(/Coefficient cost mode \(adds/));
+    expect(screen.getByLabelText("Coefficient cost mode for line item 1")).toBeChecked();
+    await userEvent.click(screen.getByLabelText("Coefficient cost mode for line item 2"));
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+
+    // Then: the flags ride per row, and the master gate rides as data.coefEnabled.
+    const body = vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1;
+    expect(body.data?.coefEnabled).toBe(true);
+    expect(body.lineItems?.find((li) => li.lineItemId === "1")?.costCoef).toBe(true);
+    expect(body.lineItems?.find((li) => li.lineItemId === "2")?.costCoef).toBe(false);
+  });
+
+  it("shows the exchange-rate override only for a non-USD draft, and an edited rate rides locked", async () => {
+    // Given: a CAD draft - Pacing ignores body.rate for a USD campaign, so a USD draft (every other
+    // test here) must not render the control at all; asserted first via its absence above.
+    const li = aPacingDraftLineItemV1({
+      lineItemId: "1", currency: "CAD", converted: true, exchangeRate: 0.704503184354,
+    });
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [li] }));
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1());
+    renderPanel();
+    await screen.findByText("Campaign link");
+
+    // Then: the control is there, showing a HUMAN rendering of the NetSuite rate, not the raw float.
+    const rateInput = screen.getByLabelText("Exchange rate override");
+    expect(rateInput).toHaveValue("0.704503");
+
+    // When: editing the rate, then creating.
+    await userEvent.clear(rateInput);
+    await userEvent.type(rateInput, "0.71");
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+
+    // Then: the edited rate rides with the lock, so a later revalidate keeps it.
+    const body = vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1;
+    expect(body.rate).toBe(0.71);
+    expect(body.rateLocked).toBe(true);
+  });
+
+  it("accepts a pre-fetched draft without fetching its own (the Create Pacing modal's entry)", async () => {
+    // Given: the Overview's Create Pacing modal already holds the step-1 lookup result.
+    const draft = aPacingDraftV1({
+      campaign: "2026_Campaign",
+      client: "Acme",
+      agency: "MediaCo",
+      lineItems: [aPacingDraftLineItemV1({ lineItemId: "1" })],
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    // When:
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreatePacingPanel draft={draft} backLabel="← Back to input" onClose={vi.fn()} onCreated={vi.fn()} />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    // Then: the review table renders off the passed draft - campaign context read from it, no
+    // draft request of the panel's own, and the back button labelled for the step it returns to.
+    await screen.findByText("1");
+    expect(screen.getByText("2026_Campaign")).toBeInTheDocument();
+    expect(getPacingDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "← Back to input" })).toBeInTheDocument();
   });
 
   it("shows validated/IO/ready-need-excluded counts in the result header (§8 counts)", async () => {

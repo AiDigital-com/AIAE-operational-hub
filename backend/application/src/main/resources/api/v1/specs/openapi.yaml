@@ -2827,6 +2827,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: >-
+            Pacing rate-limits creates (a few per user per minute) - wait a minute and try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '500':
           description: >
             Creating the pacing failed. Also returned, deliberately, when Pacing answers 401 (the two
@@ -3829,14 +3836,18 @@ paths:
         - pacing
       operationId: validatePacingLineItems
       description: >
-        Looks up line items by id directly (§9 of the migration plan, US-126's add-by-id path), for
-        adding a line item to an existing pacing that the campaign-scoped picker
-        (GET .../addable-line-items) does not offer - including a line item that belongs to a
-        different campaign than the pacing's own, which this endpoint returns and marks with its own
-        `campaignId`/`campaignName` exactly as Pacing sent them, never silently substituting the
-        pacing's campaign. Calls POST /api/pacings/validate on the Pacing side with a
-        `line_item_ids` selector (unchanged by this migration) - the same endpoint §8's campaign-scoped
-        draft uses with a `campaign_id` selector instead.
+        Looks up line items directly, by exactly one of two selectors. `lineItemIds` (§9 of the
+        migration plan, US-126's add-by-id path) looks ids up for adding a line item to an existing
+        pacing that the campaign-scoped picker (GET .../addable-line-items) does not offer -
+        including a line item that belongs to a different campaign than the pacing's own, which this
+        endpoint returns and marks with its own `campaignId`/`campaignName` exactly as Pacing sent
+        them, never silently substituting the pacing's campaign. `insertionOrderId` looks up every
+        line item of one NetSuite insertion order - the first entry mode of the Overview's Create
+        Pacing modal. Both call POST /api/pacings/validate on the Pacing side (with a
+        `line_item_ids` or `insertion_order_id` selector respectively, unchanged by this migration) -
+        the same endpoint §8's campaign-scoped draft uses with a `campaign_id` selector instead. A
+        request carrying both selectors, or neither, is rejected with 400 here, before Pacing is
+        called.
       requestBody:
         required: true
         content:
@@ -3853,7 +3864,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/PacingDraftV1'
         '400':
-          description: Every id was malformed (not digits-only).
+          description: >-
+            Both selectors or neither were sent, every id was malformed (not digits-only), or the
+            insertion-order number failed Pacing's charset gate.
           content:
             application/json:
               schema:
@@ -3862,6 +3875,14 @@ paths:
           description: The authorization token not provided or expired.
         '404':
           description: The Pacing service answered the request with a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: >-
+            Pacing rate-limits validate lookups (a few per user per minute) - wait a minute and try
+            again.
           content:
             application/json:
               schema:
@@ -7580,6 +7601,25 @@ components:
             do not match" and show both, never as "the owner is wrong"; Pacing's owner keeps
             driving access either way. Null when NetSuite reports none, or before this pacing's
             next revalidate (the field only started being stored on 2026-09-21).
+        # The three fields below are HUB-resolved, not read from Pacing: Pacing's campaign ids are
+        # NetSuite campaign ids - the same id space as CampaignV1.id - so the Hub resolves them
+        # against its own BigQuery campaign data (one bulk lookup per list request, respecting the
+        # caller's agency visibility) and attaches the agency/client here. Absent when the campaign
+        # could not be resolved - unknown id, or outside the caller's visibility. Deliberately NOT
+        # `nullable: true` - see PacingRowV1.dashSlug's description for why; omission already
+        # carries "unresolved".
+        agencyId:
+          type: integer
+          format: int64
+          description: >
+            The campaign's agency id, Hub-resolved (see the note above). The Overview's agency
+            filter matches a pacing when ANY of its campaigns carries a selected agency id.
+        agencyName:
+          type: string
+          description: That agency's display name, resolved alongside `agencyId`.
+        clientName:
+          type: string
+          description: The campaign's client (advertiser) name, resolved alongside `agencyId`.
       required:
         - id
         - name
@@ -7637,6 +7677,193 @@ components:
         - type
         - severity
         - text
+    PacingDelegationRefV1:
+      type: object
+      description: >
+        The other side of a delegation as it decorates an Overview row (§12, US-135): who a pacing is
+        delegated to (`delegatedTo`), or who delegated it in (`delegatedFrom`), and when the grant
+        lapses. Display-only - managing delegations has its own endpoints.
+      properties:
+        name:
+          type: string
+          description: The other person's display name.
+        expiresAt:
+          type: string
+          format: date
+          description: The day the delegation lapses.
+      required:
+        - name
+    PacingKpiTargetV1:
+      type: object
+      description: >
+        One KPI target of a line item - CTR, or VCR/ACR (audio completion rate, same
+        completes-over-impressions series as VCR) - with the band bounds Pacing derived from that
+        pacing's own notify config. The Overview's KPI sparkline colors by `value / tgt` against
+        `low`/`high` with Pacing's own band rule; the Hub evaluates no threshold of its own.
+      properties:
+        type:
+          type: string
+          description: KPI kind - `CTR`, `VCR` or `ACR`.
+        tgt:
+          type: number
+          format: double
+          description: >
+            Target percentage. Absent on the placeholder entry Pacing sends for a line item with no
+            KPI target at all - the sparkline then renders neutral. Deliberately NOT `nullable: true`
+            - see PacingRowV1.dashSlug's description for why; omission already carries "no target".
+        low:
+          type: number
+          format: double
+          description: >
+            Lower band bound as a ratio of target (e.g. 0.7). Absent means that side is disabled in
+            the pacing's own alert config; the renderer falls back to its default band.
+        high:
+          type: number
+          format: double
+          description: Upper band bound as a ratio of target; same absence rule as `low`.
+      required:
+        - type
+    PacingRecentDayV1:
+      type: object
+      description: >
+        One recent delivery day of a line item, exactly as Pacing's own `recentDailyMetrics` computed
+        it (newest first on the wire). The Overview renders these as the 7-day delivery heatmap
+        (units vs tgtUnitsReforecast, rate vs tgtRate) and the KPI sparklines (ctr/vcr series) -
+        recomputing nothing.
+      properties:
+        date:
+          type: string
+          format: date
+          description: The delivery day.
+        impr:
+          type: number
+          format: double
+          description: Impressions delivered that day.
+        spend:
+          type: number
+          format: double
+          description: Spend that day.
+        clicks:
+          type: number
+          format: double
+          description: Clicks that day.
+        completes:
+          type: number
+          format: double
+          description: Video/audio completes that day.
+        ctr:
+          type: number
+          format: double
+          description: That day's CTR, as a percentage.
+        vcr:
+          type: number
+          format: double
+          description: That day's VCR (completes over impressions), as a percentage.
+        cpm:
+          type: number
+          format: double
+          description: That day's effective CPM.
+        tgtCpm:
+          type: number
+          format: double
+          description: The plan's target CPM.
+        tgtImpr:
+          type: number
+          format: double
+          description: Expected impressions for that day per the static plan.
+        rateType:
+          type: string
+          description: The line item's billing rate type (CPM/CPC/CPV) the native units below follow.
+        units:
+          type: number
+          format: double
+          description: >
+            Delivered units in the rate type's native unit - impressions for CPM, clicks for CPC,
+            completes for CPV.
+        tgtUnits:
+          type: number
+          format: double
+          description: Expected native units for that day per the static plan.
+        tgtUnitsReforecast:
+          type: number
+          format: double
+          description: >
+            Expected native units for that day per the pace-to-goal reforecast - the heatmap's
+            preferred delivery target; 0 on a day the line item was paused.
+        rate:
+          type: number
+          format: double
+          description: That day's effective rate in the native rate type (CPM/CPC/CPV).
+        tgtRate:
+          type: number
+          format: double
+          description: The plan's target rate in the native rate type.
+      required:
+        - date
+    PacingLineItemHealthV1:
+      type: object
+      description: >
+        One line item's health figures inside a pacing row, computed by Pacing's `computeHealthBatch`
+        - what the Overview's expanded row shows: identity, flight, budget, margin, pacing index, the
+        recent-days series and the KPI targets.
+      properties:
+        lineItemId:
+          type: string
+          description: NetSuite/Pacing line item id.
+        channel:
+          type: string
+          description: Delivery channel / media tactic.
+        rateType:
+          type: string
+          description: Billing rate type (CPM/CPC/CPV).
+        flightStart:
+          type: string
+          format: date
+          description: The line item's effective flight start.
+        flightEnd:
+          type: string
+          format: date
+          description: The line item's effective flight end.
+        budget:
+          type: number
+          format: double
+          description: The line item's planned budget.
+        marginActualPct:
+          type: number
+          format: double
+          description: Actual margin percentage; absent before any delivery data.
+        marginTargetPct:
+          type: number
+          format: double
+          description: Target margin percentage.
+        pacingIndex:
+          type: number
+          format: double
+          description: >
+            Percentage-point deviation from expected pace for this line item, same convention as the
+            row's own pacingDeviationPct; absent before any delivery data.
+        isPaused:
+          type: boolean
+          description: >
+            Whether the line item is paused as of the data's own latest date - manual pause intervals
+            or an out-of-schedule day between split containers.
+        costCoef:
+          type: boolean
+          description: >
+            Whether this line item runs on a cost coefficient instead of a margin target - its margin
+            then renders neutrally rather than good/bad against a target.
+        recent:
+          type: array
+          description: The most recent delivery days, newest first (up to 7).
+          items:
+            $ref: '#/components/schemas/PacingRecentDayV1'
+        kpis:
+          type: array
+          description: The line item's KPI targets, for the sparklines.
+          items:
+            $ref: '#/components/schemas/PacingKpiTargetV1'
+      required:
+        - lineItemId
     PacingNsDiffCountsV1:
       type: object
       description: >
@@ -7986,10 +8213,9 @@ components:
       type: object
       description: >
         One pacing visible to the current user, shaped for the Overview screen (§4 of the migration
-        plan, US-109/110/111) - a deliberately narrow projection of what Pacing's GET /api/pacings
-        returns. Fields such as owner id, delegation, client/agency and the per-line-item health
-        breakdown exist on the Pacing side but are not surfaced here because Overview does not use
-        them yet; see PacingContractMapper for the full list of what is left out and why.
+        plan, US-109/110/111) from what Pacing's GET /api/pacings returns: the row's own figures,
+        owner and delegation identity, the per-line-item health breakdown (heatmap + KPI sparkline
+        data included), and the Hub-resolved agency/client of each campaign (see CampaignRefV1).
       properties:
         id:
           type: string
@@ -8021,6 +8247,33 @@ components:
         ownerName:
           type: string
           description: Display name of the pacing's current owner.
+        ownerId:
+          type: string
+          description: >
+            Pacing `access.users.user_id` (UUID) of the current owner - the stable key the Overview
+            groups rows by (a display name can legitimately repeat; this cannot). Deliberately NOT
+            `nullable: true` - see dashSlug's description; omission already carries "no owner".
+        client:
+          type: string
+          description: >
+            Client display name as stored on the pacing's own config - Pacing's value, shown as the
+            row's subtitle. Not the Hub's resolved client; that lives per campaign (CampaignRefV1).
+        agency:
+          type: string
+          description: >
+            Agency display name as stored on the pacing's own config - a NAME, not a Hub agency id.
+            The filterable agency ids live per campaign (CampaignRefV1.agencyId), Hub-resolved.
+        # Delegation decoration (§12, US-135). Absent when the row carries none - deliberately NOT
+        # `nullable: true`, same JsonNullable reasoning as dashSlug above.
+        delegatedFrom:
+          $ref: '#/components/schemas/PacingDelegationRefV1'
+        delegatedTo:
+          type: array
+          description: >
+            Everybody this row's owner has delegated it to (scoped or portfolio-wide grants); absent
+            when nobody.
+          items:
+            $ref: '#/components/schemas/PacingDelegationRefV1'
         flightStart:
           type: string
           format: date
@@ -8084,6 +8337,51 @@ components:
           type: number
           format: double
           description: Total planned budget across the pacing's line items.
+        liCount:
+          type: integer
+          format: int32
+          description: >
+            Line items with computed health figures - the count the Overview row shows. Can differ
+            from `lineItemCount` (the config's own count) while data is still arriving; absent when
+            health was not computed.
+        daysRemaining:
+          type: integer
+          format: int32
+          description: Days until flight end, never negative; absent when health was not computed.
+        periodScope:
+          type: boolean
+          description: >
+            Whether this pacing's figures are scoped to a reporting period rather than the whole
+            flight - the Overview badges such a row. Absent/false when scope is off.
+        periodScopeState:
+          type: string
+          description: >
+            Where "now" sits relative to the scoped period: `in_period`, `ended`, `upcoming` or
+            `no_period`. Only present when `periodScope` is on. Left a plain string, not an enum -
+            the vocabulary is Pacing's, and a new state must degrade, not 500.
+        periodLabel:
+          type: string
+          description: The scoped period's display label (e.g. `Sep 2026`), when one is configured.
+        lineItems:
+          type: array
+          description: >
+            Per-line-item health breakdown - what the Overview's expanded row renders (US-109's
+            line-item drill-in, heatmap and KPI sparklines included). Absent when health was not
+            computed.
+          items:
+            $ref: '#/components/schemas/PacingLineItemHealthV1'
+        liNames:
+          type: object
+          description: >
+            Owner-assigned display names by line item id (the pacing's own Display settings) -
+            shown as a caption above the id on an expanded row. Absent entries mean no custom name.
+          additionalProperties:
+            type: string
+        liDesc:
+          type: object
+          description: Line-item descriptions by line item id, for the expanded row's hover detail.
+          additionalProperties:
+            type: string
         alerts:
           type: array
           description: Alert badges raised for this pacing (US-110); empty when none fired.
@@ -8392,16 +8690,49 @@ components:
         targetVcr:
           type: number
           format: double
+        costCoef:
+          type: boolean
+          description: >
+            Coefficient cost mode for this line item (Pacing's per-LI `cost_coef` flag). Only sent
+            when the create screen's coefficient master toggle is on ("visible is saved"); Pacing
+            validates the flag against the line item's margins server-side (`bad_coef_config`).
+            Omitted (never null) when the caller does not use the feature.
       required:
         - lineItemId
         - flightStart
         - flightEnd
+    PacingCreateDataV1:
+      type: object
+      description: >
+        The new pacing's `config.data` namespace at create - which BigQuery table its delivery is
+        read from and which optional extras ride along. Pacing normalises this through its own
+        allowlist and applies defaults for anything absent, so the whole object (and every field)
+        is optional.
+      properties:
+        source:
+          $ref: '#/components/schemas/PacingDataSourceV1'
+        fetchCreatives:
+          type: boolean
+          description: Fetch DSP creative assets alongside delivery (adds the Creative breakdown).
+        fetchConversions:
+          type: boolean
+          description: Fetch conversions alongside delivery (adds the Conversion Action breakdown).
+        coefEnabled:
+          type: boolean
+          description: >
+            UI-visibility gate for the coefficient-cost feature: mirrors the create screen's master
+            toggle so a coef pacing's Settings shows its coef controls from day one. The maths is
+            driven by each line item's `costCoef` flag regardless.
     PacingCreateV1:
       type: object
       description: >
-        Creates a pacing from selected, reviewed line items of a campaign (§8, US-123/124). Every
-        plan value on every line item is exactly what the caller confirmed - the Hub does not
-        compute, default or validate any of them beyond what Pacing itself enforces.
+        Creates a pacing from selected, reviewed line items (§8, US-123/124) - reached from an open
+        campaign, or from the Overview's Create Pacing modal after an insertion-order or
+        line-item-id lookup. Every plan value on every line item is exactly what the caller
+        confirmed - the Hub does not compute, default or validate any of them beyond what Pacing
+        itself enforces. None of the optional properties is `nullable: true` - see
+        PacingRowV1.dashSlug for the JsonNullable trap; Pacing gates most of these keys on presence,
+        so an untouched setting is expressed by omitting the key, never by null.
       properties:
         pacingName:
           type: string
@@ -8411,6 +8742,51 @@ components:
           description: The selected line items - at least one required.
           items:
             $ref: '#/components/schemas/PacingCreateLineItemV1'
+        client:
+          type: string
+          description: >
+            Advertiser/client name as the draft (`PacingDraftV1.client`) reported it. Stored as
+            `config_json.client`; without it a Hub-created pacing shows a blank client everywhere
+            (e.g. the Overview's "agency · client" subtitle) until somebody runs Revalidate.
+        agency:
+          type: string
+          description: Agency name as the draft (`PacingDraftV1.agency`) reported it - `client`'s twin.
+        campaigns:
+          type: array
+          description: >
+            The pinned campaign ORDER (NetSuite campaign ids) for the derived campaign set - first
+            entry is the primary campaign, the one the Hub navigates to when this pacing is opened.
+            Pacing derives the set itself from the line items (`deriveCampaigns`); this list only
+            reorders it and can never add or drop a campaign (`applyPinnedOrder` ignores ids outside
+            the derived set).
+          items:
+            type: string
+        data:
+          $ref: '#/components/schemas/PacingCreateDataV1'
+        rate:
+          type: number
+          format: double
+          description: >
+            Create-time exchange-rate override (USD per one unit of the campaign's currency), for a
+            non-USD campaign only - Pacing ignores it for a USD one. Pacing re-materializes every
+            line item's USD budget from this rate.
+        rateLocked:
+          type: boolean
+          description: >
+            True when the caller set `rate` by hand, so later revalidates keep it instead of
+            re-detecting from NetSuite. Read by Pacing only when `rate` is sent.
+        campaignLinks:
+          type: array
+          maxItems: 50
+          description: >
+            Reference links to store on the new pacing (§16's `config_json.campaign_links`, seeded at
+            create). Validated by the Hub exactly like the settings save - Pacing stores them
+            verbatim, so this is the only gate before they render clickable.
+          items:
+            $ref: '#/components/schemas/PacingCampaignLinkV1'
+        campaignNotes:
+          type: string
+          description: Free-text campaign notes to store as `config_json.campaign_notes`.
       required:
         - pacingName
         - lineItems
@@ -9241,14 +9617,23 @@ components:
         - alreadyAdded
     PacingLineItemValidateV1:
       type: object
-      description: Line item ids to look up directly (§9, US-126's add-by-id path).
+      description: >
+        A direct NetSuite lookup: exactly ONE selector must be present - `lineItemIds` (§9, US-126's
+        add-by-id path) or `insertionOrderId` (the Create Pacing modal's insertion-order mode).
+        A request carrying both selectors, or neither, is rejected with 400 before anything is sent
+        to Pacing. Neither property is `nullable: true` on purpose - see PacingRowV1.dashSlug for the
+        JsonNullable trap; "absent" is expressed by omitting the key.
       properties:
         lineItemIds:
           type: array
+          description: Line item ids to look up directly. Mutually exclusive with `insertionOrderId`.
           items:
             type: string
-      required:
-        - lineItemIds
+        insertionOrderId:
+          type: string
+          description: >
+            A NetSuite insertion-order number whose line items to look up (Pacing's
+            `insertion_order_id` validate selector). Mutually exclusive with `lineItemIds`.
     PacingStatusUpdateV1:
       type: object
       description: A pacing status change (§9, US-128).

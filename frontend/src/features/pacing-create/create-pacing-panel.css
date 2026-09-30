@@ -82,12 +82,12 @@
   color: var(--muted-strong);
 }
 
-/* ── name row ── */
-.pcreate__name-row {
+/* ── the pacing-name field, inline in the result strip ── */
+.pcreate__name-inline {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-left: 8px;
 }
 .pcreate__name-label {
   font-size: 13px;
@@ -96,9 +96,10 @@
   white-space: nowrap;
 }
 .pcreate__name-input {
-  max-width: 420px;
-  height: 38px !important;
-  min-height: 38px !important;
+  width: 300px;
+  height: 32px !important;
+  min-height: 32px !important;
+  font-size: 13px !important;
 }
 
 /* ── warnings (background tint, no stripe) ── */
@@ -134,22 +135,33 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 }
+/* Always-visible scrollbar (same recipe as .data-table__scroll): macOS overlay scrollbars hide
+   until touched, which read as "the STATUS column is just cut off" rather than "this scrolls". */
+.pcreate__table-wrap::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+.pcreate__table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--surface);
+  border-radius: 8px;
+}
 .pcreate__table {
   width: 100%;
-  min-width: 1184px;
+  min-width: 1260px;
   border-collapse: collapse;
   font-size: 13px;
 }
-.pcreate__col-check { width: 36px; }
-.pcreate__col-include { width: 46px; }
-.pcreate__col-li { width: 220px; }
-.pcreate__col-channel { width: 96px; }
-.pcreate__col-flight { width: 140px; }
-.pcreate__col-budget { width: 156px; }
-.pcreate__col-impr { width: 156px; }
-.pcreate__col-rate { width: 124px; }
-.pcreate__col-pct { width: 98px; }
-.pcreate__col-status { width: 150px; }
+.pcreate__col-check { width: 32px; }
+.pcreate__col-include { width: 40px; }
+.pcreate__col-li { width: 168px; }
+.pcreate__col-channel { width: 80px; }
+.pcreate__col-flight { width: 232px; }
+.pcreate__col-budget { width: 130px; }
+.pcreate__col-impr { width: 128px; }
+.pcreate__col-rate { width: 88px; }
+.pcreate__col-pct { width: 78px; }
+.pcreate__col-status { width: 140px; }
 
 /* ── group (insertion order) row: full-cell background tint, never a side stripe ── */
 .pcreate__group-row td {
@@ -276,19 +288,21 @@
   border-top-right-radius: 0;
 }
 
-/* stacked start/end date inputs share one column - two inputs, never an input beside a bare label. */
+/* start/end date inputs share ONE line - stacked, they doubled every row's height and halved how
+   many rows fit on screen. Two inputs, never an input beside a bare label. */
 .pcreate__flight-field {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
-  padding-top: 4px;
 }
 .pcreate__flight-input {
-  height: 26px !important;
-  min-height: 26px !important;
-  padding: 0 6px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 4px !important;
   font-size: 12px !important;
-  width: 100%;
+  width: 106px;
+  flex: 0 0 auto;
 }
 
 /* ── line item row ── */
@@ -302,7 +316,7 @@
    the cell's padding IS the gap between one field and the next. At 10px two adjacent
    numbers sat close enough to read as one field. */
 .pcreate__row td {
-  padding: 8px 14px;
+  padding: 6px 10px;
   vertical-align: top;
 }
 /* Both control cells centre their control instead of nudging it down by a fixed
@@ -329,8 +343,10 @@
    pair rather than as two unrelated widgets. */
 .pcreate__cell-check > input {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
   margin: 0 auto;
 }
 /* Include column (PDI-131 fix): decides what gets created, so its cell carries a full-cell background
@@ -401,7 +417,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 210px;
+  max-width: 150px;
 }
 .pcreate__cell-channel {
   color: var(--muted-strong);
@@ -419,12 +435,21 @@
   gap: 4px;
 }
 
-/* every editable cell shares the same baseline: input/select on the left, the "Auto" badge right
-   after it on the same line - never stacked, so a row never grows a second line by itself. */
+/* every editable cell shares the same baseline; the "Auto" badge is a corner tag ON the field
+   (absolute, top-right), never an inline sibling - inline it stole a third of the input's width,
+   clipping money values mid-number and squeezing the rate select down to a bare chevron. */
 .pcreate__field {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.pcreate__field > .pcreate__badge {
+  position: absolute;
+  top: -5px;
+  right: 2px;
+  z-index: 1;
+  pointer-events: none;
 }
 .pcreate__input,
 .pcreate__select {
@@ -447,9 +472,7 @@
 .pcreate__input--pct {
   text-align: right;
 }
-.pcreate__input--pct {
-  max-width: 66px;
-}
+
 .pcreate__field-hint {
   display: block;
   margin-top: 3px;
@@ -599,4 +622,179 @@
 .pcreate__col-select-th > input {
   position: relative;
   top: 2px;
+}
+
+/* ── coefficient-cost column (rendered only while the master toggle is on) ── */
+.pcreate__col-coef { width: 56px; }
+.pcreate__th-coef {
+  text-align: center;
+}
+.pcreate__cell-coef {
+  text-align: center;
+}
+.pcreate__cell-coef > input {
+  position: relative;
+  top: 1px;
+}
+
+/* ── the blocks below the table: derived campaign set + settings, sharing one row on a wide
+      screen instead of stacking two full-width bands ── */
+.pcreate__blocks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 14px;
+}
+.pcreate__blocks > .pcreate__block {
+  flex: 1 1 420px;
+  margin-top: 0;
+}
+.pcreate__block {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pcreate__block-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.pcreate__block-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Background tint, never a stripe: the "this would be linked to no campaign" explanation. */
+.pcreate__campaigns-none {
+  margin: 0;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--bad);
+}
+/* "Nothing selected yet" is a prompt, not a failure - only the real would-be-orphan case reads red. */
+.pcreate__campaigns-none--empty {
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-weight: 600;
+}
+.pcreate__campaign-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pcreate__campaign {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.pcreate__campaign-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.pcreate__campaign-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.pcreate__campaign-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── settings fields: a vertical stack, one control per row, so a label-stacked select never has to
+      share a baseline with a bare checkbox (project layout rule). ── */
+.pcreate__setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.pcreate__setting-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.pcreate__setting-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+/* The app's global `input { width: 100%; min-height: 42px }` (styles.css) applies to checkboxes and
+   radios too: laid out in a flex row, the box itself became hundreds of pixels wide and its label
+   was shoved to the far edge of the block. Explicit intrinsic sizing for every boxed control here. */
+.pcreate__setting-check > input[type="checkbox"],
+.pcreate__campaign-pick > input[type="radio"],
+.pcreate__cell-coef > input[type="checkbox"],
+.pcreate__th-coef > input,
+.pcreate__col-select-th > input {
+  width: 15px;
+  height: 15px;
+  min-height: 15px;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.pcreate__cell-coef > input[type="checkbox"] {
+  display: block;
+  margin: 0 auto;
+}
+.pcreate__rate-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pcreate__input--rate {
+  width: 120px;
+}
+.pcreate__link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pcreate__input--link-name {
+  width: 180px;
+}
+.pcreate__input--link-url {
+  flex: 1;
+  min-width: 220px;
+  max-width: 520px;
+}
+.pcreate__notes::placeholder {
+  color: var(--muted);
+}
+.pcreate__notes {
+  width: 100%;
+  max-width: 640px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.pcreate__create-error {
+  margin: 12px 0 0;
 }

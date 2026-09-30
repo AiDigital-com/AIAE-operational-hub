@@ -36,7 +36,12 @@ import "./pacing-dashboard.css";
 
 interface PacingDashboardProps {
   row: PacingRowV1;
-  onBack: () => void;
+  /**
+   * Renders the "Back to pacings" link. Omitted where there is nothing to go back to: the campaign
+   * Pacing tab keeps its list on screen above this dashboard, so a back link there would offer to
+   * return to a list the user is already looking at.
+   */
+  onBack?: () => void;
   /**
    * Set only for a pacing the user has just created. Creating a pacing starts its first refresh
    * fire-and-forget, so this view can open before any data exists; with this set, it waits for that
@@ -175,9 +180,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
 
   return (
     <section className="pdash">
-      <button type="button" className="pdash__back" onClick={onBack}>
-        <ChevronLeftIcon /> Back to pacings
-      </button>
+      {onBack && (
+        <button type="button" className="pdash__back" onClick={onBack}>
+          <ChevronLeftIcon /> Back to pacings
+        </button>
+      )}
 
       <header className="pdash__header">
         <div>

@@ -1,12 +1,18 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateDataV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateLineItemV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCreateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftLineItemV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDraftV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingInUseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingInsertionOrderV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingInUseEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingInsertionOrder;
@@ -163,7 +169,73 @@ public class PacingCreateContractMapper {
 				li.getTargetImpressions(),
 				li.getMarginPercent(),
 				li.getTargetCtr(),
-				li.getTargetVcr());
+				li.getTargetVcr(),
+				li.getCostCoef());
+	}
+
+	/**
+	 * Collects the optional create-time extras off the request body into the external-services input
+	 * - a straight field copy/rename; nulls stay null (the Pacing client omits the matching wire keys,
+	 * which is how an untouched setting stays untouched).
+	 *
+	 * @param body the create request
+	 * @return the optional extras to submit alongside the line items
+	 */
+	public PacingCreateOptions toCreateOptions(PacingCreateV1 body) {
+		// Empty lists become null: the generated model initializes an absent array property to an
+		// empty list (the exact trap PacingDimSourcesV1's contract note documents), and a null here
+		// is what makes the Pacing client OMIT the wire key - "no pinned order" / "no links" must
+		// not travel as `[]`.
+		return new PacingCreateOptions(
+				emptyToNull(body.getCampaigns()),
+				body.getClient(),
+				body.getAgency(),
+				toCreateData(body.getData()),
+				body.getRate(),
+				body.getRateLocked(),
+				toCampaignLinks(emptyToNull(body.getCampaignLinks())),
+				body.getCampaignNotes());
+	}
+
+	/**
+	 * Degrades an absent-or-empty generated list to null, so the outbound NON_NULL body omits its key.
+	 *
+	 * @param list the generated model's list property
+	 * @param <T>  the element type
+	 * @return the list, or null when it is null or empty
+	 */
+	<T> List<T> emptyToNull(List<T> list) {
+		return list == null || list.isEmpty() ? null : list;
+	}
+
+	/**
+	 * Maps the create body's {@code data} namespace verbatim; the enum source becomes its wire string.
+	 *
+	 * @param data the request's data settings, or null when the caller sent none
+	 * @return the external-services data settings, or null to omit the key
+	 */
+	PacingCreateData toCreateData(PacingCreateDataV1 data) {
+		if (data == null) {
+			return null;
+		}
+		return new PacingCreateData(
+				data.getSource() == null ? null : data.getSource().getValue(),
+				data.getFetchCreatives(),
+				data.getFetchConversions(),
+				data.getCoefEnabled());
+	}
+
+	/**
+	 * Maps the create body's campaign links verbatim (name/URL pairs, §16's create-time seed).
+	 *
+	 * @param links the request's links, or null when the caller sent none
+	 * @return the external-services links, or null to omit the key
+	 */
+	List<PacingCampaignLink> toCampaignLinks(List<PacingCampaignLinkV1> links) {
+		if (links == null) {
+			return null;
+		}
+		return links.stream().map(link -> new PacingCampaignLink(link.getName(), link.getUrl())).toList();
 	}
 
 	/**
