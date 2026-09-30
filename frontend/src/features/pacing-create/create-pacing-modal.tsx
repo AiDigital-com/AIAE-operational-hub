@@ -65,6 +65,10 @@ export function CreatePacingModal({ open, onClose }: { open: boolean; onClose: (
   const [discardIntent, setDiscardIntent] = useState<DiscardIntent | null>(null);
 
   const step: 1 | 2 = draft ? 2 : 1;
+  // Validate is dead until the active field has something in it, like the reference's own gate. The
+  // empty-field messages in `handleValidate` stay: Enter still reaches it from the insertion-order
+  // input, where there is no button to have greyed out.
+  const hasLookupInput = mode === "io" ? ioInput.trim().length > 0 : parseIds(idsInput).length > 0;
 
   /**
    * Every close path of the Modal (Esc, overlay click, header X) lands here: with no draft there is
@@ -211,12 +215,18 @@ export function CreatePacingModal({ open, onClose }: { open: boolean; onClose: (
 
             {mode === "io" ? (
               <label className="pcreate-modal__field">
-                <span className="pcreate-modal__field-label">Insertion order number</span>
+                <span className="pcreate-modal__field-label">Insertion order ID</span>
                 <input
                   type="text"
                   className="pcreate-modal__io-input"
                   value={ioInput}
-                  placeholder="e.g. TM-271064"
+                  // Three shapes, from the reference's own placeholder, because all three are real
+                  // and the lookup accepts them all: a bare number, a prefixed one, and one with
+                  // spaces (`REPLACE(UPPER(order_number), ' ', '')` is what it compares against, so
+                  // spacing and case do not have to match NetSuite's). Advertising a single
+                  // `TM-xxxxxx` shape, as this used to, reads as "the format is TM-digits" and sends
+                  // people looking for a number that does not exist.
+                  placeholder="e.g. 3450, TM-277175 or GIL - 13906"
                   onChange={(e) => setIoInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleValidate();
@@ -239,7 +249,12 @@ export function CreatePacingModal({ open, onClose }: { open: boolean; onClose: (
             {validateError && <p className="form-error pcreate-modal__error">{validateError}</p>}
 
             <div className="pcreate-modal__actions">
-              <button type="button" className="button" disabled={validating} onClick={() => void handleValidate()}>
+              <button
+                type="button"
+                className="button"
+                disabled={validating || !hasLookupInput}
+                onClick={() => void handleValidate()}
+              >
                 {validating ? "Validating…" : "Validate"}
               </button>
             </div>

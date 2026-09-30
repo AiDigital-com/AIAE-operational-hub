@@ -670,7 +670,7 @@ describe("Overview", () => {
 
     // Then: the Create Pacing modal opens right here - no navigation, no URL change.
     expect(await screen.findByRole("dialog", { name: "Create Pacing" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Insertion order number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Insertion order ID")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
 
     // When: closing it (step 1 holds no work, so it closes without a confirm).
