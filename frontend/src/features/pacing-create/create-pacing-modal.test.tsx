@@ -45,7 +45,7 @@ describe("CreatePacingModal", () => {
 
     // Then: the Modal primitive's dialog, holding the step-1 lookup form.
     expect(screen.getByRole("dialog", { name: "Create Pacing" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Insertion order number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Insertion order ID")).toBeInTheDocument();
     expect(validatePacingLookup).not.toHaveBeenCalled();
   });
 
@@ -57,7 +57,7 @@ describe("CreatePacingModal", () => {
 
     // When: typing an IO number and validating.
     renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
 
     // Then: the selector travelled trimmed as insertionOrderId, and step 2 shows the review panel
@@ -67,6 +67,48 @@ describe("CreatePacingModal", () => {
     await screen.findByText("599852");
     expect(screen.getByLabelText("Pacing name")).toHaveValue("2026_Campaign");
     expect(getPacingDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps Validate dead until the active field has something in it", async () => {
+    // When:
+    renderModal();
+
+    // Then: nothing typed, nothing to look up - the reference's own gate, rather than a live button
+    // that answers a click with "enter a number"
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+
+    // When: typing an order number
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "GIL - 13906");
+
+    // Then:
+    expect(screen.getByRole("button", { name: "Validate" })).toBeEnabled();
+
+    // When: switching to the ids mode, whose own field is still empty
+    await userEvent.click(screen.getByRole("button", { name: "Line item IDs" }));
+
+    // Then: dead again - the gate reads the field the user is actually on, not whichever one was
+    // filled in first
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+
+    // And: a paste of nothing but separators is still nothing to look up
+    await userEvent.type(screen.getByLabelText(/Line item ids/), " , ,");
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+  });
+
+  it("sends a spaced insertion-order number through untouched", async () => {
+    // Given: NetSuite spells orders with spaces ("GIL - 13906") and Pacing folds spacing and case
+    // itself - so nothing on this side may normalise the string beyond trimming its ends.
+    vi.mocked(validatePacingLookup).mockResolvedValue(
+      aPacingDraftV1({ campaign: "Spaced", lineItems: [aPacingDraftLineItemV1({ lineItemId: "502121" })] })
+    );
+
+    // When:
+    renderModal();
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "  GIL - 13906  ");
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    // Then: inner spacing intact, only the ends trimmed
+    expect(validatePacingLookup).toHaveBeenCalledWith({ insertionOrderId: "GIL - 13906" });
   });
 
   it("reaches the review step from a paste of line item ids (mode 2)", async () => {
@@ -95,7 +137,7 @@ describe("CreatePacingModal", () => {
 
     // When:
     renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
 
     // Then: the reason on screen, still on step 1 (the mode switch is only rendered there).
@@ -111,7 +153,7 @@ describe("CreatePacingModal", () => {
 
     // When:
     renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "gil-13906");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "gil-13906");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
 
     // Then: never a silent empty table.
@@ -124,7 +166,7 @@ describe("CreatePacingModal", () => {
 
     // When:
     renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
 
     // Then:
@@ -134,7 +176,7 @@ describe("CreatePacingModal", () => {
   it("closes freely on step 1 - Esc and the header X hold no work to lose", async () => {
     // Given:
     const { onClose } = renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-2");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-2");
 
     // When / Then: a typed lookup string is not a draft - Esc closes without a confirm.
     await userEvent.keyboard("{Escape}");
@@ -147,7 +189,7 @@ describe("CreatePacingModal", () => {
       aPacingDraftV1({ lineItems: [aPacingDraftLineItemV1({ lineItemId: "599852" })] })
     );
     const { onClose } = renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
     await screen.findByText("599852");
 
@@ -177,7 +219,7 @@ describe("CreatePacingModal", () => {
       aPacingDraftV1({ lineItems: [aPacingDraftLineItemV1({ lineItemId: "599852" })] })
     );
     const { onClose } = renderModal();
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
     await screen.findByText("599852");
 
@@ -188,7 +230,7 @@ describe("CreatePacingModal", () => {
 
     // Then: step 1 again - the modal itself stayed open, and the typed lookup is still there.
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Insertion order number")).toHaveValue("TM-271064");
+    expect(screen.getByLabelText("Insertion order ID")).toHaveValue("TM-271064");
   });
 
   it("closes and navigates to the new pacing's primary campaign after create", async () => {
@@ -200,7 +242,7 @@ describe("CreatePacingModal", () => {
     const { onClose } = renderModal();
 
     // When: validating, then creating from the review step.
-    await userEvent.type(screen.getByLabelText(/Insertion order number/), "TM-271064");
+    await userEvent.type(screen.getByLabelText(/Insertion order ID/), "TM-271064");
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
     await screen.findByText("599855");
     await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
