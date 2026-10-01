@@ -144,7 +144,10 @@ class PacingDashboardControllerMvcTest {
 		stubCurrentUser();
 		PacingDashboardData data =
 				new PacingDashboardData(
-						null, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+						null, Map.of(), List.of(), null,
+				// types / availableSplits / availableMetrics / conversionTags - the four the moved
+				// widget renderer reads; unset here because these cases are about the other fields.
+				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 						null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
 		// Unstubbed hubUserService.findByClerkUserId(...) answers Optional.empty() (Mockito's default for

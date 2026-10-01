@@ -85,13 +85,40 @@ function createDashboardMetrics(deps) {
     return liPlan[liId];
   }
 
-  /* ── format.js — sid, plus the five formatters detailSource prints through ── */
+  /* ── format.js — sid, the five formatters detailSource prints through, and ok,
+     the module-private helpers they close over: the two Intl date formats and their
+     DateTimeFormat instances, the two number formats, and ok, fDs's date guard. None
+     of them is an export, so no list of export names could pick them up — and without
+     them detailSource throws at its first date, which the glue catches, so three
+     cards read null and nothing says why. ── */
   const sid = (v) => String(v);
 
-  const fDs = (y) =>
-    parseUTC(y).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+  const DATE_LONG = { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' };
+  const DATE_SHORT = { timeZone: 'UTC', month: 'short', day: 'numeric' };
+  const dtfLong = new Intl.DateTimeFormat('en-US', DATE_LONG);
+  const dtfShort = new Intl.DateTimeFormat('en-US', DATE_SHORT);
+  const intFmt = new Intl.NumberFormat('en-US');
+  const int2Fmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+  const ok = (d) => !Number.isNaN(d.getTime());
+  const fDs = (y) => {
+    const d = parseUTC(y);
+    return ok(d) ? dtfShort.format(d) : d.toLocaleDateString('en-US', DATE_SHORT);
+  };
+
+  /**
+   * A timestamp the way a person says it: "Today 00:33", "Yesterday 18:12",
+   * "Aug 31, 14:20" (display-history spec 2026-09-03). Local time, 24-hour, so a
+   * column of them lines up and nobody has to convert from UTC in their head.
+   *
+   * "Yesterday" is the previous local DATE, not "24 hours ago": the two disagree for
+   * most of every day, and the date is what a person means. Comparing local midnights
+   * also keeps a DST day (23 or 25 hours long) on the right side of the boundary.
+   *
+   * Anything unparseable answers '' rather than "Invalid Date": the caller draws a row
+   * whose other columns are still true, and a broken word in it helps nobody.
+   */
   const fI = (n) =>
-    n == null ? '\u2014' : Math.round(Number(n)).toLocaleString('en-US');
+    n == null ? '\u2014' : intFmt.format(Math.round(Number(n)));
   const f$ = (n) =>
     n == null ? '\u2014' : '$' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
@@ -104,8 +131,560 @@ function createDashboardMetrics(deps) {
   };
 
 
+/* ══ workspace/src/lib/dashboard/primary-cv.js ════════════════════════════════════════════════ */
+  // workspace/src/lib/dashboard/primary-cv.js
+  //
+  // Primary conversions (spec docs/2026-09-13-primary-conversions.md §3). Pure.
+  //
+  // A pacing whose switch is operative can count, per line item, only the chosen
+  // conversion actions. The builders that turn raw factsDaily into day rows call
+  // the two overlays below on the maps they return; the overlay changes only
+  // cv / pc / pv and records, per map, what each line item's conversions are:
+  //
+  //   platform     today's numbers from platform_mart, never touched
+  //   primary      the chosen actions' rows from conversions_mart
+  //   unavailable  no honest number here: readers show "—" with the reason
+  //
+  // The state lives in WeakMaps keyed by the very map a reader receives, because
+  // readers (liM / campM, SplitRow) get a bare day map, not a facts object.
+  //
+  // Stage 2: a filtered or scoped build hands the overlays a `scope`: the filter's
+  // verdict on each line item's delivery, a test for single conversion rows, and the
+  // judging dates. A conversion row is decided by its own tags where they count, and
+  // by its line item's delivery where they do not (spec §4). Stage 1's rule (every
+  // line item with a choice unavailable under any filter) is kept only for a scope
+  // with no verdicts, which no Stage 2 builder passes.
+
+
+
+  // Lives in coef-rebuild.js beside the other rebuild fingerprints, which must stay
+  // free of @shared imports (tests/coef-rebuild-test.mjs runs under plain node).
+
+  const CV = Object.freeze({ PLATFORM: 'platform', PRIMARY: 'primary', UNAVAILABLE: 'unavailable' });
+  const REV = Object.freeze({ OFF: 'off', OK: 'ok', UNAVAILABLE: 'unavailable' });   // 'off' until Stage 3
+  const VERDICT = Object.freeze({ ALL: 'all', NONE: 'none', SOME: 'some', NO_DELIVERY: 'noDelivery' });
+
+  // The tooltip text an unavailable group carries. Plain sentences, no trailing period.
+  const CV_REASON = Object.freeze({
+    NO_SOURCE: "This line item's source does not fetch conversions",
+    NOT_LOADED: 'Conversion data is not loaded for this refresh',
+    // Stage 1 input only (a scope with no verdicts). No Stage 2 builder passes one.
+    FILTER: 'Primary conversions cannot follow this filter yet',
+    // Stage 2 (spec §4 "Reasons"). Each names the delivery that makes a line item's untagged
+    // conversions unplaceable, and is true wherever it shows.
+    SPLIT: "This line item's delivery is split by this filter, and some of its conversions have no tag that matches its delivery",
+    CONTAINER: "This line item's delivery is split by this container, and some of its conversions have no tag that matches its delivery",
+    NO_DELIVERY: "This line item has no delivery here, and some of its conversions have no tag that matches its delivery",
+    DIMENSION: "This line item's delivery is split on this dimension, and some of its conversions have no tag that matches its delivery",
+  });
+
+  const SPLIT_REASON = CV_REASON.SPLIT;
+
+  /** What every builder needs to know, frozen. `operative` is the server's published
+   *  flag (merge.mjs publicDataConfig), never recomputed here. `conversions` null means
+   *  the file is absent or stale; [] means loaded with zero rows. */
+  function makeCvCtx(dataConfig, conversions, asOf) {
+    return Object.freeze({
+      operative: !!dataConfig && dataConfig.primary_cv_operative === true,
+      conversions: Array.isArray(conversions) ? conversions : null,
+      asOf: typeof asOf === 'string' && asOf ? asOf : null,
+    });
+  }
+
+  const INDEX_CACHE = new WeakMap();
+
+  /** Conversion rows grouped by line item, once per array reference.
+   *  -> Map<liId, row[]>
+   *  Each entry is row-shaped: the loaded row itself when its conversion_action is
+   *  already trimmed and its date is a string, otherwise a shallow copy carrying the
+   *  trimmed name and the string date. So every reader matches conversion_action as-is
+   *  and the loaded rows are never mutated. Numbers stay as loaded; readers coerce.
+   *  Rows with no line item id or no date are skipped. */
+  function conversionIndex(rows) {
+    if (!Array.isArray(rows)) return new Map();
+    const hit = INDEX_CACHE.get(rows);
+    if (hit) return hit;
+    const out = new Map();
+    for (const row of rows) {
+      if (!row || row.line_item_id == null) continue;
+      const id = sid(row.line_item_id);
+      const date = row.date == null ? '' : String(row.date);
+      if (!id || !date) continue;
+      const action = row.conversion_action == null ? '' : String(row.conversion_action).trim();
+      const entry = (row.conversion_action === action && row.date === date)
+        ? row
+        : { ...row, conversion_action: action, date };
+      let list = out.get(id);
+      if (!list) { list = []; out.set(id, list); }
+      list.push(entry);
+    }
+    INDEX_CACHE.set(rows, out);
+    return out;
+  }
+
+  /** A raw factsDaily row that delivered anything. Rows with no delivery never decide. */
+  function hasDelivery(row) {
+    if (!row) return false;
+    return (Number(row.impressions) || 0) > 0
+      || (Number(row.clicks) || 0) > 0
+      || (Number(row.completes) || 0) > 0
+      || (Number(row.spend) || 0) > 0
+      || (Number(row.dynamic_cost) || 0) > 0;
+  }
+
+  /* ── Stage 2: the tags a conversion row carries, and the delivery they are checked against ── */
+
+  /** The ten dimensions a per-dimension day map carries and a conversion row can be tagged on:
+   *  normalize.js DIM_FIELDS, same order. A copy because normalize.js imports this module; a test
+   *  pins the two together. */
+  const SPLIT_DIMS = Object.freeze(['audience', 'tactic', 'platform', 'comment', 'geo', 'creative', 'message', 'keyword', 'flight', 'language']);
+
+  const PURITY_CACHE = new WeakMap();
+  const EMPTY_ROWS = Object.freeze([]);
+  const EMPTY_VALUES = new Set();   // shared by NO_MEMBER and never written
+  const NO_MEMBER = Object.freeze({ single: false, value: '', members: 0, values: EMPTY_VALUES });
+
+  /**
+   * For each line item and dimension, the values on its DELIVERY rows (hasDelivery) in the
+   * breakdown's own terms: trimmed, '-' its own value, '' its own member. One member is single,
+   * two or more is split (a value plus '' is split). Built on the first `of`, once per rows array.
+   * Two readers: the tag rule reads it over every loaded row (spec §4 "Which tags count"), and
+   * placement in a breakdown reads it over the rows a build kept (Task 16).
+   *   of(liId, dim) -> { single, value, members: 0 | 1 | 2, values: Set<string> }
+   */
+  function purityIndex(rows) {
+    const list = Array.isArray(rows) ? rows : EMPTY_ROWS;
+    const hit = PURITY_CACHE.get(list);
+    if (hit) return hit;
+    let byLi = null;
+    const build = () => {
+      byLi = new Map();
+      for (const f of list) {
+        if (!f || !hasDelivery(f)) continue;
+        const id = sid(f.line_item_id);
+        let rec = byLi.get(id);
+        if (!rec) { rec = {}; byLi.set(id, rec); }
+        for (const dim of SPLIT_DIMS) {
+          const raw = f[dim];
+          (rec[dim] || (rec[dim] = new Set())).add(raw == null ? '' : String(raw).trim());
+        }
+      }
+      for (const rec of byLi.values()) {
+        for (const dim of SPLIT_DIMS) {
+          const values = rec[dim];
+          const single = values.size === 1;
+          rec[dim] = Object.freeze({ single, value: single ? values.values().next().value : '', members: Math.min(values.size, 2), values });
+        }
+      }
+    };
+    const index = Object.freeze({
+      of(liId, dim) {
+        if (!byLi) build();
+        const rec = byLi.get(sid(liId));
+        return (rec && rec[dim]) || NO_MEMBER;
+      },
+    });
+    PURITY_CACHE.set(list, index);
+    return index;
+  }
+
+  const TAGS_CACHE = new WeakMap();
+  const NO_TAGS = Object.freeze({});
+
+  /**
+   * The tags of one conversion row that COUNT (spec §4 "Which tags count"): only a row the builder
+   * marked `own` (a context joined from creative rows never counts), only a key the row carries
+   * (a NULL in the mart arrives absent), and only a value that is one of its line item's delivery
+   * values on that dimension over every loaded row (`members`: the purityIndex of the unfiltered
+   * factsDaily). So a spelling difference between the marts, or '' where the line item never
+   * delivered with '', is unknown rather than a row the delivery is not in.
+   * -> frozen { [dim]: value } of the dimensions that count; every other dimension is unknown.
+   */
+  function countedTags(row, members) {
+    const ctx = row && row.filter_context;
+    if (!ctx || ctx.own !== true || !members) return NO_TAGS;
+    const hit = TAGS_CACHE.get(row);
+    if (hit && hit.members === members) return hit.tags;
+    const out = {};
+    for (const dim of SPLIT_DIMS) {
+      const src = dim === 'platform' ? ctx : ctx.dims;
+      if (!src || !Object.prototype.hasOwnProperty.call(src, dim) || src[dim] == null) continue;
+      const value = String(src[dim]).trim();
+      if (members.of(row.line_item_id, dim).values.has(value)) out[dim] = value;
+    }
+    const tags = Object.freeze(out);
+    TAGS_CACHE.set(row, { members, tags });
+    return tags;
+  }
+
+  /**
+   * Counts one builder's delivery rows seen and kept, per line item, during that builder's own
+   * filter pass (spec §4 Filters). Only rows with delivery count; only rows inside `bound` (a
+   * period's dates; null for every date). A line item with Scope-chip dates in `windows`
+   * (Map<liId, Array<{ from, to }>>, already inside `bound`) is judged twice: inside those dates
+   * (`result`) and inside `bound` but outside them (`outside`).
+   *
+   * `expect(liId)` registers a line item the filter applies to even when it has no rows, so it
+   * comes back as NO_DELIVERY rather than missing. A line item never expected nor seen is absent
+   * from both results, which the overlays read as "not judged".
+   */
+  function makeVerdictCounter(bound, windows = null) {
+    const from = bound && bound.from ? String(bound.from) : null;
+    const to = bound && bound.to ? String(bound.to) : null;
+    const inside = new Map();
+    const outside = new Map();
+    const tally = (m, id) => {
+      let t = m.get(id);
+      if (!t) { t = { seen: 0, kept: 0 }; m.set(id, t); }
+      return t;
+    };
+    const register = (liId) => {
+      const id = sid(liId);
+      const own = windows ? windows.get(id) || null : null;
+      return { own, t: tally(inside, id), o: own ? tally(outside, id) : null };
+    };
+    const verdictOf = (t) => (t.seen === 0 ? VERDICT.NO_DELIVERY
+      : t.kept === 0 ? VERDICT.NONE : t.kept === t.seen ? VERDICT.ALL : VERDICT.SOME);
+    const collect = (m) => {
+      const out = new Map();
+      for (const [id, t] of m) out.set(id, verdictOf(t));
+      return out;
+    };
+    return {
+      expect(liId) { register(liId); },
+      see(liId, row, kept) {
+        const r = register(liId);
+        if (!hasDelivery(row)) return;
+        const d = String((row && row.date) || '');
+        if ((from && d < from) || (to && d > to)) return;
+        const t = r.own && !inWindows(d, r.own) ? r.o : r.t;
+        t.seen += 1;
+        if (kept) t.kept += 1;
+      },
+      result() { return collect(inside); },
+      outside() { return collect(outside); },
+    };
+  }
+
+  // Does a date fall in any of these windows?
+  function inWindows(date, windows) {
+    for (const w of windows) if (date >= w.from && date <= w.to) return true;
+    return false;
+  }
+
+  /** 'fs|fe' → { from, to }; anything else → null. */
+  function windowOfPeriodKey(periodKey) {
+    if (typeof periodKey !== 'string') return null;
+    const at = periodKey.indexOf('|');
+    if (at <= 0 || at === periodKey.length - 1) return null;
+    return { from: periodKey.slice(0, at), to: periodKey.slice(at + 1) };
+  }
+
+  /**
+   * One line item's chosen conversion rows under one build (spec §4 Filters). Both overlays call it
+   * with the same inputs, so the per-line-item days and the per-dimension days hold the same rows.
+   * `entries` are its chosen-action index entries.
+   *   scope null (unfiltered)        → exact: every row dated on or before the cutoff
+   *   scope.verdicts null (Stage 1)  → unavailable, CV_REASON.FILTER
+   *   the line item is not judged    → exact: every row up to the cutoff
+   *   otherwise, row by row: the row test decides a row whose tags that count answer the view's
+   *   filters (or already rule it out). An unknown row follows its line item's delivery. Inside
+   *   the judging dates: all kept → counted, none kept → dropped, part kept or none delivered →
+   *   the line item is unavailable. Under a Scope chip, an unknown row outside the declaring
+   *   dates is dropped, whatever the chip keeps of the delivery there (spec §4: "Its unknown
+   *   conversion rows count only inside those dates"). Outside the period: dropped.
+   * In view: some delivery row or some conversion row was kept. An unavailable one stays in view.
+   * The split reason names what splits the line item (scope.why, see whyOf).
+   * -> { mode: 'exact' | 'unavailable', inView: boolean, reason: string | null, kept: entry[] }
+   */
+  function resolveLi(id, entries, scope, cutoff, members) {
+    const dated = cutoff == null ? EMPTY_ROWS : entries.filter((e) => e.date <= cutoff);
+    if (!scope) return { mode: 'exact', inView: true, reason: null, kept: dated };
+    if (!scope.verdicts) return { mode: 'unavailable', inView: true, reason: CV_REASON.FILTER, kept: EMPTY_ROWS };
+    const inside = scope.verdicts.get(id);
+    if (inside === undefined) return { mode: 'exact', inView: true, reason: null, kept: dated };
+    const outside = scope.outside ? scope.outside.get(id) : undefined;
+    const own = scope.windows ? scope.windows.get(id) || null : null;
+    const bound = scope.window || null;
+    const kept = [];
+    let reason = null;
+    for (const e of dated) {
+      const test = scope.rowTest ? scope.rowTest(id, { ...countedTags(e, members), line_item_id: id, date: e.date }) : 'unknown';
+      if (test === 'keep') { kept.push(e); continue; }
+      if (test === 'drop') continue;
+      if (bound && (e.date < bound.from || e.date > bound.to)) continue;
+      if (own && !inWindows(e.date, own)) continue;
+      if (inside === VERDICT.ALL) kept.push(e);
+      else if (inside === VERDICT.SOME) reason = reason || (whyOf(scope, id) === 'container' ? CV_REASON.CONTAINER : CV_REASON.SPLIT);
+      else if (inside === VERDICT.NO_DELIVERY) reason = reason || CV_REASON.NO_DELIVERY;
+    }
+    if (reason) return { mode: 'unavailable', inView: true, reason, kept: EMPTY_ROWS };
+    const delivered = inside === VERDICT.ALL || inside === VERDICT.SOME || outside === VERDICT.ALL || outside === VERDICT.SOME;
+    return { mode: 'exact', inView: delivered || kept.length > 0, reason: null, kept };
+  }
+
+  // Which rule splits a line item's delivery in the judging dates (spec §4 "Reasons", each true
+  // wherever it shows): 'filter' when the view's own filters keep part of it, 'container' when
+  // they keep all of it and a container's (or period's) rule is what splits it. `scope.why` is one
+  // answer for every line item, or a Map per line item (splitCauses).
+  function whyOf(scope, id) {
+    const why = scope.why;
+    if (why instanceof Map) return why.get(id) || 'filter';
+    return why === 'container' ? 'container' : 'filter';
+  }
+
+  /** The per-line-item `scope.why` of a build where both the view's filters and a container rule
+   *  apply: `byFilters` is the verdict of the view's filters alone (a makeVerdictCounter result
+   *  over the same dates). Part kept by them → 'filter'; otherwise the container split it. */
+  function splitCauses(byFilters) {
+    const out = new Map();
+    for (const [id, v] of byFilters) out.set(id, v === VERDICT.SOME ? 'filter' : 'container');
+    return out;
+  }
+
+  // With no file, or a source that fetches no conversions, a line item's conversion rows are
+  // unknown, so only its delivery takes it out of view: the filter kept none of it (under a Scope
+  // chip, none outside its dates either).
+  function deliveryInView(scope, id) {
+    if (!scope || !scope.verdicts) return true;
+    const inside = scope.verdicts.get(id);
+    if (inside !== VERDICT.NONE) return true;
+    const outside = scope.outside ? scope.outside.get(id) : undefined;
+    return outside === VERDICT.ALL || outside === VERDICT.SOME;
+  }
+
+  const withView = (entry, inView) => (inView ? entry : { ...entry, inView: false });
+
+  // The line item's published choice as a Set of trimmed names, or null for "no choice".
+  function choiceOf(p) {
+    if (!p || !Array.isArray(p.primaryCv)) return null;
+    const set = new Set();
+    for (const name of p.primaryCv) {
+      if (typeof name !== 'string') continue;
+      const t = name.trim();
+      if (t) set.add(t);
+    }
+    return set.size ? set : null;
+  }
+
+  function zeroCv(days) {
+    for (const d of Object.keys(days)) {
+      const r = days[d];
+      r.cv = 0; r.pc = 0; r.pv = 0;
+    }
+  }
+
+  const CV_STATE = new WeakMap();
+  const CV_ONLY_DAYS = new WeakMap();
+  const CV_KEPT = new WeakMap();
+  const SPLIT_STATE = new WeakMap();
+  const CV_ONLY_BUCKET_DAYS = new WeakMap();
+
+  /** Per line item days. Mutates LD; registers cvStateOf(LD), cvOnlyDaysOf(LD) and cvKeptOf(LD).
+   *  Not operative: returns LD untouched and registers nothing.
+   *  `scope` (spec §4): null for an unfiltered build; otherwise what the build's filter kept, read
+   *  row by row through resolveLi. A state entry is { cv, revenue, reason }, plus inView: false
+   *  for a line item the view keeps nothing of. */
+  function overlayLiDaily(LD, localAsOf, planMap, cvCtx, scope) {
+    if (!LD || !cvCtx || cvCtx.operative !== true) return LD;
+    const state = {};
+    const created = {};
+    const keptById = {};
+    const asOf = cvCtx.asOf ?? localAsOf ?? null;
+    const loaded = Array.isArray(cvCtx.conversions);
+    const index = loaded ? conversionIndex(cvCtx.conversions) : null;
+    const members = (scope && scope.members) || null;
+    for (const rawId of Object.keys(planMap || {})) {
+      const id = sid(rawId);
+      const p = planMap[rawId];
+      const choice = choiceOf(p);
+      if (!choice) { state[id] = { cv: CV.PLATFORM, revenue: REV.OFF, reason: null }; continue; }
+      if (LD[id]) zeroCv(LD[id]);
+      if (p.conversionData !== true) {
+        state[id] = withView({ cv: CV.UNAVAILABLE, revenue: REV.OFF, reason: CV_REASON.NO_SOURCE }, deliveryInView(scope, id));
+        continue;
+      }
+      if (!loaded) {
+        state[id] = withView({ cv: CV.UNAVAILABLE, revenue: REV.OFF, reason: CV_REASON.NOT_LOADED }, deliveryInView(scope, id));
+        continue;
+      }
+      const all = index.get(id);
+      const res = resolveLi(id, all ? all.filter((e) => choice.has(e.conversion_action)) : EMPTY_ROWS, scope, asOf, members);
+      if (res.mode === 'unavailable') { state[id] = { cv: CV.UNAVAILABLE, revenue: REV.OFF, reason: res.reason }; continue; }
+      state[id] = withView({ cv: CV.PRIMARY, revenue: REV.OFF, reason: null }, res.inView);
+      if (!res.inView) continue;
+      keptById[id] = res.kept;
+      for (const e of res.kept) {
+        let days = LD[id];
+        if (!days) { days = {}; LD[id] = days; }
+        let r = days[e.date];
+        if (!r) {
+          r = zeroRow();
+          days[e.date] = r;
+          if (!created[id]) created[id] = new Set();
+          created[id].add(e.date);
+        }
+        r.cv += Number(e.conversions) || 0;
+        r.pc += Number(e.post_click_conversions) || 0;
+        r.pv += Number(e.post_view_conversions) || 0;
+      }
+    }
+    CV_STATE.set(LD, state);
+    CV_ONLY_DAYS.set(LD, created);
+    CV_KEPT.set(LD, keptById);
+    return LD;
+  }
+
+  const MARK = Object.freeze({ cv: true, revenue: false });
+  const EVERY_DIM = Object.freeze(Object.fromEntries(SPLIT_DIMS.map((dim) => [dim, MARK])));
+
+  // One kept conversion row into one bucket-day. The bucket or the day is made when this build's
+  // delivery has none there, and recorded as conversion-only (spec §4, like cvOnlyDaysOf).
+  function addToBucket(LSD, id, key, e, created) {
+    const li = LSD[id] || (LSD[id] = {});
+    const bucket = li[key] || (li[key] = {});
+    let row = bucket[e.date];
+    if (!row) {
+      row = zeroRow();
+      bucket[e.date] = row;
+      const byKey = created[id] || (created[id] = {});
+      (byKey[key] || (byKey[key] = new Set())).add(e.date);
+    }
+    row.cv += Number(e.conversions) || 0;
+    row.pc += Number(e.post_click_conversions) || 0;
+    row.pv += Number(e.post_view_conversions) || 0;
+  }
+
+  /**
+   * Per dimension days (spec §4 "Breakdowns"). Mutates LSD; registers splitStateOf(LSD) and
+   * cvOnlyBucketDaysOf(LSD). Not operative: returns LSD untouched and registers nothing.
+   *
+   * A line item with a choice first has cv / pc / pv zeroed in every bucket, so no platform value
+   * survives where nothing is placed. Then, per dimension, each of its kept rows (resolveLi: the
+   * rows its per-line-item days hold) goes
+   *   - to `dim:v` when its tag there counts: '-' lands in `dim:-` («Unclassified»), and '' gets
+   *     no bucket, reaching «Others» through the line total like its delivery;
+   *   - where the delivery is when the tag is unknown and the delivery is single on that
+   *     dimension (a single '', or no delivery rows in this build: «Others»);
+   *   - nowhere when the tag is unknown and the delivery is split. Then none of its rows is placed
+   *     on that dimension, which is marked { cv: true }: a partly placed line item would show
+   *     short numbers that look exact.
+   * An unavailable line item (no source, no file, or a filter result that reads "—") is zeroed
+   * and marked on every dimension; one the view keeps nothing of is zeroed and not marked. No
+   * choice: untouched and never marked (Stage 3 adds the revenue half; `revenue` stays false).
+   * `purity` is purityIndex of this build's own rows (the kept rows of a filtered build); tags
+   * count against `scope.members` (every loaded row), which for an unfiltered build is `purity`.
+   * A placed row can open a bucket-day, or in a filtered build a bucket, that the build's delivery
+   * does not have; cvOnlyBucketDaysOf records them.
+   */
+  function overlayLiSplitDaily(LSD, planMap, cvCtx, scope, purity, localAsOf = null) {
+    if (!LSD || !cvCtx || cvCtx.operative !== true) return LSD;
+    const cutoff = cvCtx.asOf ?? localAsOf ?? null;
+    const loaded = Array.isArray(cvCtx.conversions);
+    const index = loaded ? conversionIndex(cvCtx.conversions) : null;
+    const members = (scope && scope.members) || purity || null;
+    const state = {};
+    const created = {};
+    for (const rawId of Object.keys(planMap || {})) {
+      const id = sid(rawId);
+      const p = planMap[rawId];
+      const choice = choiceOf(p);
+      if (!choice) continue;
+      if (LSD[id]) for (const key of Object.keys(LSD[id])) zeroCv(LSD[id][key]);
+      if (p.conversionData !== true || !loaded) { if (deliveryInView(scope, id)) state[id] = EVERY_DIM; continue; }
+      const all = index.get(id);
+      const res = resolveLi(id, all ? all.filter((e) => choice.has(e.conversion_action)) : EMPTY_ROWS, scope, cutoff, members);
+      if (!res.inView) continue;
+      if (res.mode === 'unavailable') { state[id] = EVERY_DIM; continue; }
+      const marks = {};
+      for (const dim of SPLIT_DIMS) {
+        const pur = purity ? purity.of(id, dim) : null;
+        const places = [];
+        let split = false;
+        for (const e of res.kept) {
+          const tags = countedTags(e, members);
+          if (Object.prototype.hasOwnProperty.call(tags, dim)) { places.push(tags[dim]); continue; }
+          if (!pur || pur.members > 1) { split = true; break; }
+          places.push(pur.members === 1 ? pur.value : '');
+        }
+        if (split) { marks[dim] = MARK; continue; }
+        res.kept.forEach((e, i) => { if (places[i] !== '') addToBucket(LSD, id, dim + ':' + places[i], e, created); });
+      }
+      if (Object.keys(marks).length) state[id] = marks;
+    }
+    SPLIT_STATE.set(LSD, state);
+    CV_ONLY_BUCKET_DAYS.set(LSD, created);
+    return LSD;
+  }
+
+  /** null | { [liId]: { cv: CV, revenue: REV, reason: string | null, inView?: false } }
+   *  `inView: false` only for a line item the view keeps nothing of (Stage 2; read it with isInView). */
+  function cvStateOf(dayMap) {
+    return (dayMap && CV_STATE.get(dayMap)) || null;
+  }
+
+  /** null | { [liId]: { [dim]: { cv: boolean, revenue: boolean } } }   true = cannot be placed */
+  function splitStateOf(liSplitDaily) {
+    return (liSplitDaily && SPLIT_STATE.get(liSplitDaily)) || null;
+  }
+
+  /** null | { [liId]: Set<date> } — day keys the overlay created with zero delivery. */
+  function cvOnlyDaysOf(dayMap) {
+    return (dayMap && CV_ONLY_DAYS.get(dayMap)) || null;
+  }
+
+  /** null | { [liId]: { [bucketKey]: Set<date> } } — bucket-days the per-dimension overlay created
+   *  with zero delivery (spec §4 "Conversion-only rows and days"). */
+  function cvOnlyBucketDaysOf(liSplitDaily) {
+    return (liSplitDaily && CV_ONLY_BUCKET_DAYS.get(liSplitDaily)) || null;
+  }
+
+  function isCvUnavailable(dayMap, liId) {
+    const s = cvStateOf(dayMap);
+    const id = sid(liId);
+    return !!(s && Object.prototype.hasOwnProperty.call(s, id) && s[id].cv === CV.UNAVAILABLE);
+  }
+
+  /** False only for a line item the view keeps nothing of (spec §4 Filters). */
+  function isInView(dayMap, liId) {
+    const s = cvStateOf(dayMap);
+    const id = sid(liId);
+    return !(s && Object.prototype.hasOwnProperty.call(s, id) && s[id].inView === false);
+  }
+
+  /** The totals rule (spec §3): only an unavailable line item that is in view nulls a total. */
+  function cvBlocksTotals(dayMap, liId) {
+    return isCvUnavailable(dayMap, liId) && isInView(dayMap, liId);
+  }
+
+  /** null | { [liId]: entry[] }: the chosen conversion rows each primary line item in view holds on
+   *  this day map, after the view's filters (the Creative cut buckets these same rows, Task 17). */
+  function cvKeptOf(dayMap) {
+    return (dayMap && CV_KEPT.get(dayMap)) || null;
+  }
+
+  /** Register the listed line items' state of fromMap on toMap (a dailyForContainer
+   *  wrapper). Nothing registered on fromMap → nothing registered on toMap. */
+  function copyCvState(fromMap, toMap, liIds) {
+    const s = cvStateOf(fromMap);
+    if (!s || !toMap || typeof toMap !== 'object') return toMap;
+    const days = cvOnlyDaysOf(fromMap) || {};
+    const state = {};
+    const created = {};
+    for (const raw of liIds || []) {
+      const id = sid(raw);
+      if (Object.prototype.hasOwnProperty.call(s, id)) state[id] = s[id];
+      if (Object.prototype.hasOwnProperty.call(days, id)) created[id] = days[id];
+    }
+    CV_STATE.set(toMap, state);
+    CV_ONLY_DAYS.set(toMap, created);
+    return toMap;
+  }
+
+
 /* ══ workspace/src/lib/dashboard/normalize.js ═════════════════════════════════════════════════ */
   // workspace/src/lib/dashboard/normalize.js
+
 
 
 
@@ -119,6 +698,22 @@ function createDashboardMetrics(deps) {
     return out;
   }
 
+  // Net cost mode: k = net/gross for one LI; 1 = identity (absent / null / out of range).
+  function netK(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 && n < 1 ? n : 1;
+  }
+
+  // Primary conversions (spec 2026-09-13 §2): a published name list, copied so the store
+  // never shares an array with the parsed blob. Anything that is not a list reads as absent.
+  function cvNames(v) {
+    return Array.isArray(v) ? v.filter((name) => typeof name === 'string') : null;
+  }
+
+  // The LI's net ratio as addFact wants it: undefined when the plan has no entry,
+  // so a missing LI stays on the identity path instead of inventing a ratio.
+  const kOf = (planMap, id) => (planMap && planMap[id] ? planMap[id].k : undefined);
+
   // Aggregates each impression independently across 8 namebuilder dimensions
   // (audience + 7 per-position carve-outs) plus 2 first-class BQ fields
   // (tactic, platform). Each LSD bucket key is `<dim_key>:<value>`. The 8
@@ -131,7 +726,12 @@ function createDashboardMetrics(deps) {
   // first-paint surfaces (KPIs, charts, alerts, LI cards) read. Split out from the
   // per-dimension LSD build so the heavy carve-out runs only when a breakdown
   // surface actually needs it (see dashboardStore.load lazy getter).
-  function buildLiDaily(factsDaily, rate, planMap) {
+  //
+  // `cvCtx` / `scope` (primary conversions, spec 2026-09-13 §3): with no context, or a
+  // context whose switch is not operative, the result is exactly today's. Otherwise the
+  // overlay rewrites cv / pc / pv of line items with a choice and registers the state
+  // readers consult on the returned LD. `scope` is null for an unfiltered build.
+  function buildLiDaily(factsDaily, rate, planMap, cvCtx = null, scope = null) {
     const LD = {};
     const rows = Array.isArray(factsDaily) ? factsDaily : [];
     const coefIdx = buildCoefIndexMap(planMap);
@@ -140,21 +740,24 @@ function createDashboardMetrics(deps) {
       const id = sid(f.line_item_id);
       if (!LD[id]) LD[id] = {};
       if (!LD[id][f.date]) LD[id][f.date] = zeroRow();
-      addFact(LD[id][f.date], f, rate, coefIdx[id]);
+      addFact(LD[id][f.date], f, rate, coefIdx[id], kOf(planMap, id));
     });
 
     const asOf = rows.length
       ? rows.reduce((mx, f) => (f.date > mx ? f.date : mx), rows[0].date)
       : null;
 
+    if (cvCtx && cvCtx.operative === true) overlayLiDaily(LD, asOf, planMap, cvCtx, scope);
+
     return { LD, asOf };
   }
 
   // Per-LI per-`<dim>:<value>` per-day aggregate (LSD). O(rows × DIM_FIELDS) plus
   // one zeroRow allocation per distinct bucket — the dominant cost of the old
-  // combined builder. Only Breakdown / CampaignBreakdown / SplitRow consume it, so
-  // it is materialized lazily on first access rather than on every dashboard load.
-  function buildLiSplitDaily(factsDaily, rate, planMap) {
+  // combined builder. Only the Breakdown WIDGET (useAutoInventory → selectAvailDims) and
+  // SplitRow consume it, so it is materialized lazily on first access rather than on every
+  // dashboard load. `cvCtx` / `scope`: as buildLiDaily.
+  function buildLiSplitDaily(factsDaily, rate, planMap, cvCtx = null, scope = null) {
     const LSD = {};
     const rows = Array.isArray(factsDaily) ? factsDaily : [];
     const coefIdx = buildCoefIndexMap(planMap);
@@ -162,6 +765,7 @@ function createDashboardMetrics(deps) {
     rows.forEach((f) => {
       const id = sid(f.line_item_id);
       const rowIdx = coefIdx[id];
+      const rowK = kOf(planMap, id);
       for (const k of DIM_FIELDS) {
         const raw = f[k];
         const v = raw == null ? '' : String(raw).trim();
@@ -170,9 +774,19 @@ function createDashboardMetrics(deps) {
         if (!LSD[id]) LSD[id] = {};
         if (!LSD[id][key]) LSD[id][key] = {};
         if (!LSD[id][key][f.date]) LSD[id][key][f.date] = zeroRow();
-        addFact(LSD[id][key][f.date], f, rate, rowIdx);
+        addFact(LSD[id][key][f.date], f, rate, rowIdx, rowK);
       }
     });
+
+    // Primary conversions (spec §4 "Breakdowns"). Purity is judged over THESE rows: the store's full
+    // factsDaily for the lazy getters, the kept rows for buildBreakdownFacts. The local asOf is the
+    // one buildLiDaily computes, the fallback cutoff when the context has none.
+    if (cvCtx && cvCtx.operative === true) {
+      const localAsOf = rows.length
+        ? rows.reduce((mx, f) => (f.date > mx ? f.date : mx), rows[0].date)
+        : null;
+      overlayLiSplitDaily(LSD, planMap, cvCtx, scope, purityIndex(rows), localAsOf);
+    }
 
     return LSD;
   }
@@ -180,9 +794,9 @@ function createDashboardMetrics(deps) {
   // Combined LD + LSD + asOf. Retained for the breakdown-filter re-aggregation
   // path (which rebuilds both halves over a filtered subset) and the equivalence
   // test. Equivalent to building both halves separately.
-  function buildFactsAggregates(factsDaily, rate, planMap) {
-    const { LD, asOf } = buildLiDaily(factsDaily, rate, planMap);
-    return { LD, LSD: buildLiSplitDaily(factsDaily, rate, planMap), asOf };
+  function buildFactsAggregates(factsDaily, rate, planMap, cvCtx = null, scope = null) {
+    const { LD, asOf } = buildLiDaily(factsDaily, rate, planMap, cvCtx, scope);
+    return { LD, LSD: buildLiSplitDaily(factsDaily, rate, planMap, cvCtx, scope), asOf };
   }
 
   function normalize(raw) {
@@ -206,6 +820,16 @@ function createDashboardMetrics(deps) {
           planImpr: Number(p.plannedImpressions) || 0,
           mTgt: Number(p.marginTargetPct) || 0,
           coef: p.cost_coef === true,
+          // Net cost mode (spec 2026-09-07 §3). `k` is the OPERATIVE ratio the blob
+          // already resolved (a value only while the pacing switch is on) and the
+          // only one the math reads; `kStored` is the ungated stored ratio the
+          // Settings editor binds to, so a ratio stored while the switch was off
+          // is still there when it comes back on; `nsK` is the raw NetSuite
+          // reading kept for the settings UI, never for the math.
+          k: netK(p.netRatio),
+          kStored: netK(p.storedNetRatio),
+          netLocked: p.netRatioLocked === true,
+          nsK: (typeof p.nsNetRatio === 'number') ? p.nsNetRatio : null,
           ctrTgt: p.ctrTargetPct != null ? Number(p.ctrTargetPct) : null,
           vcrTgt: p.vcrTargetPct != null ? Number(p.vcrTargetPct) : null,
           fs: p.flightStart || raw.campaign.startDate,
@@ -221,6 +845,15 @@ function createDashboardMetrics(deps) {
           converted: !!p.converted,
           currency: p.currency || null,
           native_budget: p.native_budget != null ? Number(p.native_budget) : null,
+          // Primary conversions (spec 2026-09-13 §2), the k / kStored pairing again:
+          // `primaryCv` is the list the math reads (published only while the pacing switch
+          // is on), `primaryCvStored` is what config_json holds and what the Settings editor
+          // binds to, `conversionData` says whether this line item's own source fetches
+          // conversion rows. Absent keys read as off. normalizePlan below must match, or
+          // sharePlanIdentities sees no change after a choice-only save.
+          primaryCv: cvNames(p.primaryConversions),
+          primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
+          conversionData: p.conversionData === true,
         };
       }
     } else if (raw.planByType && typeof raw.planByType === 'object') {
@@ -276,7 +909,10 @@ function createDashboardMetrics(deps) {
     // materialized lazily by the store so it doesn't block first paint. LP is passed
     // so coef-LIs get the per-row dc override on first paint (LP already carries the
     // `coef` flag + mTgt/containers; non-coef LIs take the raw currencyToUsd path).
-    const { LD, asOf } = buildLiDaily(raw.factsDaily, raw.campaign && raw.campaign.rate, LP);
+    // The blob's own `data` and `conversions` decide the primary-conversions overlay. An
+    // unfiltered build needs no context asOf: its local asOf is the pacing's.
+    const { LD, asOf } = buildLiDaily(raw.factsDaily, raw.campaign && raw.campaign.rate, LP,
+      makeCvCtx(raw.data, raw.conversions, null));
 
     return { LP, LD, asOf };
   }
@@ -298,6 +934,13 @@ function createDashboardMetrics(deps) {
         planImpr: Number(p.plannedImpressions) || 0,
         mTgt: Number(p.marginTargetPct) || 0,
         coef: p.cost_coef === true,
+        // Net cost mode — same mapping as normalize() above, so a saved plan
+        // rebuilds the facts on the same `k` the first paint used and the drawer
+        // re-hydrates on the same `kStored`.
+        k: netK(p.netRatio),
+        kStored: netK(p.storedNetRatio),
+        netLocked: p.netRatioLocked === true,
+        nsK: (typeof p.nsNetRatio === 'number') ? p.nsNetRatio : null,
         ctrTgt: p.ctrTargetPct != null ? Number(p.ctrTargetPct) : null,
         vcrTgt: p.vcrTargetPct != null ? Number(p.vcrTargetPct) : null,
         fs: p.flightStart || (campaign && campaign.startDate) || '',
@@ -310,6 +953,10 @@ function createDashboardMetrics(deps) {
         converted: !!p.converted,
         currency: p.currency || null,
         native_budget: p.native_budget != null ? Number(p.native_budget) : null,
+        // Primary conversions: same mapping and key order as normalize() above.
+        primaryCv: cvNames(p.primaryConversions),
+        primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
+        conversionData: p.conversionData === true,
       };
     }
     return LP;
@@ -345,6 +992,7 @@ function createDashboardMetrics(deps) {
   let _prorateRangeCache = new WeakMap();
   let _planContainerDataCache = new WeakMap();
   let _planContainerDataRev = 0;
+  let _clientSpendPlanCache = new WeakMap();
 
   function invalidatePlanCalcCache() {
     _planContainerDataRev++;
@@ -354,6 +1002,7 @@ function createDashboardMetrics(deps) {
     _prorateCache = new WeakMap();
     _prorateRangeCache = new WeakMap();
     _planContainerDataCache = new WeakMap();
+    _clientSpendPlanCache = new WeakMap();
   }
 
   function getPlanContainerData(plan) {
@@ -451,6 +1100,117 @@ function createDashboardMetrics(deps) {
     return v;
   }
 
+  /* ── Plan inside a narrowed window (2026-09-23) ───────────────────────────────
+   * When the viewer narrows the date window, a widget's PLAN follows it the way its delivered
+   * numbers already do. The plan of a window is the part of the line's plan curve that falls
+   * in [range.from .. range.to], clipped to the line's flight: the SAME curve expected delivery
+   * reads (liExpUnits / liExpCost: containers, date children, pauses), read to the window END.
+   * Unlike cachedProrateRange's expected half it is never capped at asOf: a Custom window that
+   * runs past the last data day still plans its later days.
+   *
+   * Consecutive windows add up to the curve's value at flight end. That is `planImpr` exactly
+   * whenever the curve reaches it; it falls short of it in two cases, both of which expected
+   * delivery shares: a pause (its days plan nothing), and containers that cover every day of
+   * the flight while their targets add up to less than the line's plan (the remainder has no
+   * uncovered day to be spread over). Flight itself keeps reading the line's own `planImpr`. */
+  function windowOverlap(plan, range) {
+    if (!plan || !range || !range.from || !range.to || !plan.fs || !plan.fe) return null;
+    return rangeOverlap(range.from, range.to, plan.fs, plan.fe);
+  }
+
+  /** Planned units (the line's rate-type unit) inside the window; 0 with no overlap. */
+  function unitsInWindow(plan, range) {
+    const o = windowOverlap(plan, range);
+    if (!o) return 0;
+    return liExpUnits(plan, o.end) - (o.start > plan.fs ? liExpUnits(plan, datePrev(o.start)) : 0);
+  }
+
+  /** Planned cost (the margin-net cost curve) inside the window; 0 with no overlap. */
+  function costInWindow(plan, range) {
+    const o = windowOverlap(plan, range);
+    if (!o) return 0;
+    return liExpCost(plan, o.end) - (o.start > plan.fs ? liExpCost(plan, datePrev(o.start)) : 0);
+  }
+
+  /**
+   * The line with every margin set to 0 — the line, its parts and their date children. Its cost
+   * curve is then the CLIENT's money curve: a part's own spend (containerSpendEff: its
+   * target_spend, else its units' share of the budget), a date child's share of its part, and
+   * the rest of the budget over the days no part covers. Memoised per plan object, so the curve
+   * reads below share liExpCost's per-plan cache. `total` is that curve at flight end with no
+   * pause taken out: whether the line has any client money on the curve at all.
+   */
+  function clientSpendPlan(plan) {
+    let v = _clientSpendPlanCache.get(plan);
+    if (!v) {
+      const twin = {
+        ...plan,
+        mTgt: 0,
+        containers: Array.isArray(plan.containers) ? plan.containers.map((c) => (c && typeof c === 'object' ? {
+          ...c,
+          margin_percent: 0,
+          date_children: Array.isArray(c.date_children)
+            ? c.date_children.map((d) => (d && typeof d === 'object' ? { ...d, margin_percent: 0 } : d))
+            : c.date_children,
+        } : c)) : plan.containers,
+      };
+      v = { plan: twin, total: PacingCore.liExpCostRaw(twin, plan.fe) };
+      _clientSpendPlanCache.set(plan, v);
+    }
+    return v;
+  }
+
+  /**
+   * The client budget inside the window: the client's money the window plans. It is the
+   * client-spend curve (clientSpendPlan) read over the window, the way unitsInWindow reads the
+   * units curve — never the media COST curve. The client pays one rate every month, so a part
+   * with a higher margin (less cost per impression) must not get less of the budget: shared by
+   * cost, a 1.2M part at 60% margin on a 2.8M line read $9,000 where selecting it as a period
+   * reads $12,857.14 (review 2026-09-23). Read this way, a part or date child whose window is
+   * selected reads exactly the budget period scope gives it (buildVirtualPlanFromContainer /
+   * FromDateChild), and a window's budget over its units is the line's own client rate.
+   *
+   * Consecutive windows add up to the curve at flight end, which is the whole budget unless the
+   * units curve falls short of `planImpr` too: a pause takes its days out, and parts covering
+   * every day with targets short of the plan leave the rest with no day to fall on (3 × 900k
+   * of 3M reads $27,000 over the whole flight, as its units read 2.7M). Flight keeps the line's
+   * own budget. A curve with no money on it at all (a malformed line whose parts cover every
+   * day with no spend) takes the calendar share of the flight.
+   */
+  function budgetInWindow(plan, range) {
+    const budget = Number(plan && plan.budget) || 0;
+    if (!budget) return 0;
+    const o = windowOverlap(plan, range);
+    if (!o) return 0;
+    const money = clientSpendPlan(plan);
+    if (money.total > 0) {
+      return liExpCost(money.plan, o.end) - (o.start > plan.fs ? liExpCost(money.plan, datePrev(o.start)) : 0);
+    }
+    return budget * dI(o.start, o.end) / Math.max(1, dI(plan.fs, plan.fe));
+  }
+
+  /**
+   * The client's plan TO DATE (2026-09-23): budgetInWindow read from the window's first day
+   * (the line's flight start with no window) to its last day or asOf, whichever comes first.
+   * 0 before any data (no asOf) and for a window that starts after asOf, the rule expected
+   * delivery keeps (widget-data expectedBounds, cachedProrateRange above). The same days
+   * `costBud` covers, read on the client money curve instead of the cost curve.
+   *
+   * Read line by line, never as a cost plan over one margin. The Finance cell was
+   * `costBud / (1 - mTgt / 100)` over the campaign's budget-weighted margin, which is the
+   * client's money only while every line and part carries the same margin: on the plan-window
+   * worked example (a 30% line with a 25% part beside a 25% line) it read +2% on Flight.
+   */
+  function budgetToDate(plan, range, asOf) {
+    if (!plan || !asOf) return 0;
+    const from = range ? range.from : plan.fs;
+    const end = range ? range.to : plan.fe;
+    if (!from || !end) return 0;
+    const to = end < asOf ? end : asOf;
+    if (from > to) return 0;
+    return budgetInWindow(plan, { from, to });
+  }
+
   const liActualUnits = PacingCore.liActualUnits;
 
   function marginStatus(actual, target, warnThreshold) {
@@ -464,6 +1224,7 @@ function createDashboardMetrics(deps) {
 
 /* ══ workspace/src/lib/dashboard/metrics.js ═══════════════════════════════════════════════════ */
   // workspace/src/lib/dashboard/metrics.js
+
 
 
 
@@ -576,7 +1337,11 @@ function createDashboardMetrics(deps) {
         // the same logic for clicks here.
         const fs = p.fs, fe = p.fe, rf = range.from, rt = range.to;
         const ovStart = rf > fs ? rf : fs;
-        const ovEnd = rt < fe ? rt : fe;
+        // …and never past asOf: expected does not run ahead of the last data day (the rule
+        // pr.eI above already obeys through prorateRange). A window running past asOf — a
+        // Custom range, a Timeline segment, a Journal jump — counted clicks nobody expected yet.
+        const ovEndFlight = rt < fe ? rt : fe;
+        const ovEnd = asOf < ovEndFlight ? asOf : ovEndFlight;
         if (ovStart <= ovEnd) {
           const endVal = liExpClicks(p, ovEnd);
           const beforeVal = ovStart > fs ? liExpClicks(p, datePrev(ovStart)) : 0;
@@ -590,9 +1355,25 @@ function createDashboardMetrics(deps) {
     const pI = PacingCore.pacingIndex(au, pr.eI, p.planImpr);
     const ctr = t.im > 0 ? (t.cl / t.im) * 100 : 0;
     const vcr = t.co > 0 && t.im > 0 ? (t.co / t.im) * 100 : 0;
-    const cvr = t.cl > 0 ? (t.cv / t.cl) * 100 : 0;
+    // Primary conversions (spec 2026-09-13 §3 "Unavailable, as a value"): a line item whose
+    // conversion group cannot be answered for this day map reads null, never 0, and so does
+    // every ratio built on it. The overlay already zeroed its cv/pc/pv rows, so the sums
+    // above are safe numbers; only the published values change. Not operative: no state,
+    // cvOff is false and every value and key position is today's.
+    const cvOff = isCvUnavailable(liDaily, liId);
+    const cvr = cvOff ? null : (t.cl > 0 ? (t.cv / t.cl) * 100 : 0);
     const cpm = t.im > 0 ? (t.sp / t.im) * 1000 : 0;
-    const result = freezeDev({ ...t, ...pr, mA, pI, au, ctr, vcr, cvr, cpm, clientPr: t.dc, eCl });
+    // Net cost mode: t.dc is already NET (the per-LI ratio was applied at
+    // aggregation), so the GROSS twin is net / k. k is read from the RAW plan, not
+    // from p: the virtual plans getEffPlan returns in period/container scope
+    // enumerate their fields explicitly and drop k (same as they drop coef), which
+    // would collapse gross back onto net. The budget stays the effective (scoped) one.
+    const rawPlan = liPlan[liId];
+    const k = (rawPlan && rawPlan.k > 0 && rawPlan.k < 1) ? rawPlan.k : 1;
+    // The trailing spread overwrites values in place: cv/pc/pv keep the key positions `t` gave them.
+    const result = freezeDev({ ...t, ...pr, mA, pI, au, ctr, vcr, cvr, cpm, clientPr: t.dc, eCl,
+      k, clientPrGross: t.dc / k, budGross: p.budget / k,
+      ...(cvOff ? { cv: null, pc: null, pv: null } : null) });
     byMetric.set(liId, result);
     return result;
   }
@@ -632,11 +1413,89 @@ function createDashboardMetrics(deps) {
   }
   function hasViewGoal(plan) { return viewGoalUnits(plan) > 0; }
 
-  function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, splitScopedPlans) {
+  /* ── the campaign CTR target (owner decision 2026-09-23) ─────────────────────
+   * The campaign CTR counts every line: all clicks over all impressions, whatever a line is
+   * bought in. Its target is the CTR the campaign would have if every line hit its own target:
+   * each line's target weighted by the impressions it DELIVERED in the window the CTR is read
+   * over. campM and widget-data's campaignScalars both read the three helpers below, so the
+   * dashboard and the widget engine cannot weigh it two ways. They stay out of
+   * shared/pacing-core.js: no server surface computes a campaign CTR. */
+
+  /** A CTR target is a goal only when it is a finite number above 0. A stored 0, null or NaN is
+   *  «no target» everywhere: it neither pulls the campaign average down nor prints «0.00%». */
+  function hasCtrTarget(p) {
+    return !!p && Number.isFinite(p.ctrTgt) && p.ctrTgt > 0;
+  }
+
+  /**
+   * The impressions a line PLANS, whatever it is bought in — the fallback weight before any
+   * line with a target has delivered in the window. A CPM line's plan is impressions already.
+   * A CPC line's plan is clicks, and its own CTR target turns them into impressions. A CPV
+   * line's plan is views, and its VCR target does the same. A CPV line with no VCR target has
+   * no impressions figure at all: 0, so it stays out of the plan average rather than borrow a
+   * number from another unit (budget, a default VCR) and invent impressions.
+   */
+  function ctrPlanImpr(p) {
+    if (!p) return 0;
+    const units = Number(p.planImpr) || 0;
+    if (!(units > 0)) return 0;
+    const rt = p.rateType || 'CPM';
+    if (rt === 'CPC') return hasCtrTarget(p) ? units / (p.ctrTgt / 100) : 0;
+    if (rt === 'CPV') return Number.isFinite(p.vcrTgt) && p.vcrTgt > 0 ? units / (p.vcrTgt / 100) : 0;
+    return units;
+  }
+
+  /**
+   * add(plan, deliveredImpressions) per line, then value():
+   *   · the lines with a target weighted by their delivered impressions, when any of them has
+   *     impressions in the window;
+   *   · else weighted by their planned impressions (ctrPlanImpr) over the whole scoped plan.
+   *     All or nothing: actual and plan impressions are never mixed, because a line that has
+   *     not started would bring its whole flight's plan against a week of another's delivery;
+   *   · else, when no plan figure is usable either, the plain average of the targets;
+   *   · null when no line carries a target.
+   * A line with no target counts in the CTR and never here.
+   */
+  function ctrTargetAccumulator() {
+    let byImpr = 0, imprWeight = 0, byPlan = 0, planWeight = 0, plain = 0, n = 0;
+    return {
+      add(p, im) {
+        if (!hasCtrTarget(p)) return;
+        const t = p.ctrTgt;
+        const w = Number.isFinite(im) && im > 0 ? im : 0;
+        byImpr += t * w; imprWeight += w;
+        const q = ctrPlanImpr(p);
+        byPlan += t * q; planWeight += q;
+        plain += t; n++;
+      },
+      value() {
+        if (imprWeight > 0) return byImpr / imprWeight;
+        if (planWeight > 0) return byPlan / planWeight;
+        return n > 0 ? plain / n : null;
+      },
+    };
+  }
+
+  /**
+   * `planInRange` (2026-09-23): the viewer NARROWED the window (config.js getEffRangeInfo), so
+   * the plan SUMS follow `range` the way the delivered sums already do — imprPlan / pI,
+   * clicksPlan / planClicks, viewsPlan / cpvViewsPlan, their paused remainders, and the client
+   * budget `bud` with its gross twin. Everything a rate or a target is made of stays as it was:
+   * the per-line `planUnit` still weights vcrT and drives the daily rates, the plan RATES
+   * (bidPlan* / clientPlan*, forecastDspSpend) divide by the whole-flight twins published beside
+   * the sums, and ctrT's plan fallback reads the whole scoped plan. ctrT's main weights are
+   * delivered impressions in `range` (owner decision 2026-09-23), so they follow the window
+   * whether or not the plan does. Off (the default, and every caller whose range is the flight
+   * or the period), nothing here changes.
+   */
+  function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, splitScopedPlans, planInRange = false) {
     if (!liDaily || !liPlan) return null;
 
     const scopedCache = getScopedCache(campMetricsCache, liDaily, liPlan, splitScopedMode, splitScopedPlans);
-    const key = metricKey(asOf, range);
+    // The window the plan follows, or null. It is part of the answer, so it is part of the key:
+    // the same (asOf, range) read with and without it are two different metric objects.
+    const win = planInRange && range && range.from && range.to ? range : null;
+    const key = metricKey(asOf, range) + (win ? '|plan-in-window' : '');
     let byMetric = scopedCache.get(key);
     if (!byMetric) {
       byMetric = new Map();
@@ -692,6 +1551,11 @@ function createDashboardMetrics(deps) {
     let viewsPlan = 0, viewsActual = 0, viewsExpected = 0, viewsSpend = 0, viewsDc = 0;
     let viewsDailyRateActive = 0, viewsDailyRateAvg = 0;
     let viewsEndedCount = 0, viewsLiCount = 0;
+    // Whole-flight twins of the plan sums above. Equal to them unless the window is narrowed
+    // (`win`); then they are what decides which units the campaign HAS (hasImpr / hasViews, the
+    // primary unit) and what every plan RATE divides by — so a window holding none of a unit's
+    // plan neither hides that unit nor moves a rate.
+    let imprPlanFlight = 0, clicksPlanFlight = 0, viewsPlanFlight = 0, cpvViewsPlanFlight = 0;
     // Reforecast horizon: the latest EFFECTIVE flight-end across effLIs. Built from
     // the SAME scoped plan getEffPlan resolves (period/dim-scope aware), so the
     // pace-to-goal horizon shrinks with the scoped goal instead of staying on the
@@ -721,7 +1585,25 @@ function createDashboardMetrics(deps) {
 
     // ── General accumulators (across all LIs) ──────────────────────────────
     let clientPr = 0, costPr = 0, sp = 0, cl = 0, co = 0, cv = 0, imV = 0, bud = 0;
-    let costBudTotal = 0, ctW = 0, ctWt = 0, vcW = 0, vcWt = 0, mW = 0, mWt = 0;
+    // ── Primary conversions (spec 2026-09-13 §3, §7) ───────────────────────
+    // cvUnavailableCount > 0 turns the campaign conversion group (cv, CR, CPA) into null:
+    // one line item in view that cannot show conversions makes the total unanswerable.
+    // cvPrimaryCount / cvDataCount feed the rate rows note "on K of N line items".
+    // Not operative: cvState is null and all three stay 0.
+    const cvState = cvStateOf(liDaily);
+    let cvPrimaryCount = 0, cvDataCount = 0, cvUnavailableCount = 0;
+    // ── Net cost mode: GROSS twins ─────────────────────────────────────────
+    // One twin per client-money accumulator, summed from liM's per-LI gross
+    // (net / k) so a mixed campaign adds each LI at its own ratio. Identity
+    // pacings (k = 1 everywhere) keep every twin equal to its net original.
+    let clientPrGross = 0, budGross = 0, imprDcGross = 0, cpcDcGross = 0, viewsDcGross = 0, cpvViewsDcGross = 0;
+    let costBudTotal = 0, vcW = 0, vcWt = 0, mW = 0, mWt = 0;
+    // The client's plan to date inside `range`, line by line (budPr below, 2026-09-23).
+    let budToDate = 0;
+    // The campaign CTR pair (owner decision 2026-09-23): impressions over EVERY line, and the
+    // target weighted by each line's delivered impressions (ctrTargetAccumulator above).
+    let imAll = 0;
+    const ctrAcc = ctrTargetAccumulator();
     let totalDP = 0, totalFD = 0, pacW = 0, pacWt = 0, cpmBudSum = 0, cpmImprSum = 0;
     // Per-rate-type budget split — each type's bid/plan rate is derived from ITS OWN
     // budget (cost side for Bid Plan, client side for Plan rate), not the campaign total.
@@ -737,6 +1619,15 @@ function createDashboardMetrics(deps) {
       const m = liM(id, liDaily, liPlan, asOf, range, splitScopedMode, splitScopedPlans);
       if (!p || !m) continue;
 
+      // A line item the view keeps nothing of is not in view (spec §4): it neither makes the total
+      // unanswerable nor counts in the rate rows note.
+      if (isInView(liDaily, id)) {
+        if (isCvUnavailable(liDaily, id)) cvUnavailableCount++;
+        else if (cvState && cvState[id] && cvState[id].cv === CV.PRIMARY) cvPrimaryCount++;
+        // Read from liPlan[id], not p: getEffPlan's virtual plans drop unknown fields.
+        if (liPlan[id] && liPlan[id].conversionData === true) cvDataCount++;
+      }
+
       if (p.fe && p.fe > scopeEnd) scopeEnd = p.fe;
 
       const rt = p.rateType || 'CPM';
@@ -747,16 +1638,26 @@ function createDashboardMetrics(deps) {
       // impressions (CPM), clicks (CPC), or views (CPV).
       const planUnit = Number(p.planImpr) || 0;
       const w = planUnit || p.budget || 1;
+      // The plan SUMS follow a narrowed window; `planUnit` keeps driving weights and rates.
+      const planWin = win ? unitsInWindow(p, win) : planUnit;
+      const budWin = win ? budgetInWindow(p, win) : p.budget;
 
       // General (always)
       clientPr += m.clientPr;
       costPr += m.costPr;
       sp += m.sp;
       cl += m.cl;
+      // `m.im` is range-aware (liM): the flight to date with no range, the window's with one.
+      imAll += m.im || 0;
+      ctrAcc.add(p, m.im || 0);
       cv += m.cv || 0;
-      bud += p.budget;
+      bud += budWin;
+      clientPrGross += m.clientPrGross;
+      // The gross twin stands on the same budget as `bud`: m.budGross is the flight's (p.budget / k).
+      budGross += win ? budWin / m.k : m.budGross;
       const liCostBud = range ? m.costPr : p.budget * (1 - p.mTgt / 100);
       costBudTotal += liCostBud;
+      if (range) budToDate += budgetToDate(p, range, asOf);
       // Per-LI pause: a paused LI's REMAINING plan should not be demanded by the
       // reforecast pace-to-goal (it won't deliver until resumed). Its delivered
       // stays in the chart's actual bars — we only shrink the goal total.
@@ -773,8 +1674,15 @@ function createDashboardMetrics(deps) {
       if (isVcrEligible(p, liDaily[id])) { co += m.co; imV += m.im; }
       mW += p.mTgt * p.budget;
       mWt += p.budget;
-      const bw = p.budget || 1;
-      pacW += m.pI * bw;
+      // The Pacing reading (`pac`, «index vs plan»): each line's (actual − expected) over its
+      // plan, weighted by its budget. On a narrowed window (`win`) the plan is the window's,
+      // the one the Delivery reading, the unit bars and the verdict divide by, and the weight is
+      // the line's budget in that window, so a line with no plan there has no pace to add
+      // (review 2026-09-23: 7d at 80% of plan read −1.82 pp here against −20.0 pp beside it).
+      // Off, it is the flight's per-line index and weight, byte for byte.
+      const linePace = win ? PacingCore.pacingIndex(m.au, m.eI, planWin) : m.pI;
+      const bw = win ? (planWin > 0 ? (budWin || 1) : 0) : (p.budget || 1);
+      pacW += linePace * bw;
       pacWt += bw;
       if (!_hasAudio && (p.ch || '').toLowerCase() === 'audio') _hasAudio = true;
 
@@ -808,9 +1716,11 @@ function createDashboardMetrics(deps) {
         imprExpected += m.eI;
         imprSpend += m.sp;
         imprDc += m.clientPr;
+        imprDcGross += m.clientPrGross;
         if (planUnit > 0) {
-          imprPlan += planUnit;
-          if (PacingCore.isLiPaused(p, asOf)) imprPlanPausedRem += Math.max(0, planUnit - (m.im || 0));
+          imprPlan += planWin;
+          imprPlanFlight += planUnit;
+          if (PacingCore.isLiPaused(p, asOf)) imprPlanPausedRem += Math.max(0, planWin - (m.im || 0));
           imprDailyRateAvg += planUnit / liFDays;
           if (asOf && asOf >= p.fs) {
             if (asOf > p.fe) imprEndedCount++;
@@ -828,7 +1738,6 @@ function createDashboardMetrics(deps) {
           cpmBudSum += p.budget * (1 - p.mTgt / 100);
           cpmImprSum += planUnit;
         }
-        if (p.ctrTgt != null && Number.isFinite(p.ctrTgt)) { ctW += p.ctrTgt * w; ctWt += w; }
       }
 
       // VCR target weighting — any non-CPC, non-audio LI carrying a VCR target
@@ -842,12 +1751,15 @@ function createDashboardMetrics(deps) {
 
       // Clicks side — CPC LIs only (planImpr = plan_clicks convention).
       if (isCpc) {
-        hasCpc = true; cpcDc += m.clientPr; cpcCl += m.cl;
+        hasCpc = true; cpcDc += m.clientPr; cpcDcGross += m.clientPrGross; cpcCl += m.cl;
         if (planUnit > 0) { cpcCostBud += liCostBud; cpcClientBud += p.budget; cpcPlanClicks += planUnit; }
       }
       const liClicksPlan = isCpc ? planUnit : 0;
+      // cpcPlanClicks above is NOT windowed: it feeds only the two CPC plan rates.
+      const liClicksPlanWin = isCpc ? planWin : 0;
       if (isCpc) {
-        clicksPlan += liClicksPlan;
+        clicksPlan += liClicksPlanWin;
+        clicksPlanFlight += liClicksPlan;
         clicksActual += m.cl;
         // latest-day (= asOf) actual — same flight-window guard as the impr
         // branch above.
@@ -855,7 +1767,7 @@ function createDashboardMetrics(deps) {
           const dayRow = liDaily[id]?.[asOf];
           if (dayRow) latestDayClicks += dayRow.cl || 0;
         }
-        if (PacingCore.isLiPaused(p, asOf)) clicksPlanPausedRem += Math.max(0, liClicksPlan - (m.cl || 0));
+        if (PacingCore.isLiPaused(p, asOf)) clicksPlanPausedRem += Math.max(0, liClicksPlanWin - (m.cl || 0));
         clicksExpected += m.eCl || 0;
         // Daily rate for clicks side: liExpUnits already prorates planImpr
         // (which IS plan-clicks for CPC).
@@ -888,13 +1800,17 @@ function createDashboardMetrics(deps) {
         viewsExpected += m.eI;
         viewsSpend += m.sp;
         viewsDc += m.clientPr;
+        viewsDcGross += m.clientPrGross;
         // CPV-only accumulators (cost-per-view rate basis — NOT the non-CPV branch).
         cpvViewsActual += m.co;
         cpvViewsDc += m.clientPr;
+        cpvViewsDcGross += m.clientPrGross;
         if (planUnit > 0) {
-          viewsPlan += planUnit;
-          if (PacingCore.isLiPaused(p, asOf)) viewsPlanPausedRem += Math.max(0, planUnit - (m.co || 0));
-          cpvViewsPlan += planUnit;
+          viewsPlan += planWin;
+          viewsPlanFlight += planUnit;
+          if (PacingCore.isLiPaused(p, asOf)) viewsPlanPausedRem += Math.max(0, planWin - (m.co || 0));
+          cpvViewsPlan += planWin;
+          cpvViewsPlanFlight += planUnit;
           viewsDailyRateAvg += planUnit / liFDays;
           if (asOf && asOf >= p.fs) {
             if (asOf > p.fe) viewsEndedCount++;
@@ -950,33 +1866,24 @@ function createDashboardMetrics(deps) {
     //          impressions plan. Drives the impressions side of UI cards.
     // hasClicks: at least one CPC LI exists. CPC LIs always trigger this even
     //          with planImpr=0; the UI shows a "plan not set" placeholder then.
-    const hasImpr = imprPlan > 0;
+    // Read off the whole-flight twins: a narrowed window holding none of the impressions plan
+    // (a line that starts later) must not hide the unit. Equal to imprPlan / viewsPlan otherwise.
+    const hasImpr = imprPlanFlight > 0;
     const hasClicks = hasCpc;
-    const hasViews = viewsPlan > 0 || hasCpv;
+    const hasViews = viewsPlanFlight > 0 || hasCpv;
 
     // ── Derived ratios ─────────────────────────────────────────────────────
     const mA = PacingCore.margin(clientPr, sp);
     const mT = mWt > 0 ? mW / mWt : 0;
-    // CTR is impression-side: ratio of clicks to impressions. Use non-CPC
-    // sums on both sides so CPC actuals (impressions side-metric + their
-    // clicks) don't double-count.
-    const imprActualClicks = (() => {
-      let v = 0;
-      for (const id of effLIs) {
-        const pp = liPlan[id];
-        if (!pp) continue;
-        const rtp = pp.rateType || 'CPM';
-        if (rtp === 'CPC' || rtp === 'CPV') continue;
-        const mm = liM(id, liDaily, liPlan, asOf, range, splitScopedMode, splitScopedPlans);
-        if (mm) v += mm.cl;
-      }
-      return v;
-    })();
-    const ctr = imprActual > 0 ? (imprActualClicks / imprActual) * 100 : 0;
-    const ctrT = ctWt > 0 ? ctW / ctWt : null;
+    // CTR counts every line (owner decision 2026-09-23): all clicks over all impressions, the
+    // number the CTR chart and the Daily table already print. A click-bought line's impressions
+    // are real impressions, so nothing double-counts. Division by zero gives 0 (engine rule).
+    const ctr = imAll > 0 ? (cl / imAll) * 100 : 0;
+    const ctrT = ctrAcc.value();
     const vcr2 = imV > 0 ? (co / imV) * 100 : 0;
     const vcrT = vcWt > 0 ? vcW / vcWt : null;
-    const cvr2 = cl > 0 ? (cv / cl) * 100 : 0;
+    const cvOff = cvUnavailableCount > 0;
+    const cvr2 = cvOff ? null : (cl > 0 ? (cv / cl) * 100 : 0);
     const cpm = imprActual > 0 ? (imprSpend / imprActual) * 1000 : 0;
     const cpv = cpvViewsV > 0 ? cpvSpendV / cpvViewsV : 0;
     // Dynamic rates: client-effective rate from dynamic_cost (dc), not media spend.
@@ -987,10 +1894,17 @@ function createDashboardMetrics(deps) {
     // Client cost-per-conversion (spec §4.2): full clientPr over full cv —
     // rate-type-agnostic by design (conversions span all rate types). cv basis
     // matches cvr (= cv/cl). Rebases with the coefficient because clientPr does.
-    const dynCpa = cv > 0 ? clientPr / cv : 0;
+    const dynCpa = cvOff ? null : (cv > 0 ? clientPr / cv : 0);
+    // GROSS twins of the four dynamic rates — same denominators, gross numerators.
+    const dynCpmGross = imprActual > 0 ? (imprDcGross / imprActual) * 1000 : 0;
+    const dynCpcGross = cpcCl > 0 ? cpcDcGross / cpcCl : 0;
+    const dynCpvGross = cpvViewsActual > 0 ? cpvViewsDcGross / cpvViewsActual : 0;
+    const dynCpaGross = cvOff ? null : (cv > 0 ? clientPrGross / cv : 0);
     const iPct = imprPlan > 0 ? (imprActual / imprPlan) * 100 : 0;
     const avgTP = totalFD > 0 ? totalDP / totalFD : 0;
-    const pac = pacWt > 0 ? pacW / pacWt : 0;
+    // A narrowed window holding no line's plan has no pace at all: null, the em dash the
+    // Delivery reading prints there, not a 0 that reads «on plan». Flight keeps its 0.
+    const pac = pacWt > 0 ? pacW / pacWt : (win ? null : 0);
 
     const daysLeft = effLIs.length > 0
       ? Math.max(0, Math.round(effLIs.reduce((s, id) => {
@@ -1003,13 +1917,15 @@ function createDashboardMetrics(deps) {
     // Bid Plan (cost side) + Plan rate (client side) per type, each from ITS OWN
     // budget. bidPlanCpm previously divided the WHOLE cost budget by impr plan —
     // wrong for mixed campaigns; now per-CPM-bucket (identical for pure CPM).
-    const bidPlanCpm = imprPlan > 0 ? imprCostBud / imprPlan * 1000 : 0;
+    // The rates and the DSP forecast divide by the whole-flight plan (the *Flight twins), so a
+    // narrowed window leaves every one of them byte-identical to what it was.
+    const bidPlanCpm = imprPlanFlight > 0 ? imprCostBud / imprPlanFlight * 1000 : 0;
     const bidPlanCpc = cpcPlanClicks > 0 ? cpcCostBud / cpcPlanClicks : 0;
-    const bidPlanCpv = cpvViewsPlan > 0 ? cpvCostBud / cpvViewsPlan : 0;
-    const forecastDspSpend = imprActual > 0 ? (imprSpend / imprActual) * imprPlan : 0;
-    const clientPlanCpm = imprPlan > 0 ? imprClientBud / imprPlan * 1000 : 0;
+    const bidPlanCpv = cpvViewsPlanFlight > 0 ? cpvCostBud / cpvViewsPlanFlight : 0;
+    const forecastDspSpend = imprActual > 0 ? (imprSpend / imprActual) * imprPlanFlight : 0;
+    const clientPlanCpm = imprPlanFlight > 0 ? imprClientBud / imprPlanFlight * 1000 : 0;
     const clientPlanCpc = cpcPlanClicks > 0 ? cpcClientBud / cpcPlanClicks : 0;
-    const clientPlanCpv = cpvViewsPlan > 0 ? cpvClientBud / cpvViewsPlan : 0;
+    const clientPlanCpv = cpvViewsPlanFlight > 0 ? cpvClientBud / cpvViewsPlanFlight : 0;
     // Subtract paused-LI remaining only (no Math.max clamp) so a non-paused
     // campaign stays byte-identical — including the legacy negative value when
     // over-delivered. *PausedRem is 0 when nothing is paused.
@@ -1029,13 +1945,18 @@ function createDashboardMetrics(deps) {
 
     /* Bid Fact 2d: actual buying rate (media spend) over the last 2 days with data,
        per rate type. CPM = sp/impr*1000; CPC = sp/clicks; CPV = sp/views. Each over
-       its OWN rate-type LIs, with that type's own last-2-days-with-data window. */
+       its OWN rate-type LIs, with that type's own last-2-days-with-data window.
+       Primary conversions (spec 2026-09-13 §3 "Days"): a day row the overlay made only
+       for conversions is not a day with data. Its delivery is 0, so it would add nothing
+       to s or u below, but it would still take a place in last2. Not operative: no list. */
+    const cvOnlyDays = cvOnlyDaysOf(liDaily);
     function bidFact2d(typePred, unitField, perMille) {
       const allDates = new Set();
       for (const id of effLIs) {
         const pp = liPlan[id];
         if (!pp || !typePred(pp.rateType || 'CPM')) continue;
-        for (const d in (liDaily[id] || {})) allDates.add(d);
+        const skip = cvOnlyDays && cvOnlyDays[id];
+        for (const d in (liDaily[id] || {})) { if (!skip || !skip.has(d)) allDates.add(d); }
       }
       const last2 = [...allDates].sort().slice(-2);
       let s = 0, u = 0;
@@ -1058,11 +1979,16 @@ function createDashboardMetrics(deps) {
       + neededPerDayClicks * bidFact2dCpc
       + neededPerDayViews * bidFact2dCpv;
 
-    const budPr = mT < 100 ? costBudTotal / (1 - mT / 100) : bud;
+    // The client's plan over the days `costPr` covers: each line's client money from the range's
+    // first day to asOf (widget-data's `budgetToDate`, 2026-09-23), and the budget with no range.
+    // It was `costBudTotal / (1 - mT / 100)`, the cost plan over one budget-weighted margin, which
+    // is that number only while every line and part carries the same margin.
+    const budPr = range ? budToDate : bud;
 
     const imprPlanDailyEnded = imprLiCount > 0 && imprEndedCount === imprLiCount;
     const imprPlanDailyRate = Math.round(imprPlanDailyEnded ? imprDailyRateAvg : imprDailyRateActive);
     const allImprEnded = allImprLiCount > 0 && allImprEndedCount === allImprLiCount;
+    // Still a documented member of campM, but the reforecast no longer reads it.
     const allPlanImprDailyRate = Math.round(allImprEnded ? allImprDailyRateAvg : allImprDailyRateActive);
     const clicksPlanDailyEnded = clicksLiCount > 0 && clicksEndedCount === clicksLiCount;
     const clicksPlanDailyRate = Math.round(clicksPlanDailyEnded ? clicksDailyRateAvg : clicksDailyRateActive);
@@ -1071,8 +1997,13 @@ function createDashboardMetrics(deps) {
 
     const result = freezeDev({
       // General (across all LIs)
-      clientPr, costPr, costBudTotal, sp, cl, co, cv, bud, budPr,
+      clientPr, costPr, costBudTotal, sp, cl, co, cv: cvOff ? null : cv, bud, budPr,
+      // `imAll`: impressions over EVERY line, the CTR's denominator. `im` / `imprActual` below
+      // stay the impression-paced lines' (CPM, delivery %, pacing).
+      imAll,
       mA, mT, pac, ctr, ctrT, vcr: vcr2, vcrT, cvr: cvr2, cpm, cpv, dynCpm, dynCpc, dynCpv, dynCpa, tgtCpm,
+      // Net cost mode: GROSS twins, shown beside their net originals.
+      clientPrGross, budGross, dynCpmGross, dynCpcGross, dynCpvGross, dynCpaGross,
       avgTP, totalDP, totalFD, daysLeft,
       scopeEnd: scopeEnd || null,
       bidPlanCpm, bidPlanCpc, bidPlanCpv,
@@ -1086,8 +2017,11 @@ function createDashboardMetrics(deps) {
       // Drives the dailyImpr reforecast so it paces to the SAME total as Plan.
       allPlanImpr, allPlanImprDailyRate,
       // Paused-remaining (plan − delivered summed over currently-paused LIs) —
-      // consumed by report-calc to shrink the pace-to-goal total.
-      allPlanImprPausedRem, viewsPlanPausedRem, costBudPausedRem, imprPlanPausedRem,
+      // consumed by report-calc to shrink the pace-to-goal total, and by the «Needed to be on
+      // pace» notes (brick-data.js) to match the neededPerDay* headlines they explain.
+      // `clicksPlanPausedRem` was computed and left off this object until 2026-09-23, so both
+      // of its readers saw 0 for a paused click-paced line.
+      allPlanImprPausedRem, viewsPlanPausedRem, costBudPausedRem, imprPlanPausedRem, clicksPlanPausedRem,
       clicksPlan, clicksActual, clicksExpected,
       clicksPlanDailyRate, clicksPlanDailyEnded, neededPerDayClicks,
 
@@ -1123,11 +2057,22 @@ function createDashboardMetrics(deps) {
       hasVideo: co > 0,
       hasAudio: _hasAudio,
 
+      // Whole-flight plan sums (2026-09-23): equal to imprPlan / clicksPlan / viewsPlan unless
+      // the window is narrowed (`planWindowed`), when those three follow it and these do not.
+      // Readers that ask whether a unit HAS a plan read these; readers of a pace over the
+      // window read the three above.
+      imprPlanFlight, clicksPlanFlight, viewsPlanFlight,
+      planWindowed: !!win,
+
       // Variant-D Plan rate formula (impressions side)
       planForCurrentSplit,
       daysInSplit: daysInSplitDen > 0 && daysInSplitHomogeneous
         ? Math.round(daysInSplitNum / daysInSplitDen)
         : 0,
+
+      // Primary conversions (spec 2026-09-13 §7): line items in view that count chosen
+      // actions, that have conversion data, and that cannot show conversions here.
+      cvPrimaryCount, cvDataCount, cvUnavailableCount,
     });
 
     byMetric.set(effKey, result);
@@ -1137,6 +2082,7 @@ function createDashboardMetrics(deps) {
 
 /* ══ workspace/src/lib/dashboard/widget-formula.js ════════════════════════════════════════════ */
   // workspace/src/lib/dashboard/widget-formula.js
+
   //
   // Formula engine for custom widgets (spec 2026-07-12 §3). Plain ESM, no React, no DOM,
   // no eval — a hand-rolled recursive-descent parser over a whitelisted grammar:
@@ -1162,17 +2108,90 @@ function createDashboardMetrics(deps) {
   //       rolling(x, n) trailing mean over the last min(i+1, n) in-window calendar days.
   //       shift(x, n)   value n days back, 0 before the window.
 
-  const FIELDS_DAILY = new Set(['im', 'cl', 'sp', 'co', 'coViews', 'cv', 'pc', 'pv', 'dc']);
-  const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw']);
+  // `coV` / `imV` are the VCR-ELIGIBLE pair — completes and impressions over the lines whose
+  // completes are video completes (metrics.js isVcrEligible). They joined with the Breakdown
+  // preset (section-widget parity 2026-09-04): `vcr` has always been `coV / imV`, so a table
+  // printing raw `co` beside it contradicts the rate in the next column the moment an audio
+  // line delivers a listen-through. The sums existed already (widget-data.js ZERO_FLOW); what
+  // was missing was a NAME, so a column and a formula could ask for them.
+  // The classic order first — the formula library lists this set in order — then every delivery
+  // key of the registry not already named (the six added 2026-09-08). `coViews`, `imV`, `coV`
+  // are engine-derived counts the registry does not carry.
+  const LEGACY_DAILY = ['im', 'cl', 'sp', 'co', 'coViews', 'cv', 'pc', 'pv', 'dc', 'imV', 'coV'];
+  const FIELDS_DAILY = new Set(LEGACY_DAILY.concat(
+    MetricRegistry.DELIVERY_KEYS.filter((k) => !LEGACY_DAILY.includes(k)),
+  ));
+  // `imprExpected` is `expIm` gated to the IMPRESSION-PACED lines — campM's own `eI`, which
+  // counts no CPC line's plan clicks and no CPV line's plan views (widget-data.js
+  // expectedDeltas). It joined with the Daily Performance preset (section-widget parity
+  // 2026-09-04): the legacy totals row stacks it under delivered impressions, and `expIm` reads
+  // a different, larger number on every mixed-rate pacing.
+  const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected']);
   const FIELDS_RATES = new Set(['ctr', 'vcr', 'acr', 'cpm', 'cpc', 'cpv']);
   const FIELDS_PLAN = new Set([
     // `costBudTotal` is the whole flight's cost budget where `costBud` is prorated inside the
     // window (widget-data.js liPlanScalars). It joined the universe with the Targets preset
     // (sections-to-widgets M3): the legacy CPC target is `costBudTotal / planClicks`, and
     // the prorated field made that expression read a fraction of the target on any window.
-    'budget', 'costBud', 'costBudTotal', 'planImpr', 'planClicks', 'planViews',
-    'daysLeft', 'daysPassed', 'mTgt', 'ctrT', 'vcrT', 'acrT',
+    // `tgtCpm` joined with the Daily Performance preset (section-widget parity 2026-09-04):
+    // cost budget over plan impressions on the CPM lines, which is the flight constant the
+    // legacy totals row stacks under the CPM column and no combination of the fields beside
+    // it can spell (`costBudTotal / planImpr` counts every line's budget, CPC and CPV too).
+    //
+    // The *Total twins (2026-09-23) are the whole plan of the four sums beside them. `budget`
+    // and `planImpr` / `planClicks` / `planViews` follow a window the viewer narrowed; the
+    // twins never do, which is what a flight target is built from — the Targets CPC target
+    // became `costBudTotal / planClicksTotal` with them. Each twin sits right after its sum,
+    // as `costBudTotal` sits after `costBud`: both formula pickers (FormulaEditorDialog,
+    // FormulaField) list their Plan group in this set's order.
+    //
+    // `budgetToDate` (2026-09-23) is the client's plan over the days `costBud` covers: each
+    // line's client money from the window's first day to its last day or asOf. The Finance
+    // «Budget Plan to Date» cell reads it; `costBud / (1 - mTgt / 100)` is that number only
+    // while every line carries the same margin.
+    'budget', 'budgetTotal', 'budgetToDate', 'costBud', 'costBudTotal', 'planImpr', 'planImprTotal',
+    'planClicks', 'planClicksTotal', 'planViews', 'planViewsTotal',
+    'daysLeft', 'daysPassed', 'mTgt', 'ctrT', 'vcrT', 'acrT', 'tgtCpm',
   ]);
+
+  // The three counts the CM360 file carries, per placement per day (spec 2026-09-16 §2.1).
+  // A NAMESPACE OF THEIR OWN, never merged into TS_FIELDS or a dim set, and that is load
+  // bearing rather than tidy: a field set answers «what does the DELIVERY engine carry on this
+  // grain», and widening one with `cmIm` hands the engine a field it has no column for, which
+  // is the «Unknown field» every cm value was invented to avoid. The only thing that ever
+  // produces a number for one is `cmEvalAt` (cm-formula-context.js), off a joined pair.
+  const FIELDS_CM = new Set(['cmIm', 'cmCl', 'cmCo']);
+
+  // …and the delivery half of the SAME comparison (§2.3). `cmIm / im` describes one matched
+  // population because both halves come off one pair; it is not the Δ% column and is not
+  // scaled. Kept beside FIELDS_CM because the pair is the rule.
+  //
+  // Exported (not just module-private) so `cm-formula-context.js`'s `DLV_IDS` — the SAME three
+  // identifiers, mapped to their metric names — can derive its membership from this Set
+  // instead of relisting it: that file already imports this one, and the reverse import would
+  // close a cycle.
+  const FIELDS_CM_DELIVERY = new Set(['im', 'cl', 'co']);
+
+  /** Can the matched pairs (and the plan published beside them) answer this name? The whole
+   *  vocabulary of an expression read off the comparison: the three CM360 counts, their delivery
+   *  halves, and the plan fields. `validate` judges by it, and so does the builder when it
+   *  decides whether a highlight rule on a cm-fed owner can be read at all. */
+  const pairsServe = (name) => FIELDS_CM.has(name) || FIELDS_CM_DELIVERY.has(name) || FIELDS_PLAN.has(name);
+
+  // The four refusals a CM360 formula can meet. They live HERE, in the module that decides,
+  // and every surface imports them: report-render.js prints two of them on a model, the draft
+  // validator blocks Save with them, FormulaField and the Spotlight print them under an input.
+  // A sentence retyped at one of those doors is a tile and a Save gate telling the same author
+  // two different things about one expression.
+  const NO_CM_JOIN = 'CM360 joins to delivery by date or by mapping dim, and a line item carries nothing to join on';
+  const PIE_NO_CM = 'CM360 numbers are grouped by the mapping dimensions, so this value cannot be cut by this one';
+  const CM_FORMULA_ONLY = 'A CM360 formula can name im, cl, co and the plan fields this grain carries beside the CM360 fields; nothing else';
+  const CM_BQ_ONLY = 'Auxiliary expressions use the BQ context, which cannot describe this value\'s mapped population';
+  // …and the fifth, which is about a SHARE rather than about a formula. A row share divides one
+  // row's reading by the sum of every row's, and a running total is already the sum of the days
+  // before it: the percentages would add to far more than 100 and mean nothing on the way. Here
+  // for the reason the four above are here, said once for every surface that has to say it.
+  const SHARE_NO_WINDOW = 'A row share cannot divide a running total, so pick a column that reads one day';
 
   // name → { arity: [min, max], tsOnly }
   const FUNCTIONS = {
@@ -1185,6 +2204,13 @@ function createDashboardMetrics(deps) {
     round: { arity: [1, 2], tsOnly: false },
     if: { arity: [3, 3], tsOnly: false },
   };
+
+  /** What a window function gets off a date axis. It has a name because it now has TWO
+   *  speakers: `validate` below, while the author is typing, and report-render.js's CM360
+   *  window pass, which answers a STORED expression that reached a dimension axis
+   *  (CM360-in-formulas spec §2.9). A retyped copy there would drift from the one the editor
+   *  shows, and the reader would be told two different things about one expression. */
+  const dateAxisRefusal = (fn) => `${fn}() needs a date axis, so use it in chart series or by-date tables`;
 
   const MAX_FORMULA_LENGTH = 500;
 
@@ -1360,6 +2386,11 @@ function createDashboardMetrics(deps) {
   }
 
   function didYouMean(name, fieldSet) {
+    // A `cm`-prefixed typo is someone reaching for the CM360 side (§2.10). Every candidate
+    // here is a DELIVERY field, so the nearest one is `im` or `cl` — a suggestion that sends
+    // the author back to exactly the number they were trying not to read. Silence is the
+    // honest answer; the palette's CM360 group is where the right spelling lives.
+    if (/^cm[A-Z]/.test(name)) return null;
     let best = null;
     let bestD = 3;
     for (const cand of [...fieldSet, ...Object.keys(FUNCTIONS)]) {
@@ -1377,19 +2408,65 @@ function createDashboardMetrics(deps) {
   }
 
   /**
-   * validate(src, contextKind, fieldSet) — parse + semantic checks for a context.
+   * validate(src, contextKind, fieldSet, opts) — parse + semantic checks for a SLOT.
    *   contextKind 'ts'  — time-series (window functions allowed)
    *   contextKind 'agg' — aggregate (window functions rejected)
    *   fieldSet — Set of identifiers legal for THIS widget context (e.g. dim rows
    *              exclude plan scalars).
+   *   opts.cm  — the CM360 join this slot HAS: 'date' | 'label' | 'window' | 'total' | null
+   *              (spec 2026-09-16 §2.5). `formula-scope.js` derives it from the grain; the
+   *              highlight family overrides it, because its join is not its grain's.
+   *   opts.cmRefusal — the sentence to answer when a cm-bearing expression meets `cm: null`.
+   *              The SLOT owns that sentence, not this module: a pie says PIE_NO_CM, a line
+   *              item says NO_CM_JOIN, and validate only decides when it is said.
+   *   opts.cmOnly — this slot's OWNER is cm-fed, so a plain delivery expression beside it
+   *              would describe a different population (§2.5). Refused per expression rather
+   *              than by disabling the whole slot.
+   *
+   * → `{ ok: true }` on success, or `{ ok: false, error, hint? }` on a refusal.
+   *
+   * A CM-BEARING expression is judged against its OWN universe and never against `fieldSet`:
+   * `cmIm` is in no field set by construction, so the ordinary unknown-field walk would answer
+   * «Unknown field "cmIm"» for the one identifier this whole feature is about.
    */
-  function validate(src, contextKind, fieldSet) {
+  function validate(src, contextKind, fieldSet, opts = {}) {
     const p = parse(src);
     if (!p.ok) return p;
+    const cm = opts.cm == null ? null : opts.cm;
+    const cmRefusal = typeof opts.cmRefusal === 'string' && opts.cmRefusal ? opts.cmRefusal : NO_CM_JOIN;
+    const names = identifiersOfAst(p.ast);
+    const cmNamed = names.some((name) => FIELDS_CM.has(name));
+    // Beside a cm-fed owner whose slot JOINS, a delivery expression is read off the same matched
+    // pairs the owner's value is (2026-09-18): `cl` there is the pair's delivery half, so it
+    // describes the owner's own mapped population and «red when cl < 100» is an honest
+    // comparison. It is therefore judged exactly as a cm-bearing expression is. A constant names
+    // nothing and stays legal in every slot.
+    const onPairs = !cmNamed && names.length > 0 && !!opts.cmOnly && !!cm;
+    const bearing = cmNamed || onPairs;
+    if (bearing) {
+      if (!cm) return { ok: false, error: cmRefusal };
+      for (const name of names) {
+        // §2.3: the comparison carries no spend, no conversions and no expected curve, so a
+        // rate or an expected field beside a CM360 count would be a number from another
+        // population. The plan fields ARE legal — the engine publishes them (§2.4) — and
+        // whether THIS grain carries the one named is the runtime gate's question, not this
+        // one's: a formula is authored before the row it will be read on exists.
+        // A delivery expression read off the pairs (`onPairs`) is still stored as a BQ
+        // expression, and the Save gate judges it against this grain's own field set. So it may
+        // name a plan field only where that set carries it, or the field would accept what Save
+        // refuses; a cm-bearing formula keeps the whole plan vocabulary, as before.
+        if (pairsServe(name) && (cmNamed || !FIELDS_PLAN.has(name) || fieldSet.has(name))) continue;
+        return { ok: false, error: CM_FORMULA_ONLY };
+      }
+    } else if (names.length && opts.cmOnly) {
+      // A cm-fed owner whose slot has NO join (a line-item grain): the pairs cannot answer, and
+      // the BQ context describes another population, so a delivery expression stays refused.
+      return { ok: false, error: CM_BQ_ONLY };
+    }
     let bad = null;
     walk(p.ast, (n) => {
       if (bad) return;
-      if (n.t === 'id' && !fieldSet.has(n.name)) {
+      if (n.t === 'id' && !bearing && !fieldSet.has(n.name)) {
         const hint = didYouMean(n.name, fieldSet);
         bad = {
           ok: false,
@@ -1397,13 +2474,27 @@ function createDashboardMetrics(deps) {
           ...(hint ? { hint: `did you mean ${hint}?` } : {}),
         };
       } else if (n.t === 'call' && contextKind !== 'ts' && FUNCTIONS[n.fn].tsOnly) {
-        bad = {
-          ok: false,
-          error: `${n.fn}() needs a date axis, so use it in chart series or by-date tables`,
-        };
+        // The same sentence on both sides of the rail: a running total over CM360 needs a date
+        // axis for exactly the reason a running total over delivery does.
+        bad = { ok: false, error: dateAxisRefusal(n.fn) };
       }
     });
     return bad || { ok: true };
+  }
+
+  /** The field names a PARSED formula reads, first-seen order. Exported because
+   *  `cm-formula-context.js` mints its marker off an AST it already holds (§2.2) and must not
+   *  re-parse the same text to find out which identifiers are in it. */
+  function identifiersOfAst(ast) {
+    const out = [];
+    walk(ast, (n) => { if (n.t === 'id' && !out.includes(n.name)) out.push(n.name); });
+    return out;
+  }
+
+  /** The field names a formula reads, first-seen order; [] when it does not parse. */
+  function identifiersOf(src) {
+    const p = parse(src);
+    return p.ok ? identifiersOfAst(p.ast) : [];
   }
 
   // ── Evaluation ───────────────────────────────────────────────────────────────
@@ -1596,6 +2687,204 @@ function createDashboardMetrics(deps) {
     const values = ev(ast);
     for (let i = 0; i < n; i++) values[i] = guard(values[i], state);
     return { values, warned: state.warned };
+  }
+
+  /**
+   * evaluateMaskedSeries(ast, ctx) → { values, present, warned } — the time-series evaluator
+   * that CARRIES absence instead of flattening it (CM360-in-formulas spec §2.9).
+   *
+   *   ctx.length     — days on the published axis (cmDates / cmRowOrder, report-render.js);
+   *   ctx.get(name)  → number (broadcast) | number[] (aligned, all present)
+   *                    | { values, present } (aligned, with holes) | null (absent column).
+   *
+   * In `values` a hole is 0, exactly as the cm column beside it prints 0 for a day the CM360
+   * file showed nothing on; presence lives only in the mask, and the CALLER writes
+   * `present[i] ? values[i] : null`. `null` from `get` is NOT a hole: it is the delivery
+   * path's absent column, zeros and present, because a name this context does not carry was
+   * never a claim about a day.
+   *
+   * Why this exists next to `evaluateSeries` rather than inside it: the delivery path's canon
+   * is absence-is-zero and every caller it has depends on that. A missing CM360 day is a fact
+   * about the JOIN, which the system tells as a dash everywhere else (the cell, the Totals
+   * row, the Δ%) — so a running total that skips it stays true and the line starts where the
+   * data starts, and a seven-day mean never divides three joined days by seven. The two
+   * evaluators answer the same numbers on hole-free input, `shift`'s first n positions apart,
+   * and tests/widget-formula-test.mjs pins that across every operator and function.
+   *
+   * Division by zero is still 0 (the project canon): inside a JOINED day the numbers are
+   * numbers. The highlight canon is the highlight engine's own and is applied by ANDing this
+   * mask with `evaluateHighlightSeries`' output (§2.8), never by changing a rule here.
+   */
+  function evaluateMaskedSeries(ast, ctx) {
+    const n = ctx.length;
+    const state = { warned: false };
+    const zeros = () => new Array(n).fill(0);
+    const all = (p) => new Array(n).fill(p);
+    const both = (values, present) => ({ values, present });
+
+    const resolveField = (name) => {
+      const col = ctx.get(name);
+      if (col == null) return both(zeros(), all(true));
+      if (typeof col === 'number') return both(new Array(n).fill(num(col)), all(true));
+      if (Array.isArray(col)) {
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) out[i] = num(col[i]);
+        return both(out, all(true));
+      }
+      // The masked shape. The 0 is forced rather than trusted: a caller that leaves the last
+      // read number sitting in a hole must not be able to leak it through an operator that
+      // ignores the mask on one side (`if`'s untaken branch, `min`).
+      const values = new Array(n);
+      const present = new Array(n);
+      for (let i = 0; i < n; i++) {
+        present[i] = !!(col.present && col.present[i]);
+        values[i] = present[i] ? num(col.values && col.values[i]) : 0;
+      }
+      return both(values, present);
+    };
+
+    const ev = (node) => {
+      switch (node.t) {
+        case 'num': return both(new Array(n).fill(node.v), all(true));
+        case 'id': return resolveField(node.name);
+        case 'neg': {
+          const e = ev(node.e);
+          const out = new Array(n);
+          for (let i = 0; i < n; i++) out[i] = -e.values[i];
+          return both(out, e.present);
+        }
+        case 'bin': {
+          const l = ev(node.l), r = ev(node.r);
+          const out = new Array(n);
+          const p = new Array(n);
+          for (let i = 0; i < n; i++) {
+            p[i] = l.present[i] && r.present[i];
+            switch (node.op) {
+              case '+': out[i] = guard(l.values[i] + r.values[i], state); break;
+              case '-': out[i] = guard(l.values[i] - r.values[i], state); break;
+              case '*': out[i] = guard(l.values[i] * r.values[i], state); break;
+              default: out[i] = r.values[i] === 0 ? 0 : guard(l.values[i] / r.values[i], state);
+            }
+          }
+          return both(out, p);
+        }
+        case 'cmp': {
+          const l = ev(node.l), r = ev(node.r);
+          const out = new Array(n);
+          const p = new Array(n);
+          for (let i = 0; i < n; i++) {
+            p[i] = l.present[i] && r.present[i];
+            switch (node.op) {
+              case '>': out[i] = l.values[i] > r.values[i] ? 1 : 0; break;
+              case '<': out[i] = l.values[i] < r.values[i] ? 1 : 0; break;
+              case '>=': out[i] = l.values[i] >= r.values[i] ? 1 : 0; break;
+              case '<=': out[i] = l.values[i] <= r.values[i] ? 1 : 0; break;
+              case '==': out[i] = l.values[i] === r.values[i] ? 1 : 0; break;
+              default: out[i] = l.values[i] !== r.values[i] ? 1 : 0;
+            }
+          }
+          return both(out, p);
+        }
+        case 'call': {
+          const a = node.args;
+          switch (node.fn) {
+            case 'cumsum': {
+              const x = ev(a[0]);
+              const out = new Array(n);
+              const p = new Array(n);
+              let run = 0;
+              let seen = false;
+              for (let i = 0; i < n; i++) {
+                if (x.present[i]) { run += x.values[i]; seen = true; }
+                out[i] = guard(run, state);
+                // Present once ANY day was: after the last joined day the total still stands,
+                // because it makes no claim about the days that did not join.
+                p[i] = seen;
+              }
+              return both(out, p);
+            }
+            case 'rolling': {
+              const x = ev(a[0]);
+              const win = Math.max(1, Math.round(num(ev(a[1]).values[0])));
+              const out = new Array(n);
+              const p = new Array(n);
+              let run = 0;
+              let cnt = 0;
+              for (let i = 0; i < n; i++) {
+                if (x.present[i]) { run += x.values[i]; cnt += 1; }
+                if (i >= win && x.present[i - win]) { run -= x.values[i - win]; cnt -= 1; }
+                // The denominator is the joined days in the window, not the window's width —
+                // on hole-free input that is min(i + 1, win), which is evaluateSeries' own.
+                out[i] = cnt > 0 ? guard(run / cnt, state) : 0;
+                p[i] = cnt > 0;
+              }
+              return both(out, p);
+            }
+            case 'shift': {
+              const x = ev(a[0]);
+              const by = Math.max(0, Math.round(num(ev(a[1]).values[0])));
+              const out = new Array(n);
+              const p = new Array(n);
+              for (let i = 0; i < n; i++) {
+                const src = i - by;
+                out[i] = src >= 0 ? x.values[src] : 0;
+                // The one place this evaluator differs from the delivery path even on hole-free
+                // input: there the first n positions are a zero, here they are the nothing they
+                // describe — no day before the window was ever measured.
+                p[i] = src >= 0 ? x.present[src] : false;
+              }
+              return both(out, p);
+            }
+            case 'min': case 'max': {
+              const l = ev(a[0]), r = ev(a[1]);
+              const f = node.fn === 'min' ? Math.min : Math.max;
+              const out = new Array(n);
+              const p = new Array(n);
+              for (let i = 0; i < n; i++) { out[i] = f(l.values[i], r.values[i]); p[i] = l.present[i] && r.present[i]; }
+              return both(out, p);
+            }
+            case 'abs': {
+              const x = ev(a[0]);
+              const out = new Array(n);
+              for (let i = 0; i < n; i++) out[i] = Math.abs(x.values[i]);
+              return both(out, x.present);
+            }
+            case 'round': {
+              const x = ev(a[0]);
+              const digits = a.length > 1 ? num(ev(a[1]).values[0]) : 0;
+              const f = Math.pow(10, Math.max(0, Math.min(6, Math.round(digits))));
+              const out = new Array(n);
+              for (let i = 0; i < n; i++) out[i] = guard(Math.round(x.values[i] * f) / f, state);
+              return both(out, x.present);
+            }
+            case 'if': {
+              const c = ev(a[0]), t = ev(a[1]), e = ev(a[2]);
+              const out = new Array(n);
+              const p = new Array(n);
+              for (let i = 0; i < n; i++) {
+                const take = c.values[i] ? t : e;
+                out[i] = take.values[i];
+                // The condition is read on the same day: a branch chosen from a day nobody
+                // measured is not a choice, so an absent condition makes the day absent too.
+                p[i] = c.present[i] && take.present[i];
+              }
+              return both(out, p);
+            }
+            default:
+              // Unreachable: the parser admits no other function name. Nothing was computed,
+              // so nothing is claimed — the caller draws a dash rather than a zero.
+              state.warned = true;
+              return both(zeros(), all(false));
+          }
+        }
+        default: state.warned = true; return both(zeros(), all(false));
+      }
+    };
+
+    const out = ev(ast);
+    const values = out.values;
+    for (let i = 0; i < n; i++) values[i] = guard(values[i], state);
+    return { values, present: out.present, warned: state.warned };
   }
 
 
@@ -1812,6 +3101,8 @@ function createDashboardMetrics(deps) {
 /* ══ workspace/src/lib/dashboard/breakdown-filter.js ══════════════════════════════════════════ */
 
 
+
+
   // Synthetic value for "everything this line item's covering containers do NOT
   // declare" (spec 2026-08-14-container-dim-scope §4). It is the one NEGATIVE
   // filter in the system, and it is bound to ONE line item — delivery is per line
@@ -1820,6 +3111,29 @@ function createDashboardMetrics(deps) {
   const OUTSIDE_KEY = '__outside__';
   const outsidePair = (dim, liId) => `${dim}:${OUTSIDE_KEY}@${liId}`;
 
+  /**
+   * The `brkf` list after one click on a row or a slice (section-widget parity 2026-09-04) —
+   * the write a v2 Breakdown tile makes, in the same words the legacy panel's `handleRowFilter`
+   * makes it. It lives HERE, beside the parser that reads these pairs back, rather than inline
+   * in the tile: it is the one piece of that click a host test can drive, and a toggle nobody
+   * can run is a toggle nobody can check.
+   *
+   * A pair that is on comes OFF and nothing else moves: clicking an active row removes that one
+   * pair, which is what lets a reader unpick one dimension of a multi-dimension filter.
+   *
+   * The caller writes `brk` alongside, so both surfaces stand on the cut that was clicked.
+   *
+   * The legacy panel still spells its own copy inline (Breakdown.jsx:209), guarded by the two
+   * refusals it makes before it gets here — a leftover row and an unfilterable dimension. The
+   * tile makes both of those refusals earlier, where it decides whether a view gets a picker at
+   * all, which is why this half is the same four lines on both sides and nothing more.
+   */
+  function nextBrkfPairs(pairs, dim, value) {
+    const cur = Array.isArray(pairs) ? pairs : [];
+    const pair = `${dim}:${value}`;
+    return cur.indexOf(pair) === -1 ? [...cur, pair] : cur.filter((p) => p !== pair);
+  }
+
   // Namebuilder positions tracked as independent dim axes (per-position model).
   const OTHER_DIMS = ['comment', 'geo', 'creative', 'message', 'keyword', 'flight', 'language'];
 
@@ -1827,6 +3141,81 @@ function createDashboardMetrics(deps) {
   // dim; tactic + platform are first-class BQ fields; OTHER_DIMS are namebuilder
   // per-position carve-outs. Keep this in sync with Breakdown.jsx:DIM_ORDER.
   const FILTERABLE_DIMS = ['audience', 'tactic', 'platform', ...OTHER_DIMS];
+
+  /** Filter an auxiliary export only when its own metadata can answer every cut.
+   * Missing context means unknown; an explicitly empty value means measured without
+   * a name. A row ruled out by a known field cannot make the remaining slice unknown. */
+  function filterAuxRows(rows, filters, { liIds, liPlan = {}, range = null, outsidePlanMap = liPlan, containerFilters = {}, lensContext = false,
+    tagMembers = null, tagsOn = false, fileTags = null } = {}) {
+    const ids = liIds == null ? null : new Set(Array.from(liIds, String));
+    const pairs = parseBreakdownFilters(filters);
+    const byDim = groupBreakdownFilters(pairs);
+    const outside = outsideFiltersOf(pairs);
+    const indexes = outsideIndexes(outside, outsidePlanMap);
+    const platforms = filters?.platforms?.length ? new Set(filters.platforms.map(String)) : null;
+    const kept = [];
+    const has = (obj, key) => obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (!row) continue;
+      const id = String(row.line_item_id);
+      if (ids && !ids.has(id)) continue;
+      const p = liPlan[id];
+      if (p?.fs && p?.fe && (row.date < p.fs || row.date > p.fe)) continue;
+      if (range && (row.date < range.from || row.date > range.to)) continue;
+      const context = row.filter_context;
+      // A row carrying its OWN tags (conversion tags, spec 2026-09-13 §4) is read through the tags
+      // that count: a value its line item never delivered on is unknown, like a missing key. A
+      // context joined from creatives (the lens box, no own marker) is read as before.
+      const own = !!context && context.own === true;
+      const fact = own
+        ? { ...countedTags(row, tagMembers), line_item_id: id, date: row.date }
+        : { ...(context?.dims || {}), line_item_id: id, date: row.date };
+      if (!own && has(context, 'platform')) fact.platform = context.platform;
+      let unknown = false;
+      let matches = true;
+      if (platforms) {
+        if (!has(fact, 'platform')) unknown = true;
+        else if (!platforms.has(String(fact.platform))) matches = false;
+      }
+      for (const [dim, values] of byDim) {
+        if (!has(fact, dim)) unknown = true;
+        else if (!values.has(readDimValue(fact, dim))) matches = false;
+      }
+      for (const [dim, values] of Object.entries(containerFilters[id] || {})) {
+        if (!has(fact, dim)) unknown = true;
+        else {
+          const value = readDimValue(fact, dim);
+          if (value && !values.includes(value)) matches = false;
+        }
+      }
+      for (const o of outside) {
+        if (id !== o.liId) { matches = false; continue; }
+        if (!has(fact, o.dim) || !indexes[o.liId]) unknown = true;
+        else if (!factMatchesOutside(fact, [o], indexes)) matches = false;
+      }
+      if (!matches) continue;
+      if (unknown) {
+        // Spec 2026-09-09-lens-context-flag §3.3. Off: this pacing never fetches the
+        // context, so say where the switch is. On: the rows on disk predate the flag
+        // (or the file is stale); a refresh fixes both. Both start with "This data" —
+        // filterSourceRows swaps that prefix for the cut's name.
+        // Conversion tags (spec 2026-09-13 §4): on a file that already carries a tag state, a refresh
+        // would not add the missing tags. On a file without one, only a refresh brings them, and a
+        // Paused or Complete pacing gets none until it is Live again, so that sentence asks for no
+        // refresh. Each sentence says only what is true.
+        const reason = tagsOn === true && fileTags
+          ? 'Some of this data has no tag for these filters. Clear these filters to see the breakdown.'
+          : tagsOn === true
+            ? "This data has no tags until this pacing's next refresh, so it cannot follow these filters. Clear these filters to see the breakdown."
+            : lensContext === true
+              ? 'This data does not follow the dashboard filters yet. Refresh this pacing to apply them, or clear these filters to see the breakdown.'
+              : 'This data does not follow the dashboard filters on this pacing. Turn on "Apply dashboard filters to creatives and conversions" in Settings, Data tab, then refresh this pacing, or clear these filters to see the breakdown.';
+        return { rows: [], reason };
+      }
+      kept.push(row);
+    }
+    return { rows: kept, reason: null };
+  }
 
   /** Read a fact's value for a given dim key. Empty / '-' / missing → ''. */
   function readDimValue(fact, dim) {
@@ -1924,13 +3313,69 @@ function createDashboardMetrics(deps) {
     return true;
   }
 
-  function buildBreakdownFacts(facts, filters, rate, planMap) {
+  /**
+   * The delivery predicate of buildBreakdownFacts, asked about ONE conversion row through the tags
+   * it has (primary conversions, spec 2026-09-13 §4 Filters). `fact` carries only the row's tags
+   * that count (primary-cv.js countedTags) plus line_item_id and date. A filter on a dimension the
+   * row has no counting tag for makes it 'unknown', unless a tag it does have already rules it out:
+   * then it is 'drop' (the filterAuxRows rule, a row ruled out by a known field cannot make the rest
+   * unknown). PacingCore.factMatchesDimFilter reads a missing key as untagged and would keep the
+   * row, so it is only ever asked about a key the fact carries.
+   * -> (liId, fact) => 'keep' | 'drop' | 'unknown'
+   */
+  function conversionRowTest({ platformSet = null, byDim = new Map(), outside = [], outIdx = null, containerFilters = null } = {}) {
+    const has = (fact, dim) => Object.prototype.hasOwnProperty.call(fact, dim);
+    return (liId, fact) => {
+      const id = String(liId);
+      let unknown = false;
+      const cf = containerFilters ? containerFilters[id] : null;
+      if (cf) {
+        for (const dim of Object.keys(cf)) {
+          if (!has(fact, dim)) { unknown = true; continue; }
+          if (!PacingCore.factMatchesDimFilter(fact, { [dim]: cf[dim] })) return 'drop';
+        }
+      }
+      if (platformSet) {
+        if (!has(fact, 'platform')) unknown = true;
+        else if (!platformSet.has(String(fact.platform || ''))) return 'drop';
+      }
+      for (const [dim, values] of byDim) {
+        if (!has(fact, dim)) { unknown = true; continue; }
+        if (!values.has(readDimValue(fact, dim))) return 'drop';
+      }
+      for (const o of outside) {
+        if (id !== o.liId) return 'drop';
+        if (!has(fact, o.dim) || !outIdx || !outIdx[o.liId]) { unknown = true; continue; }
+        if (!PacingCore.factOutsideSplits(outIdx[o.liId], o.dim, fact)) return 'drop';
+      }
+      return unknown ? 'unknown' : 'keep';
+    };
+  }
+
+  // The dates a dimension Scope chip judges each declaring line item in (owner decision 2026-09-16,
+  // spec §4): dim-scope.js declaringWindows, each cut to the period when one is selected. null when
+  // the chip declares nothing.
+  function scopeChipWindows(planMap, filters, bound) {
+    const pairs = Array.isArray(filters?.brkf) ? filters.brkf
+      : (typeof filters?.brkf === 'string' && filters.brkf ? [filters.brkf] : []);
+    const declared = declaringWindows(planMap, pairs);
+    if (declared.size === 0) return null;
+    if (!bound) return declared;
+    const out = new Map();
+    for (const [id, list] of declared) {
+      out.set(id, list.map((w) => ({ from: w.from > bound.from ? w.from : bound.from, to: w.to < bound.to ? w.to : bound.to }))
+        .filter((w) => w.from <= w.to));
+    }
+    return out;
+  }
+
+  function buildBreakdownFacts(facts, filters, rate, planMap, containerFilters = null, judgeWindow = null) {
     if (!facts) return facts;
     const brkFilters = parseBreakdownFilters(filters);
     const platforms = Array.isArray(filters?.platforms)
       ? filters.platforms.filter((p) => p != null)
       : [];
-    if (brkFilters.length === 0 && platforms.length === 0) return facts;
+    if (brkFilters.length === 0 && platforms.length === 0 && !Object.keys(containerFilters || {}).length) return facts;
     if (!Array.isArray(facts.factsDaily)) return facts;
 
     const platformSet = platforms.length ? new Set(platforms.map((p) => String(p))) : null;
@@ -1938,24 +3383,68 @@ function createDashboardMetrics(deps) {
     const outside = outsideFiltersOf(brkFilters);
     const outIdx = outside.length ? outsideIndexes(outside, planMap) : null;
 
+    // Primary conversions (spec 2026-09-13 §4 Filters): while the one predicate runs, count each
+    // judged line item's delivery rows seen and kept. Chips judge every line item; container
+    // filters alone judge only the ones they name. `judgeWindow` is a period's dates; a dimension
+    // Scope chip adds each declaring line item's own dates. Not operative: no counter, no scope,
+    // no extra work per row.
+    const cvCtx = facts.cvCtx || null;
+    const chips = platformSet !== null || brkFilters.length > 0;
+    let counter = null;
+    let windows = null;
+    // With chips and container filters both on, which one splits a line item decides its reason
+    // (spec §4 "Reasons"): a second count of what the chips alone keep, over the same dates.
+    let byChips = null;
+    if (cvCtx && cvCtx.operative === true) {
+      windows = scopeChipWindows(planMap, filters, judgeWindow);
+      counter = makeVerdictCounter(judgeWindow, windows);
+      if (chips && containerFilters && Object.keys(containerFilters).length) byChips = makeVerdictCounter(judgeWindow, windows);
+      for (const id of Object.keys(planMap || {})) {
+        if (chips || (containerFilters && containerFilters[id])) {
+          counter.expect(id);
+          if (byChips) byChips.expect(id);
+        }
+      }
+    }
+    const chipsKeep = (fact) => !(platformSet && !platformSet.has(String(fact.platform || '')))
+      && !(byDim.size > 0 && !factMatchesBreakdownFilters(fact, byDim))
+      && !(outIdx && !factMatchesOutside(fact, outside, outIdx));
+
     const filteredFactsDaily = facts.factsDaily.filter((fact) => {
-      if (platformSet && !platformSet.has(String(fact.platform || ''))) return false;
-      if (byDim.size > 0 && !factMatchesBreakdownFilters(fact, byDim)) return false;
-      if (outIdx && !factMatchesOutside(fact, outside, outIdx)) return false;
-      return true;
+      const id = String(fact.line_item_id);
+      let kept = true;
+      if (containerFilters && !PacingCore.factMatchesDimFilter(fact, containerFilters[id])) kept = false;
+      else if (platformSet && !platformSet.has(String(fact.platform || ''))) kept = false;
+      else if (byDim.size > 0 && !factMatchesBreakdownFilters(fact, byDim)) kept = false;
+      else if (outIdx && !factMatchesOutside(fact, outside, outIdx)) kept = false;
+      if (counter && (chips || (containerFilters && containerFilters[id]))) {
+        counter.see(id, fact, kept);
+        if (byChips) byChips.see(id, fact, kept || chipsKeep(fact));
+      }
+      return kept;
     });
     // :76 — THE choke point. planMap carries the per-LI coef override so filtered
     // views resolve `dc` identically to the unfiltered aggregate (spec §3.1).
-    const { LD, LSD } = buildFactsAggregates(filteredFactsDaily, rate, planMap);
+    // The scope carries the filter result to both overlays: the delivery verdicts, the same
+    // predicate for single conversion rows, and the unfiltered rows their tags are checked against.
+    const scope = counter ? {
+      verdicts: counter.result(), outside: counter.outside(), window: judgeWindow, windows,
+      rowTest: conversionRowTest({ platformSet, byDim, outside, outIdx, containerFilters }),
+      members: purityIndex(facts.factsDaily), why: byChips ? splitCauses(byChips.result()) : (chips ? 'filter' : 'container'),
+    } : null;
+    const { LD, LSD } = buildFactsAggregates(filteredFactsDaily, rate, planMap, cvCtx, scope);
 
     // Construct explicitly rather than spreading `facts`: spreading would read the
     // store's lazy liSplitDaily getter and build the FULL LSD only to discard it.
+    // cvCtx rides along only when the input had one, so a facts object without it
+    // keeps today's exact keys.
     return {
       factsDaily: facts.factsDaily,
       liDaily: LD,
       liSplitDaily: LSD,
       asOf: facts.asOf,
       rate: facts.rate,
+      ...(cvCtx ? { cvCtx } : null),
     };
   }
 
@@ -2675,17 +4164,29 @@ function createDashboardMetrics(deps) {
   //            campaign gate (an audio line's completes are listen-throughs), and it
   //            answers NULL — an em dash, the legacy Daily Performance cell — when that
   //            pair is empty. acr keeps the plain ratio, so an audio line's number is
-  //            under the name that means it;
+  //            under the name that means it. Date × LI rows use the date-series
+  //            ACR/CPV populations to agree with their date-series Totals;
   //   dim buckets ≡ the Breakdown table: plain ctr/cpm over the bucket, vcr over the
   //            gated imV/coV pair, acr over the gated imA/coA pair — the 'ts' basis shape;
-  //   'agg'    campaign totals / KPI ≡ campM/Targets: ctr & cpm over non-CPC/CPV lines,
+  //   'agg'    campaign totals / KPI ≡ campM/Targets: ctr over EVERY line (owner decision
+  //            2026-09-23: all clicks / all impressions), cpm over non-CPC/CPV lines,
   //            vcr = coV/imV, acr = coA/imA (audio-only, imA-gated), cpv = cpvSp/cpvCo
   //            (view basis), cpc = sp/cl.
-  //   expected — cumulative-to-date per day (TS) / window delta over calendarBounds
-  //              (AGG/entity); UNAVAILABLE in dim rows (no per-dim expected exists —
-  //              validation error, never a silent 0); raw floats accumulate unrounded.
-  //   plan scalars — flight-level constants, available in EVERY context (bare fields
-  //              and formulas alike; per-LI values in li/date_li rows).
+  //   expected — cumulative-to-date per day (TS) / window delta over expectedBounds
+  //              (AGG/entity: the calendar window, never past asOf); UNAVAILABLE in dim
+  //              rows (no per-dim expected exists — validation error, never a silent 0);
+  //              raw floats accumulate unrounded.
+  //   plan scalars — available in EVERY context (bare fields and formulas alike; per-LI
+  //              values in li/date_li rows). The plan SUMS (budget, planImpr, planClicks,
+  //              planViews) are the whole flight's, unless the viewer narrowed the window
+  //              (sources.planFollowsRange, 2026-09-23): then they are the part of the plan
+  //              curve inside it. Their *Total twins, costBudTotal, the rates and targets
+  //              (mTgt, vcrT, acrT, tgtCpm) and the day counts stay flight constants.
+  //              costBud and budgetToDate are the cost and client plan from the window's
+  //              first day to its last day or asOf, summed line by line. ctrT
+  //              is the one target that reads delivery (owner decision 2026-09-23): each
+  //              line's target weighted by its impressions in the window read, or by its
+  //              planned impressions before any targeted line delivered there.
   // Division by zero → 0 everywhere (engine canon). No React, no DOM — host-tested by
   // tests/widget-table-rows-test.mjs (run via the tests/dashboard/register.mjs loader).
 
@@ -2696,6 +4197,21 @@ function createDashboardMetrics(deps) {
 
 
 
+
+
+
+
+
+
+  // One question only: is this line paused right now (manual intervals ∪ auto out-of-schedule)?
+  // The legacy Daily Performance section asks the same function for the same chip.
+
+  // Primary conversions (spec 2026-09-13 §3): per-map state the overlay registers, read here so an
+  // unanswerable conversion number is null in every reading and never the engine's 0.
+
+  /** Own-key, for the reason every bucket map in this file uses `defineProperty`: a dimension
+   *  value is user text, and `constructor` is one a bare lookup would answer for. */
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
   /**
    * A refused formula as ONE sentence: what is wrong, and — when the validator worked one out
@@ -2760,16 +4276,43 @@ function createDashboardMetrics(deps) {
     };
   }
 
+  /**
+   * What an EXPECTED window delta may count (2026-09-23): the calendar window, never past the
+   * last data day — pacing-core prorateRange's rule, «expected never runs ahead of asOf». A
+   * Custom window past today (reachable from a Timeline segment, a Journal jump or a URL) read
+   * a «Needed» for days that have not happened. A window that starts after asOf answers
+   * from > to, and a pacing with no data yet an empty `to`; expectedDeltas reads both as zero,
+   * which is what campM's own prorate answers there.
+   *
+   * Only the window DELTAS read this. The chart axis and its per-day plan curve
+   * (aggregateDateRows) keep calendarBounds and still draw to the window's end.
+   */
+  function expectedBounds(sources, range) {
+    const b = calendarBounds(sources, range);
+    if (!sources.asOf) return { from: b.from, to: null };
+    return b.to && b.to > sources.asOf ? { from: b.from, to: sources.asOf } : b;
+  }
+
+  /**
+   * The window the PLAN scalars follow, or null when they are the whole (scoped) flight's.
+   *
+   * Only a window the viewer NARROWED moves the plan — `sources.planFollowsRange`, which
+   * useWidgetData sets for the FilterBar presets, a full Custom range and a widget's own
+   * period switch other than Flight. It is never inferred from `range` itself: Flight is a
+   * range too, and so is the active period.
+   */
+  function planWindowOf(sources, range) {
+    return sources && sources.planFollowsRange && range && range.from && range.to ? range : null;
+  }
+
   /* ── §0.8 per-axis scope override (composes with global brkf) ─────────────── */
 
   /**
-   * widgetEffFilters(widget, globalFilters) → {channels, labels, selection, brkf}
+   * widgetEffFilters(widget, globalFilters) → {channels, labels, selection, brkf, platforms}
    * A pinned axis REPLACES the global filter on that axis; every unpinned axis follows
    * the global — INCLUDING the global breakdown filter (brkf), which a widget cannot
-   * pin by itself but must still respect (round-6). Platforms are NOT surfaced
-   * (round-8 1A): the platform filter is a Breakdown-only concern — canonical charts
-   * and campM never apply it, and plans/expected have no per-platform slice, so a
-   * platform-filtered widget showed numbers the rest of the dashboard contradicts.
+   * pin by itself but must still respect. Platform follows the global Lens; it filters
+   * actual readings without inventing a platform-specific plan.
    */
   function widgetEffFilters(widget, globalFilters) {
     const g = globalFilters || {};
@@ -2791,6 +4334,7 @@ function createDashboardMetrics(deps) {
       labels: g.labels || [],
       selection: pinned(scope.lis) ? scope.lis.map(String) : (g.selection || []),
       brkf,
+      platforms: g.platforms || [],
     };
   }
 
@@ -2803,31 +4347,59 @@ function createDashboardMetrics(deps) {
   /** Per-LI plan scalars — the `li` row context (§3). costBud follows campM's canon:
    *  full-flight cost budget with NO range, the range-prorated cost target WITH one
    *  (round 7 — metrics.js:284 `range ? m.costPr : budget*(1-mTgt)`). costBudTotal is
-   *  that same budget with the range arm removed — see the field's own note below. */
-  function liPlanScalars(p, asOf, range = null) {
+   *  that same budget with the range arm removed — see the field's own note below.
+   *
+   *  `planWindow` (planWindowOf, 2026-09-23) is the window the viewer narrowed, or null. With
+   *  one, the four plan SUMS — budget, planImpr, planClicks, planViews — are the part of the
+   *  line's plan curve inside it (pacing-calc unitsInWindow / budgetInWindow). Their *Total
+   *  twins are the whole flight's whatever the window, by the rule costBudTotal already keeps;
+   *  the rates and targets (tgtCpm, mTgt, ctrT, vcrT, acrT) and the day counts never move.
+   *  One line's `ctrT` is its own stored target, and null where it has none: a stored 0, null
+   *  or NaN is «no target» (owner decision 2026-09-23), never a goal of 0.00%. */
+  function liPlanScalars(p, asOf, range = null, planWindow = null) {
     const rt = p.rateType || 'CPM';
     const fDays = Math.max(1, dI(p.fs, p.fe));
     let daysPassed = 0;
     if (asOf && asOf >= p.fs) {
       daysPassed = Math.min(fDays, dI(p.fs, asOf < p.fe ? asOf : p.fe));
     }
+    const units = p.planImpr || 0;
+    const unitsWin = planWindow ? unitsInWindow(p, planWindow) : units;
     return {
-      budget: p.budget || 0,
+      budget: planWindow ? budgetInWindow(p, planWindow) : (p.budget || 0),
+      // The whole flight's client budget and plan units, whatever the window. The Targets CPC
+      // target is `costBudTotal / planClicksTotal`: over a windowed `planClicks` the flight's
+      // cost budget would be divided by a week's clicks.
+      budgetTotal: p.budget || 0,
+      // The client's plan over the days `costBud` covers (2026-09-23): the line's client money
+      // from the window's first day to its last day or asOf, 0 before any data. Not a plan SUM,
+      // so a narrowed window does not move it any further than it moves `costBud`.
+      budgetToDate: budgetToDate(p, range, asOf),
+      planImprTotal: rt === 'CPC' || rt === 'CPV' ? 0 : units,
+      planClicksTotal: rt === 'CPC' ? units : 0,
+      planViewsTotal: rt === 'CPV' ? units : 0,
       costBud: range ? cachedProrateRange(p, range, asOf).costPr : costBudOf(p),
       // The WHOLE flight's cost budget, whatever window the widget is read over
       // (sections-to-widgets M3). It is the number the legacy Targets bar divides by
       // plan clicks for its CPC target (KpiPlanFact.jsx:149, off full-flight campM),
       // and `costBud` cannot stand in for it: inside a range that one is prorated to
       // date, so on a 7-day window the same expression read roughly a seventh of the
-      // target. Range-independent by construction, like `budget` and `planImpr`.
+      // target. Range-independent by construction, like the *Total twins above it.
       costBudTotal: costBudOf(p),
-      planImpr: rt === 'CPC' || rt === 'CPV' ? 0 : (p.planImpr || 0),
-      planClicks: rt === 'CPC' ? (p.planImpr || 0) : 0,
-      planViews: rt === 'CPV' ? (p.planImpr || 0) : 0,
+      planImpr: rt === 'CPC' || rt === 'CPV' ? 0 : unitsWin,
+      planClicks: rt === 'CPC' ? unitsWin : 0,
+      planViews: rt === 'CPV' ? unitsWin : 0,
+      // The line's own target CPM: what its cost budget buys per thousand planned impressions
+      // (campM's `tgtCpm` over one line, metrics.js:538). NULL where the line plans no
+      // impressions at all — a click-paced line has no CPM to aim at, and a 0 here would read
+      // as a goal of «$0.00», which is exactly what campM's own null-not-zero rule refuses one
+      // level up. A bare field reads that null as «no number»; inside arithmetic it is 0, the
+      // absence-is-zero canon every operand keeps.
+      tgtCpm: rt === 'CPM' && (p.planImpr || 0) > 0 ? (costBudOf(p) / p.planImpr) * 1000 : null,
       daysPassed,
       daysLeft: Math.max(0, fDays - daysPassed),
       mTgt: p.mTgt || 0,
-      ctrT: p.ctrTgt ?? 0,
+      ctrT: hasCtrTarget(p) ? p.ctrTgt : null,
       vcrT: p.vcrTgt ?? 0,
       // acrT mirrors vcrT exactly — same raw vcrTgt passthrough, no channel gate at
       // this per-LI scalar level (an audio LI's ACR target IS its vcrTgt by
@@ -2836,71 +4408,215 @@ function createDashboardMetrics(deps) {
     };
   }
 
+  /* ── the campaign CTR target's weights (owner decision 2026-09-23) ────────── */
+
+  /** The campaign CTR target over `ids`: each line's own target weighted by `imprOf(id)`, its
+   *  delivered impressions in the window read. metrics.js `ctrTargetAccumulator` is the rule
+   *  (and its plan fallback), shared with campM so the two cannot weigh it two ways. */
+  function weightedCtrT(liPlan, ids, imprOf) {
+    const acc = ctrTargetAccumulator();
+    for (const id of ids) {
+      const p = liPlan[id];
+      if (!hasCtrTarget(p)) continue;
+      acc.add(p, imprOf ? Number(imprOf(id)) || 0 : 0);
+    }
+    return acc.value();
+  }
+
+  /**
+   * `ctrT` as a memoised, enumerable getter on `target`. It is the one plan field that reads
+   * facts, so it reads them only when somebody reads IT: a plan-only reading (budget, planImpr,
+   * a margin target…) must never open the facts (tests/widget-data-performance-test.mjs).
+   * Enumerable, so a spread, `Object.keys` and JSON see it like any other field (they read it).
+   * A plain write — `scalars.ctrT = x` — replaces the getter with the written value, as it would
+   * on a plain field, rather than throwing in strict mode.
+   */
+  function defineLazyCtrT(target, compute) {
+    let done = false;
+    let memo = null;
+    Object.defineProperty(target, 'ctrT', {
+      enumerable: true, configurable: true,
+      get() {
+        if (!done) { memo = compute(); done = true; }
+        return memo;
+      },
+      set(value) {
+        Object.defineProperty(target, 'ctrT', { value, enumerable: true, writable: true, configurable: true });
+      },
+    });
+    return target;
+  }
+
+  /** A copy of `base` whose ctrT is `compute()`, lazy like campaignScalars' own. Every other field
+   *  keeps its value and its place, and `base`'s own ctrT is never read. */
+  function withCtrT(base, compute) {
+    const out = {};
+    for (const k of Object.keys(base)) {
+      if (k === 'ctrT') defineLazyCtrT(out, compute);
+      else out[k] = base[k];
+    }
+    return out;
+  }
+
+  const IS_DEV = false /* import.meta.env?.DEV — see build-dashboard-metrics.mjs */;
+  let warnedNoImpr = false;
+
+  /**
+   * Each line's delivered impressions in one window, the CTR target's weight (owner decision
+   * 2026-09-23): the line's own flight [fs, fe] cut to the window, over `sources.liDaily`. The
+   * same facts and the same clip `sumLiWindow` gives the CTR itself, so period scope, dim Scope
+   * and the Lens reach the weight exactly as they reach the value.
+   *
+   * Returned as `imprOf(id)`, and lazy: nothing is read until a ctrT is. A caller that has
+   * ALREADY summed a line over this window (the li rows, the li categories, the reading
+   * context) hands the figure over with `imprOf.seed(id, im)`, so the facts are walked once.
+   * One map per (frozen snapshot, window): useWidgetData's snapshots are frozen, so every model
+   * built on one snapshot shares it; a mutable caller gets a map of its own per call.
+   *
+   * The window is COPIED here: the target is read later than it is built, and a caller may
+   * reuse and edit its range object in between (campaignReadingContext's own rule).
+   */
+  const lineImprCache = new WeakMap();
+  const LINE_IMPR_WINDOWS = 8;
+  function lineImpr(sources, range) {
+    const window = range ? { from: range.from, to: range.to } : null;
+    let map = null;
+    const mapOf = () => {
+      if (map) return map;
+      if (sources && Object.isFrozen(sources)) {
+        const key = window ? JSON.stringify([window.from, window.to]) : '__all__';
+        let byWindow = lineImprCache.get(sources);
+        if (!byWindow) { byWindow = new Map(); lineImprCache.set(sources, byWindow); }
+        map = byWindow.get(key) || null;
+        if (!map) {
+          map = new Map();
+          byWindow.set(key, map);
+          if (byWindow.size > LINE_IMPR_WINDOWS) byWindow.delete(byWindow.keys().next().value);
+        }
+      } else {
+        map = new Map();
+      }
+      return map;
+    };
+    const imprOf = (id) => {
+      const m = mapOf();
+      const key = String(id);
+      if (m.has(key)) return m.get(key);
+      const p = sources?.liPlan?.[id];
+      let im = 0;
+      if (p) {
+        for (const [d, v] of Object.entries(sources.liDaily?.[id] || {})) {
+          if (p.fs && p.fe && (d < p.fs || d > p.fe)) continue;
+          if (window && (d < window.from || d > window.to)) continue;
+          im += (v && v.im) || 0;
+        }
+      }
+      m.set(key, im);
+      return im;
+    };
+    imprOf.seed = (id, im) => {
+      const m = mapOf();
+      const key = String(id);
+      if (!m.has(key)) m.set(key, im);
+    };
+    return imprOf;
+  }
+
   /** Campaign-level plan scalars over an LI set (weighted like campM — NOT plain sums
    *  for mTgt/ctrT/vcrT; also the "Others" bucket basis, round-6).
    *
    *  `foldBasis` is the Others row's basis (P0.1, owner decision 2026-08-19) and
-   *  ONLY that: it drops the rate-type exclusions so the targets weight over the same
-   *  lines the fold's values already count. Every campaign-level caller leaves it
-   *  false and keeps campM's gates. */
-  function campaignScalars(liPlan, effLIs, asOf, flightStart, flightEnd, range = null, foldBasis = false) {
+   *  ONLY that: it lifts the CPC gate on vcrT so the target weighs over the same lines the
+   *  fold's values already count. Every campaign-level caller leaves it false and keeps
+   *  campM's gates. (It used to lift a gate on ctrT too; ctrT has none left to lift.)
+   *
+   *  `planWindow` is liPlanScalars' own (planWindowOf): the plan sums follow a narrowed window,
+   *  their *Total twins do not, and vcrT / acrT / mTgt keep weighting by each line's
+   *  whole-flight plan — a window does not change which line's target counts for more there.
+   *
+   *  `imprOf(id)` is that line's (or that plan key's) delivered impressions in `range`, the
+   *  weight of its CTR target (owner decision 2026-09-23; `lineImpr` above for a line, the
+   *  (value, line) bucket for a dimension row). Every engine caller passes one. Without it the
+   *  target is the plan-weighted fallback even on a set that has delivered, which disagrees
+   *  with campM; a dev build says so on the console the first time. */
+  function campaignScalars(liPlan, effLIs, asOf, flightStart, flightEnd, range = null, foldBasis = false,
+    planWindow = null, imprOf = null) {
     const out = {
       budget: 0, costBud: 0, costBudTotal: 0, planImpr: 0, planClicks: 0, planViews: 0,
-      daysPassed: 0, daysLeft: 0, mTgt: 0, ctrT: null, vcrT: null, acrT: null,
+      budgetTotal: 0, budgetToDate: 0, planImprTotal: 0, planClicksTotal: 0, planViewsTotal: 0,
+      daysPassed: 0, daysLeft: 0, mTgt: 0, ctrT: null, vcrT: null, acrT: null, tgtCpm: null,
     };
-    // Weighting rules copied from campM verbatim (round 6.1 — a home-grown weighting
-    // put a CPC line's ctrTgt into the campaign CTR target and averaged audio ACRs
-    // into vcrT): ctrT over non-CPC/CPV lines only; vcrT over non-CPC, non-audio lines
-    // with a REAL (>0) target; both weighted by planUnit||budget||1; mTgt by budget.
-    // acrT mirrors vcrT's scheme exactly but AUDIO-ONLY (the disjoint counterpart —
-    // an audio LI's vcrTgt is its ACR target by convention).
-    // On the fold basis the rate-type exclusions lift (P0.1): the Others row's values
-    // already count a CPC/CPV line, so its targets weight over it too. The has-target
-    // filter and the audio/video split are semantics, not pollution guards — they hold
-    // on both bases.
-    // That mixes weight UNITS, and `w` (the line's own plan unit) does not change to
-    // absorb it: ctrT was uniformly impression-weighted before P0.1 — CPC and CPV were
-    // both gated out — so on a fold a CPC line's 10k plan-CLICKS now average against a
-    // CPM line's 10k plan-IMPRESSIONS for the first time, and the bigger plan number
-    // pulls the target regardless of which unit it counts. vcrT already mixed units
-    // (only CPC was gated there, CPV plan-views always weighted in).
-    let mW = 0, mWt = 0, ctW = 0, ctWt = 0, vcW = 0, vcWt = 0, acW = 0, acWt = 0;
+    // Weighting rules copied from campM (round 6.1 — a home-grown weighting averaged audio
+    // ACRs into vcrT): vcrT over non-CPC, non-audio lines with a REAL (>0) target, weighted by
+    // planUnit||budget||1; mTgt by budget. acrT mirrors vcrT's scheme exactly but AUDIO-ONLY
+    // (the disjoint counterpart — an audio LI's vcrTgt is its ACR target by convention).
+    // On the fold basis the CPC gate on vcrT lifts (P0.1): the Others row's values already
+    // count a CPC line, so its target weighs over it too. That mixes weight UNITS — a CPC
+    // line's plan-clicks against a video line's plan-impressions — as vcrT always did for CPV
+    // plan-views. The has-target filter and the audio/video split are semantics, not pollution
+    // guards — they hold on both bases.
+    // ctrT is not in this loop's weighting: it counts every line with a target > 0, whatever
+    // its rate type, weighted by delivered impressions (weightedCtrT, read lazily below).
+    let mW = 0, mWt = 0, vcW = 0, vcWt = 0, acW = 0, acWt = 0;
+    const ctrIds = [];
     let dpSum = 0, dlSum = 0, n = 0;
+    // The target-CPM pair, campM's own (metrics.js:365/538): cost budget over plan impressions,
+    // both summed over CPM-RATE lines only, both full-flight. `foldBasis` deliberately does not
+    // lift this gate the way it lifts the vcrT one: a CPC line's `planImpr` holds plan
+    // CLICKS, so folding it into this denominator is not a widened population, it is a unit
+    // error — cost per thousand of a number that does not count impressions.
+    let cpmBudSum = 0, cpmImprSum = 0;
     for (const id of effLIs) {
       const p = liPlan[id];
       if (!p) continue;
-      const s = liPlanScalars(p, asOf, range);
+      const s = liPlanScalars(p, asOf, range, planWindow);
       out.budget += s.budget;
       out.costBud += s.costBud;
       out.costBudTotal += s.costBudTotal;
       out.planImpr += s.planImpr;
       out.planClicks += s.planClicks;
       out.planViews += s.planViews;
+      out.budgetTotal += s.budgetTotal;
+      // Summed per line, each at its own client money: never `costBud` over the weighted mTgt.
+      out.budgetToDate += s.budgetToDate;
+      out.planImprTotal += s.planImprTotal;
+      out.planClicksTotal += s.planClicksTotal;
+      out.planViewsTotal += s.planViewsTotal;
       const rt = p.rateType || 'CPM';
-      const isCpc = rt === 'CPC', isCpv = rt === 'CPV';
+      const isCpc = rt === 'CPC';
       const isAudio = (p.ch || '').toLowerCase() === 'audio';
       const w = (Number(p.planImpr) || 0) || p.budget || 1;
       mW += (p.mTgt || 0) * (p.budget || 0); mWt += (p.budget || 0);
-      const ctrRateOk = foldBasis || (!isCpc && !isCpv);
       const vcrRateOk = foldBasis || !isCpc;
-      if (ctrRateOk && p.ctrTgt != null && Number.isFinite(p.ctrTgt)) { ctW += p.ctrTgt * w; ctWt += w; }
+      if (hasCtrTarget(p)) ctrIds.push(id);
       if (vcrRateOk && !isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { vcW += p.vcrTgt * w; vcWt += w; }
       if (isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { acW += p.vcrTgt * w; acWt += w; }
+      if (rt === 'CPM') { cpmBudSum += costBudOf(p); cpmImprSum += (Number(p.planImpr) || 0); }
       // days: campM canon — average of per-LI prorated (fDays − dP) / dP.
       const pr = prorate(p, asOf);
       dpSum += pr.dP; dlSum += (pr.fDays - pr.dP); n++;
     }
     out.mTgt = mWt > 0 ? mW / mWt : 0;
     // NULL, not 0, when no line in the set carries the target — campM's own answer
-    // (metrics.js:512/514) and the whole point of sections-to-widgets M3. A zero here
-    // is a real goal of «0.00%» to a reader: it made a KPI on `ctrT` draw a green
-    // «+0.12% vs 0.00%» on a pacing where nobody had set a CTR target at all. Where a
-    // null is READ decides what it means: `kpiValue` reports a bare field read as
-    // absent (no chip, no verdict), while inside arithmetic `num()` keeps the
-    // absence-is-zero canon, because an operand has to be a number.
-    out.ctrT = ctWt > 0 ? ctW / ctWt : null;
+    // and the whole point of sections-to-widgets M3. A zero here is a real goal of «0.00%»
+    // to a reader: it made a KPI on `ctrT` draw a green «+0.12% vs 0.00%» on a pacing where
+    // nobody had set a CTR target at all. Where a null is READ decides what it means:
+    // `kpiValue` reports a bare field read as absent (no chip, no verdict), while inside
+    // arithmetic `num()` keeps the absence-is-zero canon, because an operand has to be a number.
+    // ctrT answers null by the same rule, and reads the window's facts only when it is read.
+    defineLazyCtrT(out, () => {
+      if (!imprOf && ctrIds.length && IS_DEV && !warnedNoImpr) {
+        warnedNoImpr = true;
+        console.warn('campaignScalars: ctrT read without imprOf, so it is plan-weighted on a set that may have '
+          + 'delivered. Pass the window\'s per-line impressions (lineImpr).');
+      }
+      return weightedCtrT(liPlan, ctrIds, imprOf);
+    });
     out.vcrT = vcWt > 0 ? vcW / vcWt : null;
     out.acrT = acWt > 0 ? acW / acWt : null;
+    // Same null-not-zero rule, same reason: a pacing with no CPM line has no target CPM, and
+    // «$0.00» under a real CPM would read as a goal nobody set.
+    out.tgtCpm = cpmImprSum > 0 ? (cpmBudSum / cpmImprSum) * 1000 : null;
     out.daysPassed = n > 0 ? Math.max(0, Math.round(dpSum / n)) : 0;
     out.daysLeft = n > 0 ? Math.max(0, Math.round(dlSum / n)) : 0;
     return out;
@@ -2913,8 +4629,9 @@ function createDashboardMetrics(deps) {
     const isAudio = (p?.ch || '').toLowerCase() === 'audio';
     const vcrElig = isVcrEligible(p, daily);
     return {
-      // campM impressions side: CPC/CPV lines are click/view-paced — their impressions
-      // are a side-metric excluded from ctr/cpm bases.
+      // campM impressions side: CPC/CPV lines are click/view-paced, so their impressions stay
+      // out of the cpm basis (a CPC line's plan and its buying rate are clicks). The ctr basis
+      // counts every line (owner decision 2026-09-23) and needs no gate.
       nc: rt !== 'CPC' && rt !== 'CPV',
       vcrElig,
       isAudio,
@@ -2931,12 +4648,25 @@ function createDashboardMetrics(deps) {
   // Sums carry every gated basis the canonical rates need (see file header).
   const ZERO_FLOW = {
     im: 0, cl: 0, sp: 0, co: 0, coViews: 0, cv: 0, pc: 0, pv: 0, dc: 0,
+    st: 0, q1: 0, q2: 0, q3: 0, rc: 0, lc: 0,   // the six added 2026-09-08 (registry ADDED_DELIVERY_KEYS)
     imV: 0, coV: 0,          // VCR-eligible basis
     imA: 0, coA: 0,          // ACR basis (audio lines only — VCR-convention parity)
-    imNC: 0, clNC: 0, spNC: 0, // non-CPC/CPV basis (campM ctr/cpm)
+    imNC: 0, spNC: 0,        // non-CPC/CPV basis (campM cpm)
     cpvSp: 0, cpvCo: 0,      // cost-per-view basis
     expIm: 0, expCo: 0, expCl: 0, expVw: 0, // window-delta expected (AGG contexts)
+    // …and the impression-PACED half of expIm (section-widget parity 2026-09-04). campM's own
+    // `eI` counts expected units over non-CPC/CPV lines only (metrics.js:344), because a CPC
+    // line's plan is clicks and a CPV line's is views; `expIm` sums all three and therefore
+    // disagrees with it on every mixed-rate pacing. Both readings are real and neither is a
+    // substitute, so the gated one has a name of its own — the SAME name campM and the
+    // canonical metric catalogue already use for it.
+    imprExpected: 0,
   };
+
+  // The literal above is what `addRowSums` walks, so the six added on 2026-09-08 had to be
+  // typed into it by hand rather than spread from the registry. This is the key list a test
+  // pins `MetricRegistry.ADDED_DELIVERY_KEYS` against, so a seventh cannot be forgotten here.
+  const ZERO_FLOW_KEYS = Object.freeze(Object.keys(ZERO_FLOW));
 
   // `rate` converts the row's client cost to USD and is passed ONLY by callers whose
   // rows have not been through it yet. The two fact aggregates have: normalize.js
@@ -2951,20 +4681,28 @@ function createDashboardMetrics(deps) {
   // two apart. The branch stays for two reasons that are not test-visible: it says
   // in the code which path is unconverted, and it keeps a call out of the hottest
   // loop in this file, where addFact runs per line item per day.
-  function addFactTs(t, v, g, rate) {
+  //
+  // `k` (net cost mode) travels with `rate` and only with it: the unconverted callers
+  // are the ones whose money has been through neither, and a row that already came out
+  // of a fact aggregate is already net.
+  function addFactTs(t, v, g, rate, k) {
     t.im += v.im || 0; t.cl += v.cl || 0; t.sp += v.sp || 0; t.co += v.co || 0;
     t.cv += v.cv || 0; t.pc += v.pc || 0; t.pv += v.pv || 0;
-    t.dc += rate === undefined ? (v.dc || 0) : Currency.currencyToUsd(v.dc, rate);
+    t.st += v.st || 0; t.q1 += v.q1 || 0; t.q2 += v.q2 || 0; t.q3 += v.q3 || 0; t.rc += v.rc || 0; t.lc += v.lc || 0;
+    t.dc += rate === undefined ? (v.dc || 0) : PacingCore.netDc(Currency.currencyToUsd(v.dc, rate), k);
     if (g.coViews) t.coViews += v.co || 0;
     if (g.vcrElig) { t.imV += v.im || 0; t.coV += v.co || 0; }
     if (g.isAudio) { t.imA += v.im || 0; t.coA += v.co || 0; }
-    if (g.nc) { t.imNC += v.im || 0; t.clNC += v.cl || 0; t.spNC += v.sp || 0; }
+    if (g.nc) { t.imNC += v.im || 0; t.spNC += v.sp || 0; }
     if (g.cpvBasis) { t.cpvSp += v.sp || 0; t.cpvCo += v.co || 0; }
   }
 
   /** Re-sum rows that already carry the gated bases (totals over pre-gated rows). */
-  function addRowSums(t, r) {
+  function addRowSums(t, r, customKeys = []) {
     for (const k of Object.keys(ZERO_FLOW)) t[k] += r[k] || 0;
+    // Only declared additive source metrics join totals/folds. Summing every numeric
+    // property would also sum rates and allow undeclared source fields to leak in.
+    for (const k of customKeys) t[k] = (t[k] || 0) + (r[k] || 0);
   }
 
   /** Canonical rates per context basis (see file header): 'ts' ≡ chart rows,
@@ -3011,7 +4749,9 @@ function createDashboardMetrics(deps) {
       };
     }
     return {
-      ctr: t.imNC > 0 ? (t.clNC / t.imNC) * 100 : 0,
+      // Every line (owner decision 2026-09-23): the same ratio as the 'ts' basis. cpm stays on
+      // the impression-paced lines.
+      ctr: t.im > 0 ? (t.cl / t.im) * 100 : 0,
       vcr: t.imV > 0 && t.coV > 0 ? (t.coV / t.imV) * 100 : 0,
       acr: t.imA > 0 ? (t.coA / t.imA) * 100 : 0,
       cpm: t.imNC > 0 ? (t.spNC / t.imNC) * 1000 : 0,
@@ -3021,19 +4761,27 @@ function createDashboardMetrics(deps) {
   }
 
   /** Expected window deltas for ONE plan over [from..to]: value at `to` minus value just
-   *  before `from` (§3 AGG rule). liExp* clamp to the plan's flight internally. */
+   *  before `from` (§3 AGG rule). liExp* clamp to the plan's flight internally. An empty window
+   *  — `to` before `from`, which expectedBounds answers for a window that starts after asOf, or
+   *  no `to` at all on a pacing with no data yet — expects nothing. */
+  const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 });
   function expectedDeltas(p, from, to) {
+    if (!from || !to || from > to) return NO_EXPECTED;
     const base = from > p.fs
       ? { im: liExpImpr(p, datePrev(from)), co: liExpCost(p, datePrev(from)), cl: liExpClicks(p, datePrev(from)) }
       : { im: 0, co: 0, cl: 0 };
     // Raw floats — rounding happens at RENDER, never before summation (round 6.1:
     // three LIs at 0.4 each must total 1, not 0).
     const im = liExpImpr(p, to) - base.im;
+    const rt = p.rateType || 'CPM';
     return {
       expIm: im,
       expCo: liExpCost(p, to) - base.co,
       expCl: liExpClicks(p, to) - base.cl,
       expVw: viewGoalUnits(p) > 0 ? im : 0,
+      // The same gate `expVw` uses one line up, on the other side: this line's expected units
+      // count only where those units ARE impressions (campM's impressions side, metrics.js:334).
+      imprExpected: rt === 'CPC' || rt === 'CPV' ? 0 : im,
     };
   }
 
@@ -3053,6 +4801,7 @@ function createDashboardMetrics(deps) {
     if (boundsForExpected) {
       const e = expectedDeltas(p, boundsForExpected.from, boundsForExpected.to);
       t.expIm += e.expIm; t.expCo += e.expCo; t.expCl += e.expCl; t.expVw += e.expVw;
+      t.imprExpected += e.imprExpected;
     }
     return t;
   }
@@ -3062,8 +4811,16 @@ function createDashboardMetrics(deps) {
    * REAL rows with zero facts and the TRUE per-day expected curve — no forward-fill).
    * Row shape ≡ chart rows: flow fields + cumulative expected + TS-basis rates.
    */
-  function aggregateDateRows(sources, range, basis = 'ts') {
-    const { liDaily, liPlan, effLIs } = sources;
+  /* `effLIsOverride` narrows the walk to one line item WITHOUT copying `sources`.
+   * `{ ...sources, effLIs: [id] }` was the old spelling, and a spread READS every
+   * enumerable own property — including `sources.liSplitDaily`, which is a getter
+   * over the store's lazily-built per-dimension aggregate (dashboardStore.js). So
+   * the dateLi loop below materialised the FULL O(rows × dims) LSD, once per line
+   * item, on a widget that has nothing to do with dimensions. breakdown-filter.js
+   * documents the same hazard and constructs its result explicitly for this reason. */
+  function aggregateDateRows(sources, range, basis = 'ts', effLIsOverride = null) {
+    const { liDaily, liPlan } = sources;
+    const effLIs = effLIsOverride || sources.effLIs;
     const bounds = calendarBounds(sources, range);
     if (!bounds.from || !bounds.to || bounds.from > bounds.to) return [];
 
@@ -3072,9 +4829,13 @@ function createDashboardMetrics(deps) {
       if (!p) return null;
       const dd = liDaily[id] || {};
       const useBaseline = !!(range && range.from > p.fs);
+      const g = gatesOf(p, dd);
       return {
-        p, dd, g: gatesOf(p, dd),
+        p, dd, g,
         hasViewGoal: viewGoalUnits(p) > 0,
+        // `nc` is gatesOf's own impression-paced gate, read here for `imprExpected` — the same
+        // predicate the per-day fact sums already use for imNC/spNC.
+        imprPaced: g.nc,
         expImBase: useBaseline ? liExpImpr(p, datePrev(range.from)) : 0,
         expCoBase: useBaseline ? liExpCost(p, datePrev(range.from)) : 0,
         expClBase: useBaseline ? liExpClicks(p, datePrev(range.from)) : 0,
@@ -3084,7 +4845,7 @@ function createDashboardMetrics(deps) {
     const rows = [];
     for (const d of calendarDays(bounds.from, bounds.to)) {
       const t = { ...ZERO_FLOW };
-      let expIm = 0, expCo = 0, expCl = 0, expVw = 0;
+      let expIm = 0, expCo = 0, expCl = 0, expVw = 0, imprExpected = 0;
       for (const e of perLi) {
         const v = e.dd[d];
         if (v && !(e.p.fs && e.p.fe && (d < e.p.fs || d > e.p.fe))) addFactTs(t, v, e.g);
@@ -3092,10 +4853,11 @@ function createDashboardMetrics(deps) {
         expCo += liExpCost(e.p, d) - e.expCoBase;
         expCl += liExpClicks(e.p, d) - e.expClBase;
         if (e.hasViewGoal) expVw += liExpImpr(e.p, d) - e.expImBase;
+        if (e.imprPaced) imprExpected += liExpImpr(e.p, d) - e.expImBase;
       }
       rows.push({
         date: d, ...t,
-        expIm, expCo, expCl, expVw,
+        expIm, expCo, expCl, expVw, imprExpected,
         ...ratesFromSums(t, basis),
       });
     }
@@ -3106,38 +4868,121 @@ function createDashboardMetrics(deps) {
 
   const TS_FIELDS = new Set([...FIELDS_DAILY, ...FIELDS_EXPECTED, ...FIELDS_RATES, ...FIELDS_PLAN]);
   const AGG_FIELDS = TS_FIELDS;
-  // Dim buckets have no per-dim expected curve and no per-dim plan — those fields are
-  // a validation ERROR there (round 6.1: they used to read as a silent, wrong 0).
+  // What EVERY dim bucket carries: delivery counts and the rates over them. A bucket of an
+  // undeclared dimension has no plan and no expected curve, and those fields are a validation
+  // ERROR there (round 6.1: they used to read as a silent, wrong 0).
   const DIM_FIELDS_SET = new Set([...FIELDS_DAILY, ...FIELDS_RATES]);
 
   /**
-   * The fields a widget on THIS dimension source may name: the shared dim set,
-   * plus the metric keys the source declares for itself.
+   * …and what a DECLARED dimension adds (plan metrics on dim rows, 2026-09-12).
+   *
+   * A container's `dim_children` are a real plan for one value of one dimension —
+   * `dim-scope.js` has built a leaf virtual plan out of one since dim Scope shipped, and the
+   * dashboard headline paces a dim chip against exactly that. A widget cut by the same
+   * dimension was still refusing the number its own headline shows.
+   *
+   * `daysLeft` / `daysPassed` stay out. They describe a WINDOW, and a segment's window is its
+   * container's, so two rows of one table would report different day counts over the same
+   * calendar — a fact nobody reading a breakdown is asking for, stated confusingly.
+   */
+  const DIM_PLAN_SCALARS = new Set(
+    [...FIELDS_PLAN].filter((k) => k !== 'daysLeft' && k !== 'daysPassed'),
+  );
+
+  const DIM_PLAN_FIELDS = new Set([...DIM_PLAN_SCALARS, ...FIELDS_EXPECTED]);
+
+  const DIM_DECLARED_FIELDS_SET = new Set([...DIM_FIELDS_SET, ...DIM_PLAN_FIELDS]);
+
+  /** Every plan scalar spelled as an explicit NULL. A row of a declared dimension whose own
+   *  value nobody declared reads its plan cells out of this, so `fieldValue` answers null — an
+   *  em dash — instead of falling through to its terminal `return 0`. The zero is the bug this
+   *  whole rule was written against; it must not come back through the relaxed door. */
+  const DIM_PLAN_NULLS = Object.freeze(
+    Object.fromEntries([...DIM_PLAN_SCALARS].map((k) => [k, null])),
+  );
+
+  /** …and the same for the expected curve, which needs its own object because a dim bucket
+   *  already CARRIES those keys as 0 (they are part of ZERO_FLOW). `fieldValue` reads the sums
+   *  before the scalars, so an undeclared row has to say null in the sums themselves. */
+  const DIM_EXPECTED_NULLS = Object.freeze(
+    Object.fromEntries([...FIELDS_EXPECTED].map((k) => [k, null])),
+  );
+
+  /** Which dim keys this pacing declares a target on, memoised per raw-plan object. */
+  function declaredDimKeys(sources) {
+    return collectDeclaredDimKeys((sources && (sources.rawLiPlan || sources.liPlan)) || {});
+  }
+
+  /**
+   * May a row of THIS dimension carry a plan?
+   *
+   * Only a namebuilder dim that some container declares. A dimension SOURCE is its own file
+   * and containers know nothing about it; `channel` is a property of the line item rather than
+   * a declared target; the two aux cuts are files beside the facts. All three keep the original
+   * refusal, in the original words.
+   */
+  function dimIsNamebuilder(dimKey) {
+    if (typeof dimKey !== 'string' || !dimKey) return false;
+    return dimKey !== CHANNEL_DIM && !isAuxDim(dimKey) && !dimKey.startsWith('ds:');
+  }
+
+  function dimKeyPlanEligible(declaredDims, dimKey) {
+    if (!dimIsNamebuilder(dimKey)) return false;
+    return !!declaredDims && declaredDims.has(dimKey);
+  }
+
+  function dimPlanEligible(sources, dimKey) {
+    return dimKeyPlanEligible(declaredDimKeys(sources), dimKey);
+  }
+
+  /**
+   * The fields a widget on THIS dimension may name: the shared dim set, the plan half where
+   * the dimension is declared, plus the metric keys a dimension source declares for itself.
    *
    * Without it a source's own metric renders as `Unknown field "c1"` — which is
    * the good failure. The bad one is the reason this is a Set and not a relaxed
    * check: an unknown key that slips into a sum is never added by addFact and
    * prints a confident 0.
    */
-  function dimFieldSetFor(sources, sourceId) {
+  function dimFieldSetFor(sources, sourceId, dimKey = null) {
     const custom = customMetricKeys(sources, sourceId);
-    return custom.length ? new Set([...DIM_FIELDS_SET, ...custom]) : DIM_FIELDS_SET;
+    // Widened for EVERY namebuilder dimension, declared or not — the PICKER is where «this
+    // pacing declares no targets here» is enforced, and it is enforced before the save. What
+    // the runtime must not do is answer «Unknown field "planImpr"» on a widget that was
+    // authored legally and then travelled: a Library widget is validated with no pacing in
+    // hand, and a pacing can lose its containers after the fact. Those cases print an em dash,
+    // which says «no target» — a red column error says «this widget is broken», and it is not.
+    const base = dimIsNamebuilder(dimKey) ? DIM_DECLARED_FIELDS_SET : DIM_FIELDS_SET;
+    return custom.length ? new Set([...base, ...custom]) : base;
   }
 
-  /** The custom metric keys a dimension source declares, or []. */
+  /** The metric keys a dimension source carries beyond the shared dim set: the custom ones a
+   *  Google-Sheet source declares, the registry roles it MAPS that are not delivery fields
+   *  (`vi` — otherwise the loader writes the column and nothing ever reads it), and — for a
+   *  catalogued bq_mart source — the mart columns outside the delivery universe (`vi` on
+   *  devices). All three are summed the same way below. A key cannot arrive twice: `m1..m4`
+   *  are not registry keys, and a source is either mapped by hand or catalogued. */
   function customMetricKeys(sources, sourceId) {
     const configured = Array.isArray(sources?.dimSourceConfigs) ? sources.dimSourceConfigs : [];
     const src = configured.find((x) => x && typeof x === 'object' && x.id === sourceId);
     const columns = (src?.origin || {}).columns || {};
-    return MetricRegistry.customMetricsOf(columns).map((m) => m.key);
+    const keys = MetricRegistry.customMetricsOf(columns).map((m) => m.key)
+      .concat(mappedExtraMetrics(src).map((m) => m.key))
+      .concat(catalogExtraMetrics(src).map((m) => m.key));
+    return keys.filter((k, i) => keys.indexOf(k) === i);
   }
 
-  function usesWindowFn(ast) {
-    let found = false;
+  /** The first window (`tsOnly`) function an expression names, or null. Exported because the
+   *  CM360 window pass (report-render.js, spec §2.9) needs the NAME: off a date axis it prints
+   *  `dateAxisRefusal(fn)`, the same sentence `validate` shows while the author types. One
+   *  walk, so a function that becomes window-only in FUNCTIONS becomes window-only on both
+   *  paths at once. */
+  function windowFnName(ast) {
+    let found = null;
     (function walk(n) {
       if (found || !n) return;
       if (n.t === 'call') {
-        if (FUNCTIONS[n.fn]?.tsOnly) { found = true; return; }
+        if (FUNCTIONS[n.fn]?.tsOnly) { found = n.fn; return; }
         n.args.forEach(walk);
       } else if (n.t === 'bin' || n.t === 'cmp') { walk(n.l); walk(n.r); }
       else if (n.t === 'neg') walk(n.e);
@@ -3145,11 +4990,282 @@ function createDashboardMetrics(deps) {
     return found;
   }
 
-  function seriesCtx(calRows, scalars) {
+  function usesWindowFn(ast) { return windowFnName(ast) !== null; }
+
+  function scalarExpression(ast) {
+    if (ast.t === 'id') return FIELDS_PLAN.has(ast.name);
+    if (ast.t === 'call') return !FUNCTIONS[ast.fn]?.tsOnly && ast.args.every(scalarExpression);
+    if (ast.t === 'bin' || ast.t === 'cmp') return scalarExpression(ast.l) && scalarExpression(ast.r);
+    if (ast.t === 'neg') return scalarExpression(ast.e);
+    return ast.t === 'num';
+  }
+
+  // A date × LI table can skip empty calendar days only when no column reads them.
+  // round(x, precision) also reads its precision from the FIRST calendar day, even
+  // without a window function; a precision based on delivery must keep that day.
+  function calendarExpression(ast) {
+    if (ast.t === 'id') return FIELDS_EXPECTED.has(ast.name);
+    if (ast.t === 'call') return !!FUNCTIONS[ast.fn]?.tsOnly
+      || (ast.fn === 'round' && ast.args[1] && !scalarExpression(ast.args[1]))
+      || ast.args.some(calendarExpression);
+    if (ast.t === 'bin' || ast.t === 'cmp') return calendarExpression(ast.l) || calendarExpression(ast.r);
+    if (ast.t === 'neg') return calendarExpression(ast.e);
+    return false;
+  }
+
+  function factDateRows(sources, id, bounds) {
+    if (!bounds.from || !bounds.to || bounds.from > bounds.to) return [];
+    const p = sources.liPlan[id];
+    const dd = sources.liDaily[id] || {};
+    const g = gatesOf(p, dd);
+    return Object.keys(dd).filter((d) => dd[d] && d >= bounds.from && d <= bounds.to
+      && !(p.fs && p.fe && (d < p.fs || d > p.fe))).sort().map((date) => {
+      const sums = { ...ZERO_FLOW };
+      addFactTs(sums, dd[date], g);
+      return { date, ...sums, ...ratesFromSums(sums, 'entity') };
+    });
+  }
+
+  function expressionFieldError(ast, errors) {
+    if (!ast || !errors) return null;
+    if (ast.t === 'id') return errors[ast.name] || null;
+    if (ast.t === 'call') return ast.args.map((a) => expressionFieldError(a, errors)).find(Boolean) || null;
+    if (ast.t === 'bin' || ast.t === 'cmp') return expressionFieldError(ast.l, errors) || expressionFieldError(ast.r, errors);
+    if (ast.t === 'neg') return expressionFieldError(ast.e, errors);
+    return null;
+  }
+
+  /* ── primary conversions: readings that cannot be answered (spec 2026-09-13 §3, §4) ── */
+
+  /** The three conversion fields a line item's choice rebuilds. */
+  const CV_FIELDS = new Set(['cv', 'pc', 'pv']);
+
+  /** Does this AST name any field of `names`? Every branch counts, an untaken `if` branch too:
+   *  a formula over an unknown operand is an unknown reading. */
+  function astNamesAny(ast, names) {
+    let found = false;
+    (function walk(n) {
+      if (found || !n) return;
+      if (n.t === 'id') { if (names.has(n.name)) found = true; return; }
+      if (n.t === 'call') n.args.forEach(walk);
+      else if (n.t === 'bin' || n.t === 'cmp') { walk(n.l); walk(n.r); }
+      else if (n.t === 'neg') walk(n.e);
+    })(ast);
+    return found;
+  }
+
+  /** A compiled column that reads a conversion field, bare or inside a formula. */
+  function readsCvField(c) {
+    if (!c) return false;
+    if (c.kind === 'field') return CV_FIELDS.has(c.field);
+    return c.kind === 'expr' && astNamesAny(c.ast, CV_FIELDS);
+  }
+
+  /** The same question about a stored expression, for the renderer's column rules. */
+  function expressionReadsConversions(expr) {
+    if (typeof expr !== 'string' || !expr) return false;
+    const parsed = parse(expr);
+    return !!(parsed.ok && parsed.ast) && astNamesAny(parsed.ast, CV_FIELDS);
+  }
+
+  /** Is the switch operative for the facts this widget reads? The overlay registers state only
+   *  when it is, so no state is the switch-off path and every reader below returns untouched. */
+  function cvOperative(sources) {
+    if (!sources) return false;
+    const daily = sources.liDaily;
+    const campaign = sources.campaignLiDaily;
+    return !!((daily && cvStateOf(daily)) || (campaign && cvStateOf(campaign)));
+  }
+
+  /** Operative, and some line item in view carries a stored choice. The RAW plan first: the
+   *  period and dimension virtual plans drop fields they do not know. */
+  function primaryCvInView(sources) {
+    if (!cvOperative(sources)) return false;
+    const plans = sources.rawLiPlan || sources.liPlan || {};
+    return (sources.effLIs || []).some((id) => {
+      const list = hasOwn(plans, id) ? plans[id].primaryCv : null;
+      return Array.isArray(list) && list.length > 0;
+    });
+  }
+
+  /** Does a plan's flight touch this window? A line item outside it adds nothing to a reading,
+   *  so it cannot make the reading unknown either. */
+  function planReaches(p, range) {
+    if (!p) return false;
+    if (!range || !(p.fs && p.fe)) return true;
+    return !(range.from && p.fe < range.from) && !(range.to && p.fs > range.to);
+  }
+
+  /** The line items of `ids` whose conversions `sources.liDaily` cannot answer inside `range`.
+   *  A line item the view keeps nothing of is not in view: its conversions read 0, like its
+   *  delivery, and it never nulls a total (spec §4). */
+  function cvOffIds(sources, ids, range) {
+    const daily = sources && sources.liDaily;
+    if (!daily || !cvStateOf(daily)) return [];
+    return (ids || []).map(String).filter((id) => cvBlocksTotals(daily, id)
+      && planReaches(sources.liPlan && sources.liPlan[id], range));
+  }
+
+  /** Why a total built on conversions reads «—» (spec §3 totals rule): the rate rows' own words
+   *  (brick-data.js `cvUnavailableText`), so a table and a rate row never disagree. */
+  function cvCannotShowText(n) {
+    const count = n > 0 ? n : 1;
+    return `${count} line item${count === 1 ? '' : 's'} cannot show conversions here`;
+  }
+
+  /** Why a row that holds more than one line item reads «—» in its conversion cells. */
+  const CV_ROW_REASON = 'A line item in this row cannot show conversions here';
+
+  /** Why one line item's own row reads «—»: its state's reason (source, file, filter). */
+  function cvReasonOf(sources, id) {
+    const state = sources && sources.liDaily ? cvStateOf(sources.liDaily) : null;
+    const entry = state && state[String(id)];
+    return (entry && entry.reason) || CV_ROW_REASON;
+  }
+
+  /** The line items whose conversions no longer come from the platform: a choice applied
+   *  (primary) or one that cannot be (unavailable). A file keyed by a device or a creative
+   *  carries platform conversions only, so it can place neither. */
+  function cvRebuiltIds(sources) {
+    const daily = sources && sources.liDaily;
+    const state = daily ? cvStateOf(daily) : null;
+    if (!state) return null;
+    const out = new Set();
+    for (const id of sources.effLIs || []) {
+      const s = state[String(id)];
+      if (s && s.cv !== CV.PLATFORM) out.add(String(id));
+    }
+    return out;
+  }
+
+  /** Namebuilder dimension: unavailable line items, plus the ones the split record says cannot
+   *  be placed in a bucket of THIS dimension. */
+  function splitCvIds(sources, dimKey) {
+    if (!cvOperative(sources)) return null;
+    const ids = new Set(cvOffIds(sources, sources.effLIs, null));
+    const lsd = sources.liSplitDaily;
+    const split = lsd ? splitStateOf(lsd) : null;
+    if (split) {
+      for (const id of sources.effLIs || []) {
+        const entry = split[String(id)];
+        if (entry && entry[dimKey] && entry[dimKey].cv === true) ids.add(String(id));
+      }
+    }
+    return ids;
+  }
+
+  /** One cut's record of what its conversion cells cannot say: the line items, the bucket
+   *  labels they touched, and whether the remainder and the totals include them. */
+  function newCvBlock(ids) {
+    return ids && ids.size ? { ids, labels: new Set(), residual: false, totals: false } : null;
+  }
+
+  /** A day row or a source row, in the engine's short names, that carries delivery. A row with none
+   *  cannot put a line item in a bucket (spec §4: the buckets its delivery touches). */
+  function dayHasDelivery(v) {
+    return !!v && ((Number(v.im) || 0) > 0 || (Number(v.cl) || 0) > 0 || (Number(v.co) || 0) > 0
+      || (Number(v.sp) || 0) > 0 || (Number(v.dc) || 0) > 0);
+  }
+
+  function channelCvBlock(sources, range) {
+    const block = newCvBlock(new Set(cvOffIds(sources, sources.effLIs, range)));
+    if (!block) return null;
+    for (const id of block.ids) block.labels.add((sources.liPlan[id] && sources.liPlan[id].ch) || 'Unknown');
+    block.totals = true;
+    return block;
+  }
+
+  /** Is this row of a cut one whose conversion cells are unknown? */
+  function cvBlockedLabel(cut, label) {
+    if (!cut || !cut.cvBlock) return false;
+    return label === cut.residual ? cut.cvBlock.residual : cut.cvBlock.labels.has(label);
+  }
+
+  /** Per calendar row: does it include a line item whose conversions are unavailable? */
+  function cvDateMask(sources, rows, ids, range) {
+    const off = cvOffIds(sources, ids, range);
+    if (!off.length) return null;
+    const plans = off.map((id) => sources.liPlan[id]);
+    return rows.map((r) => plans.some((p) => !(p.fs && p.fe) || (r.date >= p.fs && r.date <= p.fe)));
+  }
+
+  /** A column's values with the masked cells emptied. A window function carries every earlier
+   *  day into the later ones, so one unknown day empties the whole column. */
+  function maskCvValues(values, mask, windowed) {
+    if (windowed && mask.some(Boolean)) return values.map(() => null);
+    return values.map((v, i) => (mask[i] ? null : v));
+  }
+
+  /** The Conversion Action chip's counts for one row: line items in view that carry the action,
+   *  and how many of those have it in their operative choice. Sparse: null when none chose it.
+   *  A row is a DISPLAY name (spec docs/2026-09-24-display-names.md) and a choice is stored as
+   *  raw actions, so `actionLis` maps each line item to the raw actions it carries under the
+   *  row: a line item counts as choosing the row when its choice holds every one of them. With
+   *  no names stored that set is the row's own action, which is today's test. */
+  function primaryMarkOf(sources, cut, label) {
+    const lis = cut.leftovers.has(label) ? null : cut.actionLis.get(label);
+    if (!lis || lis.size === 0) return null;
+    const plans = sources.rawLiPlan || sources.liPlan || {};
+    let chosen = 0;
+    for (const [id, raws] of lis) {
+      const p = hasOwn(plans, id) ? plans[id] : null;
+      if (p && p.conversionData === true && Array.isArray(p.primaryCv)
+        && [...raws].every((raw) => p.primaryCv.includes(raw))) chosen += 1;
+    }
+    return chosen > 0 ? { primary: { chosen, of: lis.size } } : null;
+  }
+
+  // Primary conversions (spec 2026-09-13 §3 "Days"): a conversion-only day row is not a fact.
+  // Without the skip a "spend < X" rule would paint a delivery cell on that date. Not
+  // operative: cvOnlyDaysOf answers null and both functions run today's test.
+  const isCvOnlyDay = (cvOnly, id, date) => !!(cvOnly && cvOnly[id] && cvOnly[id].has(date));
+  function highlightHasFacts(sources, range, ids = sources?.effLIs || []) {
+    const cvOnly = sources?.liDaily ? cvOnlyDaysOf(sources.liDaily) : null;
+    return ids.some((id) => Object.entries(sources?.liDaily?.[id] || {}).some(([date, value]) => value
+      && !isCvOnlyDay(cvOnly, id, date)
+      && (!range || ((!range.from || date >= range.from) && (!range.to || date <= range.to)))
+      && highlightDateInPlan(date, sources.liPlan?.[id])));
+  }
+  const highlightDateInPlan = (date, plan) => !!plan && !(plan.fs && plan.fe && (date < plan.fs || date > plan.fe));
+  function highlightDateRows(rows, sources, ids = sources.effLIs) {
+    const cvOnly = sources.liDaily ? cvOnlyDaysOf(sources.liDaily) : null;
+    const dates = new Set(ids.flatMap((id) => Object.entries(sources.liDaily?.[id] || {})
+      .filter(([date, value]) => value && !isCvOnlyDay(cvOnly, id, date)
+        && highlightDateInPlan(date, sources.liPlan?.[id])).map(([date]) => date)));
+    return rows.map((row) => ({ ...row, __highlightFacts: dates.has(row.date) }));
+  }
+
+  const HIGHLIGHT_TARGET_FIELDS = new Set(['ctrT', 'vcrT', 'acrT', 'tgtCpm']);
+
+  function highlightFieldValue(name, sums, scalars, basis) {
+    if (scalars && name in scalars) {
+      const value = scalars[name];
+      return HIGHLIGHT_TARGET_FIELDS.has(name) && !(value > 0) ? null : value;
+    }
+    if (sums?.__highlightFacts === false && (FIELDS_DAILY.has(name) || FIELDS_RATES.has(name))) return null;
+    const denominators = {
+      ctr: 'im', cpm: basis === 'agg' ? 'imNC' : 'im',
+      vcr: 'imV', acr: basis === 'entity' ? 'im' : 'imA', cpc: 'cl',
+      cpv: basis === 'entity' ? 'co' : 'cpvCo',
+    };
+    if (Object.hasOwn(denominators, name)) {
+      if (!(sums?.[denominators[name]] > 0)) return null;
+      if (name === 'vcr' && basis === 'entity' && !(sums.coV > 0)) return null;
+      return ratesFromSums(sums, basis)[name];
+    }
+    return sums && Object.hasOwn(sums, name) ? sums[name] : null;
+  }
+
+  function seriesCtx(calRows, scalars, highlightBasis = null) {
     const cols = new Map();
     return {
       length: calRows.length,
       get(name) {
+        if (highlightBasis) {
+          if (!cols.has(name)) cols.set(name, calRows.map((r) => highlightFieldValue(name, r, scalars,
+            highlightBasis === 'dateLi' && (name === 'acr' || name === 'cpv') ? 'ts' : highlightBasis === 'dateLi' ? 'entity' : highlightBasis)));
+          return cols.get(name);
+        }
         if (scalars && name in scalars) return scalars[name];
         if (!FIELDS_DAILY.has(name) && !FIELDS_EXPECTED.has(name) && !FIELDS_RATES.has(name)) return null;
         if (!cols.has(name)) cols.set(name, calRows.map((r) => r[name] ?? 0));
@@ -3158,10 +5274,11 @@ function createDashboardMetrics(deps) {
     };
   }
 
-  function aggCtx(sums, scalars, basis = 'agg') {
+  function aggCtx(sums, scalars, basis = 'agg', highlightSafe = false) {
     const rates = ratesFromSums(sums, basis);
     return {
       get(name) {
+        if (highlightSafe) return highlightFieldValue(name, sums, scalars, basis);
         if (name in rates) return rates[name];          // rates BEFORE raw sums (gated)
         if (name in sums) return sums[name];            // incl. expected window deltas
         if (scalars && name in scalars) return scalars[name];
@@ -3200,6 +5317,16 @@ function createDashboardMetrics(deps) {
 
   /* ── dim buckets (shared by dim tables and dim categories) ────────────────── */
 
+  /** The unit a pacing BUYS in, by its dominant rate type. Its own copy rather than an import
+   *  from auto-controls.js, which reaches metric-catalog.js and would close an import cycle
+   *  back onto this module. Two lines, and the pair is pinned by a test. */
+  const BUY_UNIT_OF_RATE = { CPC: 'cl', CPV: 'co' };
+
+  /** The one entry in a bucket's per-line delivery map that is not a line item: the untagged
+   *  remainder, which is line totals minus the tagged buckets and therefore has no line of its
+   *  own. A line item id is always digits, so this can never collide with one. */
+  const RESIDUAL_ORIGIN = '__residual__';
+
   // A dimension-source axis is written `ds:<sourceId>:<dimKey>` — the two colons
   // are what tells it apart from a namebuilder dim, whose keys never contain one.
   // Returns null for anything else, so the caller keeps its existing path.
@@ -3227,6 +5354,74 @@ function createDashboardMetrics(deps) {
     return Object.prototype.hasOwnProperty.call(groups, dim) ? groups[dim] : undefined;
   }
 
+  /** Raw auxiliary files bypass normalize.js. Apply its coefficient rule per row,
+   * using only dimensions this source can actually identify. A DSP creative name
+   * is not the namebuilder's creative dimension; only brk or an explicit source
+   * mapping can supply those values. Keep ordinary client cost on the currency path. */
+  function coefficientFactReader(sources, sourceId, fieldErrors) {
+    const indexes = new Map();
+    const configured = Array.isArray(sources.dimSourceConfigs) ? sources.dimSourceConfigs : [];
+    const config = configured.find((s) => s && s.id === sourceId);
+    const mappings = new Map();
+    for (const d of config?.origin?.columns?.dims || []) {
+      if (d?.brk_dim && !mappings.has(d.brk_dim)) mappings.set(d.brk_dim, {
+        key: d.key, groups: dimSourceGroups(sources, sourceId, d.key),
+      });
+    }
+    return (fact, raw, lid, plan) => {
+      // Virtual Scope plans describe targets and may be leaves. Cost attribution
+      // still follows the original per-row coefficient rules, like base facts.
+      plan = sources.rawLiPlan?.[lid] || plan;
+      if (!plan?.coef) return fact;
+      if (!indexes.has(lid)) indexes.set(lid, PacingCore.buildMarginIndex(plan));
+      const idx = indexes.get(lid);
+      const row = Object.assign(Object.create(null), { date: raw.date, spend: fact.sp });
+      for (const e of idx.dim) {
+        if (raw.date < e.fs || raw.date > e.fe || hasOwn(row, e.key)) continue;
+        const mapping = mappings.get(e.key);
+        if (mapping && raw.dims && hasOwn(raw.dims, mapping.key)) {
+          row[e.key] = groupValue(mapping.key, raw.dims[mapping.key], mapping.groups).label;
+        } else if (raw.brk && hasOwn(raw.brk, e.key)) row[e.key] = raw.brk[e.key];
+        else if (e.key === 'platform' && hasOwn(raw.filter_context || {}, 'platform')) row[e.key] = raw.filter_context.platform;
+        else if (hasOwn(raw.filter_context?.dims || {}, e.key)) row[e.key] = raw.filter_context.dims[e.key];
+      }
+      const dc = PacingCore.coefDcForRow(idx, row);
+      // A mapped dictionary and a canonical breakdown can disagree. Neither is
+      // evidence that the other margin is a known nonmatch. Compare the two reads
+      // through the same precedence rules; unrelated labels / equal costs are safe.
+      const canonical = { ...row };
+      const conflicts = [];
+      for (const key of Object.keys(row)) {
+        if (!mappings.has(key) || !raw.brk || !hasOwn(raw.brk, key)) continue;
+        if (String(row[key] ?? '').trim() === String(raw.brk[key] ?? '').trim()) continue;
+        canonical[key] = raw.brk[key];
+        conflicts.push(key);
+      }
+      if (conflicts.length && PacingCore.coefDcForRow(idx, canonical) !== dc) {
+        fieldErrors.dc = `Client cost is unavailable: source and breakdown ${conflicts.join(', ')} values disagree on coefficient margins.`;
+        return { ...fact, dc: 0 };
+      }
+      // An absent dimension may match an earlier override. If that would change
+      // cost, neither this row nor a total of it has a defensible Client Cost.
+      // Later rules cannot affect a known first match; equal margins and zero spend
+      // remain answerable even when a dimension is absent.
+      // Both interpretations must be answerable. A mapped first match must not
+      // conceal an unknown later margin in the canonical interpretation.
+      for (const candidate of conflicts.length ? [row, canonical] : [row]) {
+        for (const e of idx.dim) {
+          if (raw.date < e.fs || raw.date > e.fe) continue;
+          if (hasOwn(candidate, e.key)) {
+            if (candidate[e.key] != null && String(candidate[e.key]).trim() === e.val) break;
+          } else if (PacingCore.coefDcForRow({ dim: [], dateCh: [], cont: [], mTgt: e.m }, candidate) !== dc) {
+            fieldErrors.dc = `Client cost is unavailable: this source does not identify ${e.key} values needed for coefficient margins.`;
+            return { ...fact, dc: 0 };
+          }
+        }
+      }
+      return { ...fact, dc };
+    };
+  }
+
   /**
    * Can this source answer the dashboard's dimension filter, and how?
    *
@@ -3244,15 +5439,20 @@ function createDashboardMetrics(deps) {
    *
    * → { matchers: [{ dimKey, groups, values }], unanswered: ['geo', …] }
    */
-  function dimSourceFilterPlan(sources, sourceId, brkf) {
+  function dimSourceFilterPlan(sources, sourceId, brkf, platforms = sources?.platforms) {
     const pairs = parseBreakdownFilters({ brkf });
     const out = { matchers: [], unanswered: [] };
-    if (!pairs.length) return out;
+    if (!pairs.length && !platforms?.length) return out;
+    for (const pair of pairs) {
+      if (pair.key === OUTSIDE_KEY && !out.unanswered.includes(pair.dim)) out.unanswered.push(pair.dim);
+    }
     const configured = Array.isArray(sources?.dimSourceConfigs) ? sources.dimSourceConfigs : [];
     const src = configured.find((s) => s && typeof s === 'object' && s.id === sourceId);
     const dims = (((src || {}).origin || {}).columns || {}).dims || [];
     const cols = (((src || {}).origin || {}).columns) || {};
-    for (const [brkDim, values] of groupBreakdownFilters(pairs)) {
+    const cuts = [...groupBreakdownFilters(pairs)];
+    if (platforms?.length) cuts.push(['platform', new Set(platforms.map(String))]);
+    for (const [brkDim, values] of cuts) {
       // An explicit claim wins. A library that says it IS the flight column was
       // set by a person looking at this source; the composed name is the general
       // fallback, and where both exist the specific statement is the truer one.
@@ -3278,7 +5478,84 @@ function createDashboardMetrics(deps) {
     return out;
   }
 
-  function dimSourceBuckets(sources, sourceId, dim, range) {
+  // One prepared answer per source object/window. Rendering a table, its reason and
+  // its coverage line must not each scan the same auxiliary file.
+  const sourceRowsCache = new WeakMap();
+  function filterSourceRows(sources, dimKey, range = null) {
+    if (!sources) return { rows: [], reason: null };
+    let cache = sourceRowsCache.get(sources);
+    if (!cache) { cache = new Map(); sourceRowsCache.set(sources, cache); }
+    const key = JSON.stringify([dimKey, range?.from, range?.to]);
+    if (cache.has(key)) return cache.get(key);
+    const save = (result) => {
+      if (cache.size >= 32) cache.delete(cache.keys().next().value);
+      cache.set(key, result);
+      return result;
+    };
+    if (isAuxDim(dimKey)) {
+      const result = filterAuxRows(
+        dimKey === AUX_CREATIVE ? sources.creatives : sources.conversions,
+        sources, { liIds: sources.effLIs, liPlan: sources.liPlan, range,
+          outsidePlanMap: sources.rawLiPlan || sources.liPlan, containerFilters: sources.containerFilters,
+          lensContext: sources.lensContext === true,
+          // Conversion tags (primary conversions spec 2026-09-13 §4, §9): a conversion row's own tags
+          // count against the pacing's unfiltered delivery, and a refusal says what is true for this
+          // file. Creative rows carry no own tags and keep today's sentences.
+          ...(dimKey === AUX_CONVERSION ? {
+            tagMembers: Array.isArray(sources.cvTagFacts) ? purityIndex(sources.cvTagFacts) : null,
+            tagsOn: sources.conversionTagsOn === true, fileTags: sources.conversionTags || null,
+          } : null) },
+      );
+      const name = dimKey === AUX_CREATIVE ? 'Creative asset data' : 'Conversion action data';
+      return save(result.reason ? { ...result, reason: result.reason.replace('This data', name) } : result);
+    }
+    const ds = parseDimSourceKey(dimKey);
+    if (!ds) return save({ rows: [], reason: null });
+    const plan = dimSourceFilterPlan(sources, ds.sourceId, sources.brkf);
+    if (plan.unanswered.length) return save({ rows: [], reason: `This source does not follow the active ${plan.unanswered.join(', ')} filters. Clear these filters to see the breakdown.` });
+    const ids = new Set((sources.effLIs || []).map(String));
+    const rows = sources.dimSources?.[ds.sourceId]?.rows || [];
+    const containerPlans = new Map();
+    const kept = [];
+    for (const r of rows) {
+      if (!r || !ids.has(String(r.line_item_id))) continue;
+      const p = sources.liPlan?.[r.line_item_id];
+      if (p?.fs && p?.fe && (r.date < p.fs || r.date > p.fe)) continue;
+      if (range && (r.date < range.from || r.date > range.to)) continue;
+      let unknown = false;
+      let matches = true;
+      if (!containerPlans.has(r.line_item_id)) {
+        const pairs = Object.entries(sources.containerFilters?.[r.line_item_id] || {})
+          .flatMap(([dim, values]) => values.map((value) => `${dim}:${value}`));
+        containerPlans.set(r.line_item_id, dimSourceFilterPlan(sources, ds.sourceId, pairs, []));
+      }
+      const containerPlan = containerPlans.get(r.line_item_id);
+      if (containerPlan.unanswered.length) unknown = true;
+      const matchers = plan.matchers.concat(containerPlan.matchers.map((m) => ({ ...m, includeUnnamed: true })));
+      for (const m of matchers) {
+        const values = m.from === 'name' ? r.brk : r.dims;
+        const field = m.from === 'name' ? m.dim : m.dimKey;
+        if (!hasOwn(values || {}, field)) { unknown = true; continue; }
+        const own = values[field];
+        if (m.includeUnnamed && (own == null || !String(own).trim() || String(own).trim() === '-')) continue;
+        if (m.from === 'name'
+          ? !m.folded.has(String(own ?? '').trim().toLowerCase())
+          : !m.values.has(groupValue(m.dimKey, own, m.groups).label)) matches = false;
+      }
+      if (!matches) continue;
+      if (unknown) return save({ rows: [], reason: 'This source does not follow the active filters: some rows are missing the required dimension values. Clear these filters to see the breakdown.' });
+      kept.push(r);
+    }
+    return save({ rows: kept, reason: null });
+  }
+
+  function sourceFilterReason(sources, dimKey, range = null) {
+    return filterSourceRows(sources, dimKey, range).reason;
+  }
+
+  /** `leftovers` is the caller's Set, filled with the keys this function MINTED for rows the
+   *  source could not name (the four early exits below hand back no buckets and so add none). */
+  function dimSourceBuckets(sources, sourceId, dim, range, leftovers, fieldErrors, cvBlock = null) {
     const map = sources.dimSources;
     if (!map || !Object.prototype.hasOwnProperty.call(map, sourceId)) return {};
     // The file is here and its rows are real, but they may not be read for THIS
@@ -3290,10 +5567,9 @@ function createDashboardMetrics(deps) {
     // A filter this source cannot answer must not quietly produce the UNFILTERED
     // total beside filtered delivery — the number would describe a different
     // campaign than everything around it.
-    const plan = dimSourceFilterPlan(sources, sourceId, sources.brkf);
-    if (plan.unanswered.length) return {};
-    const entry = map[sourceId];
-    const rows = entry && Array.isArray(entry.rows) ? entry.rows : [];
+    const filtered = filterSourceRows(sources, `ds:${sourceId}:${dim}`, range);
+    if (filtered.reason) return {};
+    const rows = filtered.rows;
     // The metric keys this source invented. Read once, outside the row loop.
     const custom = customMetricKeys(sources, sourceId);
     // This SOURCE's dictionary for this dimension. Passed rather than looked up by
@@ -3310,6 +5586,7 @@ function createDashboardMetrics(deps) {
     // memo that re-fires on every filter change and column-header click. The
     // namebuilder path below hoists it for the same reason.
     const gateCache = new Map();
+    const coefficientFact = coefficientFactReader(sources, sourceId, fieldErrors);
     const gatesFor = (lid, p) => {
       if (!gateCache.has(lid)) gateCache.set(lid, gatesOf(p, (sources.liDaily || {})[lid]));
       return gateCache.get(lid);
@@ -3322,40 +5599,39 @@ function createDashboardMetrics(deps) {
       const p = (sources.liPlan || {})[lid];
       if (p && p.fs && p.fe && (r.date < p.fs || r.date > p.fe)) continue;
       if (range && (r.date < range.from || r.date > range.to)) continue;
-      if (plan.matchers.length) {
-        let kept = true;
-        for (const m of plan.matchers) {
-          if (m.from === 'name') {
-            const own = (r.brk && Object.prototype.hasOwnProperty.call(r.brk, m.dim)) ? r.brk[m.dim] : '';
-            // Case-folded: VERIFIED on a live pacing where the sheet's own name
-            // says "3rd party" and the fact built from the same convention says
-            // "3rd Party". Comparing raw would drop every row of that slice.
-            if (!m.folded.has(String(own).trim().toLowerCase())) { kept = false; break; }
-            continue;
-          }
-          const own = (r.dims && Object.prototype.hasOwnProperty.call(r.dims, m.dimKey)) ? r.dims[m.dimKey] : '';
-          // Through the dictionary, exactly as the axis is: the filter compares
-          // canonical values, and the raw spelling is what the sheet happens to
-          // have typed this time.
-          const label = groupValue(m.dimKey, own, m.groups).label;
-          if (!m.values.has(label)) { kept = false; break; }
-        }
-        if (!kept) continue;
-      }
       const raw = (r.dims && Object.prototype.hasOwnProperty.call(r.dims, dim)) ? r.dims[dim] : '';
       const g = groupValue(dim, raw, stored);
       // Blank and dropped values fold into one bucket rather than disappearing, so
       // the rows still add up to what the source reported. The wording matches the
       // Breakdown panel's row — two surfaces must not name the same thing twice.
-      const key = (g.drop || String(raw == null ? '' : raw).trim() === '') ? 'No value' : g.label;
+      const unnamed = !!g.drop || String(raw == null ? '' : raw).trim() === '';
+      const key = unnamed ? NO_VALUE_LABEL : g.label;
+      // Marked where the fold DECIDES, not by reading the label back: a source whose values
+      // literally include «No value» is a real segment until a blank row lands in it too.
+      if (unnamed) leftovers.add(key);
       if (!Object.prototype.hasOwnProperty.call(buckets, key)) {
         Object.defineProperty(buckets, key, {
           value: { ...ZERO_FLOW }, enumerable: true, writable: true, configurable: true,
         });
       }
-      // The one caller that passes a rate — see addFact. `sources.rate` is the
-      // campaign's, the same scalar normalize.js applies to the fact aggregates.
-      addFactTs(buckets[key], r.metrics || {}, gatesFor(lid, p), sources.rate ?? null);
+      // Coefficient cost is derived from USD spend; only ordinary raw cost converts —
+      // and only it takes the net ratio, for the same reason.
+      const moneyPlan = sources.rawLiPlan?.[lid] || p;
+      let fact = coefficientFact(r.metrics || {}, r, lid, p);
+      // Primary conversions (spec §4 "Dimension sources"): a device or sheet row carries the
+      // platform's conversions and names no action, so a line item whose conversions were rebuilt
+      // adds none; while it is in view, the bucket it delivers into cannot say how many count, and
+      // neither can the total. One the view keeps nothing of reads 0 and nulls nothing. A copy, so
+      // the loaded row is never written.
+      if (cvBlock && cvBlock.ids.has(lid)) {
+        fact = { ...fact, cv: 0, pc: 0, pv: 0 };
+        if (isInView(sources.liDaily, lid)) {
+          cvBlock.totals = true;
+          if (dayHasDelivery(fact)) cvBlock.labels.add(key);
+        }
+      }
+      addFactTs(buckets[key], fact, gatesFor(lid, p),
+        moneyPlan?.coef ? undefined : (sources.rate ?? null), moneyPlan?.k);
       // A source's OWN metrics, summed beside the canonical ones and never inside
       // them: they have no plan, no goal, no margin and no rate, so they enter no
       // basis and no derived ratio. addFact hardcodes every key it knows, which is
@@ -3394,8 +5670,8 @@ function createDashboardMetrics(deps) {
     // the tile were showing a measured zero.
     if (!breakdownServable(map, ds.sourceId, ds.dim)) return null;
     const entry = map[ds.sourceId];
-    const rows = entry && Array.isArray(entry.rows) ? entry.rows : [];
-    if (rows.length === 0) return null;
+    const { rows, reason } = filterSourceRows(sources, axisKey, range);
+    if (reason || rows.length === 0) return null;
 
     const ids = (sources.effLIs || []).map(String);
     if (ids.length === 0) return null;
@@ -3447,34 +5723,667 @@ function createDashboardMetrics(deps) {
     return parts.join(' · ');
   }
 
-  function dimBuckets(sources, dimKey, range) {
+  /* ── the two AUX cuts (section-widget parity 2026-09-04) ──────────────────── */
+
+  /** The DSP's own creative, and the conversions mart's action. Each is a file beside the facts
+   *  (`data.fetch_creatives` / `fetch_conversions`) rather than a `dim:value` split key, which is
+   *  why they need a bucket source of their own — `liSplitDaily` has never carried either. The
+   *  keys are the grammar's, judged there against the same closed list. */
+  const AUX_CREATIVE = 'aux:creative';
+  const AUX_CONVERSION = 'aux:conversion';
+  const isAuxDim = (key) => key === AUX_CREATIVE || key === AUX_CONVERSION;
+
+  /** An aux row in the engine's own field names. The two files carry the RAW fact spelling
+   *  (`impressions`, `post_click_conversions`), the same one row-utils' addFact reads, where
+   *  every aggregate this module sums is already short-named. */
+  function auxFact(dimKey, r) {
+    if (dimKey === AUX_CONVERSION) {
+      return { cv: +r.conversions || 0, pc: +r.post_click_conversions || 0, pv: +r.post_view_conversions || 0 };
+    }
+    return {
+      im: +r.impressions || 0, cl: +r.clicks || 0, sp: +r.spend || 0, co: +r.completes || 0,
+      cv: +r.conversions || 0, pc: +r.post_click_conversions || 0, pv: +r.post_view_conversions || 0,
+      dc: +r.dynamic_cost || 0,
+      // The six added 2026-09-08 (registry ADDED_DELIVERY_KEYS). A creatives row carries them
+      // under the same column names, sparsely — absent on a display row, present on a video one.
+      // Left out, a Creative-cut widget on `st`/`rc` reads a confident 0 and the «Others» row
+      // takes the whole number. The conversion arm above carries none of them by design.
+      st: +r.starts || 0, q1: +r.first_quartiles || 0, q2: +r.midpoints || 0, q3: +r.third_quartiles || 0,
+      rc: +r.reach || 0, lc: +r.link_clicks || 0,
+    };
+  }
+
+  /** …and what the file calls it, or '' where it names it nothing. The legacy panel's own rule:
+   *  a DSP creative falls back to its id where the export carries no name (Search and DOOH rows
+   *  do). The caller folds an unnamed row into the «Unclassified» bucket every other cut in this
+   *  file mints — HERE, so the fold is one decision and the leftover mark follows it. */
+  function auxRaw(dimKey, r) {
+    if (dimKey === AUX_CONVERSION) {
+      return (r.conversion_action && String(r.conversion_action).trim()) || '';
+    }
+    return (r.creative && String(r.creative).trim()) || r.creative_id || '';
+  }
+
+  /** …and what it is SHOWN as: the pacing's display name for that value (spec
+   *  docs/2026-09-24-display-names.md), else the value itself. The one place a Creative or
+   *  Conversion Action row gets its name, so two values with one display name are one bucket,
+   *  and a kept conversion row lands on its creative's renamed row (auxBuckets, below). The
+   *  rows themselves stay raw: Primary conversions and CM360 matching read them. */
+  function auxLabel(dimKey, r, labels) {
+    const raw = auxRaw(dimKey, r);
+    const map = labels ? labels[dimKey === AUX_CONVERSION ? 'conversion_action' : 'creative'] : null;
+    return raw && map ? ValueLabels.labelOf(map, raw) : raw;
+  }
+
+  /** `leftovers` is the caller's Set, as in `dimSourceBuckets`. `cvOnlyOut`, a Set the caller hands
+   *  on an operative Creative cut, receives the buckets only conversion rows reached (spec §4
+   *  "Conversion-only rows and days"). */
+  function auxBuckets(sources, dimKey, range, leftovers, fieldErrors, cvBlock = null, actionLis = null, cvOnlyOut = null) {
+    const { rows, reason } = filterSourceRows(sources, dimKey, range);
+    if (reason || rows.length === 0) return {};
+    const inView = new Set((sources.effLIs || []).map(String));
+    if (inView.size === 0) return {};
+    const buckets = {};
+    // Gates are a property of the LINE, not of the row — dimSourceBuckets' own cache, for its
+    // own reason: `isVcrEligible` walks a line's whole daily map, and these files are per row.
+    const gateCache = new Map();
+    const coefficientFact = coefficientFactReader(sources, null, fieldErrors);
+    const gatesFor = (lid, p) => {
+      if (!gateCache.has(lid)) gateCache.set(lid, gatesOf(p, (sources.liDaily || {})[lid]));
+      return gateCache.get(lid);
+    };
+    const ensure = (key) => {
+      if (!hasOwn(buckets, key)) {
+        Object.defineProperty(buckets, key, {
+          value: { ...ZERO_FLOW }, enumerable: true, writable: true, configurable: true,
+        });
+      }
+    };
+    // Primary conversions on the Creative cut (spec §4 "Which rows count"): a line item whose
+    // conversions were rebuilt adds none from its creative rows. A primary one in view takes the
+    // chosen rows its day map holds (cvKeptOf: the rows the view's filters kept), bucketed by
+    // creative below, so «Others» (line total minus buckets) never eats into another line item's
+    // conversions; an unavailable one in view makes the buckets it delivers into, and the total,
+    // unknown. Only when dimBuckets handed a block, which it does on an operative Creative cut.
+    const dayState = cvBlock && dimKey === AUX_CREATIVE ? cvStateOf(sources.liDaily) : null;
+    for (const r of rows) {
+      if (!r) continue;
+      const lid = String(r.line_item_id);
+      if (!inView.has(lid)) continue;
+      const p = (sources.liPlan || {})[lid];
+      if (p && p.fs && p.fe && (r.date < p.fs || r.date > p.fe)) continue;
+      if (range && (r.date < range.from || r.date > range.to)) continue;
+      const named = auxLabel(dimKey, r, sources.valueLabels);
+      const key = named === '' ? UNCLASSIFIED_LABEL : named;
+      if (named === '') leftovers.add(key);
+      // An action row records which line items carry it, and under which raw actions, for the
+      // «primary» chip (Task 8; a display name can gather several raw actions).
+      if (actionLis && named !== '') {
+        if (!actionLis.has(key)) actionLis.set(key, new Map());
+        const byLi = actionLis.get(key);
+        if (!byLi.has(lid)) byLi.set(lid, new Set());
+        byLi.get(lid).add(auxRaw(dimKey, r));
+      }
+      ensure(key);
+      const fact = auxFact(dimKey, r);
+      const s = dayState ? dayState[lid] : null;
+      const rebuilt = !!s && s.cv !== CV.PLATFORM;
+      if (rebuilt) { fact.cv = 0; fact.pc = 0; fact.pv = 0; }
+      // Conversions carry no money; creative cost follows the same per-row contract
+      // as facts, including coefficient margins, ordinary currency conversion and the
+      // net ratio that rides behind it.
+      const moneyPlan = sources.rawLiPlan?.[lid] || p;
+      const summed = dimKey === AUX_CREATIVE ? coefficientFact(fact, r, lid, p) : fact;
+      addFactTs(buckets[key], summed, gatesFor(lid, p),
+        dimKey === AUX_CREATIVE && !moneyPlan?.coef ? (sources.rate ?? null) : undefined, moneyPlan?.k);
+      if (rebuilt && s.cv === CV.UNAVAILABLE && s.inView !== false && dayHasDelivery(summed)) cvBlock.labels.add(key);
+    }
+    if (!dayState) return buckets;
+    // A bucket a creative row reached is a fact. One that only the kept conversion rows below reach
+    // (a creative with no row in the window, or rows naming no creative) is a conversion-only row.
+    const factLabels = new Set(Object.keys(buckets));
+    const kept = cvKeptOf(sources.liDaily) || {};
+    for (const lid of inView) {
+      const s = dayState[lid];
+      if (!s || s.cv === CV.PLATFORM || s.inView === false) continue;
+      if (s.cv === CV.UNAVAILABLE) { cvBlock.ids.add(lid); continue; }
+      const p = (sources.liPlan || {})[lid];
+      for (const e of kept[lid] || []) {
+        if (p && p.fs && p.fe && (e.date < p.fs || e.date > p.fe)) continue;
+        if (range && (e.date < range.from || e.date > range.to)) continue;
+        const named = auxLabel(AUX_CREATIVE, e, sources.valueLabels);
+        const key = named === '' ? UNCLASSIFIED_LABEL : named;
+        if (named === '') leftovers.add(key);
+        ensure(key);
+        addFactTs(buckets[key], auxFact(AUX_CONVERSION, e), gatesFor(lid, p));
+      }
+    }
+    if (cvOnlyOut) for (const key of Object.keys(buckets)) if (!factLabels.has(key)) cvOnlyOut.add(key);
+    return buckets;
+  }
+
+  /* ── the untagged remainder (section-widget parity 2026-09-04) ─────────────── */
+
+  /** What the legacy Breakdown panel calls the remainder row. */
+  const RESIDUAL_LABEL = 'Others';
+  /**
+   * …and the two buckets a CUT mints for delivery it could not name: a split value that is
+   * blank or the `-` placeholder production carries, a DSP row with no creative and no id, and
+   * a dimension source's blank or dropped value.
+   *
+   * They are LEFTOVERS, not segments anybody chose, and the legacy panel treats all of them the
+   * same way (`RESIDUAL_KEYS`, Breakdown.jsx:71): they rank below the real values, render grey
+   * at 0.6 opacity and refuse a click, because there is no fact to filter by — `readDimValue`
+   * reads a `-` fact as '', never as the display label, so the pair would match nothing and
+   * scope the whole dashboard to zero delivery.
+   *
+   * They stay IN the best/worst comparison, which is the panel's own split (its :80): these two
+   * are aggregated from real facts, so their rates are measured and belong on screen. Only the
+   * remainder is held out of it.
+   */
+  const UNCLASSIFIED_LABEL = 'Unclassified';
+  const NO_VALUE_LABEL = 'No value';
+
+  /**
+   * Where one row sorts among the leftovers: a real value, then «Unclassified» / «No value»,
+   * then the untagged remainder — the legacy panel's own three ranks (Breakdown.jsx:536).
+   *
+   * Exported because TWO comparators need it and only one of them can call the engine: the
+   * authored sort runs here, and the VIEWER's header click re-orders the rows the renderer
+   * already holds (`sortReportRows`). One function, so a header click cannot float a leftover
+   * to the top of a table the engine sank it in.
+   */
+  const leftoverRank = (r) => (r.residual ? 2 : r.leftover ? 1 : 0);
+  /** The volume fields a remainder is judged MATERIAL on. A sliver is rounding, not a segment:
+   *  the legacy panel uses the same 1% floor on the one unit it computes (Breakdown.jsx:523). */
+  const RESIDUAL_ANCHORS = ['im', 'cl', 'co', 'sp'];
+  /** …and while primary conversions are operative, conversions too (spec §4 "«Others» keeps
+   *  conversions"): an «Others» holding conversions tagged '' is kept, not dropped with them. */
+  const RESIDUAL_ANCHORS_CV = [...RESIDUAL_ANCHORS, 'cv'];
+
+  /**
+   * Delivery in this window that carries NO value of this dimension — the legacy panel's
+   * «Others» row, and the single largest number the v2 tile used to leave out: on a Geo cut of
+   * `mock-multi` it is 81% of the clicks, so every share beside it was a share of the tagged
+   * fifth.
+   *
+   * It is the LINE totals minus the tagged buckets, over the same line set, the same range and
+   * the same flight clamp, PER FIELD — so the row's own CTR, CPM and VCR are measured numbers
+   * rather than the em dashes the legacy row prints (it computes one unit and dashes the rest).
+   * Both sides run through `addFact` with the same gates, which is what makes the subtraction
+   * exact: `imV`/`coV` come out gated on both, so the VCR beside it is the product's VCR.
+   *
+   * A negative field is clamped to 0 — splits that over-count a day would otherwise draw a
+   * negative slice — and the row is dropped entirely unless it is at least 1% of one volume.
+   */
+  function residualBucketFromSources(sources, range, tagged) {
+    const line = { ...ZERO_FLOW };
+    for (const id of sources.effLIs) {
+      const p = sources.liPlan[id];
+      const dd = (sources.liDaily || {})[id] || {};
+      const g = gatesOf(p, dd);
+      for (const [d, v] of Object.entries(dd)) {
+        if (p && p.fs && p.fe && (d < p.fs || d > p.fe)) continue;
+        if (range && (d < range.from || d > range.to)) continue;
+        addFactTs(line, v, g);
+      }
+    }
+    const rest = { ...ZERO_FLOW };
+    for (const k of Object.keys(ZERO_FLOW)) {
+      const diff = (line[k] || 0) - (tagged[k] || 0);
+      rest[k] = diff > 0 ? diff : 0;
+    }
+    const anchors = cvOperative(sources) ? RESIDUAL_ANCHORS_CV : RESIDUAL_ANCHORS;
+    const material = anchors.some((k) => line[k] > 0 && rest[k] / line[k] >= 0.01);
+    return material ? rest : null;
+  }
+
+  /**
+   * One cut's buckets, plus the two marks a leftover row needs.
+   *
+   * `leftovers` is a Set of the keys this cut minted for delivery it could not NAME, filled
+   * where each fold is decided rather than by reading a label back — a dimension whose values
+   * literally include «No value» keeps an ordinary row until a blank one lands in it. The
+   * remainder carries its own `residual` key beside it, because it is the further of the two
+   * from being a value and the surfaces rank and paint them one step apart.
+   */
+  function dimBuckets(sources, dimKey, range, wantResidual = false) {
     const ds = parseDimSourceKey(dimKey);
-    if (ds) return dimSourceBuckets(sources, ds.sourceId, ds.dim, range);
+    const leftovers = new Set();
+    const fieldErrors = {};
+    // label → { value: the RAW dim value (null for a fold), byLi: id → delivered volume }.
+    // Empty on every cut that cannot carry a declared plan; see the namebuilder branch below.
+    const origins = new Map();
+    // Before the residual calculation too: an unanswered cut must not turn into
+    // one large Others row containing the delivery the source could not filter.
+    if (sourceFilterReason(sources, dimKey, range)) return { buckets: {}, residual: null, leftovers, origins };
+    // A dimension SOURCE states its own coverage (`dimSourceCoverageNote`), which is the same
+    // fact a remainder row would be — measured over the days both sides share. Two answers to
+    // one question is what the legacy panel refuses here too (Breakdown.jsx:518).
+    if (ds) {
+      const cvBlock = newCvBlock(cvRebuiltIds(sources));
+      const buckets = dimSourceBuckets(sources, ds.sourceId, ds.dim, range, leftovers, fieldErrors, cvBlock);
+      return { buckets, residual: null, leftovers, fieldErrors, origins, cvBlock };
+    }
     // Channel is a property of the LINE ITEM, not a split of the facts. Every
     // other dim here is a `dim:value` key in liSplitDaily; `ch` lives on the plan
     // (normalize.js:97) and has therefore never been chartable or groupable
     // anywhere, though the line-item search has always matched on it.
-    if (dimKey === CHANNEL_DIM) return channelBuckets(sources, range);
-    const prefix = dimKey + ':';
-    const buckets = {};
-    for (const id of sources.effLIs) {
-      const p = sources.liPlan[id];
-      const sd = (sources.liSplitDaily || {})[id] || {};
-      const g = gatesOf(p, (sources.liDaily || {})[id]);
-      for (const [sk, dd] of Object.entries(sd)) {
-        if (!sk.startsWith(prefix)) continue;
-        const rawVal = sk.slice(prefix.length).trim();
-        const key = (!rawVal || rawVal === '-') ? 'Unclassified' : rawVal;
-        if (!buckets[key]) buckets[key] = { ...ZERO_FLOW };
-        for (const [d, v] of Object.entries(dd)) {
-          if (p && p.fs && p.fe && (d < p.fs || d > p.fe)) continue;
-          if (range && (d < range.from || d > range.to)) continue;
-          addFactTs(buckets[key], v, g);
+    // Every line has one, so its buckets partition the delivery and a remainder is always 0.
+    if (dimKey === CHANNEL_DIM) {
+      return { buckets: channelBuckets(sources, range), residual: null, leftovers, origins, cvBlock: channelCvBlock(sources, range) };
+    }
+    let buckets;
+    let cvBlock = null;
+    let cvOnly = null;   // labels of conversion-only rows (namebuilder and Creative cuts, operative only)
+    let quiet = null;    // labels with no day in the window at all (namebuilder cut, operative only)
+    if (isAuxDim(dimKey)) {
+      // An empty block that auxBuckets fills: a Creative cut whose chosen line items were all
+      // answered keeps its numbers and its total (the post-branch rule below reads it unchanged).
+      cvBlock = dimKey === AUX_CREATIVE && cvOperative(sources)
+        ? { ids: new Set(), labels: new Set(), residual: false, totals: false }
+        : null;
+      const actionLis = dimKey === AUX_CONVERSION && cvOperative(sources) ? new Map() : null;
+      // …and the Creative buckets only conversion rows reached: conversion-only rows (spec §4).
+      const creativeCvOnly = cvBlock ? new Set() : null;
+      buckets = auxBuckets(sources, dimKey, range, leftovers, fieldErrors, cvBlock, actionLis, creativeCvOnly);
+      if (creativeCvOnly && creativeCvOnly.size) cvOnly = creativeCvOnly;
+      // Conversions do not sum to a delivery total — the mart counts actions, not impressions —
+      // so there is nothing for a remainder to be the rest OF. The legacy panel skips it there
+      // for the same reason and computes one for the DSP creatives beside it.
+      if (dimKey === AUX_CONVERSION) return { buckets, residual: null, leftovers, origins, actionLis };
+    } else {
+      const prefix = dimKey + ':';
+      buckets = {};
+      cvBlock = newCvBlock(splitCvIds(sources, dimKey));
+      // Bucket-days the per-dimension overlay made from a conversion alone (spec §4 "Conversion-only
+      // rows and days"). A conversion-only row has conversions and no delivery in the window: a
+      // bucket with no day in the window from delivery, and one there from a conversion, or one
+      // made by conversions alone. A value delivered only outside the window, with no conversion
+      // in it, stays today's zero row.
+      const cvOnlyDays = cvOperative(sources) ? cvOnlyBucketDaysOf(sources.liSplitDaily) : null;
+      const factLabels = cvOnlyDays ? new Set() : null;   // a delivery day in the window
+      const cvLabels = cvOnlyDays ? new Set() : null;     // a conversion-only day in the window
+      const deliveredLabels = cvOnlyDays ? new Set() : null;   // a delivery day on any date
+      // Who delivered into each bucket, and how much. Only the namebuilder cut can carry a
+      // declared plan, so only it records this — the answer to «does this row's plan cover
+      // the delivery standing beside it» (plan metrics on dim rows, 2026-09-12). The unit is
+      // the pacing's dominant buy unit, the one the Breakdown panel already measures in.
+      const anchor = BUY_UNIT_OF_RATE[domRateType(sources.liPlan || {}, sources.effLIs || [])] || 'im';
+      for (const id of sources.effLIs) {
+        const p = sources.liPlan[id];
+        const sd = (sources.liSplitDaily || {})[id] || {};
+        const g = gatesOf(p, (sources.liDaily || {})[id]);
+        // This line item's conversions cannot be placed in a bucket of this dimension (spec §4).
+        const blocks = !!cvBlock && cvBlock.ids.has(String(id));
+        for (const [sk, dd] of Object.entries(sd)) {
+          if (!sk.startsWith(prefix)) continue;
+          const rawVal = sk.slice(prefix.length).trim();
+          // The `-` placeholder is what production writes for a split with no value
+          // (metric-catalog.js:802), and a blank is the other spelling of it.
+          const unnamed = !rawVal || rawVal === '-';
+          const key = unnamed ? UNCLASSIFIED_LABEL : rawVal;
+          if (unnamed) leftovers.add(key);
+          if (!buckets[key]) buckets[key] = { ...ZERO_FLOW };
+          // Keyed by the label, but carrying the RAW value: a plan is matched on what the
+          // configuration declared, never on what the table prints. A dimension whose values
+          // literally include «Others» would otherwise hand its plan to the remainder row.
+          if (!origins.has(key)) origins.set(key, { value: unnamed ? null : rawVal, byLi: new Map() });
+          const org = origins.get(key);
+          const cvOnlyHere = cvOnlyDays && cvOnlyDays[id] ? cvOnlyDays[id][sk] : null;
+          if (deliveredLabels && !deliveredLabels.has(key)
+            && (!cvOnlyHere || Object.keys(dd).some((d) => !cvOnlyHere.has(d)))) deliveredLabels.add(key);
+          for (const [d, v] of Object.entries(dd)) {
+            if (p && p.fs && p.fe && (d < p.fs || d > p.fe)) continue;
+            if (range && (d < range.from || d > range.to)) continue;
+            addFactTs(buckets[key], v, g);
+            // A blocked line item makes a bucket unknown only on a day it delivers there (spec §4).
+            if (blocks && dayHasDelivery(v)) cvBlock.labels.add(key);
+            if (factLabels) (cvOnlyHere && cvOnlyHere.has(d) ? cvLabels : factLabels).add(key);
+            // `im`: the line's impressions INSIDE this value, the weight of its CTR target on
+            // this row (owner decision 2026-09-23) — the same facts the row's CTR counts.
+            const prev = org.byLi.get(id) || { u: 0, sp: 0, im: 0 };
+            prev.u += Number(v[anchor]) || 0;
+            prev.sp += Number(v.sp) || 0;
+            prev.im += Number(v.im) || 0;
+            org.byLi.set(id, prev);
+          }
         }
       }
+      if (factLabels) {
+        const only = [];
+        const none = [];
+        for (const label of Object.keys(buckets)) {
+          if (factLabels.has(label)) continue;
+          if (cvLabels.has(label) || !deliveredLabels.has(label)) only.push(label);
+          if (!cvLabels.has(label)) none.push(label);
+        }
+        if (only.length) cvOnly = new Set(only);
+        if (none.length) quiet = new Set(none);
+      }
     }
-    return buckets;
+    // The remainder is line totals minus the buckets, so a line item that cannot be placed
+    // reaches it (and the totals) whenever its flight reaches the window.
+    if (cvBlock) {
+      cvBlock.residual = [...cvBlock.ids].some((id) => planReaches(sources.liPlan && sources.liPlan[id], range));
+      cvBlock.totals = cvBlock.residual || cvBlock.labels.size > 0;
+    }
+    if (!wantResidual) return { buckets, residual: null, leftovers, fieldErrors, origins, cvBlock, cvOnly, quiet };
+    const tagged = Object.values(buckets).reduce((t, b) => (addRowSums(t, b), t), { ...ZERO_FLOW });
+    const rest = residualBucketFromSources(sources, range, tagged);
+    if (!rest) return { buckets, residual: null, leftovers, fieldErrors, origins, cvBlock, cvOnly, quiet };
+    // A dimension whose values literally include «Others» would otherwise absorb the remainder
+    // into a real segment. The suffix loop terminates on the first free name and is the only
+    // place this label is decided, so the model's «which row is the remainder» stays an identity
+    // check rather than a guess.
+    let key = RESIDUAL_LABEL;
+    while (hasOwn(buckets, key)) key += ' (untagged)';
+    Object.defineProperty(buckets, key, {
+      value: rest, enumerable: true, writable: true, configurable: true,
+    });
+    // The remainder counts as DELIVERY the plan does not cover, which is what makes the Totals
+    // mark honest: the facts total includes it, so the plan standing under them is short by it
+    // too. It is line totals minus the tagged buckets, so it has no per-line attribution —
+    // hence the one synthetic entry under a key no line item can have. `value: null` keeps it
+    // out of every declaration match, so it can only ever land in the denominator.
+    if (origins.size > 0) {
+      const anchor = BUY_UNIT_OF_RATE[domRateType(sources.liPlan || {}, sources.effLIs || [])] || 'im';
+      origins.set(key, {
+        value: null,
+        byLi: new Map([[RESIDUAL_ORIGIN, { u: Number(rest[anchor]) || 0, sp: Number(rest.sp) || 0, im: Number(rest.im) || 0 }]]),
+      });
+    }
+    return { buckets, residual: key, leftovers, fieldErrors, origins, cvBlock, cvOnly, quiet };
   }
+
+  /* ── the per-row plan of a declared dimension (2026-09-12) ────────────────── */
+
+  /** What a row of a declared dimension reads when its own value was never declared: every
+   *  plan key present and null, so a cell prints an em dash rather than a confident 0. */
+  const NO_ROW_PLAN = Object.freeze({ scalars: DIM_PLAN_NULLS, exp: DIM_EXPECTED_NULLS, partial: null });
+
+  /**
+   * What a row that declared NOTHING publishes to the second pass (CM360 in formulas,
+   * 2026-09-16 §2.4), and what every row of a cut with no plan at all publishes.
+   *
+   * One frozen object, shared and exported: `report-render.js`'s `cmRowPlanOf` returns it per
+   * row per fed column, and its callers read `.scalars` and `.unplanned` off it — never an
+   * identity check — so a fresh `{ scalars, unplanned }` per read would just be an allocation on
+   * every cell of every render, with nothing to buy it. Its scalars are the same explicit nulls
+   * the plan CELLS read, so «unplanned» and «no target» can never be two different answers here.
+   */
+  const ABSENT_ROW_PLAN = Object.freeze({ scalars: DIM_PLAN_NULLS, unplanned: true });
+
+  /** One row's plan as the second pass reads it: the scalars `dimRowPlans` already built — the
+   *  same object the plan cells were computed from, never a second weighting of the same leaf
+   *  plans — plus whether the row declared anything at all. */
+  const publishedRowPlan = (rp) => (rp && rp.keys && rp.keys.length
+    ? { scalars: rp.scalars, unplanned: false }
+    : ABSENT_ROW_PLAN);
+
+  /**
+   * One answer per key SET, by the set's own identity.
+   *
+   * A narrowed table's Totals row and a cm-bearing formula standing in it ask for the same
+   * subset one line apart — `report-render.js`'s `retotal` runs the engine's own re-total and
+   * then `cmPlan.subset` on the same `keys` — and re-weighting a dimension cut's leaf plans is
+   * the one expensive thing on that path (§2.4: ONE `campaignScalars` per call). Keyed by
+   * identity rather than by contents because the renderer builds the Set once per call
+   * (`ReportTable.jsx`: `model.retotal(new Set(...))`) and never mutates it afterwards.
+   *
+   * «Nothing cached yet» is a private Symbol rather than null, because null is a legal thing to
+   * be called with — and a null marker would hand that first caller an empty cache instead of
+   * an answer.
+   */
+  const MEMO_UNSET = Symbol('onceForKeys.unset');
+  function onceForKeys(fn) {
+    let lastKeys = MEMO_UNSET;
+    let last = null;
+    return (keys) => {
+      if (lastKeys !== keys) { lastKeys = keys; last = fn(keys); }
+      return last;
+    };
+  }
+
+  /**
+   * Does this row's plan cover the delivery standing in it?
+   *
+   * The row aggregates every line item that delivered a value of the dimension; the plan
+   * exists only on the lines that declared it. On a pacing where one line of three carries the
+   * containers — the case this feature was built for — an unmarked row invites the reader to
+   * compare three lines of fact against one line of plan.
+   *
+   * Measured in the pacing's dominant buy unit, falling back to spend where the row bought
+   * nothing in that unit. It counts LINES, not dates: a container narrower than its line's
+   * flight also covers part of the row, and that second axis is deliberately not folded in
+   * here — the mark says «lines» and means it.
+   */
+  function planCoverageOf(org, declaredIds, sources) {
+    let total = 0, covered = 0, totalSp = 0, coveredSp = 0;
+    let delivering = 0, declaredDelivering = 0;
+    const missing = [];
+    for (const [id, v] of org.byLi) {
+      if (!(v.u > 0 || v.sp > 0)) continue;
+      delivering++;
+      total += v.u; totalSp += v.sp;
+      if (declaredIds.has(String(id))) {
+        declaredDelivering++;
+        covered += v.u; coveredSp += v.sp;
+      } else {
+        missing.push(sources.liNames?.[id] || `LI ${id}`);
+      }
+    }
+    // The trigger is the LINES, not the ratio. A row is short exactly when something delivered
+    // into it from a line that declared nothing, and that is true whatever unit the two sides
+    // happen to buy in. Measuring it by volume instead missed two real cases: a declaring CPM
+    // line beside a CPC line on a click-dominant pacing (the declaring side contributes 0
+    // clicks, so the covered volume is 0), and a declaring line that delivered nothing at all
+    // in this window. Both print a plan the delivery beside it does not answer to.
+    //
+    // Called only where the row HAS a plan — the caller returns early otherwise — so a row with
+    // no declaration at all still carries no mark. Its em dash already says there is no target.
+    if (delivering === 0 || missing.length === 0) return null;
+    const basis = total > 0 ? total : totalSp;
+    const hit = total > 0 ? covered : coveredSp;
+    // …and the RATIO is the size of the gap, which needs a unit both sides share. Where they
+    // do not, the mark still stands and says only what it can count: the lines.
+    const ratio = basis > 0 ? hit / basis : null;
+    // A hair under 1 is float noise on summed daily figures, not a gap worth a warning.
+    if (ratio != null && ratio >= 0.9995) return null;
+    return { ratio, lines: declaredDelivering, ofLines: delivering, missing };
+  }
+
+  /**
+   * The plan behind every row of one dimension cut, or null where the dimension declares
+   * nothing. Built ONCE per cut: `collectDimPlans` walks the containers a single time and this
+   * loop is a lookup per row, which is what keeps it out of dimBuckets' hot path.
+   */
+  function dimRowPlans(sources, dimKey, cut, range, bounds) {
+    // Not a namebuilder dimension → no plan exists and none is named: `null` leaves the rows
+    // exactly as they were before this feature, scalars and all.
+    if (!dimIsNamebuilder(dimKey)) return null;
+    const decl = dimPlanEligible(sources, dimKey)
+      ? collectDimPlans(sources.rawLiPlan || sources.liPlan, dimKey, sources.periodKey || null)
+      : new Map();
+    const inView = new Set((sources.effLIs || []).map(String));
+    const out = new Map();
+    // Every leaf plan the cut actually stands on, keyed «value|line» — one campaignScalars
+    // call over the lot is the totals row. A plain sum of the row scalars would average the
+    // rate targets instead of weighting them.
+    const allPlans = {};
+    const allKeys = [];
+    // …and each key's delivered impressions inside its value: the weight of that leaf plan's
+    // CTR target wherever the key is weighed — its row, the Totals, a kept subset, a fold.
+    const imByKey = new Map();
+    const allExp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    let totalVol = 0, coveredVol = 0, totalSpend = 0, coveredSpend = 0;
+    for (const [label, org] of cut.origins) {
+      // A fold («Unclassified», «No value») and the untagged remainder are not values anything
+      // declared. Their plan cells stay em dashes, and they carry no mark — they are already
+      // grey for a reason of their own, and a second grey meaning would read as a third.
+      const entry = org.value == null ? null : decl.get(normDimValue(org.value));
+      const ids = entry ? entry.liIds.filter((id) => inView.has(String(id))) : [];
+      const declaredIds = new Set(ids.map(String));
+      for (const [id, v] of org.byLi) {
+        totalVol += v.u; totalSpend += v.sp;
+        if (declaredIds.has(String(id))) { coveredVol += v.u; coveredSpend += v.sp; }
+      }
+      if (ids.length === 0) { out.set(label, NO_ROW_PLAN); continue; }
+      const planMap = {};
+      entry.liIds.forEach((id, i) => { if (inView.has(String(id))) planMap[id] = entry.plans[i]; });
+      // A line's delivery INSIDE this value (dimBuckets' `byLi`), by the line id as a string —
+      // the declaration and the facts may spell one id as a number and a string.
+      const imInValue = new Map([...org.byLi].map(([id, v]) => [String(id), Number(v.im) || 0]));
+      const imOf = (id) => imInValue.get(String(id)) || 0;
+      // campaignScalars, not a hand-rolled sum: margin weights by budget, the rate targets by
+      // plan unit (ctrT by this value's delivery), a CPC line's units go to planClicks, and a
+      // target nobody set answers null rather than 0. Every one of those laws already lives
+      // there, and a per-dim copy of them would disagree with the line-item rows in the widget.
+      const scalars = {
+        ...campaignScalars(planMap, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
+          false, planWindowOf(sources, range), imOf),
+      };
+      const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+      if (bounds.from && bounds.to && bounds.from <= bounds.to) {
+        for (const id of ids) {
+          const e = expectedDeltas(planMap[id], bounds.from, bounds.to);
+          exp.expIm += e.expIm; exp.expCo += e.expCo; exp.expCl += e.expCl;
+          exp.expVw += e.expVw; exp.imprExpected += e.imprExpected;
+        }
+      }
+      for (const k of Object.keys(allExp)) allExp[k] += exp[k];
+      const keys = [];
+      for (const id of ids) {
+        // A synthetic address, because campaignScalars reads its plans BY KEY and one line can
+        // declare several values, so the line id alone is not unique. An ordinal rather than
+        // «value + separator + line»: a dimension value is arbitrary text and could carry any
+        // separator this file might pick.
+        const key = `${allKeys.length}:${id}`;
+        allPlans[key] = planMap[id];
+        imByKey.set(key, imOf(id));
+        allKeys.push(key);
+        keys.push(key);
+      }
+      out.set(label, { scalars, partial: planCoverageOf(org, declaredIds, sources), keys, exp });
+    }
+
+    // The Totals row. Its facts are the whole pacing including the untagged remainder
+    // (the canon a few lines down), so its plan is short whenever anything delivered outside
+    // a declaration — and it says so with the same mark the rows use, one level up, where
+    // there is no row left to carry the warning.
+    const basis = totalVol > 0 ? totalVol : totalSpend;
+    const hit = totalVol > 0 ? coveredVol : coveredSpend;
+    const ratio = basis > 0 ? hit / basis : 1;
+    const totals = allKeys.length === 0 ? NO_ROW_PLAN : {
+      scalars: campaignScalars(allPlans, allKeys, sources.asOf, sources.flightStart, sources.flightEnd, range,
+        false, planWindowOf(sources, range), keyImprOf(imByKey)),
+      exp: allExp,
+      // Symmetrical with a row, so the Totals cell can be silenced by the same test: nothing
+      // declared anywhere means an em dash there too, not the 0 a formula would otherwise print
+      // under a column of em dashes.
+      keys: allKeys,
+      // RATIO only. There is no single row to count lines over here — the shortfall is spread
+      // across every value nobody declared and every line that declared none — so the totals
+      // mark says how much of the delivery below it the plan covers, and nothing it cannot know.
+      partial: ratio >= 0.9995 ? null : { ratio },
+    };
+    return { byLabel: out, totals, plans: allPlans, imByKey };
+  }
+
+  /** A plan key's delivered impressions inside its value (dimRowPlans' `imByKey`), as the
+   *  `imprOf` campaignScalars weighs ctrT by. */
+  const keyImprOf = (imByKey) => (key) => (imByKey && imByKey.get(key)) || 0;
+
+  /** A dim bucket already carries the expected keys as 0 (ZERO_FLOW), and `fieldValue` reads the
+   *  sums before the scalars — so the row's own expected curve, or its absence, has to be
+   *  written into a COPY of the bucket. The original is what the totals re-sum, untouched. */
+  const withRowExpected = (sums, rp) => (rp ? { ...sums, ...rp.exp } : sums);
+
+  /**
+   * Does this column's number come from the plan?
+   *
+   * Not only a bare `planImpr`: the cell a partial plan distorts WORST is an expression that
+   * divides delivery by it — `im / expIm` over three line items of fact and one line item of
+   * expected prints 300%. So the AST is walked, not just the field name.
+   */
+  function readsPlanField(c) { return columnReads(c, DIM_PLAN_FIELDS); }
+
+  /** Does this column read any of `fields` — as its bare field, or anywhere inside its AST? */
+  function columnReads(c, fields) {
+    if (!c) return false;
+    if (c.kind === 'field') return fields.has(c.field);
+    if (c.kind !== 'expr') return false;
+    let found = false;
+    (function walk(n) {
+      if (found || !n) return;
+      if (n.t === 'id') { if (fields.has(n.name)) found = true; return; }
+      if (n.t === 'call') n.args.forEach(walk);
+      else if (n.t === 'bin' || n.t === 'cmp') { walk(n.l); walk(n.r); }
+      else if (n.t === 'neg') walk(n.e);
+    })(c.ast);
+    return found;
+  }
+
+  /** What a subset of DATES cannot total: the window's expected is a delta over the whole
+   *  window, so `retotal` answers nothing for a column that reads one of these on a date
+   *  grain. A plan scalar is a constant of the window — every row prints the same budget — and
+   *  passes through untouched, as the rows above the Totals do. */
+  const CALENDAR_EXPECTED_FIELDS = FIELDS_EXPECTED;
+
+  /** The rates whose population is EMPTY in these sums on the campaign ('agg') basis — ctr
+   *  over every line's impressions, cpm over the non-click-bought lines', vcr over the eligible
+   *  ones, and so on (ratesFromSums). Over the whole campaign an empty population prints 0 by
+   *  that canon; over a SUBSET the search box kept it must not, because the rows above it print
+   *  their own entity rates and a 0.00% standing over a 4.00% row is a number nothing adds up to.
+   *  Since ctr counts every line (owner decision 2026-09-23), a subset of click-bought rows
+   *  prints their CTR; only their cpm stays silent. */
+  function silentAggRates(sums) {
+    const out = new Set();
+    if (!(sums.im > 0)) out.add('ctr');
+    if (!(sums.imNC > 0)) out.add('cpm');
+    if (!(sums.imV > 0 && sums.coV > 0)) out.add('vcr');
+    if (!(sums.imA > 0)) out.add('acr');
+    if (!(sums.cl > 0)) out.add('cpc');
+    if (!(sums.cpvCo > 0)) out.add('cpv');
+    return out;
+  }
+
+  /**
+   * One row's identity, on every grain: the date, the line, both, or the bucket label. The
+   * renderer keys its rows by it (report-render.js imports it) and `retotal` reads the same
+   * keys back, so the two can never disagree about which row is which.
+   */
+  function tableRowKey(r, rowType) {
+    if (rowType === 'date') return String(r.date);
+    if (rowType === 'li') return String(r.liId);
+    if (rowType === 'dateLi') return `${r.date}|${r.liId}`;
+    return String(r.label);
+  }
+
+  /** The plan behind a FOLD — «Other values», several dimension values in one bar. Weighted
+   *  over the union of their leaf plans, never a sum of their row scalars: averaging target
+   *  margins is the mistake campaignScalars exists to prevent. */
+  function foldPlanScalars(dimPlans, members, sources, range) {
+    const keys = [];
+    const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    for (const m of members) {
+      if (!m || !m.keys || m.keys.length === 0) continue;
+      for (const k of m.keys) keys.push(k);
+      for (const k of Object.keys(exp)) exp[k] += Number(m.exp?.[k]) || 0;
+    }
+    if (keys.length === 0) return { scalars: DIM_PLAN_NULLS, exp: DIM_EXPECTED_NULLS };
+    return {
+      scalars: campaignScalars(dimPlans.plans, keys, sources.asOf, sources.flightStart, sources.flightEnd, range, true,
+        planWindowOf(sources, range), keyImprOf(dimPlans.imByKey)),
+      exp,
+    };
+  }
+
+  /** The plan slot for one row, defaulting to «declared nothing» — the residual row is minted
+   *  after the origins map is filled, and every non-namebuilder cut has no origins at all. */
+  const rowPlanOf = (rowPlans, label) => (
+    rowPlans ? (rowPlans.byLabel.get(label) || NO_ROW_PLAN) : null
+  );
 
   /** The pacing's own channel, as an axis. Buckets whole line items rather than
    *  splits, which is why it cannot ride the generic path above. */
@@ -3504,57 +6413,145 @@ function createDashboardMetrics(deps) {
   /* ── table model ──────────────────────────────────────────────────────────── */
 
   function buildTabularModel(request, range, sources) {
+    const highlightSafe = !!request?.highlightSafe;
+    const evalSeries = highlightSafe ? evaluateHighlightSeries : evaluateSeries;
+    const evalOne = highlightSafe ? evaluateHighlightOne : evaluateOne;
+    const readField = highlightSafe ? (name, sums, scalars, fields, basis) => highlightFieldValue(name, sums, scalars, basis) : fieldValue;
     const grain = request && request.grain ? request.grain : { type: 'date' };
     const isDim = grain.type === 'dim';
     const contextKind = grain.type === 'date' || grain.type === 'dateLi' ? 'ts' : 'agg';
     const fieldSet = isDim
-      ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId)
+      ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId, grain.key)
       : (contextKind === 'ts' ? TS_FIELDS : AGG_FIELDS);
-    const cols = compileColumns(request.columns, contextKind, fieldSet);
+    const cols = compileColumns(request.columns, contextKind, fieldSet).map((column) => {
+      if (!highlightSafe || column.kind === 'error') return column;
+      const resolved = column.kind === 'field' ? { kind: 'metric', metric: column.field }
+        : { kind: 'formula', expr: column.source.expr };
+      const error = unavailableMetric(resolved, sources, isDim ? grain.key : null);
+      return error ? { ...column, kind: 'error', error } : column;
+    });
     const colErrors = Object.fromEntries(cols.filter((c) => c.kind === 'error').map((c) => [c.id, c.error]));
-    const campScalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf, sources.flightStart, sources.flightEnd, range);
+    // Each line's impressions in this window, the CTR target's weight; the li rows below hand
+    // theirs over as they sum them, so the facts are walked once (lineImpr).
+    const impr = lineImpr(sources, range);
+    const campScalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf, sources.flightStart, sources.flightEnd, range,
+      false, planWindowOf(sources, range), impr);
+    // `bounds` is the calendar (the fact rows, the date axis); `expBounds` is what an expected
+    // window DELTA may count — the same window, never past asOf.
     const bounds = calendarBounds(sources, range);
+    const expBounds = expectedBounds(sources, range);
+    // Primary conversions (spec §3): the line items in view whose conversions this reading
+    // cannot answer. Empty while the switch is off, and then no cell below changes.
+    const cvOff = new Set(cvOffIds(sources, sources.effLIs, range));
+    let cvTotalsNull = false;
+    // …and how many line items that «—» is about, for the Totals tooltip (0: no sentence).
+    const cvColsAny = cols.some(readsCvField);
+    let cvNoteCount = 0;
+    // …and, for the Totals row a search box re-totals over the rows it keeps (`retotal`), whether
+    // THOSE rows still include an unavailable line item. Set by the two grains whose row keys name
+    // line items; the date and dimension grains inherit the whole cut's answer.
+    let cvSubsetNull = null;
 
     let rows = [];
     let totalsSums = null;
+    // The dim cut's plan, hoisted so the Totals row below can read the same one the rows did,
+    // and the ids of the columns that read it.
+    let dimPlans = null;
+    let planCols = null;
+    // The Totals row over a SUBSET of the rows — the ones a search box keeps (owner ruling
+    // 2026-09-16: the total follows the box). Each grain keeps what it needs to re-take its
+    // sums by the rows' keys, and `retotal` below runs them through the same cells the Totals
+    // row takes. Null until a grain sets it.
+    let subset = null;
+    // …and the CALENDAR's own row keys, on the one grain that has a calendar. Published for
+    // the CM360 window pass (CM360-in-formulas spec §2.9), which runs a running total down the
+    // days rather than down whatever the author sorted the table into. Null until the date arm
+    // sets it, so no other grain's model changes shape.
+    let rowOrder = null;
+    // …and the plan those rows were drawn from, published for the reader the engine cannot
+    // see: a cm-bearing formula names a plan field beside the CM360 counts and must read the
+    // row's OWN target (2026-09-16 §2.4). Null on every grain but `dim`, where a row has a
+    // plan of its own.
+    let rowScalars = null;
 
     if (grain.type === 'date') {
-      const cal = aggregateDateRows(sources, range);
-      const ctx = seriesCtx(cal, campScalars);
+      const rawCal = aggregateDateRows(sources, range);
+      const cal = highlightSafe ? highlightDateRows(rawCal, sources) : rawCal;
+      const ctx = seriesCtx(cal, campScalars, highlightSafe ? 'ts' : null);
       const evaluated = {};
       for (const c of cols) {
         // Plan scalars broadcast as constants — SAME value for a bare field and for
         // the trivial formula around it (round 6.1: bare `budget` read row-0 while
         // `budget + 0` read 100).
         if (c.kind === 'field') {
-          evaluated[c.id] = c.field in campScalars
+          evaluated[c.id] = highlightSafe ? cal.map((r) => highlightFieldValue(c.field, r, campScalars, 'ts')) : c.field in campScalars
             ? cal.map(() => campScalars[c.field])
             : cal.map((r) => r[c.field] ?? 0);
-        } else if (c.kind === 'expr') evaluated[c.id] = evaluateSeries(c.ast, ctx).values;
+        } else if (c.kind === 'expr') evaluated[c.id] = evalSeries(c.ast, ctx).values;
         else evaluated[c.id] = cal.map(() => null);
+      }
+      const cvMask = cvDateMask(sources, cal, sources.effLIs, range);
+      if (cvMask) {
+        for (const c of cols) {
+          if (readsCvField(c)) evaluated[c.id] = maskCvValues(evaluated[c.id], cvMask, c.kind === 'expr' && c.windowed);
+        }
+        cvTotalsNull = cvMask.some(Boolean);
+        if (cvTotalsNull && cvColsAny) cvNoteCount = cvOff.size;
       }
       rows = cal.map((r, i) => ({
         label: r.date, date: r.date,
+        // …and why its conversion cells are «—» (spec §3 Display). Sparse.
+        ...(cvColsAny && cvMask && cvMask[i] ? { cvReason: CV_ROW_REASON } : null),
         cells: Object.fromEntries(cols.map((c) => [c.id, evaluated[c.id][i]])),
       }));
       totalsSums = cal.reduce((t, r) => (addRowSums(t, r), t), { ...ZERO_FLOW });
-      // Totals expected = window delta, not a sum of daily cumulatives (§3).
-      const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0 };
+      const byKey = new Map(cal.map((r) => [tableRowKey(r, 'date'), r]));
+      // Taken HERE, and not after the sort below: this is the last moment the calendar is
+      // still in hand. `rows` is reordered by the authored sort a screen down, and
+      // report-render.js's own sortReportRows runs later still.
+      rowOrder = [...byKey.keys()];
+      subset = (keys) => {
+        const sums = { ...ZERO_FLOW };
+        for (const key of keys) { const r = byKey.get(key); if (r) addRowSums(sums, r); }
+        return { sums, scalars: campScalars, unplanned: false, planNull: true };
+      };
+      // Totals expected = window delta, not a sum of daily cumulatives (§3) — over the calendar
+      // the rows above draw, NOT expBounds: a date table's rows carry the plan curve to the
+      // window's end (aggregateDateRows), and a Totals row stopped at asOf read 56,400 under a
+      // last row of 141,000, and 40% under a row's 100% (review 2026-09-23). The Totals is that
+      // last row's cumulative, as it was before; the rows that stop at asOf are the li, dateLi
+      // and dim grains', whose Totals stop with them.
+      const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
       for (const id of sources.effLIs) {
         const p = sources.liPlan[id];
         if (!p) continue;
         const e = expectedDeltas(p, bounds.from, bounds.to);
         eTot.expIm += e.expIm; eTot.expCo += e.expCo; eTot.expCl += e.expCl; eTot.expVw += e.expVw;
+        eTot.imprExpected += e.imprExpected;
       }
       Object.assign(totalsSums, eTot);
     } else if (grain.type === 'dateLi') {
+      const needsCalendar = cols.some((c) => c.kind === 'field' ? FIELDS_EXPECTED.has(c.field)
+        : c.kind === 'expr' && calendarExpression(c.ast));
+      const factByKey = new Map();
+      // …and which line each row key belongs to, for a kept subset's CTR target.
+      const lineByKey = new Map();
       for (const id of sources.effLIs) {
         const p = sources.liPlan[id];
         if (!p) continue;
         // One LI per row → ENTITY rates (its own plain ratios).
-        const cal = aggregateDateRows({ ...sources, effLIs: [id] }, range, 'entity');
-        const liScalars = liPlanScalars(p, sources.asOf, range);
-        const ctx = seriesCtx(cal, liScalars);
+        const rawCal = needsCalendar ? aggregateDateRows(sources, range, 'entity', [id])
+          : factDateRows(sources, id, bounds);
+        const cal = highlightSafe ? highlightDateRows(rawCal, sources, [id]) : rawCal;
+        // Date-series Totals count audio listens for ACR and eligible video views
+        // for CPV. Use those same populations in the detail cells and formulas.
+        // Keep entity CTR/CPM and the legacy VCR empty-cell behavior intact.
+        for (const r of cal) {
+          const { acr, cpv } = ratesFromSums(r, 'ts');
+          Object.assign(r, { acr, cpv });
+        }
+        const liScalars = liPlanScalars(p, sources.asOf, range, planWindowOf(sources, range));
+        const ctx = seriesCtx(cal, liScalars, highlightSafe ? 'dateLi' : null);
         const evaluated = {};
         for (const c of cols) {
           if (c.kind === 'field') {
@@ -3563,105 +6560,373 @@ function createDashboardMetrics(deps) {
             // `?? 0` here printed that as 0.00%); a field it does not carry is the
             // absence-is-zero canon. Unknown names never reach this — compileColumns
             // turns them into error columns above.
-            evaluated[c.id] = c.field in liScalars
+            evaluated[c.id] = highlightSafe ? cal.map((r) => highlightFieldValue(c.field, r, liScalars, ['acr', 'cpv'].includes(c.field) ? 'ts' : 'entity')) : c.field in liScalars
               ? cal.map(() => liScalars[c.field])
               : cal.map((r) => (c.field in r ? r[c.field] : 0));
-          } else if (c.kind === 'expr') evaluated[c.id] = evaluateSeries(c.ast, ctx).values;
+          } else if (c.kind === 'expr') evaluated[c.id] = evalSeries(c.ast, ctx).values;
           else evaluated[c.id] = cal.map(() => null);
         }
+        if (cvOff.has(String(id))) {
+          for (const c of cols) if (readsCvField(c)) evaluated[c.id] = cal.map(() => null);
+        }
         const label = sources.liNames?.[id] || `LI ${id}`;
+        // The line's own three facts, carried once per line rather than per row: the display
+        // name, the raw id and the channel are what the legacy section's «LI / Channel» column
+        // draws (name in bold over «LI 900101 · Display»), and `paused` is the muted chip beside
+        // it. `isLiPausedNow` is the section's own read (DailyTable.jsx:102).
+        const rawId = `LI ${id}`;
+        const channel = p.ch || 'Unknown';
+        const paused = PacingCore.isLiPausedNow(p, sources.asOf);
         cal.forEach((r, i) => {
           // Fact days only (DailyTable granularity) — window functions above still ran
-          // over the full calendar, so their values are gap-correct.
+          // over the full calendar, so their values are gap-correct. And only days inside the
+          // line's OWN flight: `aggregateDateRows` already refuses the fact there (a flight-date
+          // edit can leave delivery outside the window), so without this clip the row survived
+          // as a full row of zeros where the legacy section drops it (DailyTable.jsx:30).
           if (!(sources.liDaily[id] || {})[r.date]) return;
-          rows.push({
-            label: r.date, date: r.date, liId: id, sub: label,
+          if (p.fs && p.fe && (r.date < p.fs || r.date > p.fe)) return;
+          const row = {
+            label: r.date, date: r.date, liId: id, sub: label, subId: rawId, subNote: channel,
             cells: Object.fromEntries(cols.map((c) => [c.id, evaluated[c.id][i]])),
-          });
+          };
+          // Sparse, like every other «only when it is true» mark in this system: a row that
+          // carries the key is a line that is paused right now.
+          if (paused) row.paused = true;
+          // …and one whose conversion cells are «—», with its line item's reason (spec §3 Display).
+          if (cvColsAny && cvOff.has(String(id))) row.cvReason = cvReasonOf(sources, id);
+          rows.push(row);
+          factByKey.set(tableRowKey(row, 'dateLi'), r);
+          lineByKey.set(tableRowKey(row, 'dateLi'), id);
         });
       }
       totalsSums = sources.effLIs.reduce((t, id) => {
         const p = sources.liPlan[id];
-        if (p) addRowSums(t, sumLiWindow(sources.liDaily, p, id, range, bounds));
+        if (p) addRowSums(t, sumLiWindow(sources.liDaily, p, id, range, expBounds));
         return t;
       }, { ...ZERO_FLOW });
+      cvTotalsNull = cvOff.size > 0;
+      if (cvTotalsNull && cvColsAny) cvNoteCount = cvOff.size;
+      // A dateLi row key is `${date}|${liId}` (tableRowKey).
+      cvSubsetNull = (keys) => [...keys].some((k) => cvOff.has(String(k).split('|')[1]));
+      // A kept subset keeps the window's plan constants, as the rows above it do, with ONE
+      // exception: the CTR target. Each row here prints its own line's target, and the kept rows'
+      // CTR is theirs alone, so the target over them is re-weighted by the impressions THOSE rows
+      // delivered (owner decision 2026-09-23) — «C's rows» read C's target, not the mixed window's.
+      subset = (keys) => {
+        const sums = { ...ZERO_FLOW };
+        const keptIm = new Map();
+        const keptIds = [];
+        for (const key of keys) {
+          const r = factByKey.get(key);
+          if (!r) continue;
+          addRowSums(sums, r);
+          const id = lineByKey.get(key);
+          const k = String(id);
+          if (!keptIm.has(k)) { keptIm.set(k, 0); keptIds.push(id); }
+          keptIm.set(k, keptIm.get(k) + (r.im || 0));
+        }
+        const scalars = withCtrT(campScalars,
+          () => weightedCtrT(sources.liPlan, keptIds, (id) => keptIm.get(String(id)) || 0));
+        return { sums, scalars, unplanned: false, planNull: true };
+      };
     } else if (isDim) {
-      const buckets = dimBuckets(sources, grain.key, range);
+      const cut = dimBuckets(sources, grain.key, range, !!request.residual);
+      const buckets = cut.buckets;
+      for (const c of cols) {
+        const error = c.kind === 'field' ? cut.fieldErrors?.[c.field] : expressionFieldError(c.ast, cut.fieldErrors);
+        if (error) { c.kind = 'error'; c.error = error; colErrors[c.id] = error; }
+      }
+      // The per-row plan, where the dimension is declared: one container walk for the whole
+      // cut, then a lookup per row (plan metrics on dim rows, 2026-09-12).
+      dimPlans = dimRowPlans(sources, grain.key, cut, range, expBounds);
+      // Which columns read the plan. Needed twice: to say so on the model, and — right here —
+      // to keep a FORMULA honest on a row that declared nothing. A bare field reads the null
+      // scalars and prints an em dash, but inside arithmetic an absent value is 0 (the engine's
+      // absence-is-zero canon), so `im / expIm * 100` printed a confident 0% where the answer
+      // is that there is no target to pace against. On this grain that is not a rounding of the
+      // truth, it is the opposite of it.
+      planCols = new Set(cols.filter(readsPlanField).map((c) => c.id));
+      // …and which columns read a conversion field, emptied on the rows the cut could not place.
+      const cvCols = new Set(cols.filter(readsCvField).map((c) => c.id));
       // Dim buckets follow the Breakdown-table canon: ctr/cpm plain over the bucket,
       // vcr over the gated imV/coV pair — exactly the 'ts' basis shape.
-      rows = Object.entries(buckets).map(([label, sums]) => ({
-        label,
-        cells: Object.fromEntries(cols.map((c) => [
-          c.id,
-          c.kind === 'field' ? fieldValue(c.field, sums, null, fieldSet, 'ts')
-            : c.kind === 'expr' ? evaluateOne(c.ast, aggCtx(sums, null, 'ts')).value
-            : null,
+      rows = Object.entries(buckets).map(([label, bucket]) => {
+        const rp = rowPlanOf(dimPlans, label);
+        const scalars = rp ? rp.scalars : null;
+        // A row made only of conversions (no delivery in the window) is not a fact (spec §4
+        // "Conversion-only rows and days"): a highlight rule reads its daily and rate fields as
+        // absent, and it joins no best/worst (report-render.js columnExtremes).
+        const cvOnlyRow = !!(cut.cvOnly && cut.cvOnly.has(label));
+        const sums = cvOnlyRow && highlightSafe
+          ? { ...withRowExpected(bucket, rp), __highlightFacts: false } : withRowExpected(bucket, rp);
+        const unplanned = !!rp && !(rp.keys && rp.keys.length);
+        const cvBlocked = cvBlockedLabel(cut, label);
+        return {
+          label,
+          // Sparse, like `paused` one grain over: the row that carries it is the untagged
+          // remainder, which sorts last, never joins a best/worst comparison and refuses a click.
+          ...(label === cut.residual ? { residual: true } : null),
+          // …and the cut's other leftovers — «Unclassified», «No value». They rank between the
+          // real values and the remainder, grey the same way and refuse the same click; unlike
+          // the remainder they ARE measured, so they stay in the best/worst comparison
+          // (Breakdown.jsx:80, the legacy panel's own split).
+          ...(cut.leftovers.has(label) ? { leftover: true } : null),
+          // …and a conversion-only row. Sparse.
+          ...(cvOnlyRow ? { cvOnly: true } : null),
+          // …and, on the same sparse rule, the row whose plan covers only part of its own
+          // delivery. It is a fact about THIS row, so it rides the row and not the tile.
+          ...(rp && rp.partial ? { planPartial: rp.partial } : null),
+          // …and, on the Conversion Action cut of an operative pacing, how many line items in view
+          // that carry this action chose it (spec §4). Sparse.
+          ...(cut.actionLis ? primaryMarkOf(sources, cut, label) : null),
+          // …and why its conversion cells are «—» (spec §3 Display). Sparse.
+          ...(cvBlocked && cvCols.size ? { cvReason: CV_ROW_REASON } : null),
+          cells: Object.fromEntries(cols.map((c) => [
+            c.id,
+            cvBlocked && cvCols.has(c.id) ? null
+              : unplanned && planCols.has(c.id) ? null
+              : c.kind === 'field' ? readField(c.field, sums, scalars, fieldSet, 'ts')
+                : c.kind === 'expr' ? evalOne(c.ast, aggCtx(sums, scalars, 'ts', highlightSafe)).value
+                : null,
+          ])),
+        };
+      });
+      // The remainder is IN the totals, which is what puts them back on the pacing's own
+      // delivery: on a Geo cut the Total is the campaign's 16,174 clicks again, and its CTR is
+      // still the ratio of the column standing above it.
+      const custom = customMetricKeys(sources, parseDimSourceKey(grain.key)?.sourceId);
+      totalsSums = Object.values(buckets).reduce((t, b) => (addRowSums(t, b, custom), t), { ...ZERO_FLOW });
+      // A conversion-only row is no fact (spec §4), so a total whose window holds one and no row
+      // with delivery there (a row with no day in the window has none) has none either.
+      if (highlightSafe) {
+        const labels = Object.keys(buckets);
+        const delivered = labels.some((label) => !(cut.cvOnly && cut.cvOnly.has(label)) && !(cut.quiet && cut.quiet.has(label)));
+        totalsSums.__highlightFacts = labels.length > 0 && (delivered || !(cut.cvOnly && cut.cvOnly.size));
+      }
+      cvTotalsNull = !!(cut.cvBlock && cut.cvBlock.totals);
+      if (cvTotalsNull && cvColsAny) {
+        cvNoteCount = [...cut.cvBlock.ids].filter((id) => planReaches(sources.liPlan && sources.liPlan[id], range)).length
+          || cut.cvBlock.ids.size;
+      }
+      // The kept buckets re-summed, and their plan re-weighted over the union of their leaf
+      // plans — the Totals row's own construction (dimRowPlans), over fewer rows. Answered
+      // ONCE per key set: the cm half of the same re-total asks for it again through
+      // `rowScalars.subset` below, and §2.4 buys that second read with the memo rather than
+      // with a second weighting.
+      subset = onceForKeys((keys) => {
+        const sums = { ...ZERO_FLOW };
+        const planKeys = [];
+        const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+        for (const key of keys) {
+          if (!hasOwn(buckets, key)) continue;
+          addRowSums(sums, buckets[key], custom);
+          const rp = rowPlanOf(dimPlans, key);
+          if (!rp || !rp.keys) continue;
+          for (const k of rp.keys) planKeys.push(k);
+          for (const k of Object.keys(exp)) exp[k] += Number(rp.exp?.[k]) || 0;
+        }
+        if (!dimPlans) return { sums, scalars: null, unplanned: false, planNull: false };
+        const scalars = planKeys.length
+          ? campaignScalars(dimPlans.plans, planKeys, sources.asOf, sources.flightStart, sources.flightEnd, range,
+            false, planWindowOf(sources, range), keyImprOf(dimPlans.imByKey))
+          : DIM_PLAN_NULLS;
+        return { sums: { ...sums, ...exp }, scalars, unplanned: planKeys.length === 0, planNull: false };
+      });
+      // The publication itself (§2.4): the engine's own per-row plan, keyed by the row key
+      // `tableRowKey` mints for this grain — which IS the bucket label, and is what
+      // report-render.js joins its CM360 rows on. Nothing here is computed; every value is a
+      // reference to something the rows above already stand on.
+      rowScalars = {
+        byKey: new Map(Object.keys(buckets).map((label) => [
+          String(label), publishedRowPlan(rowPlanOf(dimPlans, label)),
         ])),
-      }));
-      totalsSums = Object.values(buckets).reduce((t, b) => (addRowSums(t, b), t), { ...ZERO_FLOW });
+        absent: ABSENT_ROW_PLAN,
+        totals: publishedRowPlan(dimPlans && dimPlans.totals),
+        subset: (keys) => {
+          const part = subset(keys);
+          return part.scalars && !part.unplanned ? { scalars: part.scalars, unplanned: false } : ABSENT_ROW_PLAN;
+        },
+        // What a formula on THIS cut may name (§2.4's first gate, taken in report-render.js):
+        // the widened set for a namebuilder dimension, the bare delivery set for a dimension
+        // source, `channel` or an aux cut — the same set the bare-field columns are judged by.
+        fieldSet,
+      };
     } else {
       // rows: 'li'
       for (const id of sources.effLIs) {
         const p = sources.liPlan[id];
         if (!p) continue;
-        const sums = sumLiWindow(sources.liDaily, p, id, range, bounds);
-        const scalars = liPlanScalars(p, sources.asOf, range);
-        rows.push({
+        const sums = sumLiWindow(sources.liDaily, p, id, range, expBounds);
+        impr.seed(id, sums.im);
+        if (highlightSafe) sums.__highlightFacts = highlightHasFacts(sources, range, [id]);
+        const scalars = liPlanScalars(p, sources.asOf, range, planWindowOf(sources, range));
+        const cvRowOff = cvOff.has(String(id));
+        const row = {
           label: sources.liNames?.[id] || `LI ${id}`, liId: id, sub: p.ch || null,
+          // …and why its conversion cells are «—»: the line item's own reason (spec §3 Display). Sparse.
+          ...(cvRowOff && cvColsAny ? { cvReason: cvReasonOf(sources, id) } : null),
           cells: Object.fromEntries(cols.map((c) => [
             c.id,
-            c.kind === 'field' ? fieldValue(c.field, sums, scalars, fieldSet, 'entity')
-              : c.kind === 'expr' ? evaluateOne(c.ast, aggCtx(sums, scalars, 'entity')).value
+            cvRowOff && readsCvField(c) ? null
+              : c.kind === 'field' ? readField(c.field, sums, scalars, fieldSet, 'entity')
+              : c.kind === 'expr' ? evalOne(c.ast, aggCtx(sums, scalars, 'entity', highlightSafe)).value
               : null,
           ])),
-        });
+        };
+        // The same fact as on a date × line row, on the grain whose label IS the line.
+        if (PacingCore.isLiPausedNow(p, sources.asOf)) row.paused = true;
+        rows.push(row);
       }
       totalsSums = sources.effLIs.reduce((t, id) => {
         const p = sources.liPlan[id];
-        if (p) addRowSums(t, sumLiWindow(sources.liDaily, p, id, range, bounds));
+        if (p) addRowSums(t, sumLiWindow(sources.liDaily, p, id, range, expBounds));
         return t;
       }, { ...ZERO_FLOW });
+      cvTotalsNull = cvOff.size > 0;
+      if (cvTotalsNull && cvColsAny) cvNoteCount = cvOff.size;
+      // An li row key is the line item id (tableRowKey).
+      cvSubsetNull = (keys) => [...keys].some((k) => cvOff.has(String(k)));
+      subset = (keys) => {
+        const ids = sources.effLIs.filter((id) => keys.has(String(id)) && sources.liPlan[id]);
+        const sums = { ...ZERO_FLOW };
+        for (const id of ids) addRowSums(sums, sumLiWindow(sources.liDaily, sources.liPlan[id], id, range, expBounds));
+        const scalars = campaignScalars(sources.liPlan, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
+          false, planWindowOf(sources, range), impr);
+        return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums) };
+      };
     }
 
     // Sort + limit
     const sort = request.sort || { columnId: '__row__', dir: 'asc' };
     const dir = sort.dir === 'desc' ? -1 : 1;
     rows.sort((a, b) => {
+      // Leftovers sink below every real value, whatever the sort and whichever way it runs —
+      // the legacy panel's own rank (Breakdown.jsx:536): real values, then «Unclassified» and
+      // «No value», then the untagged remainder last of all. None of them is a segment anybody
+      // chose, and at the top of a table any of them reads as one.
+      if (leftoverRank(a) !== leftoverRank(b)) return leftoverRank(a) - leftoverRank(b);
       const av = sort.columnId === '__row__' ? a.label : a.cells[sort.columnId] ?? 0;
       const bv = sort.columnId === '__row__' ? b.label : b.cells[sort.columnId] ?? 0;
       return av < bv ? -dir : av > bv ? dir : 0;
     });
+    // What the plan half of a dimension table covers, counted BEFORE the limit cuts the list:
+    // it is a statement about the pacing, and a widget showing the top 5 of 200 values must not
+    // report a different coverage from the same widget showing 50.
+    // `planCols.size` was a fourth conjunct here until CM360 in formulas (2026-09-16 §2.4). A
+    // table whose only plan-derived column is a cm-bearing formula has no ENGINE plan column
+    // at all — report-render.js adds that column to the list afterwards — and the conjunct took
+    // the mark, the fade on its empty cells and the «declared for N of M» footnote away from a
+    // table that has a plan to describe. Nothing else moves: the renderer draws none of the
+    // three unless a DRAWN column is plan-derived (ReportTable.jsx `markColumnId`), so a table
+    // with no plan column renders exactly as it did, with an empty list instead of a null one.
+    const planInfo = (isDim && dimPlans && planCols) ? (() => {
+      const declarable = rows.filter((r) => !r.residual && !r.leftover);
+      // Nothing a value could be declared for — an empty cut, or one that is all remainder.
+      // «declared for 0 of 0» is a sentence about nothing.
+      if (declarable.length === 0) return null;
+      return {
+        planColumns: [...planCols],
+        planDeclared: declarable.filter((r) => dimPlans.byLabel.get(r.label)?.keys?.length).length,
+        planDeclarable: declarable.length,
+      };
+    })() : null;
+
     if (request.limit && rows.length > request.limit) rows = rows.slice(0, request.limit);
 
     // Totals: aggregate-then-compute; window-fn / error columns → null (renderer "—").
     //
-    // The BASIS follows the rows. A dim bucket's rows read 'ts' (plain ratios over the
-    // bucket, the Breakdown-table canon above), so its total does too — otherwise the
-    // Total is not the ratio of the column standing above it: 'agg' drops a click-paced
-    // line from ctr/cpm (clNC/imNC), and on a mixed CPM+CPC pacing the total then reads a
-    // number no row on the table adds up to (sections-to-widgets M4, measured). The three
-    // ENTITY grains keep 'agg' — that is the campaign's own canon, and whether a date
-    // table's total should be a plain re-sum instead is the owner's open question (M2).
+    // The BASIS follows the rows, and since section-widget parity (2026-09-04) that includes
+    // the two DATE grains. A dim bucket's rows read 'ts' (plain ratios over the bucket, the
+    // Breakdown-table canon above), so its total does too — otherwise the Total is not the
+    // ratio of the column standing above it: 'agg' drops a click-paced line from cpm
+    // (spNC/imNC), and on a mixed CPM+CPC pacing the total then reads a number no row on the
+    // table adds up to (sections-to-widgets M4, measured). A date table had exactly the same
+    // problem and the M2 audit left it as the owner's question: on mock-multi the totals row
+    // printed 0.13% and $2.81 over rows that re-sum to 0.76% and $3.29, which is what the
+    // legacy Daily Performance section prints. That question is answered — the rows win — and
+    // `li` is the one grain still on 'agg', because its rows are entities rather than a
+    // time series and the campaign canon is what stands over them. Its ctr now counts every
+    // line (owner decision 2026-09-23), so on ctr the li Totals is the re-sum of its rows too.
+    if (highlightSafe && !isDim && totalsSums) totalsSums.__highlightFacts = highlightHasFacts(sources, range);
     let totals = null;
-    if (request.totals) {
-      const scalars = isDim ? null : campScalars;
-      const basis = isDim ? 'ts' : 'agg';
-      totals = Object.fromEntries(cols.map((c) => {
-        if (c.kind === 'field') return [c.id, fieldValue(c.field, totalsSums, scalars, fieldSet, basis)];
+    let totalsPartial = null;
+    let retotal = null;
+    // One Totals row from one set of sums: the whole cut's below, a kept subset's in `retotal`.
+    // `planNull` is the date grains' rule (CALENDAR_PLAN_FIELDS); `unplanned` the dim cut's.
+    const totalsCells = ({ sums, scalars, unplanned, planNull, silentRates, cvNull }) => {
+      const basis = isDim || contextKind === 'ts' ? 'ts' : 'agg';
+      return Object.fromEntries(cols.map((c) => {
+        if (unplanned && planCols && planCols.has(c.id)) return [c.id, null];
+        if (planNull && columnReads(c, CALENDAR_EXPECTED_FIELDS)) return [c.id, null];
+        if (silentRates && silentRates.size && columnReads(c, silentRates)) return [c.id, null];
+        // One totals rule (spec §3): a line item that is unavailable here empties every total
+        // built on conversions — the cut's when any in-view line item is, a subset's when one of
+        // the kept rows is.
+        if (cvNull && readsCvField(c)) return [c.id, null];
+        if (c.kind === 'field') return [c.id, readField(c.field, sums, scalars, fieldSet, basis)];
         if (c.kind !== 'expr' || c.windowed) return [c.id, null];
-        return [c.id, evaluateOne(c.ast, aggCtx(totalsSums, scalars, basis)).value];
+        return [c.id, evalOne(c.ast, aggCtx(sums, scalars, basis, highlightSafe)).value];
       }));
+    };
+    if (request.totals) {
+      // A dim table's Totals plan is the declared plans summed — never the campaign's, which
+      // would stand over rows that add up to less and read as a shortfall nobody has.
+      const scalars = isDim ? (dimPlans ? dimPlans.totals.scalars : null) : campScalars;
+      if (isDim && dimPlans) totalsPartial = dimPlans.totals.partial;
+      const sums = isDim && dimPlans ? withRowExpected(totalsSums, dimPlans.totals) : totalsSums;
+      // …and the same silence the rows keep: with nothing declared anywhere on this cut, a plan
+      // formula in the Totals row would print a 0 standing under a whole column of em dashes.
+      const totalsUnplanned = !!(isDim && dimPlans && !(dimPlans.totals.keys || []).length);
+      totals = totalsCells({ sums, scalars, unplanned: totalsUnplanned, planNull: false, cvNull: cvTotalsNull });
+      if (subset) {
+        retotal = (keys) => {
+          const part = subset(keys);
+          if (highlightSafe && totalsSums && '__highlightFacts' in totalsSums) part.sums.__highlightFacts = totalsSums.__highlightFacts;
+          // A subset keyed by line item (li, dateLi) is exact again once every unavailable line
+          // item is outside it; a date or dimension subset inherits the cut's answer.
+          return totalsCells({ ...part, cvNull: cvSubsetNull ? cvSubsetNull(keys) : cvTotalsNull });
+        };
+      }
     }
 
-    return { rows, totals, colErrors };
+    // `planInfo` was counted above, before the limit. It carries which columns are plan-derived
+    // (their empty cells read as «no target», not as missing data) and how many of the rows that
+    // COULD carry a plan actually do — measured over the values a plan can name, so the untagged
+    // remainder and «Unclassified» are out of both halves. Sparse: absent on every other grain,
+    // so no other table's model changes shape.
+    return {
+      rows, totals, colErrors,
+      // The window's plan, computed above whatever the grain is, and published so a reader that
+      // evaluates its OWN expression over the same window reads the engine's plan rather than
+      // building a second one beside it (CM360 in formulas, spec
+      // docs/2026-09-16-cm360-in-formulas-design.md §2.4). On the date grains this is also what
+      // every row's plan cell prints, which is the agreement the second pass depends on.
+      windowScalars: campScalars,
+      // Sparse, like the ones under it: only a table with a Totals row can re-total a subset.
+      ...(retotal ? { retotal } : null),
+      // …and only a date grain has a calendar for a window function to run down (§2.9).
+      ...(rowOrder ? { rowOrder } : null),
+      ...(totalsPartial ? { totalsPartial } : null),
+      // Sparse, like the three above it: only a dimension table has a plan per row to publish,
+      // and a widget that names no cm identifier never reads this key (2026-09-16 §2.4).
+      ...(rowScalars ? { rowScalars } : null),
+      ...planInfo,
+      // Primary conversions (spec §3 totals rule): why the conversion Totals read «—». Sparse.
+      ...(totals && cvNoteCount > 0 ? { cvNote: cvCannotShowText(cvNoteCount) } : null),
+    };
   }
 
   /* ── chart series / categories / KPI ──────────────────────────────────────── */
 
-  function buildSeriesModel(expressions, range, sources) {
-    const cal = aggregateDateRows(sources, range);
-    const scalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf, sources.flightStart, sources.flightEnd, range);
-    const ctx = seriesCtx(cal, scalars);
+  function buildSeriesModel(expressions, range, sources, highlightSafe = false) {
+    const rawCal = aggregateDateRows(sources, range);
+    const cal = highlightSafe ? highlightDateRows(rawCal, sources) : rawCal;
+    const scalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf, sources.flightStart, sources.flightEnd, range,
+      false, planWindowOf(sources, range), lineImpr(sources, range));
+    const ctx = seriesCtx(cal, scalars, highlightSafe ? 'ts' : null);
+    // Primary conversions (spec §3): which days include a line item whose conversions are
+    // unavailable. Null while the switch is off.
+    const cvMask = cvDateMask(sources, cal, sources.effLIs, range);
     const errors = {};
     const series = (expressions || []).map((s) => {
       const v = validate(s.expr, 'ts', TS_FIELDS);
@@ -3669,38 +6934,124 @@ function createDashboardMetrics(deps) {
         errors[s.id] = formulaSay(v);
         return { id: s.id, label: s.label, values: cal.map(() => 0), warned: true };
       }
-      const r = evaluateSeries(parse(s.expr).ast, ctx);
-      return { id: s.id, label: s.label, values: r.values, warned: r.warned };
+      const unavailable = highlightSafe && unavailableMetric({ kind: 'formula', expr: s.expr }, sources, null);
+      if (unavailable) {
+        errors[s.id] = unavailable;
+        return { id: s.id, label: s.label, values: cal.map(() => null), warned: false };
+      }
+      const ast = parse(s.expr).ast;
+      const r = (highlightSafe ? evaluateHighlightSeries : evaluateSeries)(ast, ctx);
+      const values = cvMask && astNamesAny(ast, CV_FIELDS) ? maskCvValues(r.values, cvMask, usesWindowFn(ast)) : r.values;
+      return { id: s.id, label: s.label, values, warned: r.warned };
     });
-    return { dates: cal.map((r) => r.date), series, errors };
+    // `scalars` for the same reason the table publishes its own (§2.4): a cm-bearing chart
+    // series is evaluated in the second pass, over this very window, and its plan half may not
+    // be a second reading of the same question.
+    return { dates: cal.map((r) => r.date), series, errors, scalars };
   }
 
+  /**
+   * What the FOLD is called — the tail of the ranking, past `topN`, gathered into one bar or one
+   * slice. It holds real values of the axis, which is what «Other values» says.
+   *
+   * It was «Others» until section-widget parity (2026-09-04), and the rename is the one thing
+   * that keeps a Breakdown tile legible: the untagged remainder beside it is the legacy panel's
+   * «Others» — delivery that carries NO value of this dimension — and one ring drawing two grey
+   * slices under one name says nothing at all. Two different quantities may not share a word.
+   */
+  const OTHER_VALUES_LABEL = 'Other values';
+
   function buildCategoryModel(request, range, sources) {
+    const highlightSafe = !!request?.highlightSafe;
+    const evalOne = highlightSafe ? evaluateHighlightOne : evaluateOne;
     const grain = request && request.grain ? request.grain : { type: 'li' };
     const isDim = grain.type === 'dim';
     const fieldSet = isDim
-      ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId) : AGG_FIELDS;
-    const bounds = calendarBounds(sources, range);
+      ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId, grain.key) : AGG_FIELDS;
+    // Every read of `bounds` here is an expected window delta, so it stops at asOf.
+    const bounds = expectedBounds(sources, range);
+    // This model holds no window plan of its own — a category's plan is the CUT's, not the
+    // campaign's — so the window's is computed here, ONCE, with the same call every other model
+    // makes (§2.4: the window's scalars are one function, on the widget's own scoped sources).
+    // Each line's impressions in this window, the CTR target's weight; the li categories below
+    // hand theirs over as they sum them (lineImpr).
+    const impr = lineImpr(sources, range);
+    const windowScalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf,
+      sources.flightStart, sources.flightEnd, range, false, planWindowOf(sources, range), impr);
     const errors = {};
     const compiled = (request.expressions || []).map((s) => {
       const v = validate(s.expr, 'agg', fieldSet);
       if (!v.ok) { errors[s.id] = formulaSay(v); return null; }
+      const unavailable = highlightSafe && unavailableMetric({ kind: 'formula', expr: s.expr }, sources, isDim ? grain.key : null);
+      if (unavailable) { errors[s.id] = unavailable; return null; }
       return { id: s.id, ast: parse(s.expr).ast };
     });
 
+    // Primary conversions (spec §3): line items in view whose conversions are unavailable here.
+    const cvOff = new Set(cvOffIds(sources, sources.effLIs, range));
     let entities = [];
+    // The untagged remainder, held OUT of the ranking and the fold and appended last — it is
+    // not one of the values being ranked, and folded into the tail it would take the whole
+    // untagged part of the pacing with it under a name that means the opposite.
+    let residualCat = null;
+    // The dim cut's plan, hoisted so the fold below re-weights over the same leaf plans.
+    let dimPlans = null;
     if (isDim) {
-      entities = Object.entries(dimBuckets(sources, grain.key, range))
-        .map(([label, sums]) => ({ label, sums, scalars: null, ids: null }));
+      const cut = dimBuckets(sources, grain.key, range, !!request.residual);
+      compiled.forEach((c, i) => {
+        const error = expressionFieldError(c?.ast, cut.fieldErrors);
+        if (error) { errors[c.id] = error; compiled[i] = null; }
+      });
+      // The same per-row plan the dim TABLE builds, so a bar and a row of one dimension never
+      // disagree about the target behind a value.
+      dimPlans = dimRowPlans(sources, grain.key, cut, range, bounds);
+      entities = Object.entries(cut.buckets)
+        .map(([label, bucket]) => {
+          // This bucket's plan, read ONCE: the sums, the scalars the bar is drawn from, the
+          // fold's leaf plan and the published shape are four readings of one answer.
+          const rp = rowPlanOf(dimPlans, label);
+          return {
+            label,
+            // A conversion-only category is not a fact for a highlight rule (spec §4).
+            sums: highlightSafe && cut.cvOnly && cut.cvOnly.has(label)
+              ? { ...withRowExpected(bucket, rp), __highlightFacts: false } : withRowExpected(bucket, rp),
+            scalars: (rp || {}).scalars ?? null,
+            // Carried so the fold below can re-weight over the leaf plans of the values it
+            // swallows rather than averaging their finished scalars. Named `leafPlan` — not
+            // `plan` — because the PUBLIC category two lines down publishes a `plan` key of its
+            // own, in the second pass's `{ scalars, unplanned }` shape (`e.published`); the two
+            // are different shapes on different objects, and sharing a name invited confusion.
+            leafPlan: rp,
+            // …and the same plan in the shape the SECOND pass reads (2026-09-16 §2.4): the
+            // scalars this bar was drawn from, plus whether the value declared anything at all.
+            // It rides the private entity and is copied onto the public category below, so a
+            // cm-bearing series and the bar beside it stand on one weighting.
+            published: publishedRowPlan(rp),
+            ids: null,
+            highlightKey: JSON.stringify(['dim', label]),
+            residual: label === cut.residual,
+            // «Unclassified» / «No value». They stay in the RANKING, because the fold is decided
+            // by size and holding a leftover out of it would swallow a real value into «Other
+            // values» in its stead — they sink afterwards, once the fold has been taken.
+            leftover: cut.leftovers.has(label),
+            cvNull: cvBlockedLabel(cut, label),
+          };
+        });
+      residualCat = entities.find((e) => e.residual) || null;
+      if (residualCat) entities = entities.filter((e) => !e.residual);
     } else {
       entities = sources.effLIs.map((id) => {
         const p = sources.liPlan[id];
         if (!p) return null;
+        const lineSums = sumLiWindow(sources.liDaily, p, id, range, bounds);
+        impr.seed(id, lineSums.im);
         return {
           label: sources.liNames?.[id] || `LI ${id}`,
-          sums: sumLiWindow(sources.liDaily, p, id, range, bounds),
-          scalars: liPlanScalars(p, sources.asOf, range),
+          highlightKey: JSON.stringify(['li', String(id)]),
+          sums: { ...lineSums, ...(highlightSafe ? { __highlightFacts: highlightHasFacts(sources, range, [id]) } : null) },
+          scalars: liPlanScalars(p, sources.asOf, range, planWindowOf(sources, range)),
           ids: [id],
+          cvNull: cvOff.has(String(id)),
         };
       }).filter(Boolean);
     }
@@ -3708,67 +7059,301 @@ function createDashboardMetrics(deps) {
     // Per-LI categories are ENTITY rows; dim-bucket categories follow the Breakdown
     // bucket canon ('ts' basis: plain ctr/cpm, gated vcr).
     const entityBasis = isDim ? 'ts' : 'entity';
-    const evalEntity = (e) => compiled.map((c) => (c ? evaluateOne(c.ast, aggCtx(e.sums, e.scalars, entityBasis)).value : 0));
-    let cats = entities.map((e) => ({ label: e.label, values: evalEntity(e), _e: e }));
-    cats.sort((a, b) => (b.values[0] ?? 0) - (a.values[0] ?? 0));
+    // Which series read the plan, so a bar on a value nobody declared draws NOTHING rather than
+    // a zero. A chart has no bare-field path — every series is an expression — and inside
+    // arithmetic an absent value is 0, so without this the whole plan half of a dimension chart
+    // read a confident 0 while the table beside it printed em dashes for the same values.
+    const planSeries = isDim ? compiled.map((c) => !!c && readsPlanField({ kind: 'expr', ast: c.ast })) : null;
+    const unplanned = (e) => !!e.leafPlan && !(e.leafPlan.keys && e.leafPlan.keys.length);
+    // Which series read a conversion field, so an entity whose conversions are unknown draws
+    // nothing there rather than the engine's absence-is-zero 0 (spec §3).
+    const cvSeries = compiled.map((c) => !!c && astNamesAny(c.ast, CV_FIELDS));
+    const evalEntity = (e) => compiled.map((c, i) => {
+      if (!c) return highlightSafe ? null : 0;
+      if (planSeries && planSeries[i] && unplanned(e)) return null;
+      if (cvSeries[i] && e.cvNull) return null;
+      return evalOne(c.ast, aggCtx(e.sums, e.scalars, entityBasis, highlightSafe)).value;
+    });
+    // Sparse, as every other mark on this path is: only a leftover carries the key.
+    let cats = entities.map((e) => ({
+      label: e.label, ...(request.identities ? { highlightKey: e.highlightKey } : null), values: evalEntity(e),
+      // Sparse, and only where it exists: a dimension value has a declared plan of its own,
+      // a line item does not — and a line-item axis has no CM360 join to read one for (§2.2).
+      ...(e.published ? { plan: e.published } : null),
+      ...(e.leftover ? { leftover: true } : null), _e: e,
+    }));
+    const rankIndex = Object.hasOwn(request, 'rankExpression') ? (request.rankExpression == null ? -1 : request.expressions.findIndex((entry) => entry.expr === request.rankExpression)) : 0;
+    if (rankIndex >= 0) {
+      // A Highlight may reject a legacy fallback number, but must still read the
+      // categories and folded membership that the visible chart actually ranked.
+      const ranking = highlightSafe && Object.hasOwn(request, 'rankExpression') ? new Map(cats.map((cat) => [cat,
+        compiled[rankIndex] ? evaluateOne(compiled[rankIndex].ast, aggCtx(cat._e.sums, cat._e.scalars, entityBasis)).value : 0,
+      ])) : null;
+      const rank = (cat) => (ranking ? ranking.get(cat) : cat.values[rankIndex]) ?? 0;
+      cats.sort((a, b) => rank(b) - rank(a));
+    }
 
     if (request.limit && cats.length > request.limit) {
       const top = cats.slice(0, request.limit);
       const rest = cats.slice(request.limit);
-      const restSums = rest.reduce((t, c) => (addRowSums(t, c._e.sums), t), { ...ZERO_FLOW });
+      let foldHasPlan = true;
+      // The fold swallows whole rows, so one unknown row makes its conversion bar unknown.
+      const foldCvNull = rest.some((c) => c._e.cvNull);
+      const custom = isDim ? customMetricKeys(sources, parseDimSourceKey(grain.key)?.sourceId) : [];
+      const restSums = rest.reduce((t, c) => (addRowSums(t, c._e.sums, custom), t), { ...ZERO_FLOW });
       // Others scalars: WEIGHTED campaign scalars over the remainder set (round-6 —
       // summing mTgt/ctrT/daysLeft across LIs is meaningless), on the FOLD basis
       // (P0.1, owner decision 2026-08-19): the targets weight over the same lines the
-      // values count, so ctr against ctrT on one Others row is like-for-like. The
-      // has-target filter and the vcrT/acrT audio split stay; campaign-level scalars
+      // values count. ctrT weighs the folded lines by their impressions in this window
+      // (owner decision 2026-09-23), so ctr against ctrT on one Others row is like-for-like.
+      // The has-target filter and the vcrT/acrT audio split stay; campaign-level scalars
       // keep campM's rate-type gates.
+      if (highlightSafe && !isDim) restSums.__highlightFacts = rest.some((category) => category._e.sums.__highlightFacts !== false);
       let restScalars = null;
       if (!isDim) {
         const restIds = rest.flatMap((c) => c._e.ids || []);
-        restScalars = campaignScalars(sources.liPlan, restIds, sources.asOf, sources.flightStart, sources.flightEnd, range, true);
+        restScalars = campaignScalars(sources.liPlan, restIds, sources.asOf, sources.flightStart, sources.flightEnd, range, true,
+          planWindowOf(sources, range), impr);
+      } else if (dimPlans) {
+        const fold = foldPlanScalars(dimPlans, rest.map((c) => c._e.leafPlan), sources, range);
+        restScalars = fold.scalars;
+        Object.assign(restSums, fold.exp);
+        foldHasPlan = rest.some((c) => c._e.leafPlan?.keys?.length);
       }
       const others = {
-        label: 'Others',
+        label: OTHER_VALUES_LABEL, ...(request.identities ? { highlightKey: JSON.stringify(['fold']) } : null),
         // The SAME basis as the rows it folds (P0 §5.1). On the default agg basis
-        // ctr/cpm read the non-CPC/CPV bases (clNC/imNC, spNC/imNC), so a folded CPC
-        // line would contribute nothing to the bar standing beside its own siblings.
-        values: compiled.map((c) => (c ? evaluateOne(c.ast, aggCtx(restSums, restScalars, entityBasis)).value : 0)),
+        // cpm reads the non-CPC/CPV basis (spNC/imNC), so a folded CPC line would
+        // contribute nothing to the bar standing beside its own siblings.
+        values: compiled.map((c, i) => {
+          if (!c) return highlightSafe ? null : 0;
+          // The fold obeys the same rule as the rows it swallows: with no declaration among
+          // them there is no plan to draw, and a zero bar would claim one.
+          if (planSeries && planSeries[i] && !foldHasPlan) return null;
+          if (cvSeries[i] && foldCvNull) return null;
+          return evalOne(c.ast, aggCtx(restSums, restScalars, entityBasis, highlightSafe)).value;
+        }),
         others: true,
+        // The fold holds several dimension values at once, so it names none and the CM360 side
+        // has no tuple for it (§2.2's join table: the «Others» bar reads null). §2.4's answer
+        // for a category with no declaration to point at is the absent plan, on a dimension
+        // axis only — the same sparse rule the rows above follow.
+        ...(isDim ? { plan: ABSENT_ROW_PLAN } : null),
       };
       cats = [...top.map(({ _e, ...c }) => c), others];
     } else {
       cats = cats.map(({ _e, ...c }) => c);
     }
-    return { categories: cats, errors };
+    // …and NOW the leftovers sink, under the fold and above the remainder — the rank the table
+    // beside the ring draws (Breakdown.jsx:536). It happens after the fold rather than before it
+    // for the reason the mark's own note gives: the tail is chosen by size, and a leftover held
+    // out of that choice would take a real value into «Other values» in its place. Stable, so
+    // two leftovers keep the order the ranking gave them.
+    if (cats.some((c) => c.leftover)) {
+      cats = [...cats.filter((c) => !c.leftover), ...cats.filter((c) => c.leftover)];
+    }
+    // …and the remainder after the fold: the fold holds real values of this dimension, and this
+    // holds the delivery that carries none, so it is the furthest thing from a value here.
+    if (residualCat) {
+      cats = [...cats, {
+        label: residualCat.label, ...(request.identities ? { highlightKey: residualCat.highlightKey } : null),
+        values: evalEntity(residualCat),
+        residual: true,
+        // …and the remainder carries delivery this dimension never tagged, which is further
+        // from a value than the fold is. No tuple, no declaration, the absent plan (§2.4).
+        plan: ABSENT_ROW_PLAN,
+      }];
+    }
+    // `fieldSet` rides out beside the window's plan because §2.4's first gate is taken one file
+    // over, on the chart's own cut: a cm-bearing series that names `planImpr` on a `ds:` axis is
+    // a series error there, and report-render.js has no other way to ask what this cut carries.
+    return { categories: cats, errors, windowScalars, fieldSet };
   }
 
   /**
-   * One aggregate reading: `{ value, warned }`, where `value` is NULL when the expression is
-   * a bare field the context has nothing to answer with (sections-to-widgets M3).
+   * One aggregate reading: `{ value, warned }`, where `value` is NULL when the expression has
+   * nothing to answer with (sections-to-widgets M3; widened 2026-09-04).
    *
-   * The only fields that can answer nothing are the three weighted campaign targets, and the
-   * distinction is the whole fix: a KPI asking for `ctrT` on a pacing that set no CTR target
-   * gets no number and therefore no chip, while `ctrT * 2` — where the field is an OPERAND —
-   * keeps the absence-is-zero canon, because arithmetic has to be done on numbers. Absence
-   * carries no `warned` either: nothing was coerced, the question simply does not apply.
+   * Two shapes can answer nothing, and both are about the WHOLE expression rather than an
+   * operand inside it:
+   *
+   *   · **a bare field** the context has nothing for. The only fields that can are the three
+   *     weighted campaign targets: a KPI asking for `ctrT` on a pacing that set no CTR target
+   *     gets no number and therefore no chip, while `ctrT * 2` — where the field is an OPERAND
+   *     — keeps the absence-is-zero canon, because arithmetic has to be done on numbers.
+   *   · **a RATIO whose denominator is 0** (section-widget parity, Targets). `costBudTotal /
+   *     planClicks` on a campaign that plans no clicks is not a target of `$0.00`; it is the
+   *     same statement the bare-field arm already makes, one shape over. The legacy Targets
+   *     band says it in as many words — `planClicks > 0 ? costBudTotal / planClicks : null`
+   *     (KpiPlanFact.jsx:149) — and without this the tile drew a confident red delta against a
+   *     goal nobody set. The ROOT only: `cv / cl * 100` is a multiplication whose left operand
+   *     happens to divide, and an operand keeps the absence-is-zero canon like any other.
+   *
+   *     Plan fields follow a narrowed window (2026-09-23), so a window before a line starts can
+   *     now hold a plan of 0 where the flight never did. `cl / planClicks` there reads nothing;
+   *     `cl / planClicks * 100` keeps this canon's 0, as it always has on a pacing that plans
+   *     no clicks. Widening the rule is a separate decision, not taken here.
+   *
+   * Neither carries `warned`: nothing was coerced, the question simply does not apply.
+   *
+   * WHO THIS REACHES, stated because the first version of this note got it wrong (fix round 1,
+   * 2026-09-04): `kpiValue` is read by a KPI's value AND its target, by every chart GUIDE and
+   * chart target (`aggReading` → report-render.js), and by every Layout brick bind
+   * (brick-data.js). All of them answer «nothing» the same way — no chip, no line, an em dash —
+   * which is the point: one canon, or the same expression means two things one view apart.
+   * Guides are pinned in tests/report-render-test.mjs beside the bare-field case.
    */
   function aggRead(expr, ctx) {
     const ast = parse(expr).ast;
+    // Primary conversions (spec §3): a reading that names a conversion field over a line item
+    // whose conversions are unavailable has no number, bare or inside arithmetic. Asked only of
+    // an expression that names one, so no other reading pays for it.
+    if (ctx.cvUnavailable && astNamesAny(ast, CV_FIELDS) && ctx.cvUnavailable()) {
+      return { value: null, warned: false };
+    }
     if (ast.t === 'id' && ctx.get(ast.name) == null) return { value: null, warned: false };
+    if (ast.t === 'bin' && ast.op === '/' && evaluateOne(ast.r, ctx).value === 0) {
+      return { value: null, warned: false };
+    }
     return evaluateOne(ast, ctx);
+  }
+
+  // useWidgetData supplies immutable snapshots. Keep their private aggregate alive
+  // across brick/value/target reads, with a bounded set of windows per snapshot.
+  // Plain mutable callers remain uncached; no derived object escapes this context.
+  const aggregateContexts = new WeakMap();
+  const AGGREGATE_WINDOWS = 4;
+
+  function campaignReadingContext(sources, range) {
+    let cache;
+    const key = range ? JSON.stringify([range.from, range.to]) : '__all__';
+    if (Object.isFrozen(sources)) {
+      cache = aggregateContexts.get(sources);
+      if (!cache) { cache = new Map(); aggregateContexts.set(sources, cache); }
+      if (cache.has(key)) return cache.get(key);
+    }
+    // A caller may reuse and edit its range object after this read.
+    const window = range ? { from: range.from, to: range.to } : null;
+    let scalars, expected, sums, rates, cvOffAny;
+    // The window's delivered sums, built on first ask and kept. Each line's impressions go to
+    // `impr` on the way, the CTR target's weight, so the target and the value share one walk.
+    const impr = lineImpr(sources, window);
+    const factSums = () => {
+      if (!sums) {
+        sums = sources.effLIs.reduce((t, id) => {
+          const p = sources.liPlan[id];
+          if (p) {
+            const lineSums = sumLiWindow(sources.liDaily, p, id, window, null);
+            impr.seed(id, lineSums.im);
+            addRowSums(t, lineSums);
+          }
+          return t;
+        }, { ...ZERO_FLOW });
+      }
+      return sums;
+    };
+    // The window's plan, built on first ask and kept. Both readers below go through this one
+    // line, so a plan field read through `get` and the whole object handed out by `scalars()`
+    // are the same instance rather than two computations of the same question. Its ctrT is the
+    // one field that reads the facts, and only when it is read (campaignScalars).
+    const windowPlan = () => (scalars ||= campaignScalars(sources.liPlan, sources.effLIs,
+      sources.asOf, sources.flightStart, sources.flightEnd, window, false, planWindowOf(sources, window),
+      (id) => { factSums(); return impr(id); }));
+    // Primary conversions (spec §3): is any line item in view unavailable in this window?
+    const cvUnavailable = () => {
+      if (cvOffAny === undefined) cvOffAny = cvOffIds(sources, sources.effLIs, window).length > 0;
+      return cvOffAny;
+    };
+    const ctx = {
+      cvUnavailable,
+      get(name) {
+        if (FIELDS_PLAN.has(name)) return windowPlan()[name];
+        if (FIELDS_EXPECTED.has(name)) {
+          if (!expected) {
+            expected = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+            const bounds = expectedBounds(sources, window);
+            for (const id of sources.effLIs) {
+              const p = sources.liPlan[id];
+              if (!p) continue;
+              const e = expectedDeltas(p, bounds.from, bounds.to);
+              for (const field of FIELDS_EXPECTED) expected[field] += e[field] || 0;
+            }
+          }
+          return expected[name];
+        }
+        if (!FIELDS_DAILY.has(name) && !FIELDS_RATES.has(name)) return null;
+        if (CV_FIELDS.has(name) && cvUnavailable()) return null;
+        factSums();
+        if (FIELDS_RATES.has(name)) {
+          rates ||= ratesFromSums(sums, 'agg');
+          return rates[name];
+        }
+        return sums[name];
+      },
+      /** The window's plan scalars, forced. They are a lazy private here — built only when an
+       *  expression names a plan field — and the CM360 second pass needs the SAME instance the
+       *  KPI's own numbers were read from (§2.4: the window's scalars are one function, never a
+       *  second computation standing beside the first). */
+      scalars() {
+        return windowPlan();
+      },
+    };
+    if (cache) {
+      cache.set(key, ctx);
+      if (cache.size > AGGREGATE_WINDOWS) cache.delete(cache.keys().next().value);
+    }
+    return ctx;
+  }
+
+  /** The window's plan scalars for a widget's own scoped sources — the ONE function §2.4 names
+   *  for a WINDOW reading, shared with `kpiValue` through the cached campaign context, so a KPI
+   *  whose value is a CM360 formula (and is therefore never evaluated here) still reads the plan
+   *  its neighbours read. Null with no sources: a tile with nothing to read has no plan either. */
+  function campaignWindowScalars(range, sources) {
+    return sources ? campaignReadingContext(sources, range).scalars() : null;
+  }
+
+  const highlightAggregateCache = new WeakMap();
+  function kpiHighlightValue(expr, range, sources) {
+    if (!sources || !sources.effLIs?.length) return { value: null, error: 'Data unavailable' };
+    const validation = validate(expr, 'agg', AGG_FIELDS);
+    if (!validation.ok) return { value: null, error: formulaSay(validation) };
+    const unavailable = unavailableMetric({ kind: 'formula', expr }, sources, null);
+    if (unavailable) return { value: null, error: unavailable };
+    const cacheable = Object.isFrozen(sources);
+    let windows = cacheable ? highlightAggregateCache.get(sources) : null;
+    if (!windows) { windows = new Map(); if (cacheable) highlightAggregateCache.set(sources, windows); }
+    const key = JSON.stringify(range || null);
+    let ctx = windows.get(key);
+    if (!ctx) {
+      const bounds = expectedBounds(sources, range);
+      const impr = lineImpr(sources, range);
+      const sums = (sources.effLIs || []).reduce((total, id) => {
+        const plan = sources.liPlan[id];
+        if (plan) {
+          const lineSums = sumLiWindow(sources.liDaily, plan, id, range, bounds);
+          impr.seed(id, lineSums.im);
+          addRowSums(total, lineSums);
+        }
+        return total;
+      }, { ...ZERO_FLOW });
+      const scalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf,
+        sources.flightStart, sources.flightEnd, range, false, planWindowOf(sources, range), impr);
+      sums.__highlightFacts = highlightHasFacts(sources, range);
+      // An explicit null is what `highlightFieldValue` and the highlight evaluator already read as
+      // «no reading», so no conditional style can match an unknown conversion number.
+      if (cvOffIds(sources, sources.effLIs, range).length) { sums.cv = null; sums.pc = null; sums.pv = null; }
+      ctx = aggCtx(sums, scalars, 'agg', true);
+      windows.set(key, ctx);
+      if (windows.size > 16) windows.delete(windows.keys().next().value);
+    }
+    return evaluateHighlightOne(parse(expr).ast, ctx);
   }
 
   function kpiValue(widget, range, sources) {
     const v = validate(widget.expr, 'agg', AGG_FIELDS);
     if (!v.ok) return { value: 0, warned: true, error: formulaSay(v) };
-    const bounds = calendarBounds(sources, range);
-    const sums = sources.effLIs.reduce((t, id) => {
-      const p = sources.liPlan[id];
-      if (p) addRowSums(t, sumLiWindow(sources.liDaily, p, id, range, bounds));
-      return t;
-    }, { ...ZERO_FLOW });
-    const scalars = campaignScalars(sources.liPlan, sources.effLIs, sources.asOf, sources.flightStart, sources.flightEnd, range);
-    const ctx = aggCtx(sums, scalars);
+    const ctx = campaignReadingContext(sources, range);
     const r = aggRead(widget.expr, ctx);
     const out = { value: r.value, warned: r.warned };
     if (widget.target?.expr) {
@@ -3786,6 +7371,46 @@ function createDashboardMetrics(deps) {
       }
     }
     return out;
+  }
+
+  /**
+   * grossAgg(expr, range, sources) → number|null — the GROSS twin of a client money
+   * aggregate (net cost mode, spec §7), over the SAME line items and the SAME window
+   * kpiValue reads. Every `dc` in this file is already net (the per-LI ratio `k` is
+   * applied at aggregation, normalize.js), so gross is net / k, summed per line.
+   *
+   * Only the two client-money expressions have a gross twin. Media money (`sp`) is what
+   * the LI cost to buy and has none; so does every unit and rate. `null` — not 0 — is how
+   * a brick learns there is no second line to draw.
+   *
+   * `k` comes from the RAW plan wherever `sources` carries one: the virtual plans period
+   * scope and dim scope hand over enumerate their fields explicitly and DROP `k` (as they
+   * drop `coef`), which would silently collapse gross back onto net. Same rule, and the
+   * same reason, as metrics.js:137. The BUDGET, in contrast, is deliberately the effective
+   * (scoped) one — that is the number the window is actually about.
+   *
+   * `budget` follows a narrowed window exactly as the `budget` field beside it does
+   * (planWindowOf, 2026-09-23), or the gross twin would stand on the whole flight under a
+   * windowed net figure. `budgetTotal`, the whole flight's client budget, has a gross twin of
+   * its own, and it never follows the window. `budgetToDate` (2026-09-23) is client money too:
+   * its twin is each line's plan to date over the same days, over that line's own `k`.
+   */
+  function grossAgg(expr, range, sources) {
+    if (expr !== 'budget' && expr !== 'budgetTotal' && expr !== 'budgetToDate' && expr !== 'dc') return null;
+    const bounds = calendarBounds(sources, range);
+    const planWindow = expr === 'budget' ? planWindowOf(sources, range) : null;
+    let sum = 0;
+    for (const id of sources.effLIs || []) {
+      const p = sources.liPlan[id];
+      if (!p) continue;
+      const raw = sources.rawLiPlan?.[id] || p;
+      const k = (raw.k > 0 && raw.k < 1) ? raw.k : 1;
+      if (expr === 'budget') sum += (planWindow ? budgetInWindow(p, planWindow) : (p.budget || 0)) / k;
+      else if (expr === 'budgetTotal') sum += (p.budget || 0) / k;
+      else if (expr === 'budgetToDate') sum += budgetToDate(p, range, sources.asOf) / k;
+      else sum +=(sumLiWindow(sources.liDaily, p, id, range, bounds).dc || 0) / k;
+    }
+    return sum;
   }
 
   /**
@@ -3814,15 +7439,20 @@ function createDashboardMetrics(deps) {
   function windowFactCount(sources, range) {
     const bounds = calendarBounds(sources, range);
     if (!bounds.from || !bounds.to) return 0;
+    // A conversion-only day row (spec 2026-09-13 §3 "Days") is not a delivered fact: a window
+    // holding only conversions keeps its honest "no data yet" state.
+    const cvOnly = sources.liDaily ? cvOnlyDaysOf(sources.liDaily) : null;
     let n = 0;
     for (const id of sources.effLIs) {
       const p = sources.liPlan[id];
       const dd = sources.liDaily[id] || {};
+      const skip = cvOnly && cvOnly[id];
       for (const d of Object.keys(dd)) {
         if (d < bounds.from || d > bounds.to) continue;
         // clip to the LI's flight exactly like every aggregation does — facts the
         // model discards must not flip the empty state (round 7)
         if (p && p.fs && p.fe && (d < p.fs || d > p.fe)) continue;
+        if (skip && skip.has(d)) continue;
         n++;
       }
     }
@@ -3905,7 +7535,9 @@ function createDashboardMetrics(deps) {
   }
 
   // Fixed per-campaign meter scale: [target - 20, target + 10], clamped to 0..100.
-  function meterBounds(target) {
+  function meterBounds(target, format = 'percent') {
+    // Other units use a target-relative domain, never percentage limits or current value.
+    if (format !== 'percent' && format !== 'percent2') return { min: 0, max: Math.max(Number.MIN_VALUE, (target || 0) * 1.5) };
     const rounded = Math.round(target || 0);
     const min = Math.max(0, rounded - 20);
     const max = Math.min(100, Math.max(min + 10, rounded + 10));
@@ -3914,10 +7546,13 @@ function createDashboardMetrics(deps) {
 
   // Primary delivery unit: impressions first, then a plan-bearing views/clicks
   // fallback. With no plan-bearing fallback, prefer the visible views reading.
+  // Chosen on the WHOLE-flight plans (campM's *PlanFlight twins, 2026-09-23): a narrowed
+  // window holding none of a unit's plan must not switch the verdict to another unit.
+  // (`hasImpr` is already read off the flight twin.)
   function primaryUnit(cm) {
     if (cm.hasImpr) return 'impr';
-    if (cm.hasViews && (cm.viewsPlan || 0) > 0) return 'views';
-    if (cm.hasClicks && (cm.planClicks || 0) > 0) return 'clicks';
+    if (cm.hasViews && (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0) return 'views';
+    if (cm.hasClicks && (cm.clicksPlanFlight ?? cm.planClicks ?? 0) > 0) return 'clicks';
     return cm.hasViews ? 'views' : 'clicks';
   }
 
@@ -3955,9 +7590,14 @@ function createDashboardMetrics(deps) {
     delivery: {
       title: 'Delivery', format: 'percent',
       compute: (cm) => {
-        if (cm.pI > 0) return { value: cm.iPct, target: null, invert: false, sub: 'of impressions plan' };
-        if (cm.clicksPlan > 0) return { value: (cm.clicksActual / cm.clicksPlan) * 100, target: null, invert: false, sub: 'of clicks plan' };
-        if (cm.viewsPlan > 0) return { value: (cm.viewsActual / cm.viewsPlan) * 100, target: null, invert: false, sub: 'of views plan' };
+        // The unit is chosen on the whole-flight plan (2026-09-23); the percent is over the
+        // window's plan, which is the flight's unless the viewer narrowed it. A window holding
+        // none of that plan has no percent: an em dash, not a 0% that reads as no delivery.
+        const has = (flight, win) => (cm[flight] ?? cm[win] ?? 0) > 0;
+        const pct = (actual, plan) => (plan > 0 ? (actual / plan) * 100 : null);
+        if (has('imprPlanFlight', 'pI')) return { value: cm.pI > 0 ? cm.iPct : null, target: null, invert: false, sub: 'of impressions plan' };
+        if (has('clicksPlanFlight', 'clicksPlan')) return { value: pct(cm.clicksActual, cm.clicksPlan), target: null, invert: false, sub: 'of clicks plan' };
+        if (has('viewsPlanFlight', 'viewsPlan')) return { value: pct(cm.viewsActual, cm.viewsPlan), target: null, invert: false, sub: 'of views plan' };
         return { value: 0, target: null, invert: false, sub: 'no delivery plan' };
       },
     },
@@ -3971,7 +7611,10 @@ function createDashboardMetrics(deps) {
     },
     ctr: {
       title: 'CTR', format: 'percent2',
-      compute: (cm, fl) => ({ value: cm.ctr, target: fl?.ctrT ?? null, invert: false, sub: 'vs target' }),
+      // The target is weighted by delivered impressions in the window the CTR is read over
+      // (owner decision 2026-09-23), so it comes from the SAME metrics object as the value:
+      // a narrowed window compares its CTR with its own target, never the flight's.
+      compute: (cm) => ({ value: cm.ctr, target: cm.ctrT ?? null, invert: false, sub: 'vs target' }),
     },
     vcr: {
       title: 'VCR', format: 'percent',
@@ -4037,35 +7680,225 @@ function createDashboardMetrics(deps) {
     }));
   }
 
+  // Same sorted-union shape, for the per-LI net ratio (net cost mode, spec
+  // 2026-09-07 §3). `k` scales dc on EVERY non-coef LI, so — unlike the coef
+  // fingerprint — a change here needs no coef anywhere to matter: it stands on
+  // its own in the gate below.
+  //
+  // Only line items that actually CARRY a ratio are listed: at k = 1 (or absent)
+  // the net multiplier is the identity, so adding or removing such a line item
+  // changes no number and must not cost a facts rebuild. A pacing that never used
+  // net cost mode fingerprints as the empty list, exactly as it did before the
+  // mode existed.
+  function netFingerprint(liPlan) {
+    const ids = Object.keys(liPlan || {}).sort();
+    const out = [];
+    for (const id of ids) {
+      const k = (liPlan[id] && liPlan[id].k) ?? 1;
+      if (k !== 1) out.push([id, k]);
+    }
+    return JSON.stringify(out);
+  }
+
+  // Primary conversions (spec docs/2026-09-13-primary-conversions.md §3, "Live update
+  // after save"). Same sorted-union shape. Every line item is listed while the switch
+  // is operative: a conversion-data flip on a line item with no choice changes its
+  // revenue group, so it is a change too. Names are trimmed and sorted, so the order a
+  // list was ticked in is not a change, and a null list reads as the empty one. Not
+  // operative → the empty string, so a pacing that never used the switch never rebuilds.
+  function primaryCvFingerprint(liPlan, operative) {
+    if (operative !== true) return '';
+    const ids = Object.keys(liPlan || {}).sort();
+    return JSON.stringify(ids.map((id) => {
+      const p = liPlan[id] || {};
+      const names = Array.isArray(p.primaryCv)
+        ? p.primaryCv.filter((n) => typeof n === 'string').map((n) => n.trim()).filter(Boolean).sort()
+        : [];
+      return [id, p.conversionData === true, names];
+    }));
+  }
+
   // Gate (spec §3.4): (coefOrMarginChanged && (hadAnyCoef || hasAnyCoef))
   //                   || (rateChanged && hasAnyCoef)
-  function shouldRebuildFacts(oldLP, newLP, oldRate, newRate) {
+  //                   || netRatioChanged
+  //                   || primaryCvChanged
+  // `oldOn` / `newOn` are the published primary_cv_operative flag before and after the
+  // save. A flip either way rebuilds; operative on both sides compares the per-line-item
+  // fingerprint; off on both sides compares '' with '' and never rebuilds.
+  function shouldRebuildFacts(oldLP, newLP, oldRate, newRate, oldOn = false, newOn = false) {
     const had = anyCoef(oldLP);
     const has = anyCoef(newLP);
     const marginChanged = coefFingerprint(oldLP) !== coefFingerprint(newLP);
     const rateChanged = (oldRate ?? 1) !== (newRate ?? 1);
-    return (marginChanged && (had || has)) || (rateChanged && has);
+    const netChanged = netFingerprint(oldLP) !== netFingerprint(newLP);
+    const cvChanged = (oldOn === true) !== (newOn === true)
+      || primaryCvFingerprint(oldLP, oldOn === true) !== primaryCvFingerprint(newLP, newOn === true);
+    return (marginChanged && (had || has)) || (rateChanged && has) || netChanged || cvChanged;
+  }
+
+  // Does any LI in the plan bill the client net of a ratio? (net cost mode, spec
+  // 2026-09-07 §7.) `k` is the per-LI net ratio: 1 is the identity — the client's
+  // figure IS the gross one — and `0 < k < 1` is a net LI. Anything outside that
+  // band (missing, 0, ≥ 1) is not a ratio and reads as plain.
+  function anyNet(liPlan) {
+    return Object.values(liPlan || {}).some((p) => p && p.k > 0 && p.k < 1);
+  }
+
+  // The basis a money label states (net cost mode, spec §7). A client figure that
+  // draws the pair leads with gross and says net underneath, and margin is computed
+  // from net — in CAD the currency symbol tells the two apart, but in gross/net
+  // both are dollars, so the WORD has to. `netMode` is the CALLER's answer to "is
+  // this figure's basis worth naming": a label says what ITS OWN number is, so a
+  // lone figure with no twin beside it passes falsy and keeps its plain caption
+  // (fix round 1 — see `showsGrossPair`, dual-money.js). Off a net pacing the label
+  // is returned untouched, byte for byte; an empty label stays empty rather than
+  // becoming a bare « (gross)».
+  //
+  // Three kinds, one rule — the caption names its own number's basis:
+  //   'client'  the figure IS gross (it leads a drawn gross/net pair) → « (gross)»
+  //   'margin'  margin is computed from net → « (net)»
+  //   'net'     a CLIENT-money figure printed net with no gross twin beside it —
+  //             the standard Finance widget's statRow / kvRow cells and a client
+  //             moneyStat whose pair is not drawn → « (net)». Without it those
+  //             cells sit unlabelled next to «(gross)» ones and read as gross.
+  function basisLabel(label, kind, netMode) {
+    if (!netMode || !label) return label;
+    return (kind === 'margin' || kind === 'net') ? `${label} (net)` : `${label} (gross)`;
+  }
+
+  // The client-money bindings (net cost mode, spec §7). Every one of these prints a
+  // number the client is billed for, which on a net pacing is the NET figure — so its
+  // caption has to say so. `sp` and the DSP-side rates are deliberately absent: media
+  // money is what the line item cost to BUY and has no client basis; so do units,
+  // percentages and every plan-side count.
+  const CLIENT_MONEY_KEYS = new Set([
+    'budget', 'budgetTotal', 'budgetToDate', 'dc', 'clientPr', 'budPr',
+    'dynCpm', 'dynCpc', 'dynCpv', 'dynCpa',
+    'clientPlanCpm', 'clientPlanCpc', 'clientPlanCpv',
+  ]);
+
+  // The margin bindings (net cost mode, spec §7). `mA` is the achieved margin, `mTgt` the
+  // plan's target it is measured against, and both are computed FROM net wherever a ratio
+  // exists — so a caption naming either says «(net)».
+  const MARGIN_KEYS = new Set(['mA', 'mTgt']);
+
+  // The canonical READINGS with a basis (net cost mode, spec §7; fix round 1, findings 1–2).
+  //
+  // This is a SECOND vocabulary, not more of the first. A binding names either a delivery
+  // field (`bind.expr` — the formula fields above) or a campaign reading (`bind.metric`, and
+  // a report's `kind: 'canonical'`): the widget metric catalogue's presets and canon metrics,
+  // resolved by brick-data's CANON table and `readingFor`. The same word can be two numbers
+  // across that line — `budget` as a FIELD is the client's budget in money, `budget` as a
+  // READING is spend-to-date as a percent of expected media cost — so one table over both
+  // namespaces would print « (net)» under a percentage of media spend.
+  //
+  // `margin` and `marginbar` are both `cm.mA`, computed FROM net. The client plan rates and
+  // the dynamic client CPM are client money printed net with no gross twin beside them. Every
+  // other reading — `budget`, `pacing`, `spend`, `cpm`, the delivery and needed-per-day ones —
+  // is media-side, a count or a percentage, and has no client basis to state.
+  const READING_BASIS = new Map([
+    ['margin', 'margin'], ['marginbar', 'margin'],
+    ['clientPlanCpm', 'net'], ['clientPlanCpc', 'net'], ['clientPlanCpv', 'net'],
+    ['dynCpm', 'net'],
+  ]);
+
+  // The name a basis key goes by where the delivery-field catalogue has none. `mA` is campM's
+  // achieved margin — «Margin» on every surface that draws it — and `FIELD_LABELS`
+  // (metric-catalog.js) names only the stored formula fields. It lives beside the tables it
+  // names for rather than inline at one call site, so a second caption path gets the same word.
+  const BASIS_NAMES = new Map([['mA', 'Margin']]);
+
+  // THE rule for a DELIVERY FIELD (spec §7: a label says what its own number is) — the
+  // vocabulary of `bind.expr` and of a report's `kind: 'metric'` / bare-field formula.
+  //
+  //   'net'     client money, printed net with no gross twin beside it
+  //   'margin'  a margin, computed from net
+  //   null      no client basis to state at all: media money, units, percentages, plan
+  //             counts. This is the answer that keeps a plain pacing byte-identical, and
+  //             it is also what `dc`'s and the dynamic rates' own callers override — those
+  //             two draw the gross figure and say so through `coefLabels`.
+  function basisForKey(key) {
+    if (CLIENT_MONEY_KEYS.has(key)) return 'net';
+    if (MARGIN_KEYS.has(key)) return 'margin';
+    return null;
+  }
+
+  // The same question asked of a canonical READING key, off the table above. Map lookups, so
+  // a key out of stored config reaches no answer through the prototype chain.
+  function basisForReading(key) {
+    return READING_BASIS.get(key) ?? null;
+  }
+
+  // …and asked of a brick binding, which carries one namespace or the other. `metric` WINS
+  // where both are present: brick-data resolves it first, so the metric is the number on
+  // screen and the expr never runs — answering off the expr there would caption a reading
+  // with a field's basis. Only an EXACT key counts either way: a formula that merely mentions
+  // `dc` ("dc - sp") is a different number, and guessing at its basis would put the wrong
+  // word under it.
+  function basisForBind(bind) {
+    if (!bind) return null;
+    if (bind.metric != null) return basisForReading(bind.metric);
+    return basisForKey(bind.expr);
   }
 
   // Task 12 — coef-gated relabels (spec §8). When any LI in the plan runs the
   // coefficient-cost model, dc-based numbers are the client's REAL cost, not a
   // dynamic estimate, so the UI swaps to client-facing wording. Zero-coef
   // pacings render the legacy strings byte-identical (no visible change).
-  function coefLabels(coefMode) {
+  //
+  // `netMode` is the second, independent axis (spec 2026-09-07 §7, amended in fix
+  // round 1), and a label says what ITS OWN number is:
+  //   `dcCol`  names a COLUMN of dc — the daily table's dc cells and a report's `dc`
+  //            value are both already net (the ratio is applied at aggregation), and
+  //            no gross twin is drawn beside them, so the header says « (net)».
+  //   `dyn()`  names a dynamic rate ROW, which leads with the client's gross rate and
+  //            carries net underneath (brick-data.js `series === 'dynamic'`), so it
+  //            says « (gross)».
+  //   `cpmCol` takes no suffix either way — it is the DSP's own buying rate, which has
+  //            no client basis to state.
+  // The one-argument call shape is unchanged: `netMode` defaults falsy.
+  function coefLabels(coefMode, netMode) {
     return {
-      dcCol: coefMode ? 'Client Cost' : 'Dynamic Cost',
+      dcCol: (coefMode ? 'Client Cost' : 'Dynamic Cost') + (netMode ? ' (net)' : ''),
       cpmCol: coefMode ? 'DSP CPM' : 'CPM',
-      dyn: (unit) => (coefMode ? `Client ${unit}` : `Dyn ${unit}`),
+      dyn: (unit) => (coefMode ? `Client ${unit}` : `Dyn ${unit}`) + (netMode ? ' (gross)' : ''),
     };
+  }
+
+
+/* ══ workspace/src/lib/dashboard/layout-readings.js ═══════════════════════════════════════════ */
+  // Named domain readings for ordinary Layout bindings. The old Flight brick and its
+  // editable recipe share exactly the same range-aware day averaging and flight remainder.
+
+  const LAYOUT_READING_OPTIONS = Object.freeze([
+    { key: 'flight.day', label: 'Flight day', note: 'Average elapsed days of effective line items in the selected window.', format: 'int' },
+    { key: 'flight.total', label: 'Flight duration', note: 'Average flight duration of effective line items in the selected window.', format: 'int' },
+    { key: 'flight.remaining', label: 'Flight days remaining', note: 'Remaining days across the full flight.', format: 'int' },
+  ].map((entry) => Object.freeze(entry)));
+
+  function flightProgress(cm, flCM, effLIs) {
+    const n = Math.max(1, (effLIs || []).length);
+    const left = Math.max(0, (flCM && flCM.daysLeft) || 0);
+    return {
+      day: Math.round(((cm && cm.totalDP) || 0) / n),
+      total: Math.round(((cm && cm.totalFD) || 0) / n),
+      daysLeft: left,
+      daysLeftText: left === 0 ? 'flight ended' : left === 1 ? '1 day left' : `${left} days left`,
+    };
+  }
+
+  function layoutReading(key, ctx = {}) {
+    if (!LAYOUT_DOMAIN_READINGS.includes(key)) return { value: null, error: 'Unknown domain reading' };
+    const progress = flightProgress(ctx.cm, ctx.flCM, ctx.effLIs);
+    return { value: progress[({ 'flight.day': 'day', 'flight.total': 'total', 'flight.remaining': 'daysLeft' })[key]], format: 'int' };
   }
 
 
 /* ══ workspace/src/lib/dashboard/brick-data.js ════════════════════════════════════════════════ */
   // workspace/src/lib/dashboard/brick-data.js
   //
-  // What a block SHOWS: a canonical metric reading or a formula through the existing
-  // engine — never a third path, so its
-  // number can never disagree with the KPI tile beside it.
+  // What a block SHOWS: canonical metrics and formulas use the existing engine.
+  // Closed domain readings share their calculations with the legacy fixed blocks.
   //
   // The CANONICAL bricks (`unitBars`, `rateRows`, `flightBullet`, the canonical `note`
   // and `detailCard` sources) read neither: they repeat over what the campaign HAS, and
@@ -4078,14 +7911,44 @@ function createDashboardMetrics(deps) {
   // every brick reads from it. Thirty bricks must not be thirty window computations.
 
 
+  // The cm vocabulary and the ONE evaluation helper every cm-fed slot goes through (§2.2).
+  // From the PURE module, never from `report-render.js`: that file imports this one (for
+  // `canonicalValue`), so importing it back would be a real cycle. `cmEvalAt` lives in
+  // `cm-formula-context.js` for this reason, and `report-render.js` only re-exports it.
+
+  // `FIELDS_PLAN` is the vocabulary a WINDOW reading may name beside the comparison (§2.4): both
+  // cm slots in this file are window readings — a block, and a mini-chart line whose plan half is
+  // the window's — so both run the gate against the same set the KPI rail runs it against.
+
+
+
+  // The one predicate that says whether a money figure actually DRAWS its gross twin —
+  // asked per ROW here, so a rate label can never claim a basis the row does not show.
 
 
   // The word bands live in ONE place — the composite
   // reads the same functions block1 and the ready cards read, so the hero and the card
   // beside it can never call the same delta by two different words.
 
-  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const hasOwnBrick = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const EM = '—';
+
+  /** The totals rule of spec 2026-09-13 §3, said on a row that cannot show its number. */
+  function cvUnavailableText(n) {
+    const count = n > 0 ? n : 1;
+    return `${count} line item${count === 1 ? '' : 's'} cannot show conversions here`;
+  }
+
+  /**
+   * The rate rows note of spec §7. K = line items in view counting chosen actions, N = line
+   * items in view with conversion data. N is read off the plan map campM was given, and a
+   * widget's scoped plan map can be a virtual one without `conversionData`; K always has
+   * conversion data, so N never prints below K.
+   */
+  function primaryCvNoteText(k, n) {
+    const of = Math.max(n || 0, k);
+    return k === of ? 'Primary conversions on all line items' : `Primary conversions on ${k} of ${of} line items`;
+  }
 
   /**
    * The canonical metrics that are not KPI presets and the side
@@ -4122,7 +7985,9 @@ function createDashboardMetrics(deps) {
     // prove that the two targets are not interchangeable.
     bidPlanCpm: { from: 'fl', format: 'money', unit: 'impr' },
     // range-aware (cm)
-    imprToDatePct: { from: 'cm', format: 'percent', sub: 'of plan-to-date', unit: 'impr' },
+    // `paced`: a pace over the window's plan, so a window holding none of it has no number —
+    // an em dash, not the «0% of plan-to-date» its division by zero would print.
+    imprToDatePct: { from: 'cm', format: 'percent', sub: 'of plan-to-date', unit: 'impr', paced: true },
     // The Delivery card's Fact — campM's impression-paced actual (metrics.js:334 gates
     // CPC/CPV lines out), owner decision 2026-08-15: Fact, Needed and Deviation share
     // Needed's basis. The formula field `im` counts EVERY line's impressions and
@@ -4146,13 +8011,37 @@ function createDashboardMetrics(deps) {
    * a CPC line without one printed nothing in the blocks (VerdictHero:49 filters on
    * `cm[plan] > 0`; OverviewBlock1:447 draws its no-plan row instead). Gating on the flag
    * would put "Clicks/day 0" where the original drew nothing at all.
-   * `hasImpr` is already exactly `imprPlan > 0`, so all three read the same way here.
+   *
+   * Asked of the WHOLE-flight plan (campM's *PlanFlight twins, 2026-09-23): a narrowed window
+   * that holds none of a unit's plan — a week before a line starts — is a pace of nothing, not
+   * a unit this campaign lacks, and must not drop the unit's rows. The `??` chain keeps a
+   * metrics object from before the twins answering as it did.
    */
   function hasPlan(cm, unit) {
     if (!cm) return true; // no metrics in the context: not this layer's call to make
-    if (unit === 'impr') return (cm.imprPlan ?? cm.pI ?? 0) > 0;
-    if (unit === 'clicks') return (cm.clicksPlan ?? cm.planClicks ?? 0) > 0;
-    return (cm.viewsPlan ?? 0) > 0;
+    if (unit === 'impr') return (cm.imprPlanFlight ?? cm.imprPlan ?? cm.pI ?? 0) > 0;
+    if (unit === 'clicks') return (cm.clicksPlanFlight ?? cm.clicksPlan ?? cm.planClicks ?? 0) > 0;
+    return (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0;
+  }
+
+  /** The plan a unit's pace is read over: the window's, which is the flight's unless the
+   *  viewer narrowed it (campM `planWindowed`). */
+  function windowPlanOf(cm, unit) {
+    if (unit === 'impr') return cm.imprPlan ?? cm.pI ?? 0;
+    if (unit === 'clicks') return cm.clicksPlan ?? cm.planClicks ?? 0;
+    return cm.viewsPlan ?? 0;
+  }
+
+  /**
+   * The flight plans this unit and the viewer's window holds none of it — a week before a line
+   * starts, or after it ended. There is no pace to read there, so every pace surface says so
+   * rather than turn a delta of 0 into «On track» (review 2026-09-23): the unit bars' «no plan
+   * in this window», the Pacing and Delivery em dashes, and below, the Operational Read, the
+   * verdict, the «Actual to date» note and the to-date percent. Never true on Flight, where the
+   * window's plan IS the flight's.
+   */
+  function noWindowPlan(cm, unit) {
+    return !!cm && hasPlan(cm, unit) && !(windowPlanOf(cm, unit) > 0);
   }
 
   /**
@@ -4166,7 +8055,11 @@ function createDashboardMetrics(deps) {
   const FIELD_FORMAT = {
     __proto__: null,
     sp: 'money', dc: 'money', expCo: 'money', budget: 'money', costBud: 'money',
-    costBudTotal: 'money',
+    costBudTotal: 'money', budgetTotal: 'money', budgetToDate: 'money',
+    // The plan counts print whole: a narrowed window's plan is a share of the plan curve, and
+    // `auto` would print its cents of an impression («298,214.29»).
+    planImpr: 'int', planClicks: 'int', planViews: 'int',
+    planImprTotal: 'int', planClicksTotal: 'int', planViewsTotal: 'int',
     cpm: 'money', cpc: 'money', cpv: 'money4',
     ctr: 'percent2', vcr: 'percent', acr: 'percent',
     mTgt: 'percent', ctrT: 'percent2', vcrT: 'percent', acrT: 'percent',
@@ -4215,10 +8108,11 @@ function createDashboardMetrics(deps) {
    * the page down.
    */
   function bindValue(bind, ctx) {
+    if (bind?.reading) return layoutReading(bind.reading, ctx);
     if (bind && bind.metric != null) {
       const key = bind.metric;
       if (typeof key !== 'string') return { value: null };
-      if (hasOwn(CANON, key)) {
+      if (hasOwnBrick(CANON, key)) {
         const c = CANON[key];
         // A unit this campaign has no GOAL for has no number here — not a zero. "Clicks/day
         // 0" beside a CPM-only campaign's impressions is a target nobody set, and the
@@ -4234,6 +8128,7 @@ function createDashboardMetrics(deps) {
         if (c.needsFlight && ctx.flCM && (ctx.flCM.daysLeft || 0) <= 0) {
           return { value: null, absent: true, format: c.format };
         }
+        if (c.paced && noWindowPlan(ctx.cm, c.unit)) return { value: null, format: c.format, sub: c.sub || null };
         if (c.from === 'derived') return { value: derived(key, ctx), format: c.format, sub: c.sub || null };
         const src = c.from === 'fl' ? ctx.flCM : ctx.cm;
         const v = src ? src[key] : null;
@@ -4252,7 +8147,44 @@ function createDashboardMetrics(deps) {
       }
     }
     if (!bind || !bind.expr) return { value: null };
-    const fmt = hasOwn(FIELD_FORMAT, bind.expr) ? FIELD_FORMAT[bind.expr] : null;
+    const fmt = hasOwnBrick(FIELD_FORMAT, bind.expr) ? FIELD_FORMAT[bind.expr] : null;
+    // A cm-bearing binding is never handed to the delivery engine (§2.2): `cmIm` is no field of
+    // it, and the population it counts is the mapping's rather than the pacing's. Five slots
+    // arrive here (a block's value, its target, a progress marker, a stat-row cell, a badge)
+    // and all five are WINDOW numbers, so all five read `totals` on the reader the Layout
+    // context carries.
+    const marker = cmMarkerOf(bind.expr);
+    if (marker) {
+      // §2.4's field-set gate, run here for the reason `report-render.js` runs it at all seven of
+      // its cm slots: `cmMarkerOf` counts any non-comparison identifier as a plan field, so
+      // `cmIm / sp` would fetch the window's scalars, find no `sp`, read it as absent — 0, by the
+      // formula canon — and print a computed number where the KPI beside it draws a dash with
+      // this very sentence. Only a spec that never passed the client draft gate can carry one (a
+      // Library copy, a hand-written JSON, a direct API write), which is the case the gate is
+      // for. The shape is the delivery engine's own refusal shape below, so the tile cannot tell
+      // a refused CM360 expression from a refused delivery one.
+      const badField = cmFieldRefusal(marker, FIELDS_PLAN);
+      if (badField) return { value: null, error: badField, format: fmt };
+      // No reader: the file has not landed (`ctx.cmPendingRead` true), or there is nothing to
+      // wait for at all — a dashboard dimension/platform filter has masked the bundle, or this
+      // tile never asked for one. Either way the cell draws the em dash and KEEPS ITS PLACE.
+      // `absent` is «this campaign has no goal of that kind», which drops a stat-row cell
+      // outright, and the cell would pop back the moment the file arrived (§2.7). `pending`
+      // mirrors `ctx.cmPendingRead` exactly, so a masked bundle (not pending, just refused)
+      // never reads as "waiting for the file" to a caller that tells the two apart.
+      if (!ctx.cmRead) return { value: null, pending: !!ctx.cmPendingRead, format: fmt };
+      // Only a formula that names a plan field pays for the window's plan, and it reads the one
+      // function every window slot reads (§2.4): `campaignWindowScalars` is memoised per
+      // (snapshot, window), so thirty blocks are one window computation, which is this file's
+      // own rule. With no sources the door answers null, and a plan identifier then has nothing
+      // to read. Evaluating anyway would read that identifier as absent, which the formula
+      // canon then reads as 0 — printing "0.00%" for a plan nobody published. The cell draws
+      // the same silence every other unanswered CM360 number draws instead.
+      const scalars = marker.planFields.length
+        ? campaignWindowScalars(ctx.data?.range, ctx.data?.sources) : null;
+      if (marker.planFields.length && !scalars) return { value: null, format: fmt };
+      return { value: cmEvalAt(marker, (metric) => ctx.cmRead.totals(metric), scalars), format: fmt };
+    }
     if (!ctx.data?.sources) return { value: null, format: fmt };
     const o = kpiValue({ expr: bind.expr }, ctx.data.range, ctx.data.sources);
     if (o.error) return { value: null, error: o.error, format: fmt };
@@ -4260,12 +8192,13 @@ function createDashboardMetrics(deps) {
   }
 
   /**
-   * brickValue(brick, ctx) → { value, target, invert, format, sub, error }.
+   * brickValue(brick, ctx) → { value, target, invert, format, sub, error, warned, absent, pending }.
    * An explicit `target` bind wins over the metric's canonical one — and when it is itself
    * a metric, what is taken is that metric's VALUE, not its target: "margin against
    * pacing" means the pacing number. So does an explicit `format` over the preset's.
    * `null` values are honest — the caller renders an em dash, never a 0 that reads as real
-   * delivery.
+   * delivery. `pending` is the CM360 file-not-landed-yet flag the spec's shape carries (§2.7):
+   * true only while a requested bundle is still in flight, never for a masked or refused one.
    *
    * ONE exception, and the built-in hero depends on it: a target naming the SAME metric
    * as the value ("margin against margin") is the metric measured against ITS OWN target,
@@ -4293,6 +8226,11 @@ function createDashboardMetrics(deps) {
       error: v.error || null,
       warned: !!v.warned,
       absent: !!v.absent,
+      // «The file has not landed yet» (mirrors `ctx.cmPendingRead`), which is NOT `absent`: the
+      // cell is drawn, wearing the em dash every other unanswered CM360 number wears (§2.7). A
+      // masked or never-requested bundle draws the same dash but is NOT pending — there is
+      // nothing left to wait for — so a caller can tell the two silences apart.
+      pending: !!v.pending,
     };
   }
 
@@ -4312,12 +8250,64 @@ function createDashboardMetrics(deps) {
     return out.invert ? -d : d;
   }
 
-  /** The series a `miniChart` draws, through the SAME evaluator a custom chart uses. */
-  function miniSeries(brick, ctx) {
+  /**
+   * ONE cm-bearing mini-chart line, over the calendar the engine built for the lines beside it.
+   *
+   * A day the join has no row for BREAKS the line, exactly as the CM360 column beside it prints
+   * a dash: the mask is what carries that fact through `cumsum` and `rolling` (§2.9), which is
+   * why this goes through `evaluateMaskedSeries` and not `evaluateSeries` — absence-is-zero
+   * would start a running total on days the comparison says nothing about.
+   *
+   * A plan field reads the WINDOW's scalars, the same ones a date row reads (§2.4: only a
+   * dimension row has a plan of its own). Unlike `bindValue`, this reads `scalars` with no
+   * explicit "no plan is silence" check: `campaignWindowScalars` answers null only for missing
+   * `sources` (its own docblock), and `miniSeries`'s `!ctx.data?.sources` early return already
+   * keeps that case from reaching here, so `scalars` is always a real object by this line.
+   */
+  function cmMiniLine(line, marker, dates, ctx) {
+    // The same §2.4 gate `bindValue` runs one function up, and for the same reason: the plan half
+    // of this line is the WINDOW's, so a field the window publishes none of can never be read,
+    // and evaluating anyway would draw a computed zero down an axis the column beside it refuses
+    // by name. `error` rides the line the way `bindValue`'s rides a block — the chart draws no
+    // points for it, and the formula preview prints the sentence.
+    const badField = cmFieldRefusal(marker, FIELDS_PLAN);
+    if (badField) return { id: line.id, label: line.label, values: dates.map(() => null), warned: false, error: badField };
+    if (!ctx.cmRead) return { id: line.id, label: line.label, values: dates.map(() => null), warned: false };
+    const pairs = new Map();
+    for (const read of marker.reads) {
+      if (pairs.has(read.metric)) continue;
+      pairs.set(read.metric, dates.map((date) => ctx.cmRead.atDate(read.metric, date)));
+    }
+    const scalars = marker.planFields.length
+      ? campaignWindowScalars(ctx.data.range, ctx.data.sources) : null;
+    const out = evaluateMaskedSeries(marker.ast, cmSeriesContext(pairs, scalars));
+    return {
+      id: line.id,
+      label: line.label,
+      values: out.values.map((value, i) => (out.present[i] ? value : null)),
+      warned: !!out.warned,
+    };
+  }
+
+  /**
+   * The series a `miniChart` draws, through the SAME evaluator a custom chart uses.
+   *
+   * The cm-bearing lines are held OUT of the engine call and spliced back at their own index
+   * (§2.7). The delivery engine has no field called `cmIm`, so handing it one would draw
+   * «Unknown field» where a line belongs; and the engine still builds the continuous calendar
+   * (it does so for an empty expression list too), which is what puts a CM360 line and a
+   * delivery line on ONE axis instead of two charts that happen to sit side by side.
+   */
+  function miniSeries(brick, ctx, withDates = false) {
     const list = (brick && Array.isArray(brick.series)) ? brick.series : [];
     if (!list.length || !ctx || !ctx.data?.sources) return [];
-    const built = buildSeriesModel(list, ctx.data.range, ctx.data.sources);
-    return built.series;
+    const markers = list.map((line) => (line && typeof line.expr === 'string' ? cmMarkerOf(line.expr) : null));
+    const built = buildSeriesModel(list.filter((line, i) => !markers[i]), ctx.data.range, ctx.data.sources);
+    let engine = 0;
+    const series = list.map((line, i) => (markers[i]
+      ? cmMiniLine(line, markers[i], built.dates, ctx)
+      : built.series[engine++]));
+    return withDates ? series.map((line) => ({ ...line, dates: built.dates })) : series;
   }
 
   /* ── canonical series ─────────────────────────────────────────────────────── */
@@ -4329,28 +8319,44 @@ function createDashboardMetrics(deps) {
    * arithmetic lives now. `hasPlan:false` is the NoPlanRow case (:447, :460): a unit that
    * delivers against no goal shows its count and no bar, because there is no pace to be
    * on or off.
+   *
+   * Each row's actual, expected and plan are ONE population: the lines bought in that unit.
+   * The Clicks row reads `clicksActual` (the click-paced lines' clicks), never `cl`, which counts
+   * every line's clicks: on a CPM + CPC pacing `cl` put the CPM lines' clicks over the CPC
+   * lines' plan and read +558.85 pp «Ahead of pace» where the CPC lines were at +2.55 pp, beside
+   * an «Actual to date» card and a verdict that already read `clicksActual` (review 2026-09-23).
    */
-  function deliveryUnits(cm) {
+  function deliveryUnits(cm, units) {
     if (!cm) return [];
     const rows = [
       { unit: 'Impressions', show: !!cm.hasImpr, plan: cm.pI || 0, actual: cm.im || 0, expected: cm.eI || 0 },
-      { unit: 'Clicks', show: !!cm.hasClicks, plan: cm.planClicks || 0, actual: cm.cl || 0, expected: cm.eCl || 0 },
+      { unit: 'Clicks', show: !!cm.hasClicks, plan: cm.planClicks || 0, actual: cm.clicksActual ?? cm.cl ?? 0, expected: cm.eCl || 0 },
       { unit: 'Views', show: !!cm.hasViews, plan: cm.viewsPlan || 0, actual: cm.viewsActual || 0, expected: cm.viewsExpected || 0 },
     ];
-    return rows.filter((r) => r.show).map((r) => {
-      const hasPlan = r.plan > 0;
+    const selected = Array.isArray(units) ? units.map((unit) => rows.find((row) => row.unit.toLowerCase() === unit)).filter(Boolean) : rows;
+    // «Plan not set» is a fact about the FLIGHT (hasPlan above). `r.plan` is the window's —
+    // equal to the flight's unless the viewer narrowed it — and a window holding none of it is
+    // not a «plan not set» row either: it is `noWindowPlan`, which UnitBar draws as the count
+    // and «no plan in this window», with no bar. Drawn as a bar it read «Actual 0.0% / Plan
+    // 0.0% · +0.0 pp on plan · On track» beside the Delivery reading's em dash (review
+    // 2026-09-23); there is no pace to be on or off, the NoPlanRow's own reason.
+    const flightPlan = { Impressions: 'impr', Clicks: 'clicks', Views: 'views' };
+    return selected.filter((r) => r.show).map((r) => {
+      const planned = hasPlan(cm, flightPlan[r.unit]);
+      const onPlan = planned && r.plan > 0;
       // Division by zero returns 0 — the canonical rule, and the reason a plan-less unit
       // reads "plan not set" rather than "0.0% behind".
-      const paceDelta = hasPlan ? ((r.actual - r.expected) / r.plan) * 100 : 0;
+      const paceDelta = onPlan ? ((r.actual - r.expected) / r.plan) * 100 : 0;
       return {
         unit: r.unit,
         plan: r.plan,
         actual: r.actual,
         expected: r.expected,
-        hasPlan,
+        hasPlan: planned,
+        noWindowPlan: planned && !onPlan,
         paceDelta,
-        plannedPct: hasPlan ? (r.expected / r.plan) * 100 : 0,
-        actualPct: hasPlan ? (r.actual / r.plan) * 100 : 0,
+        plannedPct: onPlan ? (r.expected / r.plan) * 100 : 0,
+        actualPct: onPlan ? (r.actual / r.plan) * 100 : 0,
         status: paceStatus(paceDelta),
         opText: paceWord(paceDelta),
       };
@@ -4402,14 +8408,21 @@ function createDashboardMetrics(deps) {
    * pacing — there the pair's own cell is empty and the CPC rate belongs in the repeat.
    */
   function rateTypeRows(cm, flCM, series, opts) {
-    const types = rateTypes(cm, flCM);
+    const requested = opts?.units;
+    const all = rateTypes(cm, flCM);
+    const types = Array.isArray(requested) ? requested.map((unit) => all.find((row) => row.unit === unit)).filter(Boolean) : all;
+    // Net cost mode (spec 2026-09-07 §7): the client plan rates and the earned figures
+    // are client money, and on a net pacing the numbers printed here are the NET ones —
+    // they are derived from the stored (net) plan budget. They draw no gross twin, so
+    // the caption is what tells them apart from the «(gross)» rows in the same card.
+    const netMode = !!(opts && opts.netMode);
     if (series === 'planRate') {
-      return types.filter((t) => t.unit !== 'CPM')
-        .map((t) => ({ kind: 'row', label: `Plan ${t.unit}`, value: f$(t.planRate) }));
+      return types.filter((t) => Array.isArray(requested) || t.unit !== 'CPM')
+        .map((t) => ({ kind: 'row', label: basisLabel(`Plan ${t.unit}`, 'net', netMode), value: f$(t.planRate), ...(opts?.highlightReadings ? { numeric: t.planRate } : {}) }));
     }
     if (series === 'earned') {
       return types.filter((t) => t.earned > 0)
-        .map((t) => ({ kind: 'row', label: `Earned @ Plan ${t.unit}`, value: f$(t.earned) }));
+        .map((t) => ({ kind: 'row', label: basisLabel(`Earned @ Plan ${t.unit}`, 'net', netMode), value: f$(t.earned), ...(opts?.highlightReadings ? { numeric: t.earned } : {}) }));
     }
     if (series === 'bidPair') {
       return types.map((t) => {
@@ -4417,8 +8430,8 @@ function createDashboardMetrics(deps) {
         return {
           kind: 'pair',
           unit: t.unit,
-          left: { label: `Bid Plan ${t.unit}`, value: f$(t.bidPlan) },
-          right: { label: `Bid Fact 2d ${t.unit}`, value: f$(t.bidFact) },
+          left: { label: `Bid Plan ${t.unit}`, value: f$(t.bidPlan), ...(opts?.highlightReadings ? { numeric: t.bidPlan } : {}) },
+          right: { label: `Bid Fact 2d ${t.unit}`, value: f$(t.bidFact), ...(opts?.highlightReadings ? { numeric: t.bidFact, target: t.bidPlan } : {}) },
           // Buying UNDER the planned bid is the good news, so `good` is not `d >= 0`.
           delta: (t.bidPlan || 0) > 0 ? { text: `${d >= 0 ? '+' : ''}${f$(d)} vs plan`, good: d <= 0 } : null,
         };
@@ -4427,37 +8440,53 @@ function createDashboardMetrics(deps) {
     if (series === 'dynamic') {
       // Coef-gated wording (spec §8): on a coefficient-cost pacing the dc-based rates are
       // the client's REAL cost, so "Dyn CPM" becomes "Client CPM" (OverviewBlock2:140).
-      const labels = coefLabels(!!(opts && opts.coefMode));
+      // On a NET pacing the row leads with the gross rate (spec 2026-09-07 §7), so the
+      // label says which of the two dollar figures is the big one.
+      const coefMode = !!(opts && opts.coefMode);
+      const labels = coefLabels(coefMode, netMode);
+      // The same names with no basis suffix, for the rows that draw no pair.
+      const plain = coefLabels(coefMode, false);
       const ac = cm || {};
       const parts = [];
       // CPM is the pair's cell (the stored binding is `dynCpm`), so the repeat carries
       // the others — see the note above.
-      for (const u of ['Cpc', 'Cpv', 'Cpa']) {
+      for (const unit of (Array.isArray(requested) ? requested : ['CPC', 'CPV', 'CPA'])) {
+        const u = unit[0] + unit.slice(1).toLowerCase();
         const v = ac[`dyn${u}`];
-        if (v > 0) parts.push({ kind: 'money', label: labels.dyn(u.toUpperCase()), usd: v });
+        // The gross twin rides along (net cost mode, spec §7): a dynamic client rate is
+        // computed off net dc, so on a net pacing the row leads with the client's own
+        // gross rate and says the net one underneath. campM carries both (metrics.js).
+        //
+        // The basis is decided PER ROW, not per pacing: a rate whose gross equals its net
+        // (every line item behind it bills at gross) draws no second line, and «(gross)»
+        // over that lone figure would name the wrong basis — it is the net number, and on
+        // a net pacing it says so. `showsGrossPair` is MoneyValue's own predicate, asked
+        // here so the caption and the figure below it can never disagree.
+        const g = ac[`dyn${u}Gross`] ?? null;
+        // Primary conversions (spec 2026-09-13 §6): campM answers null, not 0, when a line item
+        // in view cannot show conversions. That is a number the card expected and did not get,
+        // so the row stays and says why, instead of disappearing like a zero rate.
+        if (unit === 'CPA' && v === null) {
+          parts.push({ kind: 'money', label: basisLabel(plain.dyn('CPA'), 'net', netMode), usd: null, gross: null,
+            reason: cvUnavailableText(ac.cvUnavailableCount) });
+          continue;
+        }
+        if (v > 0) {
+          const name = u.toUpperCase();
+          const label = showsGrossPair({ usd: v, role: 'client', gross: g })
+            ? labels.dyn(name)
+            : basisLabel(plain.dyn(name), 'net', netMode);
+          parts.push({ kind: 'money', label, usd: v, gross: g });
+        }
+      }
+      // Spec §7: which source the conversion rates use, after the other rows and only when
+      // there are some. Not operative, or no line item in view with a choice: nothing added.
+      if (opts && opts.primaryCvOperative && parts.length > 0 && (ac.cvPrimaryCount || 0) > 0) {
+        parts.push({ kind: 'note', text: primaryCvNoteText(ac.cvPrimaryCount, ac.cvDataCount) });
       }
       return parts;
     }
     return [];
-  }
-
-  /**
-   * Day X of Y for the flight bullet — FlightCardBody.jsx's `flightDayOfTotal`, lifted
-   * (that file is deleted in T11 and this is its only surviving caller). It averages each
-   * currently-effective LI's own days-passed / flight-days out of campM's totals, so a
-   * Range filter moves it exactly as it moves block1's footer; flCM alone cannot
-   * reproduce the figure once a range is set. `daysLeft` is range-independent by
-   * construction (metrics.js:527-532).
-   */
-  function flightProgress(cm, flCM, effLIs) {
-    const n = Math.max(1, (effLIs || []).length);
-    const left = Math.max(0, (flCM && flCM.daysLeft) || 0);
-    return {
-      day: Math.round(((cm && cm.totalDP) || 0) / n),
-      total: Math.round(((cm && cm.totalFD) || 0) / n),
-      daysLeft: left,
-      daysLeftText: left === 0 ? 'flight ended' : left === 1 ? '1 day left' : `${left} days left`,
-    };
   }
 
   /**
@@ -4468,6 +8497,10 @@ function createDashboardMetrics(deps) {
    */
   function canonicalNote(source, cm, flCM, effLIs, facts) {
     if (!cm || !flCM) return '';
+    if (source === 'flightPosition' || source === 'flightRemaining') {
+      const progress = flightProgress(cm, flCM, effLIs);
+      return source === 'flightPosition' ? `Day ${progress.day} / ${progress.total}` : progress.daysLeftText;
+    }
     if (source === 'flightDays') {
       const f = flightProgress(cm, flCM, effLIs);
       return `Day ${f.day} of ${f.total} · ${f.daysLeft} days left`;
@@ -4507,7 +8540,7 @@ function createDashboardMetrics(deps) {
     for (const id of sources.effLIs || []) {
       const p = (sources.liPlan || {})[id];
       if (p && p.fs && p.fe && (asOf < p.fs || asOf > p.fe)) continue;
-      const dd = (sources.liDaily || {})[id];
+      const dd = (sources.campaignLiDaily || sources.liDaily || {})[id];
       const day = dd && dd[asOf];
       if (!day) continue;
       out.sp += day.sp || 0;
@@ -4520,7 +8553,7 @@ function createDashboardMetrics(deps) {
   }
 
   /** One stacked value line: a number, its unit word, and the explainer under it. */
-  const line = (value, unit, note) => ({ value, unit: unit || null, note: note || null });
+  const detailLine = (value, unit, note) => ({ value, unit: unit || null, note: note || null });
   const muted = (text) => ({ value: text, unit: null, note: null, muted: true });
 
   /**
@@ -4532,7 +8565,11 @@ function createDashboardMetrics(deps) {
    * rides the SUB: a stored label is a literal a user may rename, and the card that draws
    * the numbers is what knows which day they are from (§7 Conversion, std-entries note).
    */
-  function detailSource(source, ctx) {
+  function detailSource(source, ctx, withReadings = false) {
+    const line = (value, unit, note, numeric, target) => ({
+      ...detailLine(value, unit, note),
+      ...(withReadings ? { numeric: numeric ?? null, target: target ?? null } : {}),
+    });
     const cm = ctx && ctx.cm;
     const flCM = ctx && ctx.flCM;
     if (!cm || !flCM) return { lines: [], sub: null };
@@ -4541,17 +8578,21 @@ function createDashboardMetrics(deps) {
     const showImpr = !!cm.hasImpr;
     const showClicks = !!cm.hasClicks;
     const showViews = !!cm.hasViews;
-    const clicksHasPlan = (cm.clicksPlan ?? cm.planClicks ?? 0) > 0;
-    const viewsHasPlan = (cm.viewsPlan ?? 0) > 0;
+    // Whether a unit HAS a plan is a fact about the flight (hasPlan), so a narrowed window
+    // holding none of the clicks plan does not print «Clicks plan not set» (2026-09-23).
+    const clicksHasPlan = hasPlan(cm, 'clicks');
+    const viewsHasPlan = hasPlan(cm, 'views');
     const flightEnded = (flCM.daysLeft || 0) <= 0;
 
     if (source === 'planUnits') {
-      const planClicks = cm.planClicks || 0;
+      // «Flight Plan units» (the card's own note: the full-flight plan from NetSuite) — the
+      // whole flight's, whatever window the viewer narrowed. flCM, never the window's cm.
+      const planClicks = flCM.planClicks || 0;
       return {
         lines: [
-          showImpr ? line(fI(cm.pI), 'impr') : null,
-          showClicks ? (planClicks > 0 ? line(fI(planClicks), 'clicks') : muted('Clicks plan not set')) : null,
-          showViews ? line(fI(cm.viewsPlan), 'views') : null,
+          showImpr ? line(fI(flCM.pI), 'impr', null, flCM.pI) : null,
+          showClicks ? (planClicks > 0 ? line(fI(planClicks), 'clicks', null, planClicks) : muted('Clicks plan not set')) : null,
+          showViews ? line(fI(flCM.viewsPlan), 'views', null, flCM.viewsPlan) : null,
         ].filter(Boolean),
         sub: null,
       };
@@ -4574,12 +8615,12 @@ function createDashboardMetrics(deps) {
             : EM;
       return {
         lines: [
-          showImpr ? line(`${fI(imprPlanDaily)}/day`, 'impr') : null,
+          showImpr ? line(`${fI(imprPlanDaily)}/day`, 'impr', null, imprPlanDaily) : null,
           showClicks
-            ? (clicksHasPlan ? line(`${fI(flCM.clicksPlanDailyRate ?? 0)}/day`, 'clicks') : muted('Clicks plan not set'))
+            ? (clicksHasPlan ? line(`${fI(flCM.clicksPlanDailyRate ?? 0)}/day`, 'clicks', null, flCM.clicksPlanDailyRate ?? 0) : muted('Clicks plan not set'))
             : null,
           showViews
-            ? (viewsHasPlan ? line(`${fI(flCM.viewsPlanDailyRate ?? 0)}/day`, 'views') : muted('Views plan not set'))
+            ? (viewsHasPlan ? line(`${fI(flCM.viewsPlanDailyRate ?? 0)}/day`, 'views', null, flCM.viewsPlanDailyRate ?? 0) : muted('Views plan not set'))
             : null,
         ].filter(Boolean),
         sub: `On ${day} · ${sub}`,
@@ -4593,8 +8634,13 @@ function createDashboardMetrics(deps) {
       const clE = cm.clicksExpected ?? cm.eCl ?? 0;
       const vwA = cm.viewsActual ?? 0;
       const vwE = cm.viewsExpected ?? 0;
+      // The note judges the first unit shown. A window holding none of that unit's plan has
+      // nothing to be «on target» against: 0 expected beside 0 delivered read «Impr on target.»
+      const noteUnit = showImpr ? 'impr' : showClicks ? 'clicks' : showViews ? 'views' : null;
       let sub;
-      if (showImpr) {
+      if (noteUnit && noWindowPlan(cm, noteUnit)) {
+        sub = 'No plan in this window.';
+      } else if (showImpr) {
         sub = imA < imE ? `${fI(Math.round(imE - imA))} impr below expected.`
           : imA > imE ? `${fI(Math.round(imA - imE))} impr above expected.` : 'Impr on target.';
       } else if (showClicks) {
@@ -4606,9 +8652,9 @@ function createDashboardMetrics(deps) {
       } else sub = 'No plan.';
       return {
         lines: [
-          showImpr ? line(fI(imA), 'impr') : null,
-          showClicks ? line(fI(clA), 'clicks') : null,
-          showViews ? line(fI(vwA), 'views') : null,
+          showImpr ? line(fI(imA), 'impr', null, imA, imE) : null,
+          showClicks ? line(fI(clA), 'clicks', null, clA, clE) : null,
+          showViews ? line(fI(vwA), 'views', null, vwA, vwE) : null,
         ].filter(Boolean),
         sub: `By ${day} · ${sub}`,
       };
@@ -4619,12 +8665,20 @@ function createDashboardMetrics(deps) {
       const clicksNeeded = flCM.neededPerDayClicks ?? 0;
       const viewsNeeded = flCM.neededPerDayViews ?? 0;
       const spendNeeded = flCM.neededSpendPerDay ?? 0;
-      const imA = cm.imprActual ?? cm.im ?? 0;
-      const imP = cm.imprPlan ?? cm.pI ?? 0;
-      const clA = cm.clicksActual ?? cm.cl ?? 0;
-      const clP = cm.clicksPlan ?? cm.planClicks ?? 0;
-      const vwA = cm.viewsActual ?? 0;
-      const vwP = cm.viewsPlan ?? 0;
+      // The «X ÷ N days» notes explain the headline beside them, which is flCM's needed per
+      // day: the whole flight's plan, less what the whole flight delivered, less what a line
+      // paused right now will not be asked for (metrics.js neededPerDay*). Every term is flCM's,
+      // so the note is the headline times the days left — never the window's delivery against
+      // the flight's plan.
+      const imA = flCM.imprActual ?? flCM.im ?? 0;
+      const imP = flCM.imprPlan ?? flCM.pI ?? 0;
+      const imR = flCM.imprPlanPausedRem ?? 0;
+      const clA = flCM.clicksActual ?? flCM.cl ?? 0;
+      const clP = flCM.clicksPlan ?? flCM.planClicks ?? 0;
+      const clR = flCM.clicksPlanPausedRem ?? 0;
+      const vwA = flCM.viewsActual ?? 0;
+      const vwP = flCM.viewsPlan ?? 0;
+      const vwR = flCM.viewsPlanPausedRem ?? 0;
       // The per-type breakdown of the needed spend (:571-574): needed units × that rate
       // type's 2-day buying rate, which is what neededSpendPerDay actually sums.
       const parts = [];
@@ -4634,18 +8688,18 @@ function createDashboardMetrics(deps) {
       const note = (t) => (flightEnded ? null : t);
       return {
         lines: [
-          showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(imP > 0 ? `${fI(imP - imA)} impr ÷ ${flCM.daysLeft} days.` : null)) : null,
+          showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(imP > 0 ? `${fI(imP - imA - imR)} impr ÷ ${flCM.daysLeft} days.` : null), imprNeeded) : null,
           showClicks
             ? (clicksHasPlan
-              ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(clP > 0 ? `${fI(clP - clA)} clicks ÷ ${flCM.daysLeft} days.` : null))
+              ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(clP > 0 ? `${fI(clP - clA - clR)} clicks ÷ ${flCM.daysLeft} days.` : null), clicksNeeded)
               : muted('Clicks plan not set'))
             : null,
           showViews
             ? (viewsHasPlan
-              ? line(`${fI(viewsNeeded)}/day`, 'views', note(vwP > 0 ? `${fI(vwP - vwA)} views ÷ ${flCM.daysLeft} days.` : null))
+              ? line(`${fI(viewsNeeded)}/day`, 'views', note(vwP > 0 ? `${fI(vwP - vwA - vwR)} views ÷ ${flCM.daysLeft} days.` : null), viewsNeeded)
               : muted('Views plan not set'))
             : null,
-          spendNeeded > 0 ? line(`${f$(spendNeeded)}/day`, 'spend', note(parts.length ? `${parts.join(' + ')}.` : null)) : null,
+          spendNeeded > 0 ? line(`${f$(spendNeeded)}/day`, 'spend', note(parts.length ? `${parts.join(' + ')}.` : null), spendNeeded) : null,
         ].filter(Boolean),
         sub: flightEnded ? 'Flight ended; no daily target remaining.' : `Rates needed on ${day}.`,
       };
@@ -4670,10 +8724,10 @@ function createDashboardMetrics(deps) {
         : spendUnder > 0 ? `${f$(spendUnder)} above daily target.` : 'On daily target.';
       return {
         lines: [
-          showImpr ? line(fI(d.im), 'impr', noDeltas ? null : cnt(d.im - imprNeeded)) : null,
-          showClicks ? line(fI(d.cl), 'clicks', noDeltas || !clicksHasPlan ? null : cnt(d.cl - clicksNeeded)) : null,
-          showViews ? line(fI(d.co), 'views', noDeltas || !viewsHasPlan ? null : cnt(d.co - viewsNeeded)) : null,
-          d.sp > 0 ? line(f$(d.sp), 'spend', noDeltas || spendNeeded <= 0 ? null : money) : null,
+          showImpr ? line(fI(d.im), 'impr', noDeltas ? null : cnt(d.im - imprNeeded), d.im, noDeltas ? null : imprNeeded) : null,
+          showClicks ? line(fI(d.cl), 'clicks', noDeltas || !clicksHasPlan ? null : cnt(d.cl - clicksNeeded), d.cl, noDeltas || !clicksHasPlan ? null : clicksNeeded) : null,
+          showViews ? line(fI(d.co), 'views', noDeltas || !viewsHasPlan ? null : cnt(d.co - viewsNeeded), d.co, noDeltas || !viewsHasPlan ? null : viewsNeeded) : null,
+          d.sp > 0 ? line(f$(d.sp), 'spend', noDeltas || spendNeeded <= 0 ? null : money, d.sp, noDeltas ? null : spendNeeded) : null,
         ].filter(Boolean),
         sub: flightEnded ? 'Flight ended.' : (!asOf ? 'No delivery data yet.' : `Delivered on ${day}.`),
       };
@@ -4683,15 +8737,25 @@ function createDashboardMetrics(deps) {
       // The PRIMARY delivery unit (:221-227): impressions, else views, else clicks — so a
       // CPV-only or CPC-only campaign is not judged against an impressions plan it does
       // not have. Each fallback checks its OWN plan, or a goal-less unit wins the vote.
-      const primaryDelta = cm.hasImpr
-        ? (cm.pI > 0 ? ((cm.im - cm.eI) / cm.pI) * 100 : 0)
-        : cm.hasViews && (cm.viewsPlan || 0) > 0
-          ? (((cm.viewsActual || 0) - (cm.viewsExpected || 0)) / cm.viewsPlan) * 100
-          : cm.hasClicks && (cm.planClicks || 0) > 0
-            ? (((cm.cl || 0) - (cm.eCl || 0)) / cm.planClicks) * 100
-            : 0;
+      // primaryUnit makes that choice on the whole-flight plans; the delta is over the
+      // window's plan (2026-09-23), and a window holding none of it has no pace to read: the
+      // card says so, uncoloured, where a delta of 0 used to print a green «On track».
+      const u = primaryUnit(cm);
+      if (noWindowPlan(cm, u)) {
+        return {
+          lines: [muted('No plan in this window')],
+          status: null,
+          sub: 'This window holds none of the plan, so there is no pace to read.',
+        };
+      }
+      const planU = u === 'impr' ? (cm.pI || 0) : u === 'clicks' ? (cm.planClicks || 0) : (cm.viewsPlan || 0);
+      // Clicks: the click-paced lines' own clicks, the population the clicks plan and expected
+      // count (deliveryUnits' note) — never `cl`, every line's.
+      const actU = u === 'impr' ? (cm.im || 0) : u === 'clicks' ? (cm.clicksActual ?? cm.cl ?? 0) : (cm.viewsActual || 0);
+      const expU = u === 'impr' ? (cm.eI || 0) : u === 'clicks' ? (cm.eCl || 0) : (cm.viewsExpected || 0);
+      const primaryDelta = hasPlan(cm, u) && planU > 0 ? ((actU - expU) / planU) * 100 : 0;
       return {
-        lines: [line(paceWord(primaryDelta), null, null)],
+        lines: [line(paceWord(primaryDelta), null, null, primaryDelta)],
         status: paceStatus(primaryDelta),
         sub: primaryDelta > 5
           ? 'Latest day exceeded the daily target. Overall pace is ahead.'
@@ -4713,7 +8777,8 @@ function createDashboardMetrics(deps) {
     if (!cm || !flCM) return null;
     // primaryUnit is the canonical choice (impressions, else views, else clicks — each
     // fallback gated on its OWN plan), shared with the ready cards.
-    const F = UNIT_FIELDS[primaryUnit(cm)];
+    const unit = primaryUnit(cm);
+    const F = UNIT_FIELDS[unit];
     const actual = cm[F.actual] || 0;
     const expected = cm[F.expected] || 0;
     const plan = cm[F.plan] || 0;
@@ -4722,11 +8787,24 @@ function createDashboardMetrics(deps) {
       return { word: 'No delivery yet', status: 'n', reason: 'The verdict appears with the first delivered day.' };
     }
     if ((flCM.daysLeft || 0) <= 0) {
+      // A header about the FLIGHT, so the flight's own totals — not a narrowed window's
+      // delivery «of» the window's plan (2026-09-23) — and the flight's own pace for its colour,
+      // or a 7-day window at −30 pp paints a flight that over-delivered red. On Flight the two
+      // are one number: that window is the whole flight.
+      const flActual = flCM[F.actual] || 0;
+      const flPlan = flCM[F.plan] || 0;
+      const flightDelta = flPlan > 0 ? ((flActual - (flCM[F.expected] || 0)) / flPlan) * 100 : 0;
       return {
         word: 'Flight ended',
-        status: paceStatus(paceDelta),
-        reason: `Delivered ${fI(actual)} of ${fI(plan)} ${F.title.toLowerCase()}.`,
+        status: paceStatus(flightDelta),
+        reason: `Delivered ${fI(flActual)} of ${fI(flPlan)} ${F.title.toLowerCase()}.`,
       };
+    }
+    // A window holding none of the primary unit's plan has no pace to judge. Read as a delta of
+    // 0 it said «On track · 0% of plan-to-date» beside the unit bars' «no plan in this window»
+    // (review 2026-09-23). Neutral, like «No delivery yet».
+    if (noWindowPlan(cm, unit)) {
+      return { word: 'No plan in this window', status: 'n', reason: `No ${F.title.toLowerCase()} are planned in this window.` };
     }
     const missedYesterday = (cm[F.latest] || 0) < (flCM[F.dailyRate] || 0);
     return {
@@ -4740,6 +8818,11 @@ function createDashboardMetrics(deps) {
   /** Is any line item on the coefficient-cost model? (OverviewBlock2:93, for the labels.) */
   function coefModeOf(liPlan) {
     return anyCoef(liPlan);
+  }
+
+  /** Is any line item billed net of a ratio? (net cost mode, spec §7, for the labels.) */
+  function netModeOf(liPlan) {
+    return anyNet(liPlan);
   }
 
   /** The word band a live column badge prints (`pace` / `margin`). */
@@ -4918,6 +9001,45 @@ function createDashboardMetrics(deps) {
       }
     }
     return keys;
+  }
+
+  /**
+   * The dates a dimension Scope chip judges each line item in (primary conversions, spec
+   * 2026-09-13 §4; owner decision 2026-09-16): for a line item with containers declaring one of the
+   * chip's values (a dim child with a positive target, as matchDimSplits counts it), the dates of
+   * EVERY such container. A list, not mergeDimChildren's first-to-last span, so a value declared in
+   * January and March does not take in February. Single-dim chips only, like matchDimSplits: a
+   * cross-dim or Outside filter is a Lens and declares nothing. A line item declaring none of the
+   * values is absent (judged over all of its rows).
+   * @returns {Map<string, Array<{ from: string, to: string }>>}
+   */
+  function declaringWindows(liPlan, brkfPairs) {
+    const out = new Map();
+    if (!liPlan || !Array.isArray(brkfPairs) || brkfPairs.length === 0) return out;
+    const dims = new Set();
+    const values = new Set();
+    for (const pair of brkfPairs) {
+      const s = String(pair);
+      const idx = s.indexOf(':');
+      if (idx < 0) continue;
+      if (s.slice(idx + 1).startsWith('__outside__')) return out;
+      dims.add(s.slice(0, idx));
+      values.add(s.slice(idx + 1));
+    }
+    if (dims.size !== 1) return out;
+    const dimKey = [...dims][0];
+    for (const id of Object.keys(liPlan)) {
+      const containers = liPlan[id] && Array.isArray(liPlan[id].containers) ? liPlan[id].containers : [];
+      const list = [];
+      for (const container of containers) {
+        if (!container || !container.fs || !container.fe) continue;
+        const children = Array.isArray(container.dim_children) ? container.dim_children : [];
+        if (children.some((child) => child && child.dim_key === dimKey && values.has(child.dim_value)
+          && dimAbs(child, container) > 0)) list.push({ from: container.fs, to: container.fe });
+      }
+      if (list.length) out.set(String(id), list);
+    }
+    return out;
   }
 
   /**
@@ -5112,9 +9234,137 @@ function createDashboardMetrics(deps) {
     };
   }
 
+  /* ── declared dims, read per VALUE (plan metrics on dimension rows, 2026-09-12) ──
+   *
+   * matchDimSplits above answers the dashboard's question — "the viewer filtered to
+   * these values, what is the plan" — and returns ONE plan per line item over the whole
+   * selected set. A widget whose rows are a dimension asks the other question: every
+   * value separately, each with its own plan, on a pacing where most values are not
+   * declared at all.
+   *
+   * So this pair walks the containers ONCE per (pacing, dim key, period) and hands back a
+   * map keyed by value. Calling matchDimSplits per row instead would multiply the
+   * container walk by the row count inside dimBuckets, which already walks every line ×
+   * every split key × every day.
+   */
+
+  /** Every dim KEY some container declares a positive target on — the left halves of
+   *  collectSplitKeys. This is the question a metric picker asks: may this grain carry a
+   *  plan at all.
+   *
+   *  Memoised on plan-object identity, like everything else that walks the container tree: it
+   *  is asked once per widget MODEL build, and the walk is every line × every container ×
+   *  every dim child. Unmemoised it re-ran that on every render of every dim widget on the
+   *  page — small per call, and exactly the shape of the accumulation that froze Period
+   *  Scope once (pacing-calc.js's header). */
+  let _declKeyCache = new WeakMap();
+
+  function collectDeclaredDimKeys(liPlan) {
+    if (!liPlan || typeof liPlan !== 'object') return new Set();
+    const hit = _declKeyCache.get(liPlan);
+    if (hit) return hit;
+    const keys = new Set();
+    for (const pair of collectSplitKeys(liPlan)) {
+      const idx = pair.indexOf(':');
+      if (idx > 0) keys.add(pair.slice(0, idx));
+    }
+    _declKeyCache.set(liPlan, keys);
+    return keys;
+  }
+
+  // Keyed by raw-plan object identity, exactly like pacing-calc.js's caches and for the
+  // same reason: a leaf plan built fresh on every render misses every WeakMap memo behind
+  // liExpUnits / prorate — the cache that fixed the Period Scope freeze. The inner key is
+  // (dim key, period), because both change the answer.
+  let _declCache = new WeakMap();
+
+  /** Drop every memoised declaration map. Mirrors invalidatePlanCalcCache's contract:
+   *  needed only if a caller mutates a plan in place, which this product does not. */
+  function invalidateDimDeclCache() {
+    _declCache = new WeakMap();
+    _declKeyCache = new WeakMap();
+  }
+
+  /** The facts write a split key as String(raw).trim() (normalize.js); a dim_child carries
+   *  whatever Settings saved. Both sides pass through here, so a trailing space in the
+   *  configuration cannot hide a declared target. */
+  const normDimValue = (v) => String(v == null ? '' : v).trim();
+
+  /**
+   * Every declared VALUE of one dimension, with the leaf virtual plans behind it.
+   *
+   * @param {Object} liPlan   the RAW plan map — never a scoped one. Both virtual-plan
+   *                          builders strip `containers` to [], so a scoped map would
+   *                          report every value as undeclared exactly when a period or a
+   *                          dim chip is active.
+   * @param {string} dimKey   a namebuilder dim key ('geo', 'comment', …)
+   * @param {string|null} periodKey  'fs|fe' when period scope is on
+   * @returns {Map<string, { liIds: string[], plans: Object[] }>}
+   *          value → the lines that declare it, and one leaf plan per line.
+   */
+  function collectDimPlans(liPlan, dimKey, periodKey = null) {
+    if (!liPlan || !dimKey) return new Map();
+    let byPacing = _declCache.get(liPlan);
+    if (!byPacing) { byPacing = new Map(); _declCache.set(liPlan, byPacing); }
+    const cacheKey = dimKey + '\n' + (periodKey || '');
+    const hit = byPacing.get(cacheKey);
+    if (hit) return hit;
+
+    // value → li id → the children of THAT line declaring THAT value. A line may declare
+    // one value in two containers (two flights of the same audience); those merge into a
+    // single leaf plan, the way matchDimSplits merges them.
+    const staged = new Map();
+    for (const id of Object.keys(liPlan)) {
+      const li = liPlan[id];
+      if (!li) continue;
+      let owning = null;
+      if (periodKey) {
+        owning = resolveOwningContainer(li, periodKey);
+        if (!owning) continue; // the line does not own this period → it declares nothing here
+      }
+      const containers = periodKey
+        ? [owning.container]
+        : (Array.isArray(li.containers) ? li.containers : []);
+      const period = periodKey
+        ? {
+          periodFs: owning.periodFs,
+          periodFe: owning.periodFe,
+          factor: periodFactor(owning.container, owning.dateChild, owning.periodFs, owning.periodFe),
+        }
+        : null;
+      for (const container of containers) {
+        const children = Array.isArray(container.dim_children) ? container.dim_children : [];
+        for (const child of children) {
+          if (!child || child.dim_key !== dimKey) continue;
+          if (!(dimAbs(child, container) > 0)) continue;
+          const value = normDimValue(child.dim_value);
+          if (!value) continue;
+          if (!staged.has(value)) staged.set(value, new Map());
+          const perLi = staged.get(value);
+          if (!perLi.has(id)) perLi.set(id, []);
+          perLi.get(id).push({ child, container, period });
+        }
+      }
+    }
+
+    const out = new Map();
+    for (const [value, perLi] of staged) {
+      const liIds = [];
+      const plans = [];
+      for (const [id, matched] of perLi) {
+        liIds.push(id);
+        plans.push(mergeDimChildren(liPlan[id], matched, dimKey, new Set([value])));
+      }
+      out.set(value, { liIds, plans });
+    }
+    byPacing.set(cacheKey, out);
+    return out;
+  }
+
 
 /* ══ workspace/src/lib/dashboard/containers.js ════════════════════════════════════════════════ */
   // workspace/src/lib/dashboard/containers.js
+
 
 
   /**
@@ -5197,11 +9447,18 @@ function createDashboardMetrics(deps) {
    * Sum actual impressions/clicks/spend for one dim_child across the container's
    * window. Source is the workspace per-LI split-daily aggregate already keyed
    * by `<dim_key>:<dim_value>` (built by normalize.js:buildFactsAggregates).
+   * Primary conversions (spec 2026-09-13 §4): when this line item is marked on this dimension (its
+   * conversions cannot be placed there) and delivers into this child inside the summed dates, `cv`
+   * is null, the number no dimension row may print. A child it never delivered into, or whose
+   * dates hold none of its delivery, reads 0 as its delivery does (owner decision 2026-09-23): no
+   * conversion can belong there. The same rule dimBuckets applies to a table's buckets.
    */
   function sumDimChild(liId, dimChild, container, range, liSplitDaily) {
     const key = dimChild.dim_key + ':' + dimChild.dim_value;
     const dd = (liSplitDaily[liId] || {})[key] || {};
     const act = zeroRow();
+    const marked = splitStateOf(liSplitDaily)?.[liId]?.[dimChild.dim_key]?.cv === true;
+    let delivered = false;
     for (const [d, v] of Object.entries(dd)) {
       if (container.fs && container.fe && (d < container.fs || d > container.fe)) continue;
       if (range && (d < range.from || d > range.to)) continue;
@@ -5211,8 +9468,17 @@ function createDashboardMetrics(deps) {
       act.co += v.co;
       act.cv += v.cv || 0;
       act.dc += v.dc;
+      if (marked && !delivered && dayHasDeliveryContainer(v)) delivered = true;
     }
+    if (delivered) act.cv = null;
     return act;
+  }
+
+  // A day row that carries delivery. A row with none cannot put a line item's conversions in a
+  // child (widget-data.js dayHasDelivery, the same test for a table's buckets).
+  function dayHasDeliveryContainer(v) {
+    return !!v && ((Number(v.im) || 0) > 0 || (Number(v.cl) || 0) > 0 || (Number(v.co) || 0) > 0
+      || (Number(v.sp) || 0) > 0 || (Number(v.dc) || 0) > 0);
   }
 
 
@@ -5230,12 +9496,34 @@ function createDashboardMetrics(deps) {
   // The no-scope path is load-bearing: when NO container in the pacing covers
   // itself, buildScopedDaily returns null and every caller falls back to the raw
   // liDaily it used before — byte-identical, no extra pass over the facts.
+  //
+  // Primary conversions (spec 2026-09-13 §4): while operative, a container group and
+  // a period are also judged, inside their own dates, the way a filter is judged.
+  // One filter can then have one day map per judging window (a container's dates or
+  // one date child's), built from the same delivery rows. Under a user filter a date
+  // row is judged inside its own dates even when its container does not scope (or an
+  // Outside filter suspends the scoping): a group with no container filter, over the
+  // rows the view's filters keep. Off: nothing changes.
+
 
 
 
 
 
   const SEP = '\u001f';   // unit separator — never appears in an LI id or a dim value
+
+  /** Implicit cuts of the selected period. Unnamed facts stay in their container;
+   * an explicit Outside lens suspends these cuts, as in buildScopedDaily. */
+  function periodContainerFilters(liPlan, periodKey, filters) {
+    const out = {};
+    if (!periodKey || outsideFiltersOf(parseBreakdownFilters(filters)).length) return out;
+    for (const id of Object.keys(liPlan || {})) {
+      const owning = resolveOwningContainer(liPlan[id], periodKey);
+      const filter = owning && PacingCore.containerDimFilter(owning.container);
+      if (filter) out[id] = filter;
+    }
+    return out;
+  }
 
   /** Stable key for a container filter — sorted keys, sorted values. */
   function filterKey(filter) {
@@ -5244,6 +9532,19 @@ function createDashboardMetrics(deps) {
       .sort()
       .map((k) => k + '=' + [...filter[k]].sort().join(','))
       .join('|');
+  }
+
+  /** The dates a container group is judged in (primary conversions, spec 2026-09-13 §4): a date
+   *  child's dates cut to its container's, else the container's own. null when an end is
+   *  missing, which judges every date. */
+  function groupWindow(container, dateChild) {
+    let from = container && container.fs ? String(container.fs) : '';
+    let to = container && container.fe ? String(container.fe) : '';
+    if (dateChild && dateChild.fs && dateChild.fe) {
+      if (!from || String(dateChild.fs) > from) from = String(dateChild.fs);
+      if (!to || String(dateChild.fe) < to) to = String(dateChild.fe);
+    }
+    return from && to ? { from, to } : null;
   }
 
   // facts → liPlan → scalar key → index. WeakMaps so a Settings save or a new
@@ -5257,10 +9558,24 @@ function createDashboardMetrics(deps) {
   }
 
   /**
-   * @returns {null | { dailyFor(liId, container): (Object|null) }}
-   *   null  — no container in this pacing scopes; callers keep the raw liDaily.
-   *   index — dailyFor gives `{ [date]: row }` for that container's filter, or
-   *           null when the container itself does not scope.
+   * @returns {null | { dailyFor, dayMapFor, groupKeyFor }}
+   *   null  — no container in this pacing scopes (and no date row needs judging in
+   *           its own dates, below); callers keep the raw liDaily.
+   *   index — each method takes (liId, container, dateChild = null). dailyFor gives
+   *           `{ [date]: row }` for that container's group, or null when the
+   *           container itself does not scope. dayMapFor gives the whole
+   *           `{ [liId]: days }` map those days were built in, which carries the
+   *           primary-conversions state (dailyForContainer copies it). groupKeyFor
+   *           names the group, for the wrapper cache.
+   *   A group is one (line item, container filter). While primary conversions are
+   *   operative it is also one judging window (groupWindow): the same delivery rows,
+   *   judged inside those dates, so a card's period row and the period view of the
+   *   same dates say the same thing (spec 2026-09-13 §4). Operative under a user
+   *   filter (chips or Outside), a container that does not scope, and any container
+   *   under Outside, also has a group per window: no container filter, the rows the
+   *   view's filters keep, which are the rows of the view's own liDaily for that line
+   *   item. A group is built on its first ask and kept, so its days keep one identity
+   *   across renders, including a group no row reaches.
    */
   function buildScopedDaily(facts, liPlan, rate, filters) {
     if (!facts || !Array.isArray(facts.factsDaily) || !liPlan) return null;
@@ -5272,8 +9587,8 @@ function createDashboardMetrics(deps) {
     const ck = scalarKey(rate, filters);
     if (byKey.has(ck)) return byKey.get(ck);
 
-    // Distinct container filters per LI (one LI can hold several — Fouquet's
-    // carries six containers on one window, four of which scope).
+    // Distinct container filters per LI (one LI can hold several containers on one
+    // window, and more than one of them can scope).
     const byLi = new Map();
     for (const id of Object.keys(liPlan)) {
       const cs = Array.isArray(liPlan[id]?.containers) ? liPlan[id].containers : [];
@@ -5287,29 +9602,53 @@ function createDashboardMetrics(deps) {
       }
       if (m) byLi.set(id, m);
     }
-    if (byLi.size === 0) { byKey.set(ck, null); return null; }
-
-    // An active Outside-splits filter suspends container scoping: the two are
-    // complements, so keeping both would zero every period row. The caller's
-    // liDaily already carries the outside filter, so falling back to it answers
-    // the useful question — WHEN did the undeclared delivery happen.
-    const parsed = parseBreakdownFilters(filters);
-    if (outsideFiltersOf(parsed).length > 0) { byKey.set(ck, null); return null; }
 
     // Compose with the active breakdown filter the same way buildBreakdownFacts
     // does — facts.factsDaily is always the FULL row set, even on a filtered
     // facts object, so the brkf pass has to be repeated here.
+    const parsed = parseBreakdownFilters(filters);
+    const outside = outsideFiltersOf(parsed);
     const brk = groupBreakdownFilters(parsed);
     const platforms = Array.isArray(filters?.platforms) ? filters.platforms.filter((p) => p != null) : [];
     const platformSet = platforms.length ? new Set(platforms.map((p) => String(p))) : null;
+    const chips = platformSet !== null || parsed.length > 0;
 
-    const groups = new Map();   // `${liId}${SEP}${filterKey}` → rows[]
+    // Primary conversions: while operative, each line item's rows are also kept whole, so a group
+    // can count what its filters keep inside its own dates. Under a user filter every date row is
+    // judged so (`ownDates`), whether or not its container scopes. Off: the old grouping only.
+    const cvCtx = facts.cvCtx || null;
+    const judging = !!(cvCtx && cvCtx.operative === true);
+    const ownDates = judging && chips;
+    if (byLi.size === 0 && !ownDates) { byKey.set(ck, null); return null; }
+
+    // An active Outside-splits filter suspends container scoping: the two are
+    // complements, so keeping both would zero every period row. The caller's
+    // liDaily already carries the outside filter, so falling back to it answers
+    // the useful question — WHEN did the undeclared delivery happen. Operative,
+    // a date row still gets its own dates judged, over those same rows.
+    if (outside.length > 0 && !ownDates) { byKey.set(ck, null); return null; }
+    const outIdx = outside.length ? outsideIndexes(outside, liPlan) : null;
+    // The rows the view's filters keep (buildBreakdownFacts' predicate, less the period's container
+    // filters: a card in period scope shows only the owning container, whose own filter is the
+    // group's).
+    const keeps = (row) => !(platformSet && !platformSet.has(String(row.platform || '')))
+      && !(brk.size > 0 && !factMatchesBreakdownFilters(row, brk))
+      && !(outIdx && !factMatchesOutside(row, outside, outIdx));
+
+    const liRows = judging ? new Map() : null;
+    const groups = judging ? null : new Map();   // `${liId}${SEP}${filterKey}` → rows[]
     for (const row of facts.factsDaily) {
       const id = sid(row.line_item_id);
+      if (judging) {
+        if (!ownDates && !byLi.has(id)) continue;
+        let all = liRows.get(id);
+        if (!all) { all = []; liRows.set(id, all); }
+        all.push(row);
+        continue;
+      }
       const m = byLi.get(id);
       if (!m) continue;
-      if (platformSet && !platformSet.has(String(row.platform || ''))) continue;
-      if (brk.size > 0 && !factMatchesBreakdownFilters(row, brk)) continue;
+      if (!keeps(row)) continue;
       for (const [k, flt] of m) {
         if (!PacingCore.factMatchesDimFilter(row, flt)) continue;
         const gk = id + SEP + k;
@@ -5319,18 +9658,73 @@ function createDashboardMetrics(deps) {
       }
     }
 
-    const daily = new Map();
-    for (const [gk, rows] of groups) {
-      const id = gk.slice(0, gk.indexOf(SEP));
-      const { LD } = buildLiDaily(rows, rate, liPlan);
-      daily.set(gk, LD[id] || {});
+    const members = judging ? purityIndex(facts.factsDaily) : null;
+
+    // Which group a (line item, container, date child) reads. Off, the date child plays no part.
+    // Operative under a user filter, a container with no filter of its own (none declared, or
+    // Outside suspends it) is a group too, with `flt` null.
+    function groupOf(liId, container, dateChild) {
+      const flt = outside.length ? null : PacingCore.containerDimFilter(container);
+      if (!flt && !ownDates) return null;
+      const id = sid(liId);
+      const fk = flt ? filterKey(flt) : '';
+      const window = judging ? groupWindow(container, dateChild) : null;
+      const gk = id + SEP + fk + (judging ? SEP + (window ? window.from + '|' + window.to : '') : '');
+      return { id, fk, flt, window, gk };
+    }
+
+    // One group's day map. Off: today's build over the group's rows. Judging: the group's verdict
+    // inside its window, counted over every row of the line item (the view's filters and the
+    // group's filter decide kept), and a row test with the same filters for its conversion rows.
+    // The reason names what splits it there (spec §4 "Reasons"): the view's filters when they alone
+    // keep part of its delivery in the window, else the container's rule (`byFilters`).
+    // One line item per plan: its own entry is all the overlay and the coef / net lookups need.
+    function build(g) {
+      if (!judging) return buildLiDaily(groups.get(g.id + SEP + g.fk) || [], rate, liPlan).LD;
+      const counter = makeVerdictCounter(g.window);
+      const byFilters = makeVerdictCounter(g.window);
+      counter.expect(g.id);
+      byFilters.expect(g.id);
+      const rows = [];
+      for (const row of liRows.get(g.id) || []) {
+        const viewKeeps = keeps(row);
+        const kept = viewKeeps && (!g.flt || PacingCore.factMatchesDimFilter(row, g.flt));
+        counter.see(g.id, row, kept);
+        byFilters.see(g.id, row, viewKeeps);
+        if (kept) rows.push(row);
+      }
+      const scope = {
+        verdicts: counter.result(), outside: null, window: g.window, windows: null,
+        rowTest: conversionRowTest({ platformSet, byDim: brk, outside, outIdx, containerFilters: g.flt ? { [g.id]: g.flt } : null }),
+        members, why: splitCauses(byFilters.result()),
+      };
+      return buildLiDaily(rows, rate, { [g.id]: liPlan[g.id] }, cvCtx, scope).LD;
+    }
+
+    const dayMaps = new Map();
+    function groupMap(liId, container, dateChild) {
+      const g = groupOf(liId, container, dateChild);
+      if (!g) return null;
+      let LD = dayMaps.get(g.gk);
+      if (!LD) {
+        LD = build(g);
+        if (!LD[g.id]) LD[g.id] = {};
+        dayMaps.set(g.gk, LD);
+      }
+      return LD;
     }
 
     const index = {
-      dailyFor(liId, container) {
-        const flt = PacingCore.containerDimFilter(container);
-        if (!flt) return null;
-        return daily.get(sid(liId) + SEP + filterKey(flt)) || {};
+      dailyFor(liId, container, dateChild = null) {
+        const LD = groupMap(liId, container, dateChild);
+        return LD ? LD[sid(liId)] : null;
+      },
+      dayMapFor(liId, container, dateChild = null) {
+        return groupMap(liId, container, dateChild);
+      },
+      groupKeyFor(liId, container, dateChild = null) {
+        const g = groupOf(liId, container, dateChild);
+        return g ? g.gk : null;
       },
     };
     byKey.set(ck, index);
@@ -5368,13 +9762,32 @@ function createDashboardMetrics(deps) {
     }
     if (filterByLi.size === 0) { byKey.set(periodKey, raw); return raw; }
 
+    // Primary conversions (spec 2026-09-13 §4): while operative, each line item an owning container
+    // scopes is judged inside the period's dates. resolveOwningContainer answers only for a period
+    // whose dates are the key's own, so one window serves them all. The others are not judged:
+    // their conversions stay as on the unscoped dashboard.
+    const cvCtx = facts.cvCtx || null;
+    const judging = !!(cvCtx && cvCtx.operative === true);
+    const window = judging ? windowOfPeriodKey(periodKey) : null;
+    const counter = judging ? makeVerdictCounter(window) : null;
+    if (judging) for (const id of filterByLi.keys()) counter.expect(id);
+
     const rows = [];
     for (const row of facts.factsDaily) {
-      const flt = filterByLi.get(sid(row.line_item_id));
-      if (flt && !PacingCore.factMatchesDimFilter(row, flt)) continue;
+      const id = sid(row.line_item_id);
+      const flt = filterByLi.get(id);
+      const kept = !flt || PacingCore.factMatchesDimFilter(row, flt);
+      if (flt && judging) counter.see(id, row, kept);
+      if (!kept) continue;
       rows.push(row);
     }
-    const { LD } = buildLiDaily(rows, rate, liPlan);
+    const { LD } = judging
+      ? buildLiDaily(rows, rate, liPlan, cvCtx, {
+        verdicts: counter.result(), outside: null, window, windows: null,
+        rowTest: conversionRowTest({ containerFilters: Object.fromEntries(filterByLi) }),
+        members: purityIndex(facts.factsDaily), why: 'container',
+      })
+      : buildLiDaily(rows, rate, liPlan);
     // Every LI must keep an entry: an LI whose whole delivery was cut still has to
     // read as zero rather than fall through to a missing key upstream.
     for (const id of Object.keys(raw)) { if (!LD[id]) LD[id] = {}; }
@@ -5382,16 +9795,32 @@ function createDashboardMetrics(deps) {
     return LD;
   }
 
+  // index → groupKeyFor(liId, container, dateChild) → wrapper. One wrapper per group, so the
+  // identity-keyed metric caches downstream (liM / campM) see the same map on every
+  // render, and the primary-conversions state registered on it is found by SplitRow.
+  const wrapperCache = new WeakMap();
+
   /**
    * The liDaily a container's rows must be summed against: the scoped one when
    * the container covers itself, else the raw one. Shaped as `{ [liId]: days }`
-   * so it drops straight into sumDateChild.
+   * so it drops straight into sumDateChild. `dateChild`: the date row being summed,
+   * whose dates the primary-conversions state is judged in (null: the container's).
    */
-  function dailyForContainer(index, liId, container, liDaily) {
+  function dailyForContainer(index, liId, container, liDaily, dateChild = null) {
     if (!index) return liDaily;
-    const days = index.dailyFor(liId, container);
+    const days = index.dailyFor(liId, container, dateChild);
     if (!days) return liDaily;
-    return { [sid(liId)]: days };
+    const id = sid(liId);
+    const key = index.groupKeyFor(liId, container, dateChild);
+    let byKey = wrapperCache.get(index);
+    if (!byKey) { byKey = new Map(); wrapperCache.set(index, byKey); }
+    let wrapper = byKey.get(key);
+    if (!wrapper || wrapper[id] !== days) {
+      wrapper = { [id]: days };
+      copyCvState(index.dayMapFor(liId, container, dateChild), wrapper, [id]);
+      byKey.set(key, wrapper);
+    }
+    return wrapper;
   }
 
 

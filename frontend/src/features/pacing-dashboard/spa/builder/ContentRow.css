@@ -1,0 +1,12 @@
+/* Shared by series, columns, values and their dependent readings. Callers supply
+   only meaningful markers/actions; typography and states belong to this row. */
+.sp-content-row { min-width: 0; background: var(--surface); border-radius: var(--rxs); }
+.sp-content-row .sp-rb-el-b { min-height: 36px; gap: 6px; padding: 6px 8px; }
+.sp-content-row .sp-rb-el-nm { font-size: var(--text-12); font-weight: 500; line-height: 1.4; }
+.sp-content-row .sp-rb-el-sum { font-size: var(--text-11); line-height: 1.4; }
+.sp-content-role { flex: none; color: var(--text-secondary); font-size: var(--text-11); line-height: 1.4; }
+.sp-content-row--child, .sp-content-item--child { margin-inline-start: 18px; }
+.sp-content-row:has(> .sp-rb-el-b[aria-expanded="true"]) { border-color: var(--accent); background: var(--surface-tertiary); }
+.sp-content-row:has(> .sp-rb-el-b[aria-invalid="true"]) { border-color: var(--status-amber-bold); }
+.sp-content-row > .sp-rb-el-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sp-content-add { align-self: flex-start; font-size: var(--text-11); }

@@ -237,6 +237,22 @@ describe("PacingTab", () => {
     expect(screen.getByRole("button", { name: /^Ourisman Ford Q2/ })).toBeInTheDocument();
   });
 
+  it("should not nest a button inside the row's own click target", async () => {
+    // The owner cell carries a reassign button and sits in the row. If the row itself is the button,
+    // that is a button inside a button - which React only warns about, while the BROWSER repairs it
+    // by closing the outer button early, so the owner cell lands outside the row it belongs to. The
+    // repair is invisible in jsdom, so assert the markup instead of the rendering.
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "p1", name: "Ourisman Ford Q1", ownerName: "Dasha" })])
+    );
+    renderTab();
+
+    await screen.findByRole("button", { name: /^Ourisman Ford Q1/ });
+    for (const button of document.querySelectorAll("button")) {
+      expect(button.querySelector("button")).toBeNull();
+    }
+  });
+
   it("drops the dashboard filters when the selection moves to another pacing", async () => {
     // Given: a filtered dashboard - the filters live in the query string with no pacing in the key,
     // and the dashboard below the list is no longer torn down between pacings

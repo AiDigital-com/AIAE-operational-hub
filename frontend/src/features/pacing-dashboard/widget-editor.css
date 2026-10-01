@@ -1,0 +1,46 @@
+/* The frame around Pacing's moved builder. Deliberately thin: everything inside paints itself from
+   `spa/pacing-spa.css`, and a second opinion here would fight it. */
+.wedit {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+/* A bar, not a modal header: the editor replaces the library list inside the drawer rather than
+   opening on top of it, so there is one layer here and one way out. */
+.wedit__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.wedit__title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+}
+.wedit__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+.wedit__close:hover { background: var(--n-100); color: var(--ink); }
+.wedit__close svg { width: 16px; height: 16px; }
+
+/* The builder is tall and scrolls on its own; this keeps that inside the drawer rather than letting
+   it grow the page behind it. */
+.wedit__body {
+  min-height: 0;
+  overflow: auto;
+}

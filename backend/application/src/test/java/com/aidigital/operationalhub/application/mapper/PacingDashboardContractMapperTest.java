@@ -76,7 +76,10 @@ class PacingDashboardContractMapperTest {
 				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
-				"2026-08-05", List.of(Map.of("creative_name", "Hero 15s")), null,
+				"2026-08-05",
+				// types / availableSplits / availableMetrics / conversionTags - the four the moved
+				// widget renderer reads; unset here because these cases are about the other fields.
+				null, null, null, null, List.of(Map.of("creative_name", "Hero 15s")), null,
 				Map.of("devices", Map.of("rows", List.of())),
 				Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
 				Map.of("campaign", Map.of("mA", 42.5)), null,
@@ -139,7 +142,10 @@ class PacingDashboardContractMapperTest {
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
 				"2026-08-01", "2026-09-30", List.of(), List.of(), null, false, false, null);
 		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of("111", plan), List.of(), "2026-08-05", null, null, null, Map.of(), Map.of(),
+				campaign, Map.of("111", plan), List.of(), "2026-08-05",
+				// types / availableSplits / availableMetrics / conversionTags - the four the moved
+				// widget renderer reads; unset here because these cases are about the other fields.
+				null, null, null, null, null, null, null, Map.of(), Map.of(),
 				Map.of(), Map.of(), null, Map.of(), null, List.of());
 
 		// When:
@@ -325,7 +331,10 @@ class PacingDashboardContractMapperTest {
 				new PacingDashboardCampaign(
 						"slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null, null, null);
 		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				campaign, Map.of(), List.of(), null,
+				// types / availableSplits / availableMetrics / conversionTags - the four the moved
+				// widget renderer reads; unset here because these cases are about the other fields.
+				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 				null, List.of());
 
 		// When:
@@ -384,7 +393,10 @@ class PacingDashboardContractMapperTest {
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
 				"slug", "p1", "Name", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", null, "", null);
 		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of(), List.of(), null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				campaign, Map.of(), List.of(), null,
+				// types / availableSplits / availableMetrics / conversionTags - the four the moved
+				// widget renderer reads; unset here because these cases are about the other fields.
+				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 				null, List.of());
 
 		// When:

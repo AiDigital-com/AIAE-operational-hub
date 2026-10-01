@@ -19,13 +19,22 @@ server's unfiltered `PacingRowV1.alerts` (2026-09-25 filters follow-up, item 3).
 
 - Source repo: `AiDigital-com/AIAE-paicing`
 - Source path: `shared/`
-- Commit copied from (`dashboard-metrics.js`, `pacing-core.js`, `metric-registry.js`, `currency.js`,
+- Commit copied from (`dashboard-metrics.js`, `pacing-core.js`, `currency.js`,
   `dashboard-metrics-glue.js`): `e161b91edbb6f2bc3666c69f9240e6778e0a0a94` (copied 2026-09-25, from
   the `paicing-azat` checkout)
 - Commit copied from (`alerts-core.js`): `1c57d45` (copied 2026-09-25, from the `paicing-ogan`
   checkout - the read-only reference repo for that day's task; the file is byte-identical between
   both checkouts at copy time, `diff -q` confirmed, so the two sources agree on content even though
   their commit SHAs differ)
+- Re-copied 2026-10-01 (`metric-registry.js`): the `paicing-azat` working tree on branch `1.0.0`,
+  which had just taken this file from `ogan-team` at `823a42d` as part of the `shared/` sync. The
+  registry went from 8 mart metrics to 15 - the video and engagement keys `st` (starts), `q1`/`q2`/
+  `q3` (quartiles), `rc` (reach), `lc` (link clicks), `vi` (viewable impressions), plus the derived
+  `dc` (dynamic cost) - and `BUILT_IN_KEYS` from 7 sheet roles to 14. A widget naming one of those
+  keys is refused as unknown by any copy still on the old list, which is why this one could not stay
+  behind. Named as a working tree rather than a commit because the sync was not committed when the
+  copy was taken; `diff -q` against `AIAE-paicing/shared/metric-registry.js` is the check that
+  matters, not the SHA.
 
 This directory also holds six small sibling `.d.ts` files (`dashboard-metrics.d.ts`,
 `pacing-core.d.ts`, `metric-registry.d.ts`, `currency.d.ts`, `dashboard-metrics-glue.d.ts`,

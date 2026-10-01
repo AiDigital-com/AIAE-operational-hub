@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { CheckIcon, CloseIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from "../../shared/ui/icons/icons";
+import { CheckIcon, CloseIcon, CopyIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import {
   createPacingLibraryEntry,
@@ -13,8 +13,21 @@ import {
   setPacingLibraryLike,
   updatePacingLibraryEntry,
 } from "./api";
-import type { WidgetRenderContext } from "./widgets/widget-engine";
+import {
+  WIDGET_CAP,
+  copyWidget,
+  editSeedTitle,
+  hasSwitch,
+  newGroupId,
+  newWidgetId,
+  setTileEnabled,
+  tileEnabled,
+  tileTitle,
+  widgetTitle,
+  withWidgetRemoved,
+} from "./widgets/widget-tiles";
 import { WidgetPreview } from "./widget-preview";
+import { WidgetEditor } from "./widget-editor";
 import type {
   PacingDisplayShape,
   PacingLibraryEntryV1,
@@ -32,26 +45,10 @@ const KIND_OPTIONS: Array<{ value: PacingLibraryKindV1 | "all"; label: string }>
   { value: "layout", label: "Layouts" },
 ];
 
-function randomSuffix(length: number): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  for (let i = 0; i < length; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return out;
-}
-
-/** A fresh widget-instance id matching Pacing's `WIDGET_INSTANCE_RE = /^w_[a-z0-9]{4,16}$/`. */
-function newWidgetId(): string {
-  return `w_${randomSuffix(10)}`;
-}
-
-/** A fresh group id matching Pacing's `GROUP_ID_RE = /^g_[a-z0-9]{4,16}$/`. */
-function newGroupId(): string {
-  return `g_${randomSuffix(10)}`;
-}
-
-function widgetTitle(widget: PacingWidgetInstance): string {
-  return widget.title?.trim() || "Untitled widget";
-}
+/** Nothing to copy: a linked tile whose library entry is gone has no definition, only the broken
+ *  ref - and copying that would put a SECOND unavailable tile on the dashboard. */
+const COPY_NO_DEFINITION = "Nothing to copy: this tile's library entry is unavailable";
+const COPY_AT_CAP = `Widget limit reached (${WIDGET_CAP})`;
 
 interface SaveDialogState {
   widgetId: string;
@@ -84,15 +81,20 @@ interface PacingDashboardLibraryProps {
   display: PacingDisplayShape;
   saving: boolean;
   saveError: string | null;
-  /** The engine context the dashboard itself renders with - the card thumbnails are the real
-   *  widget on this pacing's own figures, not a drawing of one. */
-  renderCtx: WidgetRenderContext;
   /** Definitions for the linked instances on this pacing, keyed by entry id. */
   libraryEntries: Record<string, unknown> | undefined;
-  /** Saves the WHOLE patch (widgets + groups) back to the pacing; the caller owns the displayRev CAS
-   *  and reports a conflict (US-118) rather than silently overwriting. */
-  onSave: (patch: { widgets: PacingWidgetInstance[]; groups: PacingWidgetGroup[] }) => void;
+  /** Saves the WHOLE patch (widgets + groups + the on/off map) back to the pacing; the caller owns
+   *  the displayRev CAS and reports a conflict (US-118) rather than silently overwriting. */
+  onSave: (patch: {
+    widgets: PacingWidgetInstance[];
+    groups: PacingWidgetGroup[];
+    enabled: Record<string, boolean>;
+  }) => void;
   isAdmin: boolean;
+  /** A widget to open the builder on at once - a tile's "Edit…" on the dashboard behind. */
+  initialWidgetId?: string | null;
+  /** Called once that has been honoured, so reopening the drawer lands on the list. */
+  onWidgetEditorOpened?: () => void;
 }
 
 /**
@@ -102,12 +104,24 @@ interface PacingDashboardLibraryProps {
  * reproducing Pacing's full widget-spec rendering engine is out of scope here (see the migration
  * report); the dashboard's own health/financial/chart sections above render the real figures directly.
  */
-export function PacingDashboardLibrary({ display, saving, saveError, onSave, isAdmin, renderCtx, libraryEntries }: PacingDashboardLibraryProps) {
+export function PacingDashboardLibrary({ display, saving, saveError, onSave, isAdmin, libraryEntries, initialWidgetId, onWidgetEditorOpened }: PacingDashboardLibraryProps) {
   const queryClient = useQueryClient();
   const widgets = useMemo(() => display.widgets ?? [], [display.widgets]);
   const groups = useMemo(() => display.groups ?? [], [display.groups]);
+  const enabled = useMemo(() => display.enabled ?? {}, [display.enabled]);
   const groupedIds = useMemo(() => new Set(groups.flatMap((g) => g.tileIds)), [groups]);
+  const atCap = widgets.length >= WIDGET_CAP;
 
+  /** Which widget the builder is open on, if any. Id, not the object: the draft is the source of
+   *  truth and a held object would go stale the moment an edit landed. */
+  const [editingId, setEditingId] = useState<string | null>(initialWidgetId ?? null);
+  // A tile's "Edit…" arrives as a prop rather than as a call, because the drawer mounts this panel
+  // only when its tab is shown. Consumed once: reopening the drawer afterwards lands on the list.
+  useEffect(() => {
+    if (!initialWidgetId) return;
+    setEditingId(initialWidgetId);
+    onWidgetEditorOpened?.();
+  }, [initialWidgetId, onWidgetEditorOpened]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragId, setDragId] = useState<string | null>(null);
 
@@ -148,22 +162,86 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
     const next = [...widgets];
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
-    onSave({ widgets: next, groups });
+    onSave({ widgets: next, groups, enabled });
   }
 
   function removeWidget(widgetId: string) {
-    const nextWidgets = widgets.filter((w) => w.id !== widgetId);
     // US-116: removing affects only this pacing - the library entry it may be linked to is untouched.
-    // Dropping it out of any group too, so a group never carries a dangling reference.
-    const nextGroups = groups
-      .map((g) => ({ ...g, tileIds: g.tileIds.filter((id) => id !== widgetId) }))
-      .filter((g) => g.tileIds.length > 0);
+    // The group sweep and the on/off cleanup both come from `widget-tiles`, which runs Pacing's own
+    // `sweepGroups`, so a frame never keeps a ghost member and a stale off-switch cannot attach
+    // itself to a later widget that happens to reuse the id.
     setSelected((current) => {
       const next = new Set(current);
       next.delete(widgetId);
       return next;
     });
-    onSave({ widgets: nextWidgets, groups: nextGroups });
+    onSave(withWidgetRemoved(widgets, groups, enabled, widgetId));
+  }
+
+  /**
+   * Turn a tile on or off. Absent ≡ on, so turning one ON removes its entry rather than storing
+   * `true` - the stored map stays the size of what someone actually switched off.
+   *
+   * A switched-off widget keeps everything else: its definition, its place in the order, its group
+   * membership. It is hidden from the dashboard, not removed from the pacing, which is why the
+   * control is a switch on the card rather than a second kind of delete.
+   */
+  function toggleWidget(widgetId: string, on: boolean) {
+    onSave({ widgets, groups, enabled: setTileEnabled(enabled, widgetId, on) });
+  }
+
+  /**
+   * Fold a builder edit into the draft, in place.
+   *
+   * The builder reports an UPDATER, not a widget: `onPatch((w) => ({ ...w, spec: … }))`. It owns no
+   * copy of the tile and never saves - it describes the change and hands it up, which is what lets
+   * it live inside this drawer's draft rather than beside it.
+   *
+   * It is applied to what the tile DRAWS (`resolveWidget`), because that is what the builder was
+   * opened on - applying it to the stored instance would feed a linked tile's empty shell through a
+   * mutation written against the entry's definition.
+   *
+   * A LINKED instance is DETACHED by the edit, which is Pacing's own rule: the result is a
+   * definition, and leaving a `lib` ref beside it would claim the tile still follows an entry it no
+   * longer matches.
+   */
+  function patchWidget(widgetId: string, updater: (w: PacingWidgetInstance) => PacingWidgetInstance) {
+    const current = widgets.find((w) => w.id === widgetId);
+    if (!current) return;
+    const drawn = resolveWidget(current, libraryEntries);
+    if (!drawn) return;
+    const next = { ...updater({ ...drawn, title: editSeedTitle(current, drawn) }), id: widgetId };
+    delete next.lib;
+    delete next.from;
+    onSave({ widgets: widgets.map((w) => (w.id === widgetId ? next : w)), groups, enabled });
+  }
+
+  /**
+   * Put an independent copy of a widget on this pacing, right after the original.
+   *
+   * The SOURCE is what the tile DRAWS, not the stored instance: a linked instance carries no spec of
+   * its own, so copying it would produce a widget with nothing in it. `copyWidget` then drops `lib`
+   * and `from`, because a copy is a private widget rather than a second linked tile - editing it can
+   * never surprise the original entry's author, and this pacing does not count that entry twice.
+   *
+   * The copy deliberately does NOT join the original's group: a group is an arrangement someone
+   * built, and silently widening it is not what "duplicate" says.
+   */
+  function duplicateWidget(widgetId: string) {
+    if (atCap) return;
+    const widget = widgets.find((w) => w.id === widgetId);
+    if (!widget) return;
+    const drawn = resolveWidget(widget, libraryEntries);
+    if (!drawn) return; // the card's button is already disabled for this; belt to that brace
+    const index = widgets.findIndex((w) => w.id === widgetId);
+    // The name the CARD shows, through the same rule it uses: a linked tile's own title is an
+    // override on top of its entry's name, and `resolveWidget` returns the entry's definition - so
+    // taking the title off `drawn` alone would throw the user's rename away and call the copy
+    // "Untitled widget (copy)".
+    const copy = copyWidget({ ...drawn, title: tileTitle(widget, drawn) }, widgets.map((w) => w.id));
+    const next = [...widgets];
+    next.splice(index + 1, 0, copy);
+    onSave({ widgets: next, groups, enabled });
   }
 
   function toggleSelected(widgetId: string) {
@@ -178,13 +256,18 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
   function groupSelected() {
     if (selected.size < 2) return;
     const tileIds = Array.from(selected);
-    const nextGroup: PacingWidgetGroup = { id: newGroupId(), tileIds, bg: "slate", title: "New group" };
-    onSave({ widgets, groups: [...groups, nextGroup] });
+    const nextGroup: PacingWidgetGroup = {
+      id: newGroupId(groups.map((g) => g.id)),
+      tileIds,
+      bg: "slate",
+      title: "New group",
+    };
+    onSave({ widgets, groups: [...groups, nextGroup], enabled });
     setSelected(new Set());
   }
 
   function ungroup(groupId: string) {
-    onSave({ widgets, groups: groups.filter((g) => g.id !== groupId) });
+    onSave({ widgets, groups: groups.filter((g) => g.id !== groupId), enabled });
   }
 
   /**
@@ -205,18 +288,20 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
    */
   function addFromLibrary(entry: PacingLibraryEntryV1) {
     if (entry.kind !== "widget") return; // §6 scope: block/layout apply needs the canvas editor (§7/§9)
+    if (atCap) return;
     const definition = (entry.definition ?? {}) as Partial<PacingWidgetInstance> & Record<string, unknown>;
     const key = entry.id;
     const isStandard = typeof key === "string" && key.startsWith("std:");
+    const usedIds = widgets.map((w) => w.id);
 
     const instance: PacingWidgetInstance = isStandard
       ? (() => {
           // Copy, minus the two fields that only mean anything on a linked one.
           const { lib: _lib, from: _from, ...copied } = definition;
-          return { ...copied, id: newWidgetId() } as PacingWidgetInstance;
+          return { ...copied, id: newWidgetId(usedIds) } as PacingWidgetInstance;
         })()
       : {
-          id: newWidgetId(),
+          id: newWidgetId(usedIds),
           kind: "composite",
           lib: { src: "user", key },
           profile: definition.profile,
@@ -224,7 +309,7 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
           datasetType: definition.datasetType,
         };
 
-    onSave({ widgets: [...widgets, instance], groups });
+    onSave({ widgets: [...widgets, instance], groups, enabled });
   }
 
   async function toggleLike(entry: PacingLibraryEntryV1) {
@@ -283,7 +368,12 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
 
   function openSaveDialog(widgetId: string) {
     const widget = widgets.find((w) => w.id === widgetId);
-    setSaveDialog({ widgetId, name: widgetTitle(widget ?? { id: widgetId }), description: "", busy: false, error: null });
+    // The name the card shows, for the same reason the copy takes it: a linked tile's own title is
+    // an override, so neither half of the pair answers alone.
+    const name = widget
+      ? tileTitle(widget, resolveWidget(widget, libraryEntries))
+      : widgetTitle({ title: undefined });
+    setSaveDialog({ widgetId, name, description: "", busy: false, error: null });
   }
 
   async function confirmSaveToLibrary() {
@@ -318,6 +408,53 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
 
   const ungroupedWidgets = widgets.filter((w) => !groupedIds.has(w.id));
 
+  /** One place for the card's wiring, so the grouped and ungrouped lists cannot drift apart - they
+   *  render the same card and already restated the whole prop list twice between them. */
+  function cardProps(widget: PacingWidgetInstance) {
+    // Resolved once per card: the picture, the name and the Duplicate button all ask the same
+    // question of it, and a linked instance's answer is its library entry's definition.
+    const drawn = resolveWidget(widget, libraryEntries);
+    // Why a copy may be impossible, in the card's own words. Null means it is offered.
+    const noCopy = !drawn ? COPY_NO_DEFINITION : atCap ? COPY_AT_CAP : null;
+    return {
+      widget,
+      drawn,
+      selected: selected.has(widget.id),
+      dragging: dragId === widget.id,
+      // `hasSwitch` is the one gate for "does this id get a control at all": an id dash-gate's
+      // enabled{} may not carry gets no switch, rather than an affordance whose save is refused.
+      on: tileEnabled(display, widget.id),
+      switchable: hasSwitch(widget.id),
+      noCopy,
+      onToggleSelect: () => toggleSelected(widget.id),
+      onToggleOn: (next: boolean) => toggleWidget(widget.id, next),
+      onDuplicate: () => duplicateWidget(widget.id),
+      // Editing needs what the tile DRAWS: a linked instance carries no spec, so opening the
+      // builder on the bare ref would show an empty widget. Unavailable when the entry is gone,
+      // for the same reason Duplicate is.
+      onEdit: drawn ? () => setEditingId(widget.id) : null,
+      onRemove: () => removeWidget(widget.id),
+      onSaveToLibrary: () => openSaveDialog(widget.id),
+      onDragStart: () => setDragId(widget.id),
+      onDrop: () => dragId && reorder(dragId, widget.id),
+    };
+  }
+
+  const editing = editingId ? widgets.find((w) => w.id === editingId) : undefined;
+  if (editing) {
+    // Opened on what the tile DRAWS, not the stored instance - a linked one carries no spec.
+    const drawn = resolveWidget(editing, libraryEntries);
+    if (drawn) {
+      return (
+        <WidgetEditor
+          widget={{ ...drawn, title: editSeedTitle(editing, drawn) }}
+          onPatch={(updater) => patchWidget(editing.id, updater)}
+          onClose={() => setEditingId(null)}
+        />
+      );
+    }
+  }
+
   return (
     <div className="pdl">
       <div className="pdl__section">
@@ -347,38 +484,14 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                 </button>
                 <ul className="pdl__grid pdl__grid--nested">
                   {members.map((widget) => (
-                    <WidgetCard
-                      key={widget.id}
-                      widget={widget}
-                      selected={selected.has(widget.id)}
-                      dragging={dragId === widget.id}
-                      onToggleSelect={() => toggleSelected(widget.id)}
-                      onRemove={() => removeWidget(widget.id)}
-                      onSaveToLibrary={() => openSaveDialog(widget.id)}
-                      onDragStart={() => setDragId(widget.id)}
-                      onDrop={() => dragId && reorder(dragId, widget.id)}
-                      renderCtx={renderCtx}
-                      libraryEntries={libraryEntries}
-                    />
+                    <WidgetCard key={widget.id} {...cardProps(widget)} />
                   ))}
                 </ul>
               </li>
             );
           })}
           {ungroupedWidgets.map((widget) => (
-            <WidgetCard
-              key={widget.id}
-              widget={widget}
-              selected={selected.has(widget.id)}
-              dragging={dragId === widget.id}
-              onToggleSelect={() => toggleSelected(widget.id)}
-              onRemove={() => removeWidget(widget.id)}
-              onSaveToLibrary={() => openSaveDialog(widget.id)}
-              onDragStart={() => setDragId(widget.id)}
-              onDrop={() => dragId && reorder(dragId, widget.id)}
-              renderCtx={renderCtx}
-              libraryEntries={libraryEntries}
-            />
+            <WidgetCard key={widget.id} {...cardProps(widget)} />
           ))}
         </ul>
       </div>
@@ -436,10 +549,7 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
                     arrangement of them, and neither renders through the tile engine. They keep the
                     written card the list always was rather than an empty frame that reads broken. */}
                 {entry.kind === "widget" && (
-                  <WidgetPreview
-                    widget={(entry.definition ?? null) as PacingWidgetInstance | null}
-                    ctx={renderCtx}
-                  />
+                  <WidgetPreview widget={(entry.definition ?? null) as PacingWidgetInstance | null} />
                 )}
                 <div className="pdl__library-info">
                   {renaming?.id === entry.id ? (
@@ -582,39 +692,67 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
 
 function WidgetCard({
   widget,
+  drawn,
   selected,
   dragging,
+  on,
+  switchable,
+  noCopy,
   onToggleSelect,
+  onToggleOn,
+  onDuplicate,
+  onEdit,
   onRemove,
   onSaveToLibrary,
   onDragStart,
   onDrop,
-  renderCtx,
-  libraryEntries,
 }: {
   widget: PacingWidgetInstance;
+  /** What this tile actually draws - the instance itself, or its library entry's definition wearing
+   *  the instance's id. Null when a linked entry is gone: the card still lists it so it can be
+   *  removed, and says why there is no picture. */
+  drawn: PacingWidgetInstance | null;
   selected: boolean;
   dragging: boolean;
+  /** Shown on the dashboard. Absent from `display.enabled` ≡ true. */
+  on: boolean;
+  /** Does this id get a switch at all - i.e. may `display.enabled` carry it. */
+  switchable: boolean;
+  /** Why Duplicate is unavailable, in the words the button shows; null when it is offered. */
+  noCopy: string | null;
   onToggleSelect: () => void;
+  onToggleOn: (next: boolean) => void;
+  onDuplicate: () => void;
+  /** Opens the widget builder on this tile. Null when there is no definition to open it on. */
+  onEdit: (() => void) | null;
   onRemove: () => void;
   onSaveToLibrary: () => void;
   onDragStart: () => void;
   onDrop: () => void;
-  renderCtx: WidgetRenderContext;
-  libraryEntries: Record<string, unknown> | undefined;
 }) {
+  const title = tileTitle(widget, drawn);
   return (
     <li
-      className={cn("pdl__card", selected && "pdl__card--selected", dragging && "pdl__card--dragging")}
+      className={cn(
+        "pdl__card",
+        selected && "pdl__card--selected",
+        dragging && "pdl__card--dragging",
+        !on && "pdl__card--off"
+      )}
       draggable
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
     >
-      {/* Name and controls ABOVE the picture, the way the retired gallery card was built - and the
-          opposite way round from a library card, which leads with its picture. The difference is
-          deliberate in the original and worth keeping: your own tiles are scanned by name, someone
-          else's entries are scanned by what they look like. */}
+      {/* Name ABOVE the picture, the way the retired gallery card was built - and the opposite way
+          round from a library card, which leads with its picture. The difference is deliberate in
+          the original and worth keeping: your own tiles are scanned by name, someone else's entries
+          are scanned by what they look like.
+
+          The controls used to share this row. Four of them do not fit: at the grid's 230px minimum a
+          switch, Duplicate, Save and Remove leave the name about seven characters, which defeats the
+          scanning this row exists for. They sit in their own bar under the picture instead - the
+          same shape the library card beside it already uses. */}
       <div className="pdl__card-meta">
         <input
           type="checkbox"
@@ -622,28 +760,66 @@ function WidgetCard({
           checked={selected}
           onChange={onToggleSelect}
           title="Select for grouping"
-          aria-label={`Select ${widgetTitle(widget)} for grouping`}
+          aria-label={`Select ${title} for grouping`}
         />
-        <span className="pdl__card-title" title={widgetTitle(widget)}>
-          {widgetTitle(widget)}
+        <span className="pdl__card-title" title={title}>
+          {title}
         </span>
         {widget.lib && <span className="pdl__widget-badge">linked</span>}
-        <div className="pdl__card-actions">
+        {/* The dimming alone says "different", not "off" - and a widget that simply has no data to
+            draw looks dim too. The word is what separates the two. */}
+        {!on && <span className="pdl__widget-badge pdl__widget-badge--off">off</span>}
+      </div>
+      <WidgetPreview widget={drawn} />
+      <div className="pdl__card-actions">
+        {switchable && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label={`Show ${title} on the dashboard`}
+            className={cn("pdl__switch", on && "pdl__switch--on")}
+            // The control carries no visible text, so the hover title is where the meaning of the
+            // two positions is spelled out.
+            title={on ? "Shown on the dashboard. Click to turn off." : "Not shown on the dashboard. Click to turn on."}
+            onClick={() => onToggleOn(!on)}
+          />
+        )}
+        <div className="pdl__card-icons">
+          <button
+            type="button"
+            className="pdl__icon-btn"
+            onClick={() => onEdit?.()}
+            disabled={!onEdit}
+            title={onEdit ? "Edit" : COPY_NO_DEFINITION.replace("copy", "edit")}
+            aria-label={`Edit ${title}`}
+          >
+            <EditIcon />
+          </button>
+          <button
+            type="button"
+            className="pdl__icon-btn"
+            onClick={onDuplicate}
+            disabled={noCopy !== null}
+            title={noCopy ?? "Duplicate"}
+            aria-label={`Duplicate ${title}`}
+          >
+            <CopyIcon />
+          </button>
           <button
             type="button"
             className="pdl__icon-btn"
             onClick={onSaveToLibrary}
             title="Save to library"
-            aria-label={`Save ${widgetTitle(widget)} to library`}
+            aria-label={`Save ${title} to library`}
           >
             <UploadIcon />
           </button>
-          <button type="button" className="pdl__icon-btn" onClick={onRemove} aria-label={`Remove ${widgetTitle(widget)}`} title="Remove">
+          <button type="button" className="pdl__icon-btn" onClick={onRemove} aria-label={`Remove ${title}`} title="Remove">
             <TrashIcon />
           </button>
         </div>
       </div>
-      <WidgetPreview widget={resolveWidget(widget, libraryEntries)} ctx={renderCtx} />
     </li>
   );
 }

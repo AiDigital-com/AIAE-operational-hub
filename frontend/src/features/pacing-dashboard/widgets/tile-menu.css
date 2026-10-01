@@ -1,0 +1,63 @@
+/* The tile kebab, in this app's chrome rather than Pacing's.
+ *
+ * The rules mirror `features/overview/overview.css`'s row menu - same 30×32 borderless trigger, same
+ * fixed 190px panel - under this feature's own prefix rather than by importing that file. A second
+ * screen's stylesheet is not loaded on this route, and reaching for one across features is how a
+ * button silently loses its styling the day that screen is split or renamed. The row menu on the
+ * Pacing tab mirrors the same shape for the same reason. */
+.wtm {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.wtm__kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.wtm__kebab:hover { background: var(--n-100); color: var(--ink); }
+.wtm__kebab svg { width: 16px; height: 16px; }
+
+/* Fixed, positioned from the trigger's rect by the component: an absolute panel inside a tile would
+   be clipped at the widget frame's edge. */
+.wtm__menu {
+  position: fixed;
+  z-index: 140;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.wtm__menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wtm__menu button:hover:not(:disabled) { background: var(--n-100); }
+/* A disabled item must not look live: same ink and same pointer as an enabled one leaves "clicking
+   does nothing" as the only signal that it is off. */
+.wtm__menu button:disabled { color: var(--muted); cursor: not-allowed; }
+.wtm__menu .wtm__danger { color: var(--bad); }
+.wtm__menu .wtm__danger:hover:not(:disabled) { background: var(--bad-soft, var(--n-100)); }

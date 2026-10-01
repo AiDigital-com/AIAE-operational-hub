@@ -1,0 +1,36 @@
+.sp-inspector-view { min-width: 0; }
+.sp-inspector-title { display: grid; grid-template-columns: minmax(80px, .3fr) minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 12px; }
+.sp-inspector-title > span { color: var(--text-secondary); font-size: var(--text-12); }
+.sp-inspector-title > input { width: 100%; min-width: 0; min-height: var(--sp-ctl-h); }
+.sp-inspector-primary { padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--rxs); background: var(--surface); }
+.sp-inspector-fields { --inspector-label-width: 84px; }
+.sp-inspector-fields .sp-pop-row { display: grid; grid-template-columns: var(--inspector-label-width) minmax(0, 1fr); align-items: center; }
+.sp-inspector-secondary { display: grid; grid-template-columns: var(--inspector-label-width) minmax(0, 1fr); gap: 8px; margin: -3px 0 8px; }
+.sp-inspector-secondary > span { grid-column: 2; min-width: 0; }
+.sp-inspector-secondary .sp-pop-set { border-color: transparent; padding-left: 0; color: var(--text-secondary); }
+.sp-inspector-fields .sp-pop-why { grid-column: 1 / -1; }
+.sp-inspector-fields .sp-pop-lbl { font-size: var(--text-12); }
+.sp-inspector-fields .sp-pop-ctl { min-width: 0; flex-wrap: wrap; }
+.sp-inspector-fields .sp-pop-sel { flex: 1 1 140px; min-width: 0; max-width: 100%; min-height: var(--sp-ctl-h); font-size: var(--text-12); }
+.sp-inspector-fields .sp-pop-set { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sp-inspector-fields .sp-pop-more { margin-top: 8px; }
+.sp-inspector-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; text-align: left; min-height: var(--sp-ctl-h); }
+.sp-inspector-section-title { font-size: var(--text-12); font-weight: 600; margin: 0 0 8px; }
+.sp-inspector-details { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 10px; }
+.sp-inspector-details > summary { cursor: pointer; color: var(--text-secondary); font-size: var(--text-12); }
+.sp-inspector-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sp-inspector-detail-body { padding-top: 10px; min-width: 0; }
+.sp-inspector-help { margin: 8px 0; color: var(--text-muted); font-size: var(--text-11); }
+.sp-content-settings .sp-lay-field { grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 6px 12px; margin: 0 0 10px; }
+.sp-content-settings .sp-lay-field--stack { grid-template-columns: minmax(0, 1fr); }
+.sp-content-settings .sp-lay-label { padding: 0; font-size: var(--text-12); color: var(--text-secondary); }
+.sp-content-settings :is(input.sp-inp, select.sp-inp, button.sp-inp, .wgf-adv) { height: var(--sp-edit-control-h); min-height: var(--sp-edit-control-h); font-size: var(--text-12); }
+.sp-content-settings .sp-inp { max-width: 100%; width: 100%; }
+.sp-content-settings :is(.sp-lay-control, .wgf-field) { min-width: 0; width: 100%; }
+.sp-content-settings .sp-lay-value-row > .wgf-adv { display: grid; place-items: center; width: var(--sp-edit-control-h); padding: 0; }
+.sp-content-settings .wgf-adv { padding: 0 8px; }
+.sp-content-settings .sp-lay-help { font-size: var(--text-11); }
+@media (max-width: 540px) {
+  .sp-inspector-title { grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+  .sp-inspector-fields { --inspector-label-width: 72px; }
+}

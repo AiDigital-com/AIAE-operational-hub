@@ -3,7 +3,6 @@ import { savePacingDisplay } from "./api";
 import { PacingDashboardLibrary } from "./pacing-dashboard-library";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
 import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "./types";
-import type { WidgetRenderContext } from "./widgets/widget-engine";
 
 /**
  * The widget library as a section of the settings drawer.
@@ -22,6 +21,19 @@ import type { WidgetRenderContext } from "./widgets/widget-engine";
 interface DisplayDraft {
   widgets: PacingWidgetInstance[];
   groups: PacingWidgetGroup[];
+  /** The tile on/off map. It rides in this draft - and therefore in the drawer's one Save, inside
+   *  the full display patch - rather than saving the instant a switch is flipped, which is what the
+   *  retired SPA did.
+   *
+   *  That difference is safe here and is not safe there, for a reason worth keeping: the SPA's
+   *  switch sits on the dashboard TILE, outside the drawer, so a drawer draft holding an `enabled`
+   *  map frozen at open time would silently rewind a switch flipped behind it - which is why its
+   *  `display-blocks.js` re-reads the live map on every draft push and its widget-set saves omit the
+   *  key entirely. The Hub has no tile menu: the switch IS in the drawer, the draft is seeded from
+   *  the same payload the save's `displayRev` is taken from, and dash-gate's CAS refuses the save
+   *  outright if anything changed meanwhile. There is no window in which this map can go stale
+   *  without the save failing loudly. */
+  enabled: Record<string, boolean>;
 }
 
 export interface PacingWidgetsSectionProps extends SettingsSectionProps {
@@ -30,21 +42,24 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   /** Echoed back on save; Pacing refuses a v2 widget change without it. */
   capabilities: Record<string, unknown> | undefined;
   isAdmin: boolean;
-  /** The engine context the dashboard renders with, so a card's thumbnail is the widget itself. */
-  renderCtx: WidgetRenderContext;
   /** Definitions for this pacing's linked instances, keyed by library entry id. */
   libraryEntries: Record<string, unknown> | undefined;
   /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
   seedKey: number;
+  /** A widget a tile's "Edit…" asked to open the builder on, rather than the list. */
+  initialWidgetId?: string | null;
+  /** Called once that request is consumed, so a later open lands on the list. */
+  onWidgetEditorOpened?: () => void;
 }
 
 const seedOf = (display: PacingDisplayShape): DisplayDraft => ({
   widgets: display.widgets ?? [],
   groups: display.groups ?? [],
+  enabled: display.enabled ?? {},
 });
 
 export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidgetsSectionProps>(
-  function PacingWidgetsSection({ slug, display, capabilities, isAdmin, renderCtx, libraryEntries, seedKey, onDirtyChange }, ref) {
+  function PacingWidgetsSection({ slug, display, capabilities, isAdmin, libraryEntries, seedKey, initialWidgetId, onWidgetEditorOpened, onDirtyChange }, ref) {
     const [draft, setDraft] = useState<DisplayDraft>(() => seedOf(display));
     const [base, setBase] = useState<DisplayDraft>(() => seedOf(display));
 
@@ -69,7 +84,12 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
         if (!isDirty) return { ok: true as const };
         // The revision comes off the payload this draft was seeded from, so a layout edited
         // elsewhere since then is what earns the 409 below rather than being overwritten.
-        const next = { ...display, widgets: current.widgets, groups: current.groups };
+        const next = {
+          ...display,
+          widgets: current.widgets,
+          groups: current.groups,
+          enabled: current.enabled,
+        };
         try {
           const outcome = await savePacingDisplay(slug, next, display.rev ?? 0, capabilities);
           if (outcome.status === "conflict") {
@@ -98,7 +118,7 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
     // The library reads its widgets and groups off `display`, so it has to see the DRAFT - otherwise
     // an added widget would vanish from the list on the next render, saved or not.
     const draftDisplay = useMemo(
-      () => ({ ...display, widgets: draft.widgets, groups: draft.groups }),
+      () => ({ ...display, widgets: draft.widgets, groups: draft.groups, enabled: draft.enabled }),
       [display, draft]
     );
 
@@ -109,10 +129,11 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
         // section, is the point of having one Save.
         saving={false}
         saveError={null}
-        onSave={(patch) => setDraft({ widgets: patch.widgets, groups: patch.groups })}
+        onSave={(patch) => setDraft({ widgets: patch.widgets, groups: patch.groups, enabled: patch.enabled })}
         isAdmin={isAdmin}
-        renderCtx={renderCtx}
         libraryEntries={libraryEntries}
+        initialWidgetId={initialWidgetId}
+        onWidgetEditorOpened={onWidgetEditorOpened}
       />
     );
   }

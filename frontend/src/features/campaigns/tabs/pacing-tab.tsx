@@ -121,14 +121,23 @@ function PacingListItem({
   return (
     <li className={cn("pacing-tab__item", selected && "pacing-tab__item--selected")} ref={itemRef}>
       <div className="pacing-tab__item-row">
-        <button
-          type="button"
-          className="pacing-tab__item-head"
-          onClick={onSelect}
-          // `aria-current`, not `aria-expanded`: the row no longer opens anything, it picks which
-          // pacing the dashboard below the list is showing.
-          aria-current={selected ? "true" : undefined}
-        >
+        <div className="pacing-tab__item-head">
+          {/* The row's click target is an overlay that covers the head, NOT the head itself. The head
+              holds the owner cell, and that cell holds a reassign button - a button inside a button
+              is invalid markup, and the browser repairs it by splitting the row open, which is how
+              the owner picker ends up outside the row it belongs to. An empty button under the cells
+              keeps the markup legal and the whole row clickable; `aria-label` names it, since there
+              is no longer any text inside it to read.
+
+              `aria-current`, not `aria-expanded`: the row no longer opens anything, it picks which
+              pacing the dashboard below the list is showing. */}
+          <button
+            type="button"
+            className="pacing-tab__item-pick"
+            onClick={onSelect}
+            aria-label={row.name}
+            aria-current={selected ? "true" : undefined}
+          />
           {/* Fills the grid's first track, which the chevron used to hold - dropping the cell instead
               would move every column left on this row only. A dot, not a rail down the row's edge:
               side stripes are banned project-wide. */}
@@ -142,12 +151,10 @@ function PacingListItem({
             )}
           </span>
           <StatusBadge label={row.status} color={statusStyle.color} glow={statusStyle.glow} />
-          <span
-              className="pacing-tab__item-owner"
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-              role="presentation"
-            >
+          {/* Sits ABOVE the row's click overlay (z-index in the stylesheet), which is what makes its
+              picker reachable. It no longer has to stop a click from bubbling: the overlay is a
+              sibling now, not an ancestor. */}
+          <span className="pacing-tab__item-owner">
               <span className="pacing-tab__item-owner-name" title={row.ownerName ?? undefined}>
                 {row.ownerName ?? "—"}
               </span>
@@ -165,7 +172,7 @@ function PacingListItem({
               {/* §11, US-131: reassignment is offered here as well as on the Overview. The same
                   component, so the two cannot end up offering different people. */}
               <OwnerPicker pacingId={row.id} currentOwnerName={row.ownerName ?? null} />
-            </span>
+          </span>
           <MarginCell
             actual={row.marginActualPct ?? null}
             target={row.marginTargetPct ?? 0}
@@ -194,7 +201,7 @@ function PacingListItem({
           ) : (
             <span className="pacing-tab__item-alerts pacing-tab__item-alerts--none" />
           )}
-        </button>
+        </div>
 
         <div className="pacing-tab__menu-wrap">
           <button

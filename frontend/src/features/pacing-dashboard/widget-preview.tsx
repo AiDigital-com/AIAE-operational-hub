@@ -1,6 +1,15 @@
+import type React from "react";
 import { useLayoutEffect, useRef, useState } from "react";
-import type { WidgetRenderContext } from "./widgets/widget-engine";
-import { WidgetTile } from "./widgets/widget-engine";
+// Moved JS from Pacing's SPA (see spa/SOURCE.md). Re-typed loosely at the boundary: `allowJs`
+// infers each prop from its DEFAULT, so `maxHeightPx = null` infers as `null` and refuses the number
+// the thumbnail has to pass. The component's real contract is its own file's docblock.
+import ReportWidgetUntyped from "./spa/report/ReportWidget.jsx";
+
+const ReportWidget = ReportWidgetUntyped as unknown as React.ComponentType<{
+  widget: PacingWidgetInstance;
+  preview?: boolean;
+  maxHeightPx?: number;
+}>;
 import type { PacingWidgetInstance } from "./types";
 
 /**
@@ -11,8 +20,11 @@ import type { PacingWidgetInstance } from "./types";
  * four templates in this library - so a list of names asks the reader to remember what each one
  * looks like, or to add it and find out. The picture answers the only question the screen is for.
  *
- * It renders through the SAME engine the dashboard uses, on this pacing's own figures, so the
- * thumbnail is the widget rather than a drawing of one. Scaled by transform rather than re-styled
+ * It renders through the SAME renderer the dashboard uses - Pacing's own `ReportWidget`, in its
+ * preview mode - on this pacing's own figures, so the thumbnail is the widget rather than a drawing
+ * of one. That identity is the whole point and was briefly lost: while the board drew through
+ * Pacing's renderer and this drew through the Hub's own, a table widget showed "Unsupported view
+ * kind" on its card and a real table on the page. Scaled by transform rather than re-styled
  * at thumbnail size: a miniature built from smaller fonts is a second layout to maintain, and it
  * drifts from the real one the first time either changes.
  *
@@ -29,13 +41,7 @@ const PREVIEW_DESIGN_W: Record<string, number> = {
   table: 1160,
 };
 
-export function WidgetPreview({
-  widget,
-  ctx,
-}: {
-  widget: PacingWidgetInstance | null;
-  ctx: WidgetRenderContext;
-}) {
+export function WidgetPreview({ widget }: { widget: PacingWidgetInstance | null }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ w: number; h: number } | null>(null);
@@ -88,7 +94,10 @@ export function WidgetPreview({
   return (
     // aria-hidden: the card's own name and kind are the accessible content. A screen reader walking
     // a scaled-down copy of a whole dashboard tile would read every figure in it, per card.
-    <div className="pdl__prev" aria-hidden="true" ref={boxRef}>
+    // `wgal-prev` is Pacing's own thumbnail class, and it is load-bearing rather than decoration:
+    // the slice in `spa/pacing-spa.css` uses it to strip a widget's panel border, background and
+    // scrollbars so the miniature reads as a picture instead of a shrunken panel.
+    <div className="pdl__prev wgal-prev" aria-hidden="true" ref={boxRef}>
       <div className="pdl__prev-scaled" style={{ height }}>
         {scale != null && (
           <div
@@ -96,7 +105,18 @@ export function WidgetPreview({
             className="pdl__prev-inner"
             style={{ width: designW, transform: `scale(${scale})` }}
           >
-            <WidgetTile widget={widget} ctx={ctx} />
+            {/* Pacing's own renderer, in its preview mode — the same component the board draws
+                with, so a card and the tile it stands for cannot disagree. It used to be the Hub's
+                `WidgetTile`, which covered three of the grammar's eight view kinds: a table widget
+                showed "Unsupported view kind" on its card and a real table on the page. */}
+            {/* `maxHeightPx` in the widget's OWN pixels — the box height divided back out of the
+                scale. Without it the widget lays itself out at full dashboard height and the
+                clipped box shows its top padding, which is why the cards came up blank. */}
+            <ReportWidget
+              widget={widget}
+              preview
+              maxHeightPx={scale ? Math.ceil((box?.h ?? 132) / scale) : undefined}
+            />
           </div>
         )}
       </div>
