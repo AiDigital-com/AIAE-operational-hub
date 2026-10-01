@@ -54,6 +54,9 @@ export interface PacingWidgetInstance {
   schemaVersion?: number;
   datasetType?: string;
   lib?: { src: string; key: string };
+  /** Where a private copy came FROM - a library entry it was materialized out of. Dropped whenever
+   *  the copy stops being a copy (duplicate, edit), so it never claims provenance it no longer has. */
+  from?: { src: string; key: string };
   [key: string]: unknown;
 }
 
@@ -69,13 +72,19 @@ export interface PacingWidgetGroup {
 }
 
 /** The subset of the opaque `display` object the Hub's widget management UI reads and writes. Every
- *  other key dash-gate's `display` may carry (`layout`, `widgetRanges`, `projectionModes`, `enabled`,
+ *  other key dash-gate's `display` may carry (`layout`, `widgetRanges`, `projectionModes`,
  *  `autoAdded`) is preserved as-is on save by spreading the original object - the Hub never originates
  *  or reshapes them (§6: "service logic: None"). */
 export interface PacingDisplayShape {
   rev?: number;
   widgets?: PacingWidgetInstance[];
   groups?: PacingWidgetGroup[];
+  /** The tile on/off map. Absent ≡ every tile on; only an explicit `false` hides one, which is why
+   *  the stored map is the size of what someone actually turned off rather than of the dashboard.
+   *  Keys are functional block ids and `w_` widget instances and nothing else - dash-gate refuses an
+   *  unknown one rather than storing it. The rule itself is not restated here: it lives in
+   *  `vendor/dash-blocks.js`, reached through `widgets/widget-tiles.ts`. */
+  enabled?: Record<string, boolean>;
   [key: string]: unknown;
 }
 

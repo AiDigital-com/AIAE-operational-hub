@@ -10,7 +10,6 @@ import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
 import type { PacingCampaignLinkV1, PacingDataShape, PacingDisplayShape, PacingNotifySettingsV1 } from "./types";
-import type { WidgetRenderContext } from "./widgets/widget-engine";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-settings-drawer.css";
 
@@ -45,7 +44,6 @@ export interface PacingSettingsDrawerProps {
   capabilities: Record<string, unknown> | undefined;
   isAdmin: boolean;
   /** Handed to the widget section so its cards preview through the dashboard's own engine. */
-  renderCtx: WidgetRenderContext;
   libraryEntries: Record<string, unknown> | undefined;
   /** This pacing's stored alert configuration (§14), straight off the dashboard payload. */
   notify: PacingNotifySettingsV1 | undefined;
@@ -58,6 +56,10 @@ export interface PacingSettingsDrawerProps {
   /** Which tab to land on when the drawer opens; null keeps whatever tab was last shown. Set by
    *  the header's "+ Add documents" pill, which promises the Documents tab specifically. */
   initialTab?: SettingsTabId | null;
+  /** A widget a tile's "Edit…" asked the drawer to open its builder on. */
+  initialWidgetId?: string | null;
+  /** Called once that request has been consumed, so a later open lands on the list instead. */
+  onWidgetEditorOpened?: () => void;
   /** Re-read the dashboard after a save that landed. */
   onSaved: () => void;
 }
@@ -81,13 +83,14 @@ export function PacingSettingsDrawer({
   display,
   capabilities,
   isAdmin,
-  renderCtx,
   libraryEntries,
   notify,
   hasVideo,
   links,
   orderNumber,
   initialTab = null,
+  initialWidgetId = null,
+  onWidgetEditorOpened,
   onSaved,
 }: PacingSettingsDrawerProps) {
   const [tab, setTab] = useState<SettingsTabId>("plan");
@@ -260,9 +263,10 @@ export function PacingSettingsDrawer({
             display={display}
             capabilities={capabilities}
             isAdmin={isAdmin}
-            renderCtx={renderCtx}
             libraryEntries={libraryEntries}
             seedKey={seedKey}
+            initialWidgetId={initialWidgetId}
+            onWidgetEditorOpened={onWidgetEditorOpened}
             onDirtyChange={markWidgets}
           />
         </div>

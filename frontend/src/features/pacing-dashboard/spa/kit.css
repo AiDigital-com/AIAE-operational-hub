@@ -1,0 +1,207 @@
+/* workspace/src/components/kit/kit.css — bricks only. Tokens only (design-guard). */
+.kit-card { background: var(--surface-alt); border: 1px solid var(--border-softer);
+  border-radius: var(--dash-radius-card, 6px); padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.kit-card-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kit-card-t { font-size: 11px; font-weight: 600; color: var(--text-muted); font-family: var(--font-sans); }
+/* A LITERAL card badge ("Rate Ceiling", "Actuals") — OverviewBlock2's FinCard chip
+   (:24-31), reconciled into this chrome so `frame:'card'` draws the finance cards and
+   the verdict cards with ONE card. A live badge is a StatusPill instead: it carries a
+   status, and a status is a tint, never a border. */
+.kit-card-badge { font-size: 10px; font-weight: 600; font-family: var(--font-sans);
+  padding: 3px 8px; border-radius: var(--dash-radius-badge, 4px); white-space: nowrap;
+  color: var(--text-muted); background: var(--surface); border: 1px solid var(--border-soft); }
+.kit-pill { font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.kit-pill--g { background: var(--status-green-dim); color: var(--status-green); }
+.kit-pill--w { background: var(--status-amber-dim); color: var(--status-amber); }
+.kit-pill--b { background: var(--status-red-dim); color: var(--status-red); }
+.kit-pill--n { background: var(--surface-tertiary); color: var(--text-muted); }
+.kit-bigstat { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.kit-bigstat-v { font-size: 24px; font-weight: 600; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: var(--text-primary); }
+.kit-bigstat-c { font-size: 11px; color: var(--text-muted); }
+/* A NAMED headline figure: the name above, the number below — the same pairing
+   .kit-money draws, so a finance card's four figures line up whether or not they carry
+   a second currency. */
+.kit-bigstat-w { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kit-bigstat-l { font-size: 11px; font-weight: 600; font-family: var(--font-sans); color: var(--text-muted); }
+/* The default fact/target/deviation triple. `align-items: end` for the same reason the
+   `pair` below has it: a cell is label-over-value, and when only ONE label wraps to a
+   second line (a net pacing's «TARGET (NET)» in a narrow column) the taller cell would
+   otherwise stretch its neighbours and push its own value off their shared baseline. With
+   every label on one line the cells are equal height and the row renders as before. */
+.kit-statrow { display: flex; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border-softer); padding-top: 8px; align-items: end; }
+/* The `pair` layout (OverviewBlock2's FinPair): equal halves, and no divider — a pair
+   sits INSIDE a card's flow rather than closing it off the way a fact/needed/deviation
+   triple does. `align-items: end` bottom-anchors the two cells so their VALUES keep one
+   shared baseline when only ONE label wraps (a long caption grows UPWARD, it never pushes
+   its own number down). With both labels on one line the cells are already the same
+   height, so the pair renders exactly as before. */
+.kit-statrow--pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px; border-top: none; padding-top: 0; align-items: end; }
+.kit-statrow-cell { display: flex; flex-direction: column; gap: 2px; min-width: 72px; flex: 1 1 72px; }
+.kit-statrow-l { font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-faint); }
+.kit-statrow-v { font-size: 13px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.kit-delta { font-size: 11px; font-weight: 600; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.kit-delta--g { color: var(--status-green); }
+.kit-delta--b { color: var(--status-red); }
+.kit-delta--n { color: var(--text-muted); }
+.kit-bar-wrap { display: flex; flex-direction: column; gap: 4px; }
+.kit-bar { position: relative; height: 8px; border-radius: 4px; background: var(--surface-tertiary);
+  border: 1px solid var(--border-softer); overflow: visible; }
+.kit-bar-fill { height: 100%; border-radius: 4px; }
+.kit-bar--compact { height: 7px; }
+.kit-bar-tick { position: absolute; top: -3px; bottom: -3px; width: 0;
+  border-left: 2px dashed var(--text-muted); }
+.kit-bar-ticklabel { font-size: 10.5px; color: var(--text-muted); align-self: flex-end; }
+.kit-meter { display: flex; flex-direction: column; gap: 6px; }
+.kit-meter-track { position: relative; height: 10px; border-radius: 5px;
+  background: linear-gradient(90deg, var(--status-red), var(--status-amber), var(--status-green)); }
+.kit-meter-target { position: absolute; top: -4px; bottom: -4px; width: 0;
+  border-left: 2px solid var(--text-primary); }
+.kit-meter-marker { position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 14px; height: 14px; border-radius: 50%; background: var(--surface);
+  border: 2px solid var(--text-primary); font-size: 9px; line-height: 10px;
+  text-align: center; color: var(--text-primary); }
+.kit-meter-labels { display: flex; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; color: var(--text-muted); }
+.kit-meter-vl { color: var(--status-red); font-weight: 600; }
+.kit-meter-tl { font-weight: 600; }
+.kit-verdict { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kit-verdict-row { display: flex; align-items: center; gap: 8px; }
+.kit-verdict-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.kit-verdict-word { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; color: var(--text-primary); }
+.kit-verdict-reason { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.kit-reco { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--status-blue-dim, var(--surface-tertiary)); border-radius: 8px; padding: 8px 12px; }
+.kit-reco-l { display: flex; flex-direction: column; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-muted); }
+.kit-reco-sub { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
+.kit-reco-v { font-size: 18px; font-weight: 600; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; color: var(--text-primary); white-space: nowrap; }
+.kit-flight { display: flex; flex-direction: column; gap: 5px; }
+.kit-flight-day { font-size: 20px; font-weight: 700; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
+.kit-flight-track { height: 7px; border-radius: 4px; background: var(--surface-tertiary);
+  border: 1px solid var(--border-softer); }
+.kit-flight-fill { height: 100%; border-radius: 4px; background: var(--text-primary); }
+.kit-flight-left { font-size: 11px; color: var(--text-muted); }
+
+/* ── the composite vocabulary (widget-library spec §7) ──────────────────────────
+   Seven lifts out of OverviewBlock1 / OverviewBlock2 and one new primitive. The
+   inline styles those blocks carried live here now, so the converted sections are
+   token-only and light/dark come from the same variables as everything else. */
+
+/* detailCard — OverviewBlock1 DetailCard + UnitStack + StatStack */
+.kit-detail { background: var(--surface-alt); border: 1px solid var(--border-softer);
+  border-radius: var(--dash-radius-card, 6px); padding: 14px 16px; min-width: 0; }
+.kit-detail-l { font-size: 11px; font-weight: 600; font-family: var(--font-sans);
+  color: var(--text-muted); margin-bottom: 4px; }
+.kit-detail-vs { display: flex; flex-direction: column; gap: 2px; }
+/* Lines that carry their own explainer need air between them; lines that do not read
+   as one stacked figure. Two gaps, one component (UnitStack's 2px, StatStack's 6px). */
+.kit-detail-vs--notes { gap: 6px; }
+.kit-detail-v { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px;
+  font-size: 20px; font-weight: 600; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: var(--text-primary); }
+.kit-detail-value { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.kit-detail-v--muted { font-size: 13px; font-weight: 500; font-family: var(--font-sans);
+  letter-spacing: 0; color: var(--text-muted); }
+.kit-detail-u { font-size: 12px; font-weight: 500; font-family: var(--font-sans);
+  color: var(--text-muted); flex: none; white-space: nowrap; }
+.kit-detail-n { font-size: 11px; font-weight: 400; font-family: var(--font-sans);
+  color: var(--text-muted); margin-top: 1px; line-height: 1.3; }
+.kit-detail-s { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+.kit-detail-l, .kit-detail-n, .kit-detail-s { overflow-wrap: anywhere; }
+
+/* unitBars — OverviewBlock1 IndicatorRow + DeliveryBar + NoPlanRow */
+.kit-unitbar { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.kit-unitbar-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.kit-unitbar-u { font-size: 11px; font-weight: 600; font-family: var(--font-sans); color: var(--text-muted); }
+.kit-unitbar-pcts { font-size: 11px; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+.kit-unitbar-sep { color: var(--text-faint); }
+.kit-unitbar-bar { position: relative; height: 12px; }
+.kit-unitbar-track { position: absolute; inset: 0; border-radius: var(--rs);
+  background: var(--border-soft); overflow: hidden; }
+.kit-unitbar-fill { position: absolute; left: 0; top: 0; bottom: 0; transition: width 0.3s; }
+.kit-unitbar-tick { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px;
+  border-radius: 1px; background: var(--text-primary); box-shadow: 0 0 0 1px var(--surface);
+  transition: left 0.3s; }
+.kit-unitbar-ft { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; font-family: var(--font-sans); }
+.kit-unitbar-d { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-weight: 700; letter-spacing: -0.2px; }
+.kit-unitbar-dir { color: var(--text-muted); }
+.kit-unitbar-op { font-weight: 600; }
+.kit-unitbar-noplan { font-size: 12px; font-family: var(--font-sans); color: var(--text-muted); }
+
+/* gauge — OverviewBlock1's margin deviation bar */
+.kit-gauge { display: flex; flex-direction: column; gap: 3px; }
+.kit-gauge-track { position: relative; height: 8px; border-radius: var(--rxs);
+  background: var(--border-soft); overflow: hidden; }
+.kit-gauge-fill { position: absolute; top: 0; height: 100%; border-radius: var(--rxs);
+  transition: left 0.3s, width 0.3s; }
+.kit-gauge-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  background: var(--text-muted); opacity: 0.4; transform: translateX(-50%); }
+.kit-gauge-labels { display: flex; justify-content: space-between; gap: 8px;
+  font-size: 9px; color: var(--text-muted); }
+
+/* moneyStat — OverviewBlock2 FinLabel + FinValue */
+.kit-money { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kit-money-l { font-size: 11px; font-weight: 600; font-family: var(--font-sans); color: var(--text-muted); }
+.kit-money-v { font-size: 24px; font-weight: 600; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: var(--text-primary); }
+
+/* kvRow — OverviewBlock2 FinRow (the `strong` weight is RecoStrip, above) */
+.kit-kv { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 11px; color: var(--text-muted); min-width: 0; }
+.kit-kv-l { display: flex; flex-direction: column; min-width: 0; }
+.kit-kv-s { color: var(--text-faint); }
+.kit-kv-v { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--text-secondary); text-align: right; white-space: nowrap; }
+
+/* note — the hero footer and the muted sub-lines */
+.kit-note { font-size: 11px; font-weight: 500; font-family: var(--font-sans); color: var(--text-muted); }
+.kit-note--c { text-align: center; padding: 6px 0; }
+.kit-note--g { color: var(--status-green); }
+.kit-note--w { color: var(--status-amber); }
+.kit-note--b { color: var(--status-red); }
+.kit-note--headline { font-size: 20px; font-weight: 700; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: var(--text-primary); }
+.kit-note--caption { font-weight: 400; }
+
+/* rateRows — OverviewBlock2's per-rate-type repeats */
+.kit-raterows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The pair's StatRow must STRETCH (T12 Step 0): under align-items:flex-start the grid
+   collapsed to content width, and "Bid Plan CPM / Bid Fact 2d CPM" rendered as two
+   labels jammed together mid-card. The delta chip below it stays content-width. */
+.kit-raterows-p { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.kit-raterows-p > .kit-statrow { align-self: stretch; }
+
+/* miniChart — the new sparkline */
+.kit-spark { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kit-spark-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 3px 8px; min-width: 0; }
+.kit-spark-l { font-size: 10px; font-weight: 600; letter-spacing: 0.4px;
+  text-transform: uppercase; color: var(--text-faint); min-width: 0; }
+.kit-spark-legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 3px 7px; min-width: 0; max-width: 100%; }
+.kit-spark-key { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 112px;
+  font-size: 9px; line-height: 1.2; color: var(--text-muted); }
+.kit-spark-key > i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
+.kit-spark-key > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-spark-svg { display: block; width: 100%; overflow: visible; }
+.kit-spark--empty { font-size: 11px; color: var(--text-faint); }
+
+/* A caption directly under a headline figure is that figure's, not the next brick's —
+   the column gap belongs between bricks. (The hero's margin delta sat 2px under its
+   number; the composite's 10px rhythm would have read as two separate readings.) */
+.kit-bigstat + .kit-note { margin-top: -6px; }
+
+/* A pill or a delta chip sitting DIRECTLY in a column is a badge, not a banner: a
+   column is a flex stack, and a stretched status pill would paint its tint across the
+   whole column. (In a card HEADER they are row items and keep their own alignment.) */
+.kit-card > .kit-pill, .kit-card > .kit-delta,
+.cmp-col > .kit-pill, .cmp-col > .kit-delta,
+.cmp-signal > .kit-pill, .cmp-signal > .kit-delta { align-self: flex-start; }
+
+.kit-value-comparison { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }

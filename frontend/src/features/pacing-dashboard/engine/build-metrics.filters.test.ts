@@ -72,14 +72,14 @@ describe("buildPacingMetrics - platform/breakdown filter scoping (FIX 1)", () =>
 
   // Companion to the platform/brkf (Lens) cases above: a channel filter is Scope
   // (`filters/eff-lis.ts:computeEffLIs`) - it narrows `effLIs`, which `campM` is parametrized by,
-  // so it MUST move `campaign` - the KPI strip's Pace/Margin (`pacing-dashboard-health.ts`) reads
-  // exactly this field, and must move with it.
+  // so it MUST move `campaign` - the hero widget's pace and margin readings come off this field,
+  // and must move with it.
   it("a channel filter (Scope) DOES change campaign-level readings, unlike a platform/brkf filter (Lens)", () => {
     const channelFiltered = buildPacingMetrics(toHubShape(), { ...DEFAULT_FILTERS, channels: ["Display"] });
     expect(channelFiltered).not.toBeNull();
     expect(channelFiltered!.campaign).not.toEqual(baseline!.campaign);
-    // campM's pac/mA/mT (see pacing-dashboard-health.ts) - LI 100 (Display) only, so this is no
-    // longer the two-line-item blend the unfiltered baseline is.
+    // campM's pac/mA/mT - LI 100 (Display) only, so this is no longer the two-line-item blend the
+    // unfiltered baseline is.
     expect((channelFiltered!.campaign as Any).pac).not.toEqual((baseline!.campaign as Any).pac);
   });
 });

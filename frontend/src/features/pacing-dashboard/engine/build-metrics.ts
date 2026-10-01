@@ -338,9 +338,8 @@ export function buildPacingMetrics(
     const cm = engine.campM(LD0, LP, asOf, effLIs, range);
     const flCM = engine.campM(LD0, LP, asOf, effLIs, null);
     // The published bag is the RANGED reading (owner decision, 2026-09-25/26): everything that
-    // shows `metrics.campaign` - the Daily Performance table's totals, the KPI strip's Pace/Margin
-    // (`pacing-dashboard-health.ts`), CPM to date - follows the chosen window, same as the rows and
-    // charts beside it. The retired SPA reads the same way: its headline campM is ranged
+    // shows `metrics.campaign` - the Daily Performance table's totals, the hero widget's
+    // pace/margin readings - follows the chosen window, same as the rows and charts beside it. The retired SPA reads the same way: its headline campM is ranged
     // (`workspace/src/lib/dashboard/selectors.js`, `makeCampMetricsSelector` takes `rangeKeyOf`),
     // and with no range chosen its default window is `{from: startDate, to: asOf}` - "so far", not
     // "the whole plan".

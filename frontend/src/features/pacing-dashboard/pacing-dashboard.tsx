@@ -4,30 +4,30 @@ import { formatError } from "../../shared/format/error";
 import { cn } from "../../shared/style/cn";
 import { ChevronLeftIcon, RefreshIcon, SettingsIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
-import { MarginCell } from "../../shared/ui/margin-cell/margin-cell";
-// Money/date helpers shared with the Overview/Pacing tab so the same figures read identically.
-import { fmtBudget, fmtDate } from "../pacing/mock/format";
-import { PACE_STATUS_COLOR, PACE_STATUS_LABEL } from "../pacing-overview/format";
+// Date helper shared with the Overview/Pacing tab so the same figures read identically.
+import { fmtDate } from "../pacing/mock/format";
 import { AlertsBlock } from "../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../pacing-overview/types";
-import { triggerPacingRefresh } from "./api";
+import { savePacingDisplay, triggerPacingRefresh } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
 import { ContainersTable } from "./containers-table";
 import { DailyTable } from "./daily-table";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { DocumentsChips } from "./documents/documents-chips";
 import type { SettingsTabId } from "./settings-section";
-import { fmtInt, fmtMoney, fmtMoneyPrecise } from "./format";
+import { fmtInt } from "./format";
 import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
 import { computeHasVideo } from "./alerts-panel";
 import { JournalPanel } from "./journal/journal-panel";
 import type { PacingDataShape, PacingDisplayShape } from "./types";
-import type { BrickCtx } from "./widgets/brick-data";
-import { WidgetBoard, type WidgetRenderContext } from "./widgets/widget-engine";
+import { ReportBoard } from "./widgets/report-board";
+// Moved JS from Pacing's SPA - typed by inference under `allowJs` (see spa/SOURCE.md).
+import { PacingStateProvider, setPacingApi, usePacingState } from "./spa/store.js";
+import { WIDGET_CAP, copyWidget, setTileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
+import { resolveWidget } from "./pacing-dashboard-library";
 import { buildPacingMetrics } from "./engine/build-metrics";
 import { buildPacingAlerts } from "./engine/build-alerts";
-import { deriveHeroHealth } from "./pacing-dashboard-health";
 import { BreakdownPanel } from "./breakdown/breakdown-panel";
 import { FilterBar } from "./filters/filter-bar";
 import { useUrlFilters } from "./filters/use-url-filters";
@@ -84,6 +84,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   // chart view whose own spec carries `journal: true` draws a vertical marker at it. Page-level state,
   // not a store - there is only ever one pacing dashboard mounted at a time.
   const [journalHighlight, setJournalHighlight] = useState<string | null>(null);
+  /** Which widget the drawer should open its editor on, set by a tile's "Edit…". Cleared by the
+   *  drawer once consumed, so a later open lands on the list rather than on the last edited tile. */
+  const [editWidgetId, setEditWidgetId] = useState<string | null>(null);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
   // rather than re-arming itself on the next status fetch.
@@ -104,8 +107,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [cooldownUntil]);
-
-  const statusStyle = PACE_STATUS_COLOR;
 
   const data = dashboardQuery.data;
   const { filters, setFilters } = useUrlFilters();
@@ -134,22 +135,119 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   // purpose (§ "leave buildMetricBag in the Pacing service alone" - removing it is a later, separate
   // step the owner deliberately sequenced after this one).
   const metrics = useMemo(() => buildPacingMetrics(data, filters), [data, filters]);
-  const scalars = metrics?.scalars ?? {};
 
-  const brickCtx: BrickCtx = useMemo(
-    () => ({ metrics, currency: data?.campaign?.currency ?? null }),
-    [metrics, data]
-  );
-  const widgetCtx: WidgetRenderContext = useMemo(
-    () => ({ brickCtx, metrics, journalHighlight }),
-    [brickCtx, metrics, journalHighlight]
-  );
 
-  const spendToDate = scalars.sp ?? null;
-  const cpmToDate = (metrics?.campaign?.cpm as number | undefined) ?? null;
-  const planBudgetTotal = scalars.budget ?? null;
-  // Pace/Margin below read this, not `row.*` directly - see pacing-dashboard-health.ts's docblock.
-  const heroHealth = deriveHeroHealth(metrics, row);
+  const display = useMemo(() => (data?.display ?? {}) as PacingDisplayShape, [data]);
+
+  /**
+   * What Pacing's own renderer reads its figures from (`spa/store.js`). Assembled here because this
+   * is where the payload and the URL filters already are; `usePacingState` does the shaping the SPA
+   * store used to do on load — `normalize()` into the terse plan, and the per-line-item per-day
+   * aggregate `useWidgetData` refuses to work without.
+   */
+  const widgetActions = useMemo(
+    () => ({
+      /**
+       * The renderer's only write: a tile's saved period and a Projection control's mode. Both are
+       * per-viewer preference maps, which dash-gate merges per entry rather than replacing - so this
+       * sends the patch alone and carries no `displayRev`, exactly as the per-entry lane expects. A
+       * failure is reported, never swallowed: the control would otherwise spring back with no reason
+       * given.
+       */
+      saveSettings: async (_slug: string, patch: { display?: Record<string, unknown> }) => {
+        if (!slug || !patch?.display) return;
+        const outcome = await savePacingDisplay(
+          slug,
+          patch.display,
+          Number((data?.display as PacingDisplayShape | undefined)?.rev ?? 0),
+          data?.capabilities as Record<string, unknown> | undefined
+        );
+        if (outcome.status === "conflict") {
+          throw new Error("This pacing's layout changed elsewhere. Reload before changing it again.");
+        }
+        queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+      },
+    }),
+    [slug, data, queryClient]
+  );
+  /**
+   * The two calls a CM360 widget makes. The Hub's contract carries no third-party endpoint - that
+   * whole lane still runs through n8n on the Pacing side and is not deployed - so these answer
+   * "nothing", which the renderer already has a state for (it draws its own "no third-party data"
+   * message). Stubbed EXPLICITLY rather than left unset, because the unset path throws by design,
+   * and a CM360 tile on a pacing is not a programming error.
+   */
+  useEffect(() => {
+    setPacingApi({
+      thirdPartyData: async () => null,
+      thirdPartyStatus: async () => null,
+    });
+  }, []);
+
+  /**
+   * What a tile's ⋯ menu does. These SAVE AT ONCE, under the payload's own `displayRev`: the board
+   * holds no draft, so there is nothing to fold an edit into and nothing a Cancel could abandon. A
+   * concurrent editor therefore earns a 409 here rather than losing their work, which is the whole
+   * point of sending the revision.
+   *
+   * Edit is the exception and opens the drawer: editing a widget IS a draft, and the drawer is where
+   * this app keeps drafts.
+   */
+  const [boardSaving, setBoardSaving] = useState(false);
+  const boardActions = useMemo(() => {
+    const widgetsOf = () => (display.widgets ?? []);
+    const commit = async (patch: Record<string, unknown>) => {
+      if (!slug) return;
+      setBoardSaving(true);
+      try {
+        const outcome = await savePacingDisplay(
+          slug,
+          { ...display, ...patch },
+          Number(display.rev ?? 0),
+          data?.capabilities as Record<string, unknown> | undefined
+        );
+        if (outcome.status === "conflict") {
+          setRefreshError("This pacing's layout changed elsewhere. Reload before changing it again.");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+      } catch (error) {
+        setRefreshError(formatError(error));
+      } finally {
+        setBoardSaving(false);
+      }
+    };
+    return {
+      saving: boardSaving,
+      onEdit: (widgetId: string) => {
+        setSettingsTab("widgets");
+        setSettingsOpen(true);
+        setEditWidgetId(widgetId);
+      },
+      onDuplicate: (widgetId: string) => {
+        const list = widgetsOf();
+        const widget = list.find((w) => w.id === widgetId);
+        if (!widget || list.length >= WIDGET_CAP) return;
+        const drawn = resolveWidget(widget, data?.libraryEntries as Record<string, unknown> | undefined);
+        if (!drawn) return;
+        const copy = copyWidget({ ...drawn, title: tileTitle(widget, drawn) }, list.map((w) => w.id));
+        const next = [...list];
+        next.splice(list.findIndex((w) => w.id === widgetId) + 1, 0, copy);
+        void commit({ widgets: next });
+      },
+      onTurnOff: (widgetId: string) =>
+        void commit({ enabled: setTileEnabled(display.enabled, widgetId, false) }),
+      onRemove: (widgetId: string) =>
+        void commit(withWidgetRemoved(widgetsOf(), display.groups ?? [], display.enabled, widgetId)),
+    };
+  }, [slug, display, data, queryClient, boardSaving]);
+
+  const pacingState = usePacingState({
+    data,
+    urlFilters: { filters, setFilters },
+    actions: widgetActions,
+    journalHighlight,
+  });
 
   async function handleRefresh() {
     setRefreshError(null);
@@ -274,45 +372,14 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
         />
       )}
 
-      {/* Pace/Margin are filter-aware (owner ask, 2026-09-25): they read `heroHealth`, derived
-          from `metrics.campaign` (`deriveHeroHealth`, `pacing-dashboard-health.ts`) - the SAME
-          Scope/Lens split `build-metrics.ts` already applies (a channel/label/selection/range
-          filter moves these; a platform/breakdown filter does not, exactly like the widgets
-          beside them). Budget/Spend already came from the dashboard query, not `row`, so they are
-          unchanged. `paceStatus`/`marginTargetPct` still fall back to `row.*` while `metrics` is
-          unavailable (loading, or the pacing is Complete/Archive - see that file's docblock). */}
-      <div className="pdash__hero">
-        <div className="pdash__hero-card">
-          <div className="pdash__hero-label">Pace</div>
-          {heroHealth.pacingDeviationPct == null ? (
-            <div className="pdash__hero-value pdash__hero-value--na">No data</div>
-          ) : (
-            <div className="pdash__hero-value" style={{ color: statusStyle[heroHealth.paceStatus] }}>
-              {heroHealth.pacingDeviationPct > 0 ? "+" : ""}
-              {heroHealth.pacingDeviationPct.toFixed(1)}pp
-            </div>
-          )}
-          <div className="pdash__hero-sub">{PACE_STATUS_LABEL[heroHealth.paceStatus]}</div>
-        </div>
-        <div className="pdash__hero-card">
-          <div className="pdash__hero-label">Margin</div>
-          <MarginCell actual={heroHealth.marginActualPct} target={heroHealth.marginTargetPct} className="pdash__hero-margin" />
-        </div>
-        <div className="pdash__hero-card">
-          <div className="pdash__hero-label">Budget</div>
-          {/* Reads the SAME filtered source the old subline did (`planBudgetTotal` = `scalars.budget`,
-              already Scope-filtered) instead of `row.budgetTotal` (server-computed, unfiltered) - the
-              two disagreed under a filter (e.g. `?ch=Display`: "$100.0K" over "Plan total $12.7K" for
-              the same card). One figure now, so the subline that used to justify itself against a
-              different number is gone - it would just repeat this one (owner ask, 2026-09-25). */}
-          <div className="pdash__hero-value">{fmtBudget(planBudgetTotal)}</div>
-        </div>
-        <div className="pdash__hero-card">
-          <div className="pdash__hero-label">Spend to date</div>
-          <div className="pdash__hero-value">{fmtMoney(dashboardQuery.isSuccess ? spendToDate : null)}</div>
-          <div className="pdash__hero-sub">CPM {fmtMoneyPrecise(cpmToDate)}</div>
-        </div>
-      </div>
+      {/* The Pace / Margin / Budget / Spend strip that used to sit here is GONE (owner decision,
+          2026-10-01). It had no counterpart in Pacing itself - that page's header carries the
+          campaign name and its badges, and the headline figures live in the "Delivery, Pacing &
+          Margin" widget. Here the two disagreed in public: on a Complete pacing the strip is
+          `inactive` and printed "No data" and a dash, while the widget right below it computed
+          92.90% margin and "Ahead of pace" from the same facts; and its CPM was the cost-side one
+          while Finance beside it showed the client-side CPM, neither labelled as either. One set of
+          figures, computed one way. */}
 
       {/* Was: every alert's full sentence, joined with " · ", one line per severity.
           On a 180-line-item pacing that is a hundred and thirty sentences in a
@@ -324,15 +391,18 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
       {dashboardQuery.isError && <p className="form-error">{formatError(dashboardQuery.error)}</p>}
 
       {dashboardQuery.isSuccess && data && (
-        <>
+        /* Everything that draws a widget sits under this: the board, and the settings drawer, whose
+           library cards render the SAME renderer at thumbnail size. One provider, so a card and the
+           tile it stands for read the same figures by construction. */
+        <PacingStateProvider value={pacingState}>
           {/* Display-driven (§6 fix, US-114/115): walks `display.widgets[]` -> each widget's own
               spec.views - never a fixed, hardcoded set of charts. Adding/removing a widget in the
               library panel below changes exactly what renders here. */}
-          <WidgetBoard
-            widgets={((data.display ?? {}) as PacingDisplayShape).widgets ?? []}
-            groups={((data.display ?? {}) as PacingDisplayShape).groups ?? []}
-            ctx={widgetCtx}
-          />
+          {/* Pacing's own renderer on Pacing's own grid, fed by the seam above. The board takes the
+              whole `display` rather than a filtered widget list: the switched-off drop happens AFTER
+              placement inside it, so a hidden tile's neighbours do not slide into its cell and
+              refuse to slide back when it is switched on again. */}
+          <ReportBoard display={display} actions={boardActions} />
 
           {/* Where the delivery above actually went, one tab per dimension this pacing carries.
               Sits with the charts rather than down by the tables because it answers the same kind
@@ -350,16 +420,17 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             currency={data.campaign?.currency ?? "USD"}
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
             data={data.data as PacingDataShape | undefined}
-            display={(data.display ?? {}) as PacingDisplayShape}
+            display={display}
             capabilities={(data.capabilities ?? undefined) as Record<string, unknown> | undefined}
             isAdmin={isAdmin}
-            renderCtx={widgetCtx}
             libraryEntries={data.libraryEntries as Record<string, unknown> | undefined}
             notify={data.notify}
             hasVideo={computeHasVideo((data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>)}
             links={data.campaign?.links}
             orderNumber={data.campaign?.orderNumber}
             initialTab={settingsTab}
+            initialWidgetId={editWidgetId}
+            onWidgetEditorOpened={() => setEditWidgetId(null)}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 
@@ -377,7 +448,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           <ContainersTable metrics={metrics} />
 
           <DailyTable metrics={metrics} />
-        </>
+        </PacingStateProvider>
       )}
     </section>
   );

@@ -8,9 +8,13 @@ import java.util.Map;
 /**
  * A pacing's full dashboard payload, as {@code GET /api/dashboards/:slug/data} returns it (§6 of the
  * migration plan, US-114/115). Restricted to the fields the Pacing Dashboard screen needs; Pacing's
- * real response also carries {@code types}, {@code availableSplits}, {@code notify},
- * {@code third_party}, {@code mappings_v3}, {@code deliveryStats} and {@code sourceFacts} - none of
- * those are read here because §6 does not use them yet. {@code data} WAS on that list until the
+ * real response also carries {@code third_party}, {@code mappings_v3}, {@code deliveryStats} and
+ * {@code sourceFacts} - none of those are read here yet; the first two belong to the CM360 lane,
+ * which is being rewritten. {@code types}, {@code availableSplits}, {@code availableMetrics} and
+ * {@code conversionTags} WERE on that list until Pacing's own widget renderer moved into this app:
+ * it reads all four, and dropping them here is what made a channel row read {@code Unknown}, a
+ * dimension control offer nothing, and the Conversion Action cut unable to say why. {@code data}
+ * WAS on that list until the
  * Data panel: a pacing whose source setting the Hub cannot show is a pacing whose delivery silently
  * comes from the raw mart because nobody could see, let alone change, which table it reads.
  * {@code creatives}, {@code conversions} and {@code dimSources} left it for the Breakdown panel,
@@ -70,6 +74,19 @@ import java.util.Map;
  *                       component named {@code notify} is illegal - its generated accessor would
  *                       override the final {@code Object.notify()} - so {@link JsonProperty} carries
  *                       the translation instead
+ * @param types           one entry per line item naming its channel ({@code {line_item_id, type}}).
+ *                        The widget renderer labels a channel-grained row and answers a channel
+ *                        filter from this; without it every line item reads as {@code Unknown}
+ * @param availableSplits the dimension inventory the last build measured - which breakdown
+ *                        dimensions this pacing's delivery carries and what values each holds. A
+ *                        widget's dimension control offers exactly what is in here
+ * @param availableMetrics what the last build measured the delivery rows able to report, as
+ *                        {@code {delivery: [...]}}. SPARSE: null means the file predates the
+ *                        inventory and reads as "not built yet", which is a different answer from
+ *                        an empty list ("nothing available")
+ * @param conversionTags  the conversions file's tag state, {@code own} or {@code dropped}. Null
+ *                        means its rows were never tagged - which the Conversion Action cut has to
+ *                        tell apart from {@code dropped}, where they were and got shed for size
  * @param journal        free-text notes on this pacing
  */
 public record PacingDashboardData(
@@ -77,6 +94,10 @@ public record PacingDashboardData(
 		Map<String, PacingLineItemPlan> planByLineItem,
 		List<Map<String, Object>> factsDaily,
 		String asOf,
+		List<Map<String, Object>> types,
+		Map<String, Object> availableSplits,
+		Map<String, Object> availableMetrics,
+		String conversionTags,
 		List<Map<String, Object>> creatives,
 		List<Map<String, Object>> conversions,
 		Map<String, Object> dimSources,

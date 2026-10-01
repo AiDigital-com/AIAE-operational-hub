@@ -1,0 +1,67 @@
+.fxd-scrim { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--overlay); }
+.fxd-dialog { width: min(920px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow-card); }
+.fxd-head { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
+.fxd-head > div { min-width: 0; }
+.fxd-head span { display: block; color: var(--text-faint); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.fxd-head h3 { margin: 2px 0 0; overflow: hidden; color: var(--text-primary); font-size: 15px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.fxd-close { width: 30px; height: 30px; flex: none; border: 0; border-radius: var(--rxs); background: transparent; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+.fxd-close:hover { background: var(--surface-hover); color: var(--text-primary); }
+.fxd-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fxd-content { min-height: 0; display: flex; flex: 1; flex-direction: column; }
+.fxd-workspace { min-height: 0; display: grid; grid-template-columns: minmax(280px, .9fr) minmax(320px, 1.1fr); gap: 10px; flex: 1; padding: 12px; }
+.fxd-compose { min-width: 0; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--rs); }
+.fxd-label { display: block; margin-bottom: 7px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+textarea.fxd-input { width: 100%; min-height: 150px; resize: vertical; padding: 10px 11px; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; }
+.fxd-guidance { margin-top: 6px; color: var(--text-faint); font-size: 10px; }
+.fxd-unit { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 12px; color: var(--text-muted); font-size: 10px; }
+.fxd-unit select { width: 100%; }
+.fxd-data { margin-top: 12px; padding: 10px; border: 1px solid var(--border-soft); border-radius: var(--rs); background: var(--page-bg); }
+.fxd-data-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.fxd-data-head b { color: var(--text-primary); font-size: 11px; }
+.fxd-data-head span { overflow: hidden; color: var(--text-faint); font-size: 9px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.fxd-data p { margin: 6px 0 0; color: var(--text-faint); font-size: 9.5px; line-height: 1.4; }
+.fxd-data--error { border-color: color-mix(in srgb, var(--status-red) 42%, var(--border-soft)); }
+.fxd-data--error p { color: var(--status-red); }
+.fxd-data-scalar { display: block; margin-top: 9px; color: var(--text-primary); font-family: var(--font-mono); font-size: 24px; line-height: 1.1; }
+.fxd-data-secondary { display: block; margin-top: 3px; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
+.fxd-spark { width: 100%; height: 46px; margin-top: 8px; overflow: visible; }
+.fxd-spark polyline { stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.fxd-spark circle { fill: var(--accent); stroke: none; }
+.fxd-data-values, .fxd-data-rows { display: grid; gap: 5px; margin-top: 7px; }
+.fxd-data-values { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fxd-data-values > span, .fxd-data-rows > span { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
+.fxd-data-values > span { display: grid; }
+.fxd-data small { overflow: hidden; color: var(--text-faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.fxd-data-values b, .fxd-data-rows b { color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; }
+.fxd-data-total { margin-top: 2px; padding-top: 5px; border-top: 1px solid var(--border-soft); }
+.fxd-reference { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(130px, 1fr) auto; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--rs); background: var(--page-bg); }
+.fxd-search { position: relative; display: block; margin-bottom: 10px; }
+.fxd-search i { position: absolute; top: 50%; left: 9px; color: var(--text-faint); transform: translateY(-50%); pointer-events: none; }
+.fxd-search input { width: 100%; padding-left: 29px; }
+.fxd-palette-scroll { min-height: 0; overflow: auto; padding-right: 3px; }
+.fxd-palette { position: static; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.fxd-palette .wgf-pg { margin-bottom: 10px; }
+.fxd-palette .wgf-tok { max-width: 100%; }
+.fxd-empty { padding: 18px 4px; color: var(--text-faint); font-size: 11px; text-align: center; }
+.fxd-help { min-height: 48px; margin-top: 10px; padding: 8px 9px; border: 1px solid var(--border-soft); border-radius: var(--rxs); background: var(--surface); color: var(--text-muted); font-size: 10.5px; line-height: 1.45; }
+.fxd-actions { min-height: 54px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-soft); }
+.fxd-actions .sp-btn { min-height: var(--sp-hit); padding: 6px 14px; }
+.fxd-shortcut { margin-right: auto; color: var(--text-faint); font-size: 9.5px; }
+.sp-spot-search--label { display: flex; align-items: center; color: var(--text-primary); font-size: 13px; }
+.sp-spot:has(.sp-spot-fx--open) { width: min(920px, 100%); }
+.sp-spot .sp-spot-fx--open { width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.sp-spot-fx--open .fxd-workspace { padding: 8px 0; }
+.sp-spot-fx--open .fxd-actions { padding-right: 0; padding-left: 0; }
+@media (max-width: 700px) {
+  .fxd-scrim { align-items: stretch; padding: 10px; }
+  .fxd-dialog { max-height: calc(100vh - 20px); }
+  .fxd-workspace { grid-template-columns: 1fr; grid-auto-rows: max-content; align-content: start; overflow: auto; }
+  textarea.fxd-input { min-height: 130px; }
+  .fxd-compose { min-height: 245px; }
+  .fxd-data-head { display: grid; }
+  .fxd-data-head span { text-align: left; }
+  .fxd-reference { min-height: 330px; height: 330px; }
+  .fxd-actions { position: sticky; bottom: 0; background: var(--surface); }
+  .fxd-shortcut { display: none; }
+  .sp-spot-fx--open .fxd-content { height: calc(80vh - 110px); overflow: hidden; }
+}

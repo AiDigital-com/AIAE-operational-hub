@@ -130,14 +130,27 @@
   font-size: 12.5px;
   color: var(--ink);
 }
+/* Its own bar under the picture, not part of the meta row: four controls and a name do not share
+   230px. The switch sits at one end and the three icon buttons at the other, so the control that
+   changes what the dashboard SHOWS is never adjacent to the one that deletes. */
 .pdl__card-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  flex: none;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--border);
 }
-/* Icon-only at card width: "Save to library" as a labelled button took the whole meta row and left
-   the title nowhere to go. The words live in `title`/`aria-label`. */
+/* The switch is optional - an id `enabled{}` may not carry gets none - and without this the icon
+   group would slide to the left edge on those cards while sitting right on every other. */
+.pdl__card-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+/* Icon-only at card width: "Save to library" as a labelled button took the whole bar and left
+   nothing for the other two. The words live in `title`/`aria-label`. */
 .pdl__icon-btn {
   display: inline-flex;
   align-items: center;
@@ -153,6 +166,36 @@
 }
 .pdl__icon-btn:hover { background: var(--n-100); color: var(--ink); }
 .pdl__icon-btn svg { width: 15px; height: 15px; }
+.pdl__icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+.pdl__icon-btn:disabled:hover { background: transparent; color: var(--muted-strong); }
+
+/* A pill track with a moving knob. Never a side rail (project ban on vertical stripes). Height is
+   set to the icon buttons' optical centre so the bar reads as one line of controls. */
+.pdl__switch {
+  flex: none;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pill);
+  background: var(--n-200);
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.pdl__switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform .12s ease;
+}
+.pdl__switch--on { background: var(--primary); }
+.pdl__switch--on::after { transform: translateX(14px); }
 
 .pdl__widget-badge {
   font-size: 10.5px;
@@ -163,7 +206,21 @@
   background: var(--primary-soft);
   padding: 2px 8px;
   border-radius: var(--pill);
+  flex: none;
 }
+/* The off badge is the same pill in a neutral tint - a status word, not an alarm: the tile is
+   hidden, which is a thing the user chose, not a thing that went wrong. */
+.pdl__widget-badge--off {
+  color: var(--muted-strong);
+  background: var(--n-100);
+}
+
+/* A switched-off tile is still on the pacing: it keeps its place, its group and its definition, and
+   only stops being drawn. So the card dims rather than changing shape - and the controls stay at
+   full strength, because turning it back on is what someone is here to do. */
+.pdl__card--off { background: var(--n-100); }
+.pdl__card--off .pdl__card-title { color: var(--muted-strong); }
+.pdl__card--off .pdl__prev { opacity: .45; }
 .pdl__remove {
   display: inline-flex;
   align-items: center;

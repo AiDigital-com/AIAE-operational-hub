@@ -21,8 +21,18 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
+    // The 44 modules under `src/features/pacing-dashboard/spa/` are Pacing's own, moved across as
+    // JavaScript rather than retyped (see that folder's SOURCE.md). `checkJs` stays OFF: they are
+    // not ours to annotate, and turning it on would demand edits to files whose whole value is
+    // being byte-comparable with where they came from.
+    "allowJs": true,
+    "checkJs": false,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/pacing-core": ["./src/features/pacing-dashboard/engine/vendor/pacing-core.js"],
+      "@shared/currency": ["./src/features/pacing-dashboard/engine/vendor/currency.js"],
+      "@shared/metric-registry": ["./src/features/pacing-dashboard/engine/vendor/metric-registry.js"],
+      "@shared/*": ["./src/features/pacing-dashboard/vendor/*.js"]
     },
 
     "types": ["vite/client", "node"]

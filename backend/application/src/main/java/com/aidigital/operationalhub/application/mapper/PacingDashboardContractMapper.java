@@ -82,6 +82,18 @@ public class PacingDashboardContractMapper {
 				.planByLineItem(toPlanByLineItemV1(data.planByLineItem()))
 				.factsDaily(data.factsDaily() == null ? List.of() : data.factsDaily())
 				.asOf(data.asOf())
+				// The four the moved widget renderer reads. All sparse for the same reason
+				// `capabilities` below is: each distinguishes "Pacing did not measure this" from
+				// "it measured nothing", and flattening either to an empty value answers the
+				// second question when the first was asked. `availableMetrics` absent means the
+				// facts file predates the inventory; `conversionTags` absent means the conversion
+				// rows were never tagged, not that their tags were dropped.
+				.types(data.types())
+				.availableSplits(data.availableSplits())
+				.availableMetrics(data.availableMetrics())
+				.conversionTags(data.conversionTags() == null
+						? null
+						: PacingDashboardV1.ConversionTagsEnum.fromValue(data.conversionTags()))
 				// Null stays null, unlike factsDaily above: absent means this pacing does not collect
 				// the file at all, which is what tells the Breakdown panel not to OFFER that cut.
 				// An empty list would read as "collected, nothing delivered" and earn an empty tab.

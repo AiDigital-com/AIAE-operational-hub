@@ -1,0 +1,4537 @@
+/*
+ * Pacing's own stylesheet, the slice its moved components need.
+ *
+ * The widget renderer and the widget builder were moved here as JavaScript (see SOURCE.md) and they
+ * emit Pacing's class names - `.sp-*` for the builder's controls, `.rpt-*` for a rendered widget,
+ * `.wgf-*` for a tile frame, `.chart-panel` for its chrome. Those rules lived in the SPA's
+ * `index.css`, 6 876 lines of which only these 806 rules are reachable from what moved. Extracted
+ * rather than rewritten, for the reason the components were moved rather than retyped: a
+ * hand-rewritten stylesheet for markup nobody re-typed is a second thing to keep in step.
+ *
+ * SCOPE AND COLLISIONS. The `:root` block below defines the 77 custom properties this slice reads
+ * that the Hub's own `app/tokens.css` does not have. Four more - `--surface`, `--text-muted`,
+ * `--shadow-card`, `--shadow-pop` - exist on BOTH sides and are deliberately NOT redefined here:
+ * the Hub's values win, so a moved component picks up this app's surface and muted text rather than
+ * carrying the SPA's palette into a page that is not the SPA. That is the intended blend; where it
+ * looks wrong, the fix is a rule in this file, not a token redefinition that would move the rest of
+ * the Hub with it.
+ *
+ * Dark mode rides the Hub's own switch: `app/tokens.css` stamps `[data-theme="dark"]` on the root,
+ * and the dark block below answers to the same selector rather than to the SPA's `.dark` class.
+ */
+:root {
+  --r: 10px;
+  --rm: 8px;
+  --rs: 6px;
+  --rp: 999px;
+  --rxs: 4px;
+  --rl: 12px;
+  --sp-ctl-h: 26px;
+  --sp-ctl-h-sm: 22px;
+  --sp-edit-control-h: 32px;
+  --sp-hit: 24px;
+  --page-bg: #f7f9ff;
+  --surface-alt: #f8faff;
+  --surface-tertiary: #eef4ff;
+  --border-soft: rgba(10, 22, 55, 0.14);
+  --border-softer: rgba(10, 22, 55, 0.10);
+  --border-hover: rgba(10, 22, 55, 0.22);
+  --text-primary: #09101f;
+  --text-secondary: #44506a;
+  --text-faint: #8494a8;
+  --accent: var(--color-brand);
+  --accent-contrast: #ffffff;
+  --accent-bg: rgba(0, 9, 220, 0.07);
+  --hover-bg: rgba(9, 16, 31, 0.035);
+  --overlay: rgba(10, 16, 31, 0.20);
+  --glow: rgba(7, 15, 35, 0.08);
+  --status-green: #78b41d;
+  --status-green-dim: rgba(174, 243, 62, 0.18);
+  --status-green-bold: rgba(120, 180, 29, 0.28);
+  --status-amber: #cf911d;
+  --status-amber-dim: rgba(207, 145, 29, 0.14);
+  --status-amber-bold: rgba(207, 145, 29, 0.24);
+  --status-red: #cf4d59;
+  --status-red-dim: rgba(207, 77, 89, 0.14);
+  --status-red-bold: rgba(207, 77, 89, 0.20);
+  --status-blue: #0009DC;
+  --status-blue-dim: rgba(0, 9, 220, 0.08);
+  --status-blue-bold: rgba(0, 9, 220, 0.20);
+  --badge-display: #4060ee;
+  --badge-display-bg: rgba(0,9,220,.10);
+  --badge-display-bd: rgba(0,9,220,.20);
+  --badge-video: #7c3aed;
+  --badge-video-bg: rgba(139,92,246,.10);
+  --badge-video-bd: rgba(139,92,246,.20);
+  --badge-native: #059669;
+  --badge-native-bg: rgba(16,185,129,.10);
+  --badge-native-bd: rgba(16,185,129,.20);
+  --badge-audio: #d97706;
+  --badge-audio-bg: rgba(245,158,11,.10);
+  --badge-audio-bd: rgba(245,158,11,.20);
+  --badge-ctv: #be185d;
+  --badge-ctv-bg: rgba(236,72,153,.10);
+  --badge-ctv-bd: rgba(236,72,153,.20);
+  --badge-default: #647490;
+  --badge-default-bg: rgba(100,116,144,.10);
+  --badge-default-bd: rgba(100,116,144,.20);
+  --val-warn: #d97706;
+  --val-warn-bg: rgba(245,158,11,.08);
+  --val-warn-bd: rgba(245,158,11,.25);
+  --val-error: #ef4444;
+  --val-error-bg: rgba(220,38,38,.08);
+  --val-error-bd: rgba(220,38,38,.25);
+  --error-text: #cf4d59;
+  --scrim-modal: rgba(0, 0, 0, 0.5);
+  /* Added 2026-10-01 with `tailwind-subset.css`. These are read from JS - an inline style or an SVG
+     attribute, `fontSize: 'var(--text-10)'` on a chart tick - which is why the first extraction pass
+     missed them: it collected the tokens named in the CSS it was copying, and nothing named these.
+     An undefined custom property makes the whole declaration invalid, so the ticks inherited 16px. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', SFMono-Regular, monospace;
+  --font-barlow: 'Barlow Semi Condensed', sans-serif;
+  --color-brand: #0009DC;
+  --text-9: 9px;
+  --text-10: 10px;
+  --text-11: 11px;
+  --text-12: 12px;
+  --text-13: 13px;
+  --text-14: 14px;
+  --text-15: 15px;
+  --text-16: 16px;
+  --text-18: 18px;
+  --text-20: 20px;
+  --text-24: 24px;
+  --text-28: 28px;
+  --chart-tick: #647490;
+  --chart-grid: rgba(10, 22, 55, 0.08);
+  --chart-legend: #647490;
+  /* The group-frame palette, read through `.grp-<colour>` in this file. */
+  --grp-slate-bg: rgba(100, 116, 139, 0.08);
+  --grp-slate-line: rgba(100, 116, 139, 0.28);
+  --grp-blue-bg: rgba(0, 9, 220, 0.06);
+  --grp-blue-line: rgba(0, 9, 220, 0.22);
+  --grp-teal-bg: rgba(8, 145, 178, 0.08);
+  --grp-teal-line: rgba(8, 145, 178, 0.26);
+  --grp-amber-bg: rgba(207, 145, 29, 0.08);
+  --grp-amber-line: rgba(207, 145, 29, 0.26);
+  --grp-rose-bg: rgba(219, 39, 119, 0.07);
+  --grp-rose-line: rgba(219, 39, 119, 0.24);
+  --grp-violet-bg: rgba(139, 92, 246, 0.08);
+  --grp-violet-line: rgba(139, 92, 246, 0.26);
+  /* The four radius steps the reference sets on its dashboard page. */
+  --dash-radius-card: 6px;
+  --dash-radius-control: 6px;
+  --dash-radius-group: 8px;
+  --dash-radius-popup: 8px;
+  --dash-radius-chip: 4px;
+  --dash-radius-badge: 4px;
+  --dash-radius-bar: 10px;
+  --dash-radius-tab: 5px;
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --shadow-modal: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="dark"] {
+  --page-bg: #0b1018;
+  --surface-alt: #111620;
+  --surface-tertiary: #1a2030;
+  --border-soft: rgba(136, 156, 198, 0.20);
+  --border-softer: rgba(136, 156, 198, 0.14);
+  --border-hover: rgba(136, 156, 198, 0.32);
+  --text-primary: #eef3ff;
+  --text-secondary: #a1afcb;
+  --text-faint: #546080;
+  --accent: var(--color-lime);
+  --accent-contrast: #0b1018;
+  --accent-bg: rgba(174, 243, 62, 0.10);
+  --hover-bg: rgba(255, 255, 255, 0.035);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --glow: rgba(0, 0, 0, 0.14);
+  --status-green: #aef33e;
+  --status-green-dim: rgba(174, 243, 62, 0.12);
+  --status-green-bold: rgba(174, 243, 62, 0.24);
+  --status-amber: #ffbe3b;
+  --status-amber-dim: rgba(255, 190, 59, 0.16);
+  --status-amber-bold: rgba(255, 190, 59, 0.24);
+  --status-red: #ff7078;
+  --status-red-dim: rgba(255, 112, 120, 0.16);
+  --status-red-bold: rgba(255, 112, 120, 0.24);
+  --status-blue: #6c7dff;
+  --status-blue-dim: rgba(108, 125, 255, 0.12);
+  --status-blue-bold: rgba(108, 125, 255, 0.24);
+  --badge-display: #8090ff;
+  --badge-display-bg: rgba(108,125,255,.12);
+  --badge-display-bd: rgba(108,125,255,.24);
+  --badge-video: #b08cff;
+  --badge-video-bg: rgba(176,140,255,.12);
+  --badge-video-bd: rgba(176,140,255,.24);
+  --badge-native: #4ade80;
+  --badge-native-bg: rgba(74,222,128,.12);
+  --badge-native-bd: rgba(74,222,128,.24);
+  --badge-audio: #ffbe3b;
+  --badge-audio-bg: rgba(255,190,59,.12);
+  --badge-audio-bd: rgba(255,190,59,.24);
+  --badge-ctv: #f472b6;
+  --badge-ctv-bg: rgba(244,114,182,.12);
+  --badge-ctv-bd: rgba(244,114,182,.24);
+  --badge-default: #8a9ab8;
+  --badge-default-bg: rgba(138,154,184,.12);
+  --badge-default-bd: rgba(138,154,184,.24);
+  --val-warn: #ffbe3b;
+  --val-warn-bg: rgba(255,190,59,.10);
+  --val-warn-bd: rgba(255,190,59,.25);
+  --val-error: #ff7078;
+  --val-error-bg: rgba(255,112,120,.10);
+  --val-error-bd: rgba(255,112,120,.25);
+  --error-text: #ff7078;
+  --scrim-modal: rgba(0, 0, 0, 0.5);
+  --chart-tick: #7080a3;
+  --chart-grid: rgba(136, 156, 198, 0.10);
+  --chart-legend: #7080a3;
+  --grp-slate-bg: rgba(148, 163, 184, 0.09);
+  --grp-slate-line: rgba(148, 163, 184, 0.30);
+  --grp-blue-bg: rgba(108, 125, 255, 0.10);
+  --grp-blue-line: rgba(108, 125, 255, 0.32);
+  --grp-teal-bg: rgba(34, 211, 238, 0.09);
+  --grp-teal-line: rgba(34, 211, 238, 0.30);
+  --grp-amber-bg: rgba(255, 190, 59, 0.09);
+  --grp-amber-line: rgba(255, 190, 59, 0.30);
+  --grp-rose-bg: rgba(244, 114, 182, 0.09);
+  --grp-rose-line: rgba(244, 114, 182, 0.30);
+  --grp-violet-bg: rgba(167, 139, 250, 0.10);
+  --grp-violet-line: rgba(167, 139, 250, 0.32);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+}
+
+/* ── the moved components own rules ─────────────────────────────────────── */
+
+/* ── Chart panel layout ── */
+.chart-panel {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+
+}
+
+.chart-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-alt);
+  font-family: var(--font-barlow);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.dashboard-page .chart-panel {
+  border-radius: var(--dash-radius-card);
+}
+
+.dashboard-page .chart-panel__title {
+  background: var(--surface);
+  /* No divider: header and body share one surface here, and the line under every
+     tile title read as a grid of stripes. The distance is the body's padding. */
+  border-bottom: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dashboard-page .chart-panel__body {
+  padding-top: 12px;
+}
+
+.chart-panel__body {
+  padding: 8px 12px 12px;
+}
+
+.chart-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+/* A tile that fills its row (DashGrid: rowStretchIds). The cell already stretches to the
+   row track; this carries that height down to the chart's plot: deferred-mount wrapper →
+   frame → flush body → report → last slot → view → plot. Only a lone single-view slot
+   grows; shared rows (.rpt-row) and padded bodies keep their own sizing. */
+.dash-cell--stretch > .deferred-mount { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .chart-panel { flex: 1 1 auto; display: flex; flex-direction: column; }
+.dash-cell--stretch .chart-panel__flush { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .chart-panel__flush > .rpt { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .rpt > .rpt-slot:not(.rpt-row):last-child { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .rpt > .rpt-slot:not(.rpt-row):last-child > .rpt-view { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .rpt-view > .chart-panel__body { flex: 1 1 auto; }
+/* Inside a composition (what the builder stores: one root column around the views) the same
+   path runs down the last node of each column that holds a chart or a table (2026-09-14). */
+.dash-cell--stretch .rpt > .rpt-slot.cmp:last-child > .rpt-composition-node:last-child:has(.chart-panel__body, .rpt-scroll--measured),
+.dash-cell--stretch .rpt-composition-body.cmp-col > .rpt-composition-node:last-child:has(.chart-panel__body, .rpt-scroll--measured),
+.dash-cell--stretch .rpt-composition-view:last-child > .rpt-view:has(> .chart-panel__body, > .rpt-scroll--measured) { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell--stretch .rpt-composition-body.cmp-col:last-child:has(.chart-panel__body, .rpt-scroll--measured) { flex: 1 1 auto; min-height: 0; }
+/* …and down to a table's rows (2026-09-13). A grid row is sized by its tiles' content, so in
+   that sizing the rows' box keeps its step cap (the flex basis); it grows only into the height
+   a taller neighbour already gave the row, and never past its own rows (--rpt-rows-h, which
+   ReportTable measures). So a table cannot make its row taller, and a short one keeps its
+   height with the lines under it. Until the rows are measured the modifier is absent and the
+   cap stands. A chart needs none of this: its plot's own height is the step. */
+.dash-cell--stretch .rpt > .rpt-slot:not(.rpt-row):last-child > .rpt-view > .rpt-scroll--measured,
+.dash-cell--stretch .rpt-composition-view:last-child > .rpt-view > .rpt-scroll--measured {
+  flex: 1 1 min(var(--rpt-rows-max), var(--rpt-rows-h));
+  max-height: var(--rpt-rows-h);
+}
+
+/* ── Widget builder (Display tab, 2026-07-12) ── */
+/* Widget title row: wraps when the title, badges and actions outgrow the tile.
+   Keep the modifier separate from the frame's structural title recipe. */
+.wgf-title { flex-wrap: wrap; }
+/* A tile's subtitle (section-widget parity, 2026-09-04): what a date table covers, under the
+   name. `flex-basis: 100%` puts it on its own line inside a row that already wraps; the
+   negative margin takes back most of the row gap, so it reads as a second line of the title
+   rather than as a band of its own. */
+.wgf-sub {
+  flex-basis: 100%;
+  margin-top: -4px;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+/* Gallery previews use the full widget width before scaling, including its subtitle. */
+/* Canonical Report Period-control chips. */
+.wgf-per { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--rs); background: var(--page-bg); }
+.wgf-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+/* The metric picker's own width, moved off the element so a narrower host can override it.
+   240px is what a builder card gives it and nothing else changes. Element-qualified on
+   purpose: it shares the element with `.sp-inp`, whose `width: 100%` is declared later at
+   the same specificity and would win a plain class-for-class contest. */
+select.wgf-pick { width: 240px; height: var(--sp-ctl-h); }
+.wgf-inp { font-family: var(--font-mono); }
+.wgf-inp--err {
+  border-color: var(--val-error) !important;
+  background: var(--val-error-bg);
+  box-shadow: 0 0 0 1px var(--val-error-bd);
+}
+.wgf-err { font-size: 10.5px; color: var(--error-text); margin-top: 4px; }
+.wgf-err b { font-family: var(--font-mono); font-weight: 500; }
+/* A tile whose library entry is gone (widget-library spec §3.3). The chrome is a
+   normal WidgetFrame — title row, badge, ⋯ menu — and this is only the body, so
+   the tile reads as a tile with a problem, not as a rendering failure. */
+.wgf-gone { padding: 14px 12px; font-size: 12px; line-height: 1.45; color: var(--error-text); }
+.wgf-gone-h { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+.wgf-sample { font-size: 10px; font-family: var(--font-mono); color: var(--status-green); margin-top: 4px; }
+.wgf-help { font-size: 10px; color: var(--text-faint); margin-top: 5px; }
+.wgf-pal {
+  border: 1px solid var(--border-softer);
+  border-radius: var(--rs);
+  background: var(--surface-alt);
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+.wgf-pg { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 5px; }
+.wgf-pg:last-child { margin-bottom: 0; }
+.wgf-pgl {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-faint); min-width: 62px; font-family: var(--font-barlow);
+}
+.wgf-tok {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--rxs); padding: 1px 6px; cursor: grab;
+}
+.wgf-tok:hover { border-color: var(--accent); color: var(--accent); }
+/* Unavailable = quiet, NOT a stacking context: element-level opacity traps the chip's
+   ui-tip ::after inside it — composited at the same alpha, z-index scoped — so the one
+   tip that explains WHY the chip is off rendered as a ghost under the form. Dim with
+   tokens instead, the same rule .sp-spot-it--off argues for readability. */
+.wgf-tok--off {
+  color: var(--text-muted); background: var(--surface-alt);
+  border-color: var(--border-softer); cursor: not-allowed;
+}
+.wgf-tok--off:hover { color: var(--text-muted); border-color: var(--border-softer); }
+.wgf-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.wgf-chip {
+  border: 1px solid var(--border-soft); border-radius: var(--rp); background: var(--surface);
+  padding: 3px 10px; font-size: 11px; color: var(--text-secondary); cursor: pointer;
+}
+.wgf-chip:hover { border-color: var(--border-hover); }
+.wgf-chip--on {
+  border-color: var(--status-blue-bold); background: var(--status-blue-dim);
+  color: var(--status-blue); font-weight: 600;
+}
+.wgf-series {
+  border: 1px solid var(--border-soft); border-radius: var(--rs); background: var(--surface);
+  padding: 9px 10px; margin-bottom: 8px;
+}
+.wgf-series-top { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; flex-wrap: wrap; }
+.wgf-swatch { width: 14px; height: 14px; border-radius: var(--rxs); flex: none; }
+.wgf-x {
+  margin-left: auto; border: none; background: none; color: var(--text-muted);
+  font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: var(--rxs);
+}
+.wgf-x:hover { color: var(--status-red); background: var(--hover-bg); }
+.wgf-add {
+  width: 100%; border: 1px dashed var(--border-hover); background: none;
+  color: var(--text-secondary); border-radius: var(--rs); padding: 7px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.wgf-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+/* The constructor is the first caller that renders this button DISABLED (at the row,
+   column and brick caps). Without this it looked fully live and simply did nothing —
+   the same treatment .wgal-add:disabled already gets. */
+.wgf-add:disabled { opacity: .4; cursor: default; }
+.wgf-editor .sp-sect { margin-top: 14px; }
+.wgf-ed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.wgf-back {
+  width: 26px; height: 26px; border-radius: var(--rs); border: 1px solid var(--border-soft);
+  background: var(--surface); color: var(--text-secondary); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.wgf-back:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.wgf-kind {
+  font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  font-family: var(--font-barlow); background: var(--status-blue-dim); color: var(--status-blue);
+  border-radius: var(--rxs); padding: 3px 8px; flex: none;
+}
+/* Link state on a gallery card — LINKED / EDITED (widget-library spec §6.1). A
+   pill, never a rail, and quiet: it is a fact about the tile, not a warning.
+   Deliberately NOT the blue of .wgf-kind, which sits directly beside it — two
+   blue pills in one row read as one control, and the kind is the louder fact.
+   Same font, size and padding as .wgf-kind so the row keeps ONE baseline; only
+   the fill and the full radius differ. --text-secondary, not --text-muted: muted
+   on --surface-tertiary is under AA in both themes (contrast-audit baseline). */
+.wgal-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  font-family: var(--font-barlow); background: var(--surface-tertiary); color: var(--text-secondary);
+  border-radius: var(--rp); padding: 3px 8px; flex: none;
+}
+/* The Settings gear on the hint bar: an icon-only .sp-btn that stretches to the
+   row's tallest sibling instead of computing its own (shorter) box. Two classes
+   so it wins over .sp-btn's padding whatever the declaration order. */
+.sp-btn.lm-hint-icon { padding: 0 10px; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; align-self: stretch; }
+
+/* metric picker / advanced formula toggles (UX round) */
+.wgf-adv {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0 10px; height: var(--sp-ctl-h);
+  border: 1px solid var(--border-soft); border-radius: var(--rs);
+  background: var(--surface); color: var(--text-muted);
+  font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.wgf-adv:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.wgf-pal-toggle {
+  display: block; border: none; background: none; padding: 2px 0; margin-top: 3px;
+  color: var(--text-faint); font-size: 10.5px; cursor: pointer; text-align: left;
+}
+.wgf-pal-toggle:hover { color: var(--text-muted); }
+.wgf-lint { font-size: 10.5px; color: var(--status-amber); margin-top: 3px; }
+.wgf-row--tight { margin-bottom: 0; }
+.wgf-row--stretch { align-items: stretch; }
+.wgf-tok-h { color: var(--text-faint); font-family: var(--font-sans); font-size: 9.5px; }
+
+/* formula palette tooltips: anchor to the PALETTE, not the chip — a chip at the
+   drawer's right edge pushed a 260px tip past the drawer/viewport (round 7). */
+.wgf-pal { position: relative; }
+.wgf-pal .ui-tip { position: static; }
+.wgf-pal .ui-tip[data-tip]:hover::after,
+.wgf-pal .ui-tip[data-tip]:focus-visible::after {
+  left: 0; right: 0; bottom: calc(100% + 4px);
+  width: auto; max-width: none;
+}
+
+/* gallery */
+/* .wgal-badge (the LINKED / EDITED pill on a card, widget-library spec §6.1) is
+   declared beside .wgf-kind above — the two pills sit next to each other in the
+   meta row and are read as a pair, so they are defined as a pair. */
+.wgal { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.wgal-prev .chart-panel { border: none; border-radius: 0; background: transparent; }
+/* Thumbnail chrome scales with the thumbnail. The full tile's 43px title bar ate a
+   third of the 128px card, pushing the chart's legend and the table's last rows past
+   the clip edge — the card advertised a broken-looking widget (2026-07-29). The title
+   text stays on one line; the subtitle keeps its own row before the whole tile scales. */
+.wgal-prev .chart-panel__title { padding: 7px 10px; font-size: 10px; }
+.wgal-prev .wgf-title > span:first-child {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* .wgal-card--off (switched off, widget-library spec §5) is styled with its block-card
+   twin in the .blib-card block below — one rule, one look for one state. */
+.wgal-add {
+  border-style: dashed; border-color: var(--border-hover); background: none;
+  display: flex; align-items: center; justify-content: center; min-height: 170px;
+  color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+
+/* ── The gallery's sections (post-release UX round, 2026-08-16) ────────────────
+   "From library" (untouched links) above, "Custom" below, this pacing's groups
+   last. Headers are the drawer's .blib-group-t idiom; the divider is a hairline,
+   not a card. Two card grids can sit adjacent when a header hides — they keep
+   the grid's own 10px rhythm between them. */
+.wgal + .wgal { margin-top: 10px; }
+
+/* Library dialogs (widget-library spec 2026-08-14 §6.1). ConfirmModal supplies the
+   frame; this is only the stacked field group inside it — same rhythm as
+   .sp-card-fields. Labels sit ABOVE their fields, so nothing here mixes a
+   label-stacked field with a bare control on one row. */
+.lib-form { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+/* The Library SCREEN's own classes are at the END of this file, on purpose: three
+   of them override .sp-inp, .sp-sect-t and .blib-hint, all of which are declared
+   below this point. Same specificity, later wins — so they must sit after. */
+
+/* ── Tile ⋯ menu (widget-library spec 2026-08-14 §6.3) ── */
+/* The live tile's right-aligned actions group. Report controls render in the body. */
+.wgf-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+/* The panel is a PORTAL child of <body> with FIXED position (TileMenu.jsx places it
+   from the trigger's rect): .chart-panel is overflow:hidden (:425) and a 4-item menu
+   is taller than a KPI tile, so an in-card panel was sliced off at the card edge.
+   width must match MENU_WIDTH in TileMenu.jsx. */
+.wgm-panel {
+  position: fixed; z-index: 120; width: 176px;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--rm); box-shadow: 0 8px 24px var(--overlay); padding: 4px;
+  display: flex; flex-direction: column;
+}
+
+/* ── Split row (SplitRow.jsx) ── */
+.sp-row {
+  display: grid;
+  grid-template-columns: 56px minmax(210px, 2.5fr) repeat(5, 1fr);
+  gap: 4px;
+  align-items: center;
+  padding: 4px 20px;
+  border-top: 1px solid var(--border-soft);
+  min-height: 34px;
+  position: relative;
+}
+.sp-row[data-conv="1"] {
+  grid-template-columns: 56px minmax(210px, 2.5fr) repeat(6, 1fr);
+}
+.sp-row::before {
+  content: '';
+  position: absolute;
+  left: 96px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--border-hover);
+  border-radius: 1px;
+}
+
+.sp-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.sp-nm {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.sp-tg {
+  font-family: var(--font-barlow);
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--surface-tertiary);
+  padding: 2px 6px;
+  border-radius: 999px;
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.sp-fl {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.sp-ml {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 1px;
+}
+
+.sp-mv {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sp-ms {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.sp-section-hd {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 4px 20px 4px 52px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.sp-others {
+  opacity: 0.7;
+}
+.sp-others:hover {
+  opacity: 0.9;
+}
+.sp-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sp-expand-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  border-radius: var(--rs);
+  transition: background .15s, color .15s;
+}
+.sp-expand-toggle:hover {
+  color: var(--text-primary);
+  background: var(--surface);
+}
+.sp-expand-toggle[aria-pressed="true"] {
+  color: var(--accent);
+}
+/* Status actions (Pause/Resume · Reopen · Complete · Archive) travel together and
+   must break BETWEEN buttons, never inside one: .sp-btn is uppercase with
+   letter-spacing and no white-space:nowrap, so a squeezed button wraps its own
+   label onto a second line and stops sharing a baseline with its neighbours. The
+   parent's flex-wrap cannot help — it sees this group as one atomic child. */
+.settings-drawer-foot-group {
+  display: flex; gap: 8px;
+  flex-wrap: wrap; row-gap: 6px;
+  margin-right: auto;
+}
+.settings-drawer-foot--mapping > .sp-btn:first-of-type { margin-left: auto; }
+
+/* ── Settings drawer — .sp-* components (§5 of 2026-04-10 spec) ── */
+
+/* 1. Chrome overrides and shared atoms */
+.sp-drawer-title {
+  font-family: var(--font-barlow);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.sp-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: var(--rs);
+  transition: background .15s, color .15s;
+}
+.sp-close:hover {
+  color: var(--text-primary);
+  background: var(--surface);
+}
+.sp-chevron {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  transition: transform .15s;
+  color: currentColor;
+}
+.settings-drawer [aria-expanded="true"] > .sp-chevron { transform: rotate(90deg); }
+
+/* 2. Footer */
+.sp-dirty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--val-warn);
+}
+.sp-dirty::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--val-warn);
+}
+.sp-btn {
+  padding: 8px 16px;
+  border-radius: var(--rs);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-barlow);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: opacity .15s, transform .15s, background .15s, box-shadow .15s, color .15s, border-color .15s;
+}
+.sp-btn:disabled {
+  opacity: .4;
+  cursor: default;
+  transform: none;
+}
+.sp-btn-s {
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-soft);
+}
+.sp-btn-s:not(:disabled):hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+.sp-btn-p {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  box-shadow: 0 14px 28px var(--accent-bg);
+}
+.sp-btn-p:not(:disabled):hover {
+  opacity: .92;
+  transform: translateY(-1px);
+}
+.sp-btn-done {
+  background: var(--status-green);
+  /* Dark text on green reads in both themes; --accent-contrast is white in light → ~2.5:1 on olive-green (fails WCAG) */
+  color: #0b1018;
+  box-shadow: 0 14px 28px var(--status-green-bold);
+}
+.sp-btn-err {
+  background: var(--status-red);
+  color: var(--accent-contrast);
+  box-shadow: 0 14px 28px var(--status-red-bold);
+}
+
+/* 3. Sections */
+.sp-sect {
+  margin-bottom: 16px;
+}
+.sp-sect:last-child {
+  margin-bottom: 0;
+}
+.sp-sect-t {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-bottom: 8px;
+}
+
+/* 4. Base atoms */
+.sp-lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 70px;
+  flex-shrink: 0;
+}
+.sp-inp {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 0 8px;
+  height: var(--sp-ctl-h);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  width: 100%;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s;
+}
+.sp-inp:hover  { border-color: var(--border-hover); }
+.sp-inp:focus  { border-color: var(--border-hover); }
+.sp-inp::placeholder { color: var(--text-muted); opacity: .6; }
+.sp-inp--sans  { font-family: var(--font-sans); }
+/* Multi-line fields opt out of the fixed control height (the Add-LI dialog’s ids box). */
+textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
+.sp-inp--sm    { padding: 0 6px; height: var(--sp-ctl-h-sm); font-size: 10px; }
+.sp-inp--right { text-align: right; }
+.sp-inp.over-budget {
+  border-color: var(--status-red) !important;
+  background: var(--status-red-dim);
+  box-shadow: 0 0 0 1px var(--status-red-bold);
+}
+
+/* 5. Checkboxes (.sp-chk-grid went with the Display tab's last checkbox grid —
+   the unified gallery lays its own cards out) */
+.sp-chk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 3px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.sp-chk input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+.sp-thr-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+}
+.sp-thr-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sp-thr-item .sp-lbl {
+  flex: 1;
+  min-width: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sp-thr-item .sp-inp {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 11px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+/* 6. LI card */
+.sp-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  padding: 16px;
+  margin-bottom: 10px;
+}
+/* Paused line item: greyed surface so it clearly recedes from active cards.
+   Uses background (not opacity) — the card contains position:fixed modals
+   (remove-confirm / duplicate / fit) whose backdrop would inherit an opacity
+   and render broken. The id fades; the rate pill flips to --surface so it
+   stays legible on the grey (it shares the tertiary fill otherwise). */
+.sp-card--paused { background: var(--surface-tertiary); }
+.sp-card--paused .sp-li-id { color: var(--text-muted); }
+.sp-card--paused .sp-rate { background: var(--surface); }
+.sp-card-hd {
+  /* Sticky LI context (Phase 2): while a long card scrolls, the header keeps
+     answering "which LI am I editing". Solid card background + negative
+     margins so it covers the card padding while stuck. */
+  position: sticky;
+  top: -16px; /* compensate the drawer-body padding — pin flush at the visible top */
+  z-index: 3;
+  background: var(--surface);
+  margin: -16px -16px 10px;
+  padding: 12px 16px 8px;
+  border-radius: var(--r) var(--r) 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sp-card--paused .sp-card-hd { background: var(--surface-tertiary); }
+.sp-li-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.sp-rate {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  background: var(--surface-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.sp-li-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .15s, color .15s, background .15s;
+}
+.sp-card:hover .sp-li-remove { opacity: 1; }
+.sp-li-remove:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-split-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-li-remove:hover {
+  color: var(--status-red);
+  background: color-mix(in srgb, var(--status-red) 10%, transparent);
+}
+.sp-channel-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-family: var(--font-barlow);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  border-radius: var(--rp);
+  border: 1px solid transparent;
+}
+.sp-channel-badge.b-Display { background: var(--badge-display-bg); color: var(--badge-display); border-color: var(--badge-display-bd); }
+.sp-channel-badge.b-Video   { background: var(--badge-video-bg);   color: var(--badge-video);   border-color: var(--badge-video-bd); }
+.sp-channel-badge.b-Native  { background: var(--badge-native-bg);  color: var(--badge-native);  border-color: var(--badge-native-bd); }
+.sp-channel-badge.b-Audio   { background: var(--badge-audio-bg);   color: var(--badge-audio);   border-color: var(--badge-audio-bd); }
+.sp-channel-badge.b-CTV     { background: var(--badge-ctv-bg);     color: var(--badge-ctv);     border-color: var(--badge-ctv-bd); }
+.sp-channel-badge.b-def     { background: var(--badge-default-bg); color: var(--badge-default); border-color: var(--badge-default-bd); }
+.sp-card-name {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  margin-bottom: 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+.sp-card-name:hover,
+.sp-card-name:focus { border-color: var(--border-hover); }
+.sp-card-name::placeholder { color: var(--text-muted); opacity: .6; }
+/* Field grid, stacked-label axis (spec §3.2). auto-fit turns the drawer's width
+   into COLUMNS instead of dead space inside two fat cells: 4-5 tracks at 820px
+   vs the old 2. min() is not optional — a bare 148px minimum overflows the
+   deepest split tier, which measures ~136px at a 320px viewport. Same guard C3
+   already uses on .sp-camp-row. */
+.sp-card-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+  gap: 8px 12px;
+}
+/* Label above control; the control fills its track up to its cap. A converted
+   money cell's USD subline now grows the field's HEIGHT rather than
+   re-centering its neighbours, which is why .sp-card-fields--conv reserves the
+   subline's box below. */
+.sp-card-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  /* Grid items default to min-width:auto — that content floor blows a field
+     past its track at narrow drawer widths (container Name input painted over
+     the card edge at ≤501px). Unchanged from the row-axis version, same
+     reason. */
+  min-width: 0;
+}
+/* Single line, always. A wrapped label pushes its control below its row-mates
+   and hard-fails the row-height acceptance (§11), so it ellipsizes — <Lbl>
+   carries the title that makes a clipped one readable. */
+.sp-card-field .sp-lbl {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-muted);
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* NOTE for anyone re-adding a rule here: on the stacked axis `flex: 1` means a
+   flex-BASIS of 0 on the MAIN axis and collapses the control to text height —
+   the failure this file has documented since 2026-07-11 (money inputs rendered
+   16px next to 26px siblings, caught by the row-geometry gate). `.sp-inp` already
+   carries `width: 100%`, so no sizing rule is needed at this level. */
+/* No `.sp-card-field .sp-inp` typography rule: every value it used to declare
+   (font-size 11 / padding 0 8 / mono) is byte-identical to the base `.sp-inp`,
+   so its only effect was specificity — and that specificity is what defeated
+   single-class modifiers like `.sp-inp--sans` inside a field. Modifiers now win
+   by plain source order, as they do everywhere else. */
+/* Inside the units affix the main axis is still HORIZONTAL, so this flex — and
+   .sp-mode-sel's below — are correct as written. */
+.sp-inp-affix > .sp-inp {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+/* Width-by-content-type: the caps survive the axis flip as max-width. A control
+   fills its column UP TO its cap, so a % field never stretches to 176px and a
+   date stays date-wide at any drawer width — but the caps stop being
+   flex-bases, which on a column axis were heights. */
+.sp-f--date   > :last-child { max-width: 132px; }
+.sp-f--money  > :last-child { max-width: 132px; }
+.sp-f--num    > :last-child { max-width: 112px; }
+.sp-f--pct    > :last-child { max-width: 84px; }
+.sp-f--target > :last-child { max-width: 172px; }
+/* A read-only value carries no control box, so it must claim its tier's height
+   explicitly or it sits 4px short of its row-mates and fails the row-geometry
+   gate. Selected structurally — a direct `.sp-mv` child of a field IS the
+   read-only case — mirroring `.sp-card-field > .sp-inp` above. Base tier by
+   default; the split tier overrides. */
+.sp-card-field > .sp-mv { line-height: var(--sp-ctl-h); }
+.sp-card-split-fields .sp-card-field > .sp-mv { line-height: var(--sp-ctl-h-sm); }
+/* Full-width rows (LI display name, coefficient switch, container Name) take
+   the whole grid line, so they share it with nothing — which is what keeps a
+   bare control off a row of stacked-label fields. */
+.sp-f--full { grid-column: 1 / -1; }
+/* A mapping form is read left-to-right, not scanned like a table. Cap it at the
+   same reading width every OTHER tab gets from .sp-tab-cap — the Mapping tab
+   renders uncapped, so without this the auto-fit grid runs to 8 tracks of
+   two-word selects on a wide drawer. */
+.sp-card-fields--form { max-width: 788px; }
+/* The one bare control in the grid: a checkbox and its sentence read as one
+   control, so this field stays a ROW and is exempt from label alignment. */
+.sp-f--switch { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+/* …and its sentence is not a field label, so it wraps instead of ellipsizing.
+   Two classes, because it has to beat `.sp-card-field .sp-lbl` — and `overflow`
+   has to go with `white-space`, or the sentence still clips at its first line. */
+.sp-card-field .sp-lbl--inline {
+  white-space: normal;
+  overflow: visible;
+}
+/* The Target composite stays a row: a number and its #/% mode select read as
+   one control. Its width cap lives on .sp-f--target, applied to the field. */
+.sp-target-composite { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* A field's own actions sit under it, never beside its label — the no-mixing
+   rule (spec §3.2). Both slots stay rendered so the row cannot reflow mid-edit. */
+.sp-field-actions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.sp-pill--lock {
+  padding: 2px 8px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border-radius: var(--r);
+  border: 1px solid var(--border-softer);
+  color: var(--text-secondary);
+}
+/* Read-only value emphasis (was an inline fontWeight on RateControl's currency). */
+.sp-mv--strong { font-weight: 600; }
+/* Keeps the manual line-item-IDs block clear of the results well below it. */
+.sp-add-li-manual { margin-bottom: 10px; }
+
+/* ── Collapsed line-item row (spec §3.1) ─────────────────────────────────────
+   One line per unexpanded LI. Sized off the drawer's own control tier; the
+   custom name gives way first, then the summary — a row of six nowrap items
+   would otherwise set a min-content width wider than a 320px drawer. */
+.sp-li-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  transition: background .15s, border-color .15s;
+}
+.sp-li-row:hover { background: var(--hover-bg); }
+.sp-li-row--paused { background: var(--surface-tertiary); }
+.sp-li-row-id { font-family: var(--font-mono); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.sp-li-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-li-row-sum {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-li-row-sep { color: var(--text-faint); padding: 0 4px; }
+.sp-li-row-cnt { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; }
+/* The expanded card's header id doubles as the collapse affordance. */
+.sp-card-hd-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.sp-mode-sel { flex: 0 0 auto; width: 56px; }
+/* flex, not block: the picker's trigger is inline-level, so a block slot gives
+   it a line box and drops the control 2px below every plain input on the same
+   grid row — a dT the row-geometry gate fails on (and which the old row-axis
+   `flex: 1` hid, because the slot was itself a flex item then). */
+.sp-dt-slot { display: flex; width: 100%; }
+.sp-dt-slot > * { flex: 1; min-width: 0; }
+/* Units input + "fill from budget" affordance (acceptance #6). The affix reserves
+   the icon's slot so toggling its visibility never shifts the input baseline. */
+.sp-inp-affix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.sp-unit-fill {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  transition: color .15s, background .15s;
+}
+.sp-unit-fill:hover {
+  color: var(--color-brand);
+  background: color-mix(in srgb, var(--color-brand) 10%, transparent);
+}
+
+/* 7. Splits zone */
+.sp-card-split-zone {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.sp-card-split-hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  color: var(--text-primary);
+  text-align: left;
+  transition: color .15s;
+}
+.sp-card-split-hd:hover { color: var(--text-secondary); }
+.sp-card-split-hd:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--rs);
+}
+.sp-split-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  color: inherit;
+}
+.sp-split-cnt {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+.sp-card-splits {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+/* Children live in a flat, bordered "well" — one tier deeper than the container
+   (surface-tertiary) — and read as divided rows, not nested boxes. Full-cell
+   fill + horizontal dividers only; no vertical stripes / left-rail accents. */
+.sp-split-well {
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 2px 10px;
+}
+.sp-card-split-item {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 2px;
+  margin: 0;
+}
+.sp-split-well > .sp-card-split-item + .sp-card-split-item {
+  border-top: 1px solid var(--border-soft);
+}
+/* Container-header count chip + headline metric. C6/§7.6: this chip is
+   informational, not an action and not a state — so no brand/status fill. It
+   sits on the header's --surface-tertiary, so a --surface fill plus a hairline
+   reads as a quiet outline in both themes (one token pair, no .dark override). */
+.sp-split-cnt-chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--rp);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-softer);
+}
+.sp-split-metric {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.sp-card-split-item-hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+/* Split-name input reads as a field, not a runway — cap it in the wide drawer
+   and pin the row actions (type tag / summary chip + remove) to the right edge,
+   consistently for date AND dim rows. */
+.sp-card-split-item-hd .sp-inp { max-width: 420px; }
+.sp-card-split-item-hd .sp-split-type { margin-left: auto; }
+.sp-card-split-item-hd .sp-notify-chip { margin-left: auto; }
+.sp-split-lbl {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-split-type {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  opacity: .7;
+  color: var(--text-muted);
+}
+.sp-split-x {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+  transition: color .15s;
+}
+.sp-split-x:hover { color: var(--status-red); }
+.sp-card-split-fields {
+  display: grid;
+  /* The split tier runs one control size smaller (--sp-ctl-h-sm) inside an
+     already-indented well, so its track minimum is smaller than the LI tier's.
+     min() carries the same 320px guarantee. */
+  grid-template-columns: repeat(auto-fit, minmax(min(132px, 100%), 1fr));
+  gap: 6px 10px;
+}
+.sp-card-split-fields .sp-lbl  { font-size: 9px; }
+.sp-card-split-fields .sp-inp  { font-size: 10px; padding: 0 6px; height: var(--sp-ctl-h-sm); }
+.sp-split-warn {
+  font-size: 10px;
+  color: var(--val-warn);
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.sp-overlap-warn {
+  font-size: 10px;
+  color: var(--val-warn);
+  padding: 6px 10px;
+  border-radius: var(--rs);
+  margin-top: 4px;
+  margin-bottom: 4px;
+  background: var(--val-warn-bg);
+  border: 1px solid var(--val-warn-bd);
+}
+
+/* Distribute button + dropdown */
+.sp-dist-wrap {
+  position: relative;
+  display: inline-block;
+}
+.sp-dist-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 4px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.sp-dist-btn svg { width: 13px; height: 13px; }
+.sp-dist-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sp-dist-btn:disabled {
+  opacity: .35;
+  cursor: default;
+}
+.sp-dist-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  box-shadow: 0 8px 20px var(--glow);
+  padding: 4px 0;
+  z-index: 20;
+}
+.sp-dist-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  line-height: 1.3;
+}
+.sp-dist-menu-item:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* Inside the add/distribute row the add button is a flex item, not a block —
+   it previously kept width:100% and shoved Distribute around by accident. */
+.sp-dist-row .sp-add-split-btn { display: inline-flex; align-items: center; justify-content: center; width: auto; flex: 1 1 auto; }
+
+/* ── Phase 2: container hierarchy + master-detail ─────────────────────────── */
+
+/* Container card shell — one hierarchy step in from the LI edge. */
+.sp-ctn-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  padding: 0;
+  margin: 0 0 12px 12px;
+  box-shadow: var(--shadow-pop);
+  /* clip (not hidden): rounds the corners the same way but does NOT create a
+     scroll container, so the header's position:sticky below can bind to the
+     drawer body. hidden was silently disabling sticky (spec v2.1 §2 C2). */
+  overflow: clip;
+}
+
+/* Dim-split "in summary" toggle chip (was inline-styled). */
+.sp-notify-chip {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border-radius: var(--r);
+  border: 1px solid var(--border-softer);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s, border-color .15s, color .15s;
+}
+/* ON = a selected state, and §7.6 does grant fill to states — but this chip
+   forgoes it: in the dense split rows a solid brand/lime pill was the loudest
+   pixel on screen. The accent TINT carries the state instead, and --accent-bg
+   flips per theme so one rule covers both. */
+.sp-notify-chip[aria-pressed="true"] {
+  border-color: var(--border-soft);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* Container card header strip: wrap-safe, name ellipsizes instead of clipping
+   the metric / actions. */
+.sp-ctn-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-tertiary);
+  flex-wrap: wrap;
+  min-width: 0;
+  /* C2: pin below the LI header while its container's body scrolls. The
+     invariant is  top(.sp-ctn-hd) == top(.sp-card-hd) + var(--li-hd-h)  — this
+     -16px MIRRORS .sp-card-hd's own sticky top (`top: -16px`, :1263) and must
+     change in lockstep with THAT rule; it is not a drawer-body padding
+     compensation (the scrollport datum cancels out of the relative math).
+     --li-hd-h is the LI header's measured height — dynamic, since its badges
+     flex-wrap — published per card by LiSettingsCard (PacingTab.jsx). */
+  position: sticky;
+  top: calc(var(--li-hd-h, 46px) - 16px);
+  z-index: 2;
+}
+.sp-ctn-hd .sp-card-split-hd { width: auto; margin-bottom: 0; min-width: 0; flex-shrink: 1; overflow: hidden; }
+.sp-ctn-hd .sp-split-label {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-ctn-period {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Container dim scope (spec 2026-08-14): the container's splits cover it, so it
+   counts only that delivery. A background tint, never a side rail. Shrinkable —
+   it is the longest thing in the header row and must yield before the target. */
+.sp-ctn-scope {
+  font-size: 10px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--color-brand) 8%, transparent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.sp-ctn-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+/* Indent steps (padding-based — never left border rails): container cards sit
+   one step in from the LI edge, split wells one step further. */
+.sp-split-well { margin-left: 12px; }
+.sp-split-section-hd { margin-left: 12px; }
+.sp-split-section-hd + .sp-split-warn,
+.sp-split-well + .sp-split-warn,
+.sp-split-warn + .sp-split-warn { margin-left: 12px; }
+
+/* Dim identity chip — a dim row must never read as a date row. */
+.sp-dim-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rp);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
+}
+/* Key stays lowercase — an uppercased raw dim_key ("COMMENT") reads as a UI
+   caption, not as the dimension of the split. Muted key · emphasized value. */
+.sp-dim-chip .sp-dim-chip-key { color: var(--text-muted); font-size: 9px; letter-spacing: .02em; }
+.sp-dim-chip .sp-dim-chip-sep { color: var(--text-faint); }
+
+/* C3: Dates + Name (+ Rate on converted pacings) share a row wherever ≥2
+   columns fit; below ~520px the row collapses to a stack. min() guards the
+   320px drawer — a bare minimum track would overflow it (spec v2.1 §2 C3). */
+.sp-camp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 0 20px; align-items: start; }
+
+.sp-md-nav-warn { width: 6px; height: 6px; border-radius: var(--rp); background: var(--status-amber); flex-shrink: 0; }
+
+/* SettingsAdaptive.css opts each tab into its own wide work areas. */
+.settings-drawer--wide .sp-tab-cap { max-width: 788px; }
+.settings-drawer--wide .sp-tab-cap--display:has(.sp-comp) { max-width: none; }
+
+/* Add-split button + dropdown */
+.sp-add-split-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+.sp-add-split-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--rs);
+  padding: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  text-align: center;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+/* Zero-containers state: the add button doubles as the explainer (single box). */
+.sp-add-split-btn--empty { padding: 14px 8px; }
+/* C4: shrink-to-content variant — the collapsed Labels affordance is a small
+   inline control, not a full-width drop target. The base rule is display:block
+   + width:100%, so width alone would not shrink it. */
+.sp-add-split-btn--inline {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  padding: 4px 10px;
+}
+.sp-add-split-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.sp-add-split-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sp-add-split-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  box-shadow: 0 8px 20px var(--glow);
+  padding: 4px 0;
+  z-index: 20;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.sp-add-split-menu-hd {
+  padding: 4px 10px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+.sp-add-split-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.sp-add-split-menu-item:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.sp-add-split-menu-item[data-type="manual"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.sp-dist-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 8. Labels section */
+.sp-labels {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  position: relative;
+}
+.sp-labels-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.sp-labels-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-bottom: 6px;
+}
+.sp-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: var(--rp);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  letter-spacing: .02em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--border-soft);
+}
+.sp-label-x {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin-left: 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color .15s;
+}
+.sp-label-x:hover { color: var(--status-red); }
+.sp-label-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color .15s;
+}
+.sp-label-input:hover,
+.sp-label-input:focus { border-color: var(--border-hover); }
+.sp-label-input::placeholder { color: var(--text-muted); opacity: .6; }
+.sp-label-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 2px;
+  max-height: 120px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  box-shadow: 0 8px 20px var(--glow);
+  z-index: 10;
+}
+.sp-label-sug-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.sp-label-sug-item:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* 9. Card notification */
+.sp-card-notify {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 8px 12px;
+  border-radius: var(--rs);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.sp-card-notify.warn  { background: var(--val-warn-bg);  border: 1px solid var(--val-warn-bd);  color: var(--val-warn); }
+.sp-card-notify.error { background: var(--val-error-bg); border: 1px solid var(--val-error-bd); color: var(--val-error); }
+.sp-card-notify-msg {
+  flex: 1;
+}
+.sp-card-notify-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.sp-notify-confirm {
+  background: var(--val-warn);
+  /* Dark text on amber reads in both themes; --surface is white in light → ~3.2:1 on amber (fails WCAG) */
+  color: #0b1018;
+  border: none;
+  border-radius: var(--rs);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.sp-notify-cancel {
+  background: transparent;
+  border: 1px solid var(--val-warn-bd);
+  color: var(--val-warn);
+  border-radius: var(--rs);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.sp-card-notify-close {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: .6;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: opacity .15s;
+}
+.sp-card-notify-close:hover { opacity: 1; }
+
+/* ── Settings drawer — Info tab ── */
+
+.sp-info-section {
+  margin-bottom: 22px;
+}
+
+.sp-info-section-hd {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 0 0 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.sp-info-section:first-child .sp-info-section-hd {
+  padding-top: 0;
+}
+
+.sp-info-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sp-info-link-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sp-info-link-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.sp-info-link-icon.asana  { background: rgba(246,118,118,0.15); color: #f67676; }
+.sp-info-link-icon.io     { background: rgba(52,168,83,0.15);   color: #34a853; }
+.sp-info-link-icon.mp     { background: rgba(66,133,244,0.15);  color: #4285f4; }
+.sp-info-link-icon.slack  { background: rgba(224,174,58,0.15);  color: #e0ae3a; }
+
+.sp-info-link-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.sp-info-link-input::placeholder { color: var(--text-muted); opacity: 0.6; }
+.sp-info-link-input:focus { border-color: var(--accent); }
+.sp-info-link-input.filled {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.sp-info-link-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+.sp-info-link-clear:hover { opacity: 1; color: var(--status-red); }
+
+.sp-info-custom-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.sp-info-custom-name {
+  width: 100px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.sp-info-custom-name::placeholder { color: var(--text-muted); opacity: 0.6; }
+.sp-info-custom-name:focus { border-color: var(--accent); }
+
+.sp-info-add-btn {
+  background: none;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.sp-info-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.sp-info-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* ── 3rd Party Data section (Data tab) ── */
+.sp-tp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0 0 10px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+.sp-tp-head:hover { color: var(--text-secondary); }
+.sp-tp-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--rs);
+}
+.sp-tp-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: inherit;
+}
+.sp-tp-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 1.6;
+}
+.sp-tp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sp-tp-block {
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sp-tp-block-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sp-tp-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+  background: var(--surface-tertiary);
+  border-radius: 4px;
+  padding: 2px 7px;
+  flex-shrink: 0;
+}
+.sp-tp-block-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.sp-tp-block-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sp-tp-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sp-tp-link:hover { color: var(--text-primary); }
+/* A disabled action must LOOK disabled — without this a blocked "Bind" (a tab
+   with no date column) is pixel-identical to an available one. */
+.sp-tp-link:disabled { opacity: .35; cursor: default; }
+.sp-tp-link:disabled:hover { color: var(--text-muted); }
+/* The danger link reserves the confirm-chip footprint at all times (padding +
+   min-width + centered text), so the second-click "Remove?" state only flips
+   colour/background in place — it never reflows the adjacent Edit button. */
+.sp-tp-link-danger {
+  padding: 2px 8px;
+  min-width: 64px;
+  text-align: center;
+  border-radius: 4px;
+}
+.sp-tp-link-danger:hover { color: var(--status-red); }
+.sp-tp-link-danger.confirm {
+  color: var(--status-red);
+  background: var(--status-red-dim);
+}
+.sp-tp-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  min-height: 16px;
+}
+.sp-tp-status-muted   { color: var(--text-muted); }
+.sp-tp-status-pending { color: var(--text-secondary); }
+.sp-tp-status-ready   { color: var(--status-green); font-weight: 600; }
+.sp-tp-status-error   { color: var(--status-red); font-weight: 600; }
+.sp-tp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-amber);
+  flex-shrink: 0;
+  animation: sp-tp-pulse 1.1s ease-in-out infinite;
+}
+
+.sp-tp-flow {
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sp-tp-flow-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+.sp-tp-soon {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.sp-tp-camp-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.sp-tp-camp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-soft);
+}
+.sp-tp-camp:last-child { border-bottom: none; }
+.sp-tp-camp:hover { background: var(--surface-alt); }
+/* The rank number in the top-N preview. Fixed width so the labels line up
+   whether the row is #1 or #20 — a ragged left edge makes a ranking hard to
+   read as one. */
+.sp-tp-rank {
+  flex: 0 0 22px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+/* Others / Total: the lines that make the parts add up. A rule above them, not
+   a fill — the same reason the table's totals row carries a border. */
+.sp-tp-total {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 4px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+/* The header-row correction, inline in the sentence that states it. Narrow: it
+   holds a row number, and a full-width control there would read as a field. */
+.sp-tp-hdr-row { width: 56px; }
+/* A tab card the user has taken. The border is the only difference — a fill
+   would fight the status lines inside it, and a left accent is banned. */
+.sp-tp-block--on {
+  border-color: var(--border-hover);
+  background: var(--surface);
+}
+/* The column -> role list inside the taken card. Its own scroll: a wide export
+   runs to thirty columns, and thirty rows of controls would push the Add button
+   off the drawer. */
+.sp-tp-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+/* The header text, and the real value from the sheet beside it. Both ellipsize:
+   a 62-character app name would otherwise push the role select out of the row —
+   the same failure the widget table's label column had. min-width:0 is what
+   makes the ellipsis apply inside a flex row. */
+.sp-tp-role-name {
+  flex: 0 0 34%;
+  min-width: 0;
+}
+.sp-tp-role-sample {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.sp-tp-camp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Two-line row: name over an optional muted note ("also in N other reports").
+   min-width:0 is what lets the name's ellipsis apply inside the flex row. */
+.sp-tp-camp-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sp-tp-camp-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-tp-camp-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.sp-tp-empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+.sp-tp-flow-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.am-page .sp-inp {
+  height: 38px; padding: 0 11px; font-size: 13px; font-family: var(--font-sans);
+}
+.am-page textarea.sp-inp { height: auto; padding: 9px 11px; line-height: 1.45; }
+.am-page .sp-btn { min-height: 36px; font-size: 11.5px; }
+.am-undo-notice > .sp-btn { flex: none; }
+.am-value-row > div:last-child .sp-inp { max-width: 190px; }
+.am-suggestion .sp-inp { width: 100%; min-width: 0; }
+.am-inline-edit .sp-inp { min-width: 0; flex: 1; }
+.am-search-box .sp-inp { height: 32px; width: 190px; font-size: 12.5px; }
+.ps-tab-notes > .sp-tp-status { display: block; line-height: 1.4; }
+/* Slice 5 — dual-currency MoneyField: native input + muted derived-USD line. */
+/* min-width:0 — outside the drawer's stacked field grid (the Create table, where
+   .mf-wrap is a ROW-axis flex item) it must be allowed to shrink below its
+   input's intrinsic width. Inside a .sp-card-field the axis is vertical and the
+   declaration is inert, which is why the field itself carries its own. */
+.mf-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* Visible keyboard focus (matches the .sp-* :focus-visible convention). */
+.cp-cell:focus-visible,
+.cp-input:focus-visible,
+.cp-btn:focus-visible,
+.cp-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Delivery vs CM360 comparison table (ThirdParty/CompareTable.jsx).
+   Mirrors DailyTable typography; delta cells carry a FULL-CELL background tint
+   (never a stripe / left border). Tokens only, light+dark aware. ── */
+.tp-table-wrap { overflow-x: auto; max-width: 100%; }
+.tp-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-sans);
+}
+.tp-th {
+  background: var(--surface-alt);
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  border-top: 1px solid var(--border-softer);
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.tp-th-l { text-align: left; }
+.tp-th-r { text-align: right; }
+.tp-td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.tp-td-l { text-align: left; }
+.tp-td-r { text-align: right; }
+.tp-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tp-row { cursor: pointer; }
+.tp-row:hover .tp-td:not(.tp-delta) { background: var(--hover-bg); }
+.tp-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tp-li { display: inline-flex; align-items: center; gap: 6px; }
+.tp-li-text { color: var(--text-primary); font-weight: 600; }
+.tp-caret {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+.tp-row[aria-expanded="true"] .tp-caret { transform: rotate(90deg); }
+.tp-delta { font-weight: 600; color: var(--text-primary); }
+.tp-delta-green { background: var(--status-green-dim); color: var(--status-green); }
+.tp-delta-amber { background: var(--status-amber-dim); color: var(--status-amber); }
+.tp-delta-red { background: var(--status-red-dim); color: var(--status-red); }
+.tp-unmatched-cell { padding: 0; }
+.tp-unmatched-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.tp-unmatched-head:hover { background: var(--hover-bg); }
+.tp-chevron {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+.tp-unmatched-head[aria-expanded="true"] .tp-chevron { transform: rotate(90deg); }
+
+/* Widget mapping selector (v3.2 §11.3) — native <select> in the header when >1
+   dimensions-kind entities exist. Sits before the mode pills; height matches the
+   pill groups so the header row shares a baseline. */
+.tp-mapping-select {
+  height: 32px; box-sizing: border-box; max-width: 220px;
+  border: 1px solid var(--border-softer); border-radius: var(--dash-radius-tab, 8px);
+  background: var(--surface-alt); color: var(--text-primary);
+  font-family: var(--font-sans); font-size: 12px; font-weight: 600;
+  padding: 0 8px; cursor: pointer;
+}
+.tp-mapping-select:hover { border-color: var(--border-hover); }
+.tp-mapping-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── Mapping v3 pivot widget: Break-down chips, row expansion, Unmapped row.
+   Additive to the .tp-* table above. Full-cell tints only, no stripes. ── */
+.tp-dims-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tp-dims-label { font-weight: 600; margin-right: 2px; }
+.tp-dim-chip {
+  cursor: pointer;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.tp-dim-chip:hover { border-color: var(--border-hover); color: var(--text-secondary); }
+.tp-dim-chip.on {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tp-dim-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* CM360 multi-select keeps its existing chip geometry in the shared report row. */
+.rpt-dims .tp-dim-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.15;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  min-height: 30px;
+}
+
+.tp-exp-cell {
+  padding: 0;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border-softer);
+}
+.tp-exp { display: grid; grid-template-columns: 1fr 1fr; }
+.tp-exp-col { padding: 9px 14px 11px 26px; min-width: 0; }
+.tp-exp-col + .tp-exp-col {
+  border-left: 1px solid var(--border-softer);
+  padding-left: 16px;
+}
+.tp-exp-hd {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.tp-exp-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  min-width: 0;
+}
+.tp-exp-name {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-exp-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.tp-exp-empty {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+.tp-unmapped-row td { color: var(--text-muted); }
+.tp-unmapped-row.tp-clickable { cursor: pointer; }
+.tp-unmapped-row.tp-clickable:hover .tp-td:not(.tp-delta) { background: var(--hover-bg); }
+.tp-unmapped-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tp-unmapped-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.tp-unmapped-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tp-nodata-cell {
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Mapping v3.1: scope groups (Delivery only / CM360 only — out of pacing scope).
+   Header reuses .tp-unmatched-head / .tp-chevron; count is a neutral badge (no
+   stripe). One-sided data cells dash out the absent side + the Δ column. ── */
+.tp-scope-title { flex: 0 0 auto; }
+.tp-scope-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: center;
+}
+.tp-scope-dash { color: var(--text-faint); }
+
+/* ── Mapping v3.1 follow-up: chart follows breakdown scope + row focus.
+   Overlap rows split the click targets: the caret becomes a button (expansion),
+   the row body toggles chart focus. Focused row = full-cell accent tint (both
+   selectors below out-rank the earlier .tp-row:hover rule by source order —
+   never a stripe / left border). The caret button keeps the bare-svg footprint
+   (padding grows the hit target, negative margin cancels it) so overlap and
+   one-sided rows stay perfectly column-aligned. ── */
+.tp-caret-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin: -4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.tp-caret-btn:hover .tp-caret { color: var(--text-secondary); }
+.tp-caret-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.tp-caret-btn[aria-expanded="true"] .tp-caret { transform: rotate(90deg); }
+.tp-row-focused .tp-td:not(.tp-delta),
+.tp-row-focused:hover .tp-td:not(.tp-delta) { background: var(--accent-bg); }
+.tp-row-focused .tp-li-text { color: var(--accent); }
+
+/* Scope note / focus chip directly under the chart legend. The row always
+   renders (fixed min-height) so chip ⇄ note ⇄ empty never shifts the chips row. */
+.tp-chart-note-row {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  font-family: var(--font-sans);
+}
+.tp-chart-note {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.tp-focus-chip {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  max-width: 100%;
+  min-width: 0;
+  transition: background-color 0.15s ease;
+}
+.tp-focus-chip:hover { background: var(--hover-bg); }
+.tp-focus-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tp-focus-x { font-size: 10px; line-height: 1; }
+
+/* ── v2 report tile (widget-builder v2, P2 Task 10) ──
+   Only what the widget frame does not already give: the controls row, the seam
+   between two views, and the switch-hover highlight. Everything else is reused —
+   .chart-panel* for the frame and the empty states, .wgf-per for the period
+   group, .tp-dims-* for the breakdown chips (the same control, the same chips),
+   .tp-table/.tp-row for the comparison itself. Tokens only, no stripes. */
+.rpt-ctl {
+  padding: 8px 12px 9px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rpt-ctl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* The metric switch — the segmented group FilterBar and the CM360 panel both
+   draw inline; written once here because a third inline copy is a third place to
+   change it. */
+.rpt-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  box-sizing: border-box;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--dash-radius-group, 10px);
+  background: var(--surface-alt);
+  border: 1px solid var(--border-softer);
+}
+.rpt-pill {
+  cursor: pointer;
+  padding: 3px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--dash-radius-tab, 8px);
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.rpt-pill:hover { color: var(--text-secondary); }
+.rpt-pill.on {
+  background: var(--surface);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.rpt-pill:focus-visible,
+.rpt-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Canonical Period-control buttons inside the shared compact chip group. */
+.rpt-chip {
+  cursor: pointer;
+  border: none;
+  padding: 2px 7px;
+  border-radius: var(--dash-radius-tab);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.rpt-chip.on {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 3px var(--glow);
+}
+/* The mapping picker is the panel's own <select>, and the panel sizes it against a 32px
+   inline pill group. THIS row's group is 33.25px, so the select is re-sized here rather
+   than left a pixel short of the control beside it. The number is not measured, it is the
+   group's own arithmetic: 16px of chrome (the group's 3px padding + 1px border, twice, and
+   the pill's own 3px + 1px, twice) around one line of pill text (1.5 x 11.5px). Chrome
+   forces `line-height: normal` on a <select>, so its own box cannot be derived from the
+   same inputs — an explicit height is the only way the two share a baseline, and
+   gate-dialog measures both boxes so a change to either goes red. */
+.rpt-ctl .tp-mapping-select { height: calc(16px + 1.5 * 11.5px); }
+.rpt-dims { flex: 1 1 auto; min-width: 0; }
+/* Single-dimension switches are quiet text tabs in every report and preview. The CM360
+   multi-select above remains a separate control. Source hints take one stable line below
+   the controls so the tab labels and neighbouring controls keep a common baseline. */
+.rpt-dimension {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 20px;
+}
+.rpt-dimension-label {
+  margin-right: 4px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.rpt-dim-tab {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--rxs);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.rpt-dim-tab > span { overflow: hidden; text-overflow: ellipsis; }
+/* Same-name sources must remain distinguishable on touch screens. Only these uncommon
+   qualified options may wrap: ellipsizing a shared source prefix could hide the difference. */
+.rpt-dim-tab--qualified { display: block; white-space: normal; overflow-wrap: anywhere; }
+.rpt-dim-tab--qualified > span { overflow: visible; }
+.rpt-dim-tab:hover { background: var(--hover-bg); color: var(--text-primary); }
+.rpt-dim-tab.on { background: var(--surface-tertiary); color: var(--text-primary); }
+.rpt-dim-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rpt-dim-note {
+  min-width: 0;
+  height: 16px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+.rpt-ctl .tp-dim-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.rpt-ctl .tp-dim-chip:disabled:hover { border-color: var(--border-soft); color: var(--text-muted); }
+
+/* THE SOURCE META (section-widget parity 2026-09-04): what the CM360 file covers, and how
+   much of the comparison is two-sided. It is a STATEMENT on a row of controls, so it takes
+   the opposite of every switch cue beside it — no plate, no border, no pointer, no hover.
+   The panel's own placement and its own type size (ThirdPartyPanel.jsx:62-69): 12px, muted,
+   at the right edge and ABOVE the numbers, where the reader meets «data through Jul 9»
+   before the line that dives to zero the day after rather than 500px below it.
+
+   TWO runs with a 12px gap, never one `·`-joined chain: freshness and scope are two
+   readings, and five fragments in a row read as one sentence. `margin-left: auto` right-aligns
+   the slot on a row with no breakdown chips; with chips it lands at the row's end either way,
+   because `.rpt-dims` above takes the free space. Each run wraps within its available width and
+   stays right-aligned; when the row cannot carry the pair the slot takes a line of its own — still
+   ending at the same edge, which is what `justify-content` is for: at 620 the pair is 539px
+   of text in a 538px row, so the alignment must not depend on which side of that one pixel a
+   pacing's own numbers fall. */
+.rpt-meta {
+  margin-left: auto;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 12px;
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  color: var(--text-muted);
+}
+.rpt-meta-run { white-space: normal; overflow-wrap: anywhere; text-align: right; }
+
+/* A SOURCE STILL BEING READ (section-widget parity 2026-09-04): the panel's own dashed box
+   (ThirdPartyPanel.jsx:136-145), at the height the comparison it is waiting for occupies —
+   the chart's 220, the scope-note row's 26, and a table header with about five rows at 33
+   each. The tile used to print «Loading…» in a 120px box and then jump 400px when the numbers
+   landed, shoving everything under it down the page. It carries no text: there is nothing to
+   read yet, and a box that says so is quieter than a word that does. */
+.rpt-compare-skel {
+  min-height: 444px;
+  margin: 4px 12px 10px;
+  border-radius: var(--rm);
+  border: 1px dashed var(--border-soft);
+  background: var(--surface-alt);
+}
+
+/* THE FIXED-WINDOW NOTE (section view rows §4): this widget reads its own window and no
+   control on it can move one. It sits where a period control would sit and must not read
+   as one, so it takes the opposite of every switch cue in this row — no pointer, no hover
+   transition, no `.on` state, no accent, and the plate is the alternate SURFACE rather
+   than the lit `--surface` a selected chip wears. The word «Window» inside it is what
+   turns a plate into a statement; the range alone would be a chip that stopped working.
+   Tokens in both themes, no stripe. */
+.rpt-win {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--rp);
+  background: var(--surface-alt);
+  border: 1px solid var(--border-softer);
+  cursor: default;
+  user-select: none;
+}
+.rpt-win-l {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.rpt-win-v {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* One view per slot, a hairline between two of them (the mockup's .pv-block). */
+.rpt-slot + .rpt-slot { border-top: 1px solid var(--border-soft); }
+
+/* ── A SHARED ROW (section view rows §2) ──────────────────────────────────────
+   Views the author marked `besideNext` are drawn on one flex line inside the slot they
+   share, so the hairline above still separates BANDS and never two halves of one.
+
+   No divider between the cells, and that is not an oversight: a vertical rule between two
+   views is exactly the left/right rail this project bans, and the gap says the same thing.
+
+   It WRAPS, and the wrap is the narrow-width answer §2 asks for: under the width a row can
+   breathe in, the `grow` cell drops to the next line and the pair reads as today's stack.
+   That is why the grow basis is a real number rather than 0 — a zero basis never wraps, it
+   just squeezes a table into an ellipsis beside a donut. */
+.rpt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 12px;
+}
+/* A pie or a KPI at its own size. It may still shrink if it is alone on a line narrower
+   than it wants; it never stretches to fill one. */
+.rpt-cell--fit { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+/* A chart, a table, a comparison or a Layout across what is left. `min-width: 0` is what
+   lets it shrink at all inside a flex line, and the scroller is its own: a wide table
+   scrolls in place rather than making the whole tile scroll sideways. */
+.rpt-cell--grow { flex: 1 1 320px; min-width: 0; overflow-x: auto; }
+/* A table with the same cut and share reading serves as the adjacent pie's legend. */
+.rpt-pair-row { flex: 1 1 520px; min-width: 0; max-width: 100%; }
+.rpt-pair-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; padding: 8px 16px 10px; }
+.rpt-pair-body > [data-pie-table="pie"] { flex: 0 0 180px; min-width: 0; max-width: 100%; }
+.rpt-pair-body > [data-pie-table="table"] { flex: 1 1 320px; min-width: 0; overflow-x: auto; }
+.rpt-row-marker { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.rpt-find.rpt-pair-search { padding-right: 16px; }
+.rpt-ctl-search { margin-left: auto; flex: 0 1 160px; max-width: 100%; }
+.rpt-view-title {
+  padding: 10px 12px 0;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ── A KPI cell at BAND density (§5.3, section-widget parity 2026-09-04) ──────
+   The legacy Targets strip's own line: the label in FRONT of the number rather than over it,
+   then the verdict and what it is measured against, all on one baseline. Three stacked rows
+   per cell became one, which is what turns a panel back into a glance strip.
+
+   It WRAPS, like the row it sits in: under the width one cell needs, the parts of that cell
+   stack instead of clipping. No rule between two cells — the row's own 12px gap says it, and
+   a vertical rail between two boxes is banned across this product. */
+.rpt-kpi-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 10px 12px;
+}
+.rpt-kpi-bl {
+  font-size: var(--text-11);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.rpt-kpi-bv {
+  font-family: var(--font-mono);
+  font-size: var(--text-15);
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+/* The verdict and its «vs» are ONE flex item, so the pair wraps together rather than leaving
+   a delta on one line and what it is measured against on the next. */
+.rpt-kpi-bd {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* In the band the «vs» is a sibling on the same line, so its gap is the pair's own rather
+   than the stacked cell's left margin. Inside `.rpt-kpi-bd` it inherits the mono face; the
+   «no target» sentence that takes its place is a sentence and stays in the sans. */
+.rpt-kpi-vs { color: var(--text-muted); }
+.rpt-kpi-tail { padding: 0 12px 10px; }
+/* A sentence in place of a view: a missing dimension source, a comparison that is
+   not one yet. The height keeps a stack from jumping as one view swaps states. */
+.rpt-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 18px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* …and the same sentence where the box it replaces is one line tall: a Targets band whose
+   filter left no line items is 44px of strip, and a 120px empty panel in its place would be
+   louder than the widget ever is. */
+.rpt-state--line { min-height: 0; padding: 12px; }
+.rpt-note {
+  padding: 6px 12px 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+/* Inside the controls row the 12px gutter is already the row's own, so a note there
+   takes only its top gap — otherwise it hangs 24px in from an edge nothing else does. */
+.rpt-ctl .rpt-note { padding: 6px 0 0; }
+.rpt-compare { padding: 4px 12px 10px; }
+
+/* The table header's resting colour. It is a CLASS and not the inline style it
+   used to be: an inline colour outranks every class, so the switch-hover accent
+   below could never land on the columns it is about. */
+.rpt-th { color: var(--text-muted); }
+
+/* ── the table body's two tints (section-widget parity, 2026-09-04) ──────────
+   The weekend tint used to ride an inline `background` on every cell, and an inline
+   style outranks every rule — which is why a thirteen-column table had no hover
+   response at all. Both are classes now, and the hover wins on SPECIFICITY, not on
+   order: `:hover` counts as a class, so the hover rule carries three where the weekend
+   rule carries two. A weekend row simply keeps the tint it has. */
+.rpt-view tbody tr.rpt-tr--we td { background: var(--hover-bg); }
+.rpt-view tbody tr.rpt-tr:hover td { background: var(--hover-bg); }
+
+/* ── the Breakdown table's own four marks (section-widget parity, 2026-09-04) ──
+   A row that FILTERS the dashboard when it is clicked, and the same row while its filter
+   is on: the accent tint plus a full ring, never a left bar. The ring is an `outline`, so
+   it draws outside the cells and adds no width to a row that would push the table. */
+.rpt-view tbody tr.rpt-tr--pick { cursor: pointer; }
+.rpt-view tbody tr.rpt-tr--pick.is-on td { background: var(--accent-bg); }
+.rpt-view tbody tr.rpt-tr--pick.is-on { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* The untagged remainder: delivery this dimension did not tag. It is not a segment anybody
+   chose, so it reads quieter than the values above it and takes no pointer.
+   OPACITY, which is the legacy Breakdown panel's own device for its leftover rows
+   (Breakdown.jsx:975) — and the only one that works here: every cell in this table carries an
+   inline `color`, and an inline style outranks any class, so a colour rule would land on
+   nothing. It fades the whole row, marks included. */
+.rpt-view tbody tr.rpt-tr--rest { opacity: 0.6; }
+/* A row's share of the view, beside its name. */
+.rpt-share { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* …and what the Totals row is a total OF, said only while the segment box narrows the body
+   under it: quieter than the word it follows, because it qualifies that word rather than
+   competing with it. */
+.rpt-tot-all { color: var(--text-muted); font-weight: 500; }
+/* The viewer's segment box, above the rows and to the right, where the legacy panel puts it. */
+.rpt-find { display: flex; justify-content: flex-end; padding: 8px 12px 0; }
+.rpt-find-in {
+  width: 160px;
+  padding: 4px 10px;
+  border-radius: var(--rs);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--font-sans);
+}
+.rpt-find-in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The rows' box. Its cap is the tile's height step, which ReportTable hands over as a variable;
+   the stretch chain near the top of this file lifts it in a tile its row stretches. */
+.rpt-scroll { max-height: var(--rpt-rows-max); }
+/* «Show all (N)» / «Collapse to N», centred under the table — the legacy panel's own. */
+.rpt-more { padding: 8px 12px 10px; text-align: center; }
+.rpt-more-btn {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.rpt-more-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.rpt-more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The second label column on a date × line row: the line's name over «LI <id> · Channel»,
+   which is the legacy Daily Performance section's own «LI / Channel» cell. */
+.rpt-sub { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; min-width: 0; }
+.rpt-sub-nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The cell is capped at 320px like every label cell, and `text-overflow` on the cell cannot
+   reach text nested two boxes down — without these a long line name is cut mid-glyph with no
+   «…» to say so. The chip keeps its width; the NAME is what gives way. */
+.rpt-sub-nm > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rpt-sub-id { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+/* …and the chip a line that is paused right now wears beside its name. */
+.rpt-chip {
+  font-family: var(--font-barlow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  background: var(--surface-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--rp);
+  white-space: nowrap;
+}
+/* The «primary» chip on a Conversion Action row is a label, not a control: it takes back the
+   pointer the Period-control chip rule sets on every `.rpt-chip`. */
+.rpt-chip.rpt-chip-static { cursor: default; }
+/* …and the share beside the name inside that flex row, where the text space is not drawn: 6px
+   here plus the row's 6px gap matches the inline rows' space plus `ml-2`. */
+.rpt-sub-nm > .rpt-share { margin-left: 6px; }
+/* A paired table's slice marker, when it leads that flex row: it keeps its 8px (the first-child
+   rule above would let it shrink), 1px plus the 6px gap is its usual 7px, and the name after it
+   takes the ellipsis the first-child rule gives a name that leads. */
+.rpt-sub-nm > .rpt-row-marker { flex: none; margin-right: 1px; }
+.rpt-sub-nm > .rpt-row-marker + span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* A totals cell that carries a plan: fact on top, target under it, both flush to the right
+   edge so they line up under the right-aligned column name. Not italic, not coloured — it is
+   a second number, not a verdict. */
+.rpt-tot-stack { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+.rpt-tot-tgt { font-weight: 400; font-family: var(--font-mono); color: var(--text-faint); margin-top: 2px; }
+
+/* The footnote character a dimension row wears when its declared plan covers only PART of
+   the delivery standing beside it (plan metrics on dim rows, 2026-09-12). Amber and
+   `cursor: help` are lifted from `.wgt-colerr` — this product's existing "this number carries
+   a caveat" mark — so a reader who has seen one has seen both.
+
+   Why a class reaches it when a class cannot reach the cell: the td's own `color` is INLINE
+   and lands on this span only by INHERITANCE, and a rule on the element beats a value it
+   merely inherits. The same door `.rpt-tr--rest`'s comment says is shut for the cell itself.
+
+   The box is reserved on every cell of the marked column, empty ones included. Without it a
+   marked number would sit one glyph left of an unmarked one and the column would stop lining
+   up — a worse defect than the one being reported. `inline-block` with a fixed width and no
+   vertical-align change, so the 12px line box never grows and no row gets taller.
+
+   No fill, no border, no rail: one character, and a line under the table that decodes it. */
+.rpt-plan-mark {
+  display: inline-block;
+  /* One monospace advance at the cell's own size, which is exactly what a digit occupies —
+     so the reserved gutter is the width of the glyph and the gap in front of it stays the
+     ordinary space between two characters. A fixed pixel box left the star floating. */
+  width: 0.6em;
+  margin-left: 2px;
+  text-align: right;
+  color: var(--status-amber);
+  font-family: inherit;
+  font-weight: 700;
+}
+.rpt-plan-mark:not(:empty) { cursor: help; }
+
+/* Switch hover (§6, the blind-study condition): the class rides the widget root,
+   the views that will NOT move dim, and inside the ones that will, the exact
+   elements that follow the switch take the accent. A KPI and a pie are one
+   element each — their slot IS the element, so they need no marker of their own.
+
+   Written as «dim the ones marked 0» rather than «dim everything, then undo it for the
+   ones marked 1»: inside a shared row the box that carries the marker is a CELL, and two
+   nested opacities MULTIPLY — a 0.45 row holding a 1.0 cell still draws the cell at 0.45.
+   One rule per box that is really a view, and nothing nests. */
+.rpt-slot, .rpt-cell, .rpt-composition-view, .rpt-composition-atom { transition: opacity 0.16s ease; }
+.rpt--hl .rpt-slot[data-sw="0"],
+.rpt--hl .rpt-cell[data-sw="0"],
+.rpt--hl .rpt-composition-view[data-sw="0"],
+.rpt--hl .rpt-composition-atom[data-sw="0"] { opacity: 0.45; }
+/* Colour, never weight: a bolder face re-measures every cell that follows the
+   switch, so the table columns shift under the pointer while the reader is
+   comparing them against it. The accent is the signal on its own. */
+.rpt--hl .rpt-sw { color: var(--accent); }
+/* …except inside a chart legend, where the entry is ALREADY drawn in its series'
+   own colour: one hue becoming another is a change a reader cannot be sure they
+   saw. The underline is the second cue (§10.3), and it is horizontal — the rail
+   ban is about vertical accents. It sits under the text alone, never under the
+   swatch, because it rides the formatter's own span. */
+.rpt--hl .rpt-sw-leg { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Block library (spec §7, flat — owner amendment 2026-07-17; RE-AMENDED
+   2026-07-17: compact — hero radio CARDS replaced by a pill row + one caption
+   line, Charts CheckGrid moved in as a third sub-row of the same Blocks
+   section) */
+.blib-group-t { font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+  color: var(--text-faint); margin: 14px 0 8px; }
+.blib-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.blib-pill {
+  border: 1px solid var(--border-soft); border-radius: var(--rp); background: var(--surface);
+  padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+}
+.blib-pill:hover { border-color: var(--border-hover); }
+.blib-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.blib-pill--on {
+  border-color: var(--status-blue-bold); background: var(--status-blue-dim); color: var(--status-blue);
+}
+.blib-hint { font-size: 11px; color: var(--text-faint); margin-top: 10px; }
+
+/* Static schematic thumbnails (widget-library spec 2026-08-14 §6) — a sketch of
+   each block's shape, never a live mount. bar/line ride currentColor so the
+   sketch keeps the same weight against the light and the dark surface; only the
+   accent is a fixed hue, and it is a fill, never a side rail. */
+.blib-th {
+  display: block; width: 100%; height: 54px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border-softer);
+  color: var(--text-muted);
+}
+.blib-th-bar { fill: currentColor; opacity: .55; }
+.blib-th-line { fill: currentColor; opacity: .3; }
+.blib-th-accent { fill: var(--status-blue); opacity: .45; }
+.blib-th-series {
+  fill: none; stroke: var(--status-blue); stroke-width: 2.5; opacity: .65;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Unified per-pacing gallery cards (widget-library spec 2026-08-14 §6.1) */
+.blib-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 10px;
+}
+.blib-card {
+  border: 1px solid var(--border-soft); border-radius: var(--rm);
+  background: var(--surface); overflow: hidden;
+  display: flex; flex-direction: column; min-width: 0;
+}
+.blib-card-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.blib-card-desc { font-size: 11px; font-weight: 400; color: var(--text-muted); line-height: 1.4; }
+/* Off = a quiet card, not a marked one: tint, dimmed preview, muted name — the
+   switch says the rest. ONE rule for both grids (schematic block cards and live
+   widget cards, .wgal-card--off), so "switched off" cannot come to look like two
+   different states in the same gallery. */
+.blib-card--off, .wgal-card--off { background: var(--surface-alt); }
+.blib-card--off .blib-th, .wgal-card--off .wgal-prev { opacity: .45; }
+.blib-card--off .blib-card-name, .wgal-card--off .wgal-title { color: var(--text-muted); }
+.blib-card-b { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.blib-card-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.blib-card-row .blib-card-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.blib-card-opt {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-muted); cursor: pointer;
+  border-top: 1px solid var(--border-softer); padding-top: 6px;
+}
+/* Same box as every other checkbox in the drawer (.sp-chk input). */
+.blib-card-opt input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.blib-sw {
+  position: relative; flex: none; width: 34px; height: 19px; padding: 0;
+  border: 1px solid var(--border-soft); border-radius: var(--rp);
+  background: var(--surface-tertiary); cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+/* The 34×19 pill is the VISUAL; this invisible overlay is the target, so the
+   control clears the 24px minimum without growing the card row (it is absolutely
+   positioned, and 2px of horizontal bleed stays inside the row's 8px gaps). */
+.blib-sw::before { content: ''; position: absolute; inset: -4px -2px; }
+.blib-sw::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: var(--text-muted);
+  transition: transform .12s ease, background .12s ease;
+}
+/* The knob is the state indicator, so it is held to the 3:1 non-text contrast bar
+   against the track in BOTH themes: --text-muted clears it (4.3:1 light / 4.1:1
+   dark on --surface-tertiary), --text-faint does not (2.8 / 2.6). */
+.blib-sw[aria-checked="true"] { background: var(--status-blue-dim); border-color: var(--status-blue-bold); }
+.blib-sw[aria-checked="true"]::after { transform: translateX(15px); background: var(--status-blue); }
+.blib-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.blib-sw:disabled { opacity: .5; cursor: default; }
+
+/* ── v2 builder shells: the anchored popover and the Spotlight ────────────────
+   widget-builder v2 §3/§4, mockup 2026-08-19. The mockup is the LAYOUT contract,
+   not a stylesheet: its .pop / .palette classes do not exist here, and every value
+   below is one of the drawer's own tokens. Both surfaces are portals on <body>
+   with position: fixed — the drawer body and the widget tiles are overflow-hidden
+   scrollers that would slice an in-flow panel at the nearest edge.
+   z-index: the drawer sits at 100 and its overlay at 99; a popover joins the other
+   portalled popups at 120 (.wgm-panel, MultiSelect), and the Spotlight goes above
+   both because opening it replaces whatever popover was open. */
+.sp-pop {
+  --sp-ctl-h: var(--sp-edit-control-h);
+  --sp-ctl-h-sm: var(--sp-edit-control-h);
+  position: fixed;
+  z-index: 120;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rm);
+  box-shadow: var(--shadow-pop);
+  padding: 12px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sp-pop-hd {
+  margin-bottom: 10px;
+  font-family: var(--font-barlow);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* One label column and one control column across every settings panel. */
+.sp-pop-row {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 6px 12px;
+  min-height: var(--sp-edit-control-h); margin-bottom: 10px;
+}
+.sp-pop-lbl { min-width: 0; font-size: 12px; color: var(--text-secondary); }
+/* `flex: 1 1 0`, not `auto`: a wrapping flex line is broken on each item's HYPOTHETICAL
+   size, before any shrinking — so a control column whose basis is its CONTENT (a select is
+   as wide as its longest option, and the Value select holds the whole catalog) drops onto
+   a line of its own, and the row stops sharing a baseline with the nine under it. */
+.sp-pop-ctl { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* A row whose control is wider than the 84px-label grid leaves for it: the label goes above
+   and the control takes the whole width. The formula field is the case it exists for — a
+   240px metric picker plus the «ƒx» button beside it does not fit ~270px, and wrapped the
+   button onto a line of its own inside a 400px popover. */
+.sp-pop-row--stack { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 4px; }
+.sp-pop-row--stack > .sp-pop-ctl > .wgf-field { flex: 1 1 100%; min-width: 0; }
+/* The field's own rows carry a bottom margin for a card; inside a popover row the grid gap
+   already spaces them, and the extra 8px read as a broken rhythm against the rows above. */
+.sp-pop-row--stack .wgf-row:last-child { margin-bottom: 0; }
+/* …and inside one, it stretches: the simple picker and the advanced input sit in adjacent
+   rows of the same dialog, and a fixed 240px next to a full-width input gives the two rows
+   different right edges. */
+.sp-pop-row--stack .wgf-pick { width: auto; flex: 1 1 0; min-width: 0; }
+.sp-pop-why { grid-column: 1 / -1; font-size: 11px; color: var(--text-muted); }
+/* Inputs, selects and their adjacent formula actions share the editor control tier. */
+.sp-pop-sel, .sp-pop-inp { flex: 1 1 0; min-width: 0; max-width: 100%; height: var(--sp-edit-control-h); font-size: 12px; }
+/* The formula door beside the Value select. Square, so it sits on the select's own height
+   and the pair reads as one control with an escape hatch — which is why it moved onto the
+   hit tier with the select rather than staying 22 behind an overlay (§10.3 block below). */
+.sp-pop-fx {
+  flex: none; width: var(--sp-edit-control-h); height: var(--sp-edit-control-h);
+  border: 1px solid var(--border-soft); border-radius: var(--rxs);
+  background: var(--surface); color: var(--text-secondary);
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+}
+.sp-pop-fx:hover { border-color: var(--accent); color: var(--accent); }
+/* The palette. Round chips in a row, never a strip of colour: the chosen one carries a
+   check mark, so the choice is not made by colour alone. */
+/* 6px, not 4: the ::after below makes each 18px chip a 24px target, and the pitch has to
+   be 24 too or two chips claim the same ground and the later sibling wins it. §10.3 asks
+   for 24 AND for no overlap, and 18 + 6 is the pitch that buys both exactly. */
+.sp-pop-dots { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-pop-dot {
+  position: relative;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border-softer); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; line-height: 1; color: #fff; padding: 0;
+}
+/* A 24×24 hit area on an 18px chip (§10.3). -4 and not -3: the inset is counted from the
+   PADDING box, so the chip's own 1px border is inside it — see the §10.3 block below. No
+   `border-radius`: the overlay is invisible, so it has no shape to keep, and a square
+   hands the reader the chip's corners as well as its sides. */
+.sp-pop-dot::after { content: ''; position: absolute; inset: -4px; }
+.sp-pop-dot--auto { background: var(--surface-tertiary); color: var(--text-muted); font-weight: 700; }
+.sp-pop-dot--on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-pop-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* On the hit tier on its own (§10.3) rather than through a pseudo-element: it stands alone
+   on its line, so growing it moves nothing beside it. */
+.sp-pop-more {
+  display: flex; align-items: center; min-height: var(--sp-edit-control-h); width: 100%;
+  margin: 10px 0; padding: 8px 0 0;
+  border: 0; border-top: 1px solid var(--border-soft); border-radius: 0;
+  background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer;
+}
+.sp-pop-more:hover { border-color: var(--border-hover); color: var(--text-secondary); }
+/* The value a guide is set to, as a button back into the map that set it. */
+.sp-pop-set {
+  flex: 1 1 auto; min-width: 0; height: var(--sp-edit-control-h); padding: 0 8px;
+  border: 1px dashed var(--border-hover); border-radius: var(--rxs);
+  background: transparent; color: var(--text-secondary); font-size: 12px;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+.sp-pop-set:hover { border-color: var(--accent); color: var(--accent); }
+.sp-pop .sp-seg { min-height: var(--sp-edit-control-h); max-width: 100%; flex-wrap: wrap; }
+.sp-pop .sp-seg-b { min-height: calc(var(--sp-edit-control-h) - 6px); font-size: 12px; }
+.sp-pop .sp-seg-b::after { inset: 0; }
+.sp-pop .sp-rb-btn { width: auto; height: var(--sp-edit-control-h); min-width: var(--sp-edit-control-h); }
+.sp-switch-action { min-width: 0; max-width: 100%; }
+.sp-pop > .sp-switch-action { display: block; margin: -4px 0 10px 96px; }
+.sp-pop-ctl > .sp-switch-action { flex: 1 1 100%; }
+.sp-switch-action > .sp-pop-set { max-width: 100%; height: auto; min-height: var(--sp-hit); padding: 2px 0; border: 0; font-size: 11px; color: var(--text-muted); }
+.sp-switch-action > .sp-pop-note { display: block; margin: 4px 0 0; }
+/* The LABEL is the hit target — a 13px native box is not one, and a click on the words
+   toggles it — so the label is what carries §10.3's 24px. */
+.sp-pop-ck { display: inline-flex; align-items: center; min-height: var(--sp-hit); gap: 4px; font-size: 10.5px; color: var(--text-muted); }
+.sp-pop-rm {
+  width: 100%; margin-top: 4px; height: var(--sp-hit);
+  border: 1px solid var(--border-soft); border-radius: var(--rxs);
+  background: var(--surface); color: var(--status-red); font-size: 11px; cursor: pointer;
+}
+.sp-pop-rm:hover { border-color: var(--status-red); background: var(--hover-bg); }
+/* The same footer button when the action is a CONVERSION rather than a removal (the Period
+   switch's «make this the fixed window instead»). Same box, so the two stack as one footer
+   and neither stands proud of the other; the accent instead of the red, because nothing is
+   being destroyed — the setting moves one row up, onto the Data period. */
+.sp-pop-rm--go { color: var(--text-secondary); }
+.sp-pop-rm--go:hover { border-color: var(--accent); color: var(--accent); }
+.sp-pop-note { margin-top: 7px; font-size: 10px; color: var(--text-faint); }
+/* What the grammar already refuses about the thing this panel is open on (T9's control
+   panels). Above the rows, because it is about the whole control and not about one of its
+   settings; red TEXT and no rail — the project's ban, and a tint here would compete with
+   the row tints one screen over. */
+.sp-pop-bad { margin: -2px 0 8px; font-size: 10.5px; line-height: 1.35; color: var(--status-red); }
+
+/* ── a panel row that holds a LIST (T9: the two switches) ─────────────────────
+   A switch's options are a set, not one choice, so the control is a scrolling column of
+   checkboxes rather than a select. It sits inside .sp-pop-ctl, so it takes the same column
+   the selects take and the row keeps its shared 58px label. */
+/* A row holding a LIST is the one row whose label may not be centred: measured, «Options»
+   floated in the middle of a 210px column and read as a caption for the metric it happened
+   to sit beside. It rides at the top of the control it names. */
+.sp-pop-row:has(> .sp-pop-ctl > .sp-pop-list) { align-items: flex-start; }
+.sp-pop-row:has(> .sp-pop-ctl > .sp-pop-list) > .sp-pop-lbl { padding-top: 4px; }
+.sp-pop-list {
+  flex: 1 1 100%; min-width: 0;
+  max-height: 210px; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border-soft); border-radius: var(--rxs);
+  background: var(--surface); padding: 4px 6px;
+}
+/* Six ranges need no scroll and no group headings. */
+.sp-pop-list--flat { max-height: none; }
+.sp-pop-list--selected .sp-pop-list-r {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 24px;
+  align-items: center;
+}
+.sp-pop-list-g + .sp-pop-list-g { margin-top: 6px; }
+.sp-pop-list-gt {
+  font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text-faint); padding: 3px 0 2px;
+}
+.sp-pop-list-r { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 1px 0; }
+.sp-pop-list-l { flex: 1 1 auto; min-width: 0; }
+.sp-pop-list-nm {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary);
+}
+/* «starts here» — the one option the switch opens on. Quiet, because it rides beside the
+   checkbox that answers the louder question. */
+.sp-pop-list-d { flex: none; color: var(--text-faint); }
+.sp-pop-list-why { flex: 1 1 100%; font-size: 10px; color: var(--text-faint); padding-left: 19px; }
+.sp-pop-list-r:has(input:disabled) .sp-pop-list-nm { color: var(--text-muted); }
+
+/* A segmented choice — the builder's one-of-N control, in a popover row or on a card's
+   chip row. `.sp-seg` and not `.sp-pop-seg`: the shape is the same in both places, and two
+   stylesheets for one control is how two of them start to differ. Not a colour-only state:
+   the chosen segment carries the accent tint AND its own border. */
+.sp-seg {
+  display: inline-flex; padding: 2px; gap: 2px;
+  border: 1px solid var(--border-softer); border-radius: var(--rs);
+  background: var(--page-bg);
+}
+.sp-seg-b {
+  min-height: 18px; padding: 2px 8px; border: 1px solid transparent; border-radius: var(--rxs);
+  background: transparent; color: var(--text-muted); font-size: 10.5px; line-height: 1.3;
+  cursor: pointer; white-space: nowrap;
+}
+.sp-seg-b:hover:not([aria-disabled="true"]) { color: var(--text-primary); }
+.sp-seg-b--on {
+  background: var(--surface); border-color: var(--border-soft);
+  color: var(--text-primary); font-weight: 600;
+}
+.sp-seg-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Two-line segment (Data period's Window): the always-legal answer spans its own line and
+   the short choices share the next as equals. Layout only — one radiogroup, one Tab stop. */
+.sp-seg--stack { display: flex; flex-wrap: wrap; }
+.sp-seg--stack .sp-seg-b { flex: 1; text-align: center; }
+.sp-seg--stack .sp-seg-b:first-child { flex: 1 1 100%; }
+
+.sp-spot-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: var(--scrim-modal);
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: 7vh 16px 16px;
+}
+.sp-spot {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 80vh;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.sp-spot-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-softer);
+}
+/* Where focus is, said the way every other input in this app says it: a border
+   colour, not a ring (.sp-inp:focus). The search field itself is borderless, so the
+   line under the bar it sits in carries it — a 2px accent ring would be on screen
+   the whole time the Spotlight is open, since a text input matches :focus-visible
+   however it was focused, and this one is focused on open. */
+.sp-spot-top:focus-within { border-bottom-color: var(--border-hover); }
+.sp-spot-icon { color: var(--text-faint); font-size: 15px; }
+.sp-spot-search {
+  flex: 1;
+  min-width: 0;
+  height: var(--sp-ctl-h);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+}
+.sp-spot-search::placeholder { color: var(--text-muted); }
+.sp-spot-ctx {
+  flex: none;
+  padding: 3px 9px;
+  border-radius: var(--rp);
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.sp-spot-body { overflow-y: auto; padding: 2px 10px 12px; }
+/* auto-fill, so the map reflows 3 → 2 → 1 by its OWN width: the same shell serves
+   the 736px drawer and a 360px phone with no breakpoint of its own. */
+.sp-spot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 1px 12px;
+}
+/* Plain muted text. Not a rail, not a bar, no left accent (project ban). */
+.sp-spot-g {
+  grid-column: 1 / -1;
+  margin: 10px 6px 2px;
+  font-family: var(--font-barlow);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sp-spot-it {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: var(--rs);
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+/* The active row is a full-cell tint — the keyboard's position and the pointer's
+   hover are the same state, so they look the same. */
+.sp-spot-it:hover, .sp-spot-it--on { background: var(--accent-bg); }
+/* Unavailable = quiet, NOT unreadable. The mockup dims the whole row to .55; here
+   the row goes muted instead, because the reason IS the row's point (§1.1.3) and
+   .55 over --text-muted lands near 3:1 — a reason nobody can read is not a visible
+   reason. The distinction is not colour alone either: no hover tint, no pointer,
+   and aria-disabled carries the same fact to AT. */
+.sp-spot-it--off { cursor: default; }
+.sp-spot-it--off .sp-spot-lbl { color: var(--text-muted); }
+/* The glyph badge is decorative, so it CAN carry the dimming the text cannot. */
+.sp-spot-it--off .sp-spot-fam { opacity: .55; }
+.sp-spot-it--off:hover { background: transparent; }
+/* …and the reason WRAPS, where every other note in this map is clipped to one line
+   (P3 Task 14, from the picture). A note beside an available metric is a tip and loses
+   nothing to an ellipsis; the note on a REFUSED row is the whole reason it is refused,
+   and «A target carries the unit family of …» tells a reader nothing at all. There is no
+   tooltip behind it either, so clipped meant gone. It out-specifies the one-line rule
+   below (0,2,0 against 0,1,0), and it is the same exception `.sp-spot-fx .sp-spot-rs`
+   already takes further down this file. */
+.sp-spot-it--off .sp-spot-rs { white-space: normal; overflow: visible; }
+.sp-spot-nm { flex: 1; min-width: 0; }
+.sp-spot-lbl, .sp-spot-rs {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-spot-rs { font-size: 10px; color: var(--text-muted); }
+.sp-spot-fam {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--rxs);
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.sp-spot-chips { flex: none; display: flex; gap: 4px; }
+.sp-spot-chip {
+  padding: 2px 5px;
+  border-radius: var(--rxs);
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .04em;
+}
+/* A source the metric HAS and this pacing cannot serve — CM on a pacing with no CM360.
+   Shown, never dropped: the pill is how a reader learns the metric has that side at all
+   (§1.1.3). Quiet by TOKEN, not by opacity — the same rule .sp-spot-it--off follows, and
+   for the same reason: .55 over --text-muted lands near 3:1 and a pill nobody can read is
+   not a visible pill. The fill goes, so it reads as an outline of the one beside it — drawn
+   with an INSET shadow and not a border, which would make this pill 2px taller than the BQ
+   pill it sits next to and break the row the two of them share. */
+.sp-spot-chip--off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+  color: var(--text-muted);
+}
+.sp-spot-more {
+  grid-column: 1 / -1;
+  width: calc(100% - 12px);
+  min-height: 24px;
+  margin: 0 6px 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--rs);
+  background: none;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.sp-spot-more:hover { background: var(--hover-bg); color: var(--text-secondary); }
+.sp-spot-empty { padding: 22px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.sp-spot-step { padding: 14px 6px 6px; }
+.sp-spot-q { margin-bottom: 12px; font-size: 13px; color: var(--text-primary); }
+.sp-spot-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-spot-opt {
+  padding: 7px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rs);
+  background: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sp-spot-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-bg); }
+/* An answer this caller cannot honour — «Both sources» with room for one series. It is
+   SHOWN, dimmed, with the reason under it (§1.1.3), because a reader who has read about
+   the option must find out why, not look for it. */
+.sp-spot-opt--off {
+  flex-direction: column; align-items: flex-start; gap: 2px;
+  display: inline-flex; opacity: .55; cursor: default; color: var(--text-muted);
+}
+.sp-spot-opt-rs { font-size: 10.5px; color: var(--text-faint); }
+.sp-spot-back { margin-top: 14px; font-size: 11px; color: var(--text-muted); }
+/* The escape hatch: full width, dashed, and last — visually apart from the map
+   without becoming a second front door (§1.1.6). Dashed all round, never a rail. */
+.sp-spot-fx {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 12px);
+  margin: 12px 6px 2px;
+  padding: 9px 11px;
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--rm);
+  background: var(--accent-bg);
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sp-spot-fx:hover { border-color: var(--accent); }
+/* The map's cells truncate because they are 215px wide; this tile is the full
+   width of the panel, so its note wraps rather than losing its second half at 360. */
+.sp-spot-fx .sp-spot-rs { white-space: normal; overflow: visible; }
+.sp-spot-fx--open { display: block; cursor: default; }
+.sp-spot-fx--open:hover { border-color: var(--border-hover); }
+.sp-spot-fx-hd {
+  margin-bottom: 8px;
+  font-family: var(--font-barlow);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sp-spot-fx-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.sp-spot-fx-lbl { flex: none; font-size: 10px; color: var(--text-muted); }
+.sp-spot-fx-sel { flex: 0 1 140px; width: auto; }
+.sp-spot-fx-add { margin-left: auto; padding: 5px 14px; }
+
+/* ── The report builder (widget-builder v2 §3, mockup 2026-08-19) ─────────────
+   The window a v2 report is authored in, inside the drawer, where the legacy
+   .wgf-editor sits for every other kind — so the head, the section rhythm, the
+   dashed add button and the preview box ARE those classes (.wgf-ed-head,
+   .wgf-back, .wgf-kind, .wgf-add, .sp-sect, .sp-inp, .blib-pill). Only what has
+   no primitive yet is declared here, and every value is a drawer token.
+
+   The mockup is the LAYOUT contract, not a stylesheet: its .chip / .view / .el-row
+   classes do not exist in this app, and nothing below is a colour it named.
+
+   Depth is drawn by surface and inset, never by a rail — the project's hard ban.
+   A view card carries a full 1px border and an alternate tone, like .cmp-ed-row
+   one screen over; no element in this block has a coloured left edge. */
+
+/* The head. The title grows; the badge, the profile pair and the delete sit at
+   their natural width, and .wgf-ed-head centres the row so the 26px input, the
+   22px pills and the small badge share ONE baseline. */
+/* `1 1 140px`, not `1 1 auto`: with a content basis and `min-width: 0` the field is the
+   only item on the row that can give ground, and at 360 it did — measured, 16px of
+   clientWidth between the Back button and the badge, with the row 2px over the drawer.
+   A basis plus a floor makes the ROW wrap instead (below), which is what §10.2 asks for. */
+.sp-rb-title { flex: 1 1 140px; min-width: 120px; font-weight: 600; }
+/* Scoped to this window: `.wgf-ed-head` is shared by Builder surfaces. */
+.sp-rb .wgf-ed-head { flex-wrap: wrap; }
+.sp-rb-prof { display: inline-flex; gap: 4px; flex: none; }
+/* A sentence that is READ but not seen — `Seg`'s FLOOR for a caller that refuses an option
+   and hands no `describedBy` (rows.jsx). Clipped rather than `display: none`: a hidden node
+   is hidden from assistive technology too, and this one exists only to be announced. It is
+   a floor and never the plan — every refusal this window actually prints is visible, the
+   Card pill's included (`.sp-rb-why` in the head). */
+.sp-rb-sr {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+/* The variant-picker pill at the drawer's small control tier: .blib-pill is sized
+   for a shelf row, and at 12px/5px it would stand 4px proud of the input beside it. */
+.sp-rb-prof-b {
+  height: var(--sp-ctl-h-sm); padding: 0 10px; font-size: 11px;
+  display: inline-flex; align-items: center;
+}
+/* Refused, and still a Tab stop: `aria-disabled` rather than `disabled`, because the
+   sentence that refuses it is only reachable by a reader who can land on it (§10.3). */
+.sp-rb-prof-b[aria-disabled="true"] { opacity: .45; cursor: default; }
+.sp-rb-prof-b[aria-disabled="true"]:hover { border-color: var(--border-soft); }
+
+/* THE BANNER ROW (§9): one line under the head that says which of the ten draft
+   states this draft is in and what to do next. A full-width tinted row with a
+   leading glyph and a FULL border — the shape .cmp-ed-bad uses one screen over for
+   the same job — and never a left rail, which this project bans outright. It wraps,
+   so a long sentence keeps its Undo beside it instead of pushing the row wide. */
+.sp-rb-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 0 0 12px; padding: 6px 10px;
+  border: 1px solid var(--border-softer); border-radius: var(--rs);
+  background: var(--surface-alt); color: var(--text-secondary);
+  font-size: 11.5px; line-height: 1.45;
+}
+.sp-rb-banner-i { flex: none; font-size: 11px; line-height: 1; }
+.sp-rb-banner-t { min-width: 0; overflow-wrap: anywhere; }
+.sp-rb-banner-sep { flex: none; color: var(--text-faint); }
+/* The action is a chip, at the same 22px tier as every control in this window; only its
+   weight is raised, because it is the one thing on the row that DOES something. */
+.sp-rb-banner-b { flex: none; font-weight: 600; }
+/* A refusal, a conflict, or a source that is gone — the amber this product already
+   speaks a refusal in. Colour is never the only distinction: the sentence says it. */
+.sp-rb-banner--warn {
+  border-color: var(--status-amber-bold); background: var(--status-amber-dim);
+  color: var(--text-primary);
+}
+.sp-rb-banner--warn .sp-rb-banner-i { color: var(--status-amber); }
+/* An instruction («Add a view») and a note about what is stored but skipped: neither
+   is a fault, so neither is dressed as one. */
+.sp-rb-banner--quiet .sp-rb-banner-i { color: var(--text-faint); }
+
+/* "Controls" under "Data" — one section, two rows. .sp-sect-t's own words, with a
+   top margin instead of a section break, because they are read together. */
+.sp-rb-sub {
+  margin: 12px 0 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* One row of chips, on one baseline: a chip that appears (the CM360 mapping) must
+   not move the ones beside it, so nothing here stretches. */
+.sp-rb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* THE BASE TIER (§10.1), from the token and not from what the text inside happens to
+   measure. A chip is a control this window offers directly — not one nested in a panel —
+   so it is 26px, the height of the title input above it. Measured before this line, one
+   row of chips stood at 24.5 / 25.64 / 26 depending on whether it held a pill, a segment
+   or a number field: one row, three heights, all of them accidents of line-height. */
+.sp-rb-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: var(--sp-ctl-h); padding: 3px 10px;
+  border: 1px solid var(--border-soft); border-radius: var(--rp);
+  background: var(--surface); color: var(--text-secondary); font-size: 11px;
+}
+/* Not a control: a PLACEHOLDER for a control that cannot exist yet (§6 asks for one by
+   name). It carries no hover, no pointer and no focus ring — and it is a span, which is
+   where the promise is actually kept. */
+.sp-rb-chip--ghost {
+  border-style: dashed; border-color: var(--border-softer); color: var(--text-muted);
+}
+/* A door onto something that is not there yet — `+ Add source`, `+ Add control`. Dashed
+   like .wgf-add, which is the same offer one section down, and a real button. */
+.sp-rb-chip--add { border-style: dashed; border-color: var(--border-hover); font-weight: 600; }
+.sp-rb-chip--add:hover { border-color: var(--accent); color: var(--accent); }
+/* A chip whose setting this report cannot have (a CM360 report's period and scope). Dimmed
+   AND refused — the pair, never one of them: dimming alone lies about what a click does,
+   and refusing alone reads as a chip that simply stopped working. It keeps its Tab stop
+   (`aria-disabled`, a guarded handler) and points at the sentence on the row
+   (.sp-rb-why) through `aria-describedby`, so the reason reaches a keyboard too — which
+   a `title` on a `disabled` button never did (§10.3, T13). */
+.sp-rb-chip--off { opacity: .5; cursor: default; }
+.sp-rb-chip--off:hover { border-color: var(--border-soft); color: var(--text-secondary); }
+/* A quiet line under a row of chips: a REFUSAL (.sp-rb-why) or a standing note about what
+   the row can do (.sp-rb-note). One tier, two names — a grep for a refusal must not find a
+   note, and vice versa. `flex: 1 1 100%` puts each on its own line inside the wrapping row. */
+.sp-rb-why, .sp-rb-note { flex: 1 1 100%; font-size: 10px; color: var(--text-faint); }
+/* WHERE a number comes from. A filled pill, never a stripe: BQ takes the blue the
+   kind badge uses, CM the amber the third-party surfaces already speak in. */
+.sp-rb-src {
+  flex: none; font-family: var(--font-barlow); font-size: 9px; font-weight: 700;
+  letter-spacing: .06em; padding: 2px 5px; border-radius: var(--rxs);
+  background: var(--status-blue-dim); color: var(--status-blue);
+}
+.sp-rb-src--cm { background: var(--status-amber-dim); color: var(--status-amber); }
+/* The ⇄ mark: this control moves what elements bound to it show. Inside a ghost it
+   goes quiet with the rest — a placeholder may not carry the loudest glyph on the row. */
+.sp-rb-bind { flex: none; color: var(--accent); font-size: 12px; line-height: 1; }
+.sp-rb-chip--ghost .sp-rb-bind { color: var(--text-faint); }
+
+/* A view card. Same tone ladder as the brick constructor's rows one screen over:
+   the card takes the alternate surface, its element rows take the plain one. */
+.sp-rb-view {
+  border: 1px solid var(--border-soft); border-radius: var(--rs);
+  background: var(--surface-alt); padding: 9px 10px; margin-bottom: 8px;
+}
+/* The 3px is the ▲▼×'s ground (§10.3): each of those glyph buttons grows a 2px pressable
+   overlay above and below itself, and at 620px and under the first chip row wraps up under
+   the header — measured, the overlay reached 1px into the «Top N» chip, so a click on the
+   chip's top edge landed on ▲. Two pixels is the debt and the third is the margin. */
+.sp-rb-view-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+
+/* ── THE DRAG HANDLE, and a drag in flight (T17) ──────────────────────────────
+   A REAL handle: `draggable`, carrying its list's own dataTransfer type, with the card or
+   the row behind it as both the drag image and the box a drop is measured against. It was
+   decoration through P3 — faint, `cursor: default`, answering a drag with nothing — and the
+   fix wave took it out rather than leave a control promising a gesture it did not have;
+   this is it wired, on the owner's decision of 2026-08-24.
+
+   `aria-hidden` and no Tab stop: the ▲▼ pair beside it is the keyboard path to the same
+   reorder (§10.3), unchanged, and a grip that were also a button would be a second answer
+   to one question. The cursor is the affordance — `grab`, then `grabbing`.
+
+   The BOX, not the glyph, is what a pointer has to find: `⋮⋮` at 11px with the letter
+   spacing that keeps the two columns together measures FIVE pixels across, which is a
+   column nobody can hit. It draws as 14px and the row's full height, with the glyph centred
+   in it — the one place in this window where the drawn thing is deliberately smaller than
+   the thing you press — and it is PRESSED as ≥24 × ≥24 (§10.3), through the same ::after
+   overlay the 22px glyph buttons use.
+
+   The overlay grows LEFT and nowhere else. To the right of the grip is its row's own button
+   (the element row) or the kind tag (the card header), and §10.3's rule is that a hit area
+   takes no ground a neighbour owns; to the LEFT is the card's own padding, which belongs to
+   nothing. In the card header it also grows 2px each way vertically, because that header is
+   as tall as the 22px buttons in it — the same two pixels the ▲▼× spend, inside the same
+   3px margin (see `.sp-rb-view-hd`). An element row is already past 24 tall, so there the
+   overlay keeps the row's own height and two stacked grips cannot meet in the 4px gap.
+
+   gate-builder MEASURES all of this: `.sp-rb-hndl` is in its selector list, so the floor is
+   walked with `elementFromPoint` and the pairwise overlap scan judges it against every other
+   target on the surface. */
+.sp-rb-hndl {
+  position: relative;
+  flex: none; align-self: stretch; min-width: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 11px; line-height: 1; letter-spacing: -2px;
+  cursor: grab; user-select: none;
+}
+.sp-rb-hndl::after { content: ''; position: absolute; inset: 0 0 0 -12px; }   /* 14 wide → 26 */
+.sp-rb-view-hd > .sp-rb-hndl::after { inset: -2px 0 -2px -12px; }             /* …and 22 tall → 26 */
+.sp-rb-hndl:hover { color: var(--text-secondary); }
+.sp-rb-hndl:active { cursor: grabbing; }
+/* An element row has no gap of its own (`--act` collapses it so the button can be the whole
+   row minus the ×), so the button gives back what the grip takes: the swatch and the name
+   keep the inset they had, and the grip stands in the space that was the button's padding.
+   The card header needs none of this — its 8px gap already separates grip from kind tag. */
+.sp-rb-el--act > .sp-rb-hndl + .sp-rb-el-b { padding-left: 2px; }
+/* The row being carried is dimmed IN PLACE; the row under the pointer draws the gap the
+   drop will land in — a HORIZONTAL line, above or below it. A box-shadow and not a border:
+   the line is painted outside the box, so nothing in the list moves while the reader is
+   still deciding where to let go. Never a vertical rail — that shape is banned across this
+   project, and a reorder indicator is exactly what the ban is about. */
+.sp-rb-carried { opacity: .45; }
+.sp-rb-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.sp-rb-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+
+/* ── THE ROW SEAM (section view rows, spec 2026-08-27 §3) ─────────────────────
+   «These two views share a line», asked in the gap BETWEEN the two cards it is about.
+   It replaced a checkbox row on every card: a pairing has no card of its own, and on a
+   one-view widget that row was a permanently greyed line explaining that there was nothing
+   beside it. A seam exists only between two views, so there is no refused state to draw.
+
+   THE BAND OWNS THE GAP. The card above keeps its own 8px margin and the seam pulls 5px of
+   it back, so the pair stands 3 + 22 + 3 = 28px apart and the pill sits ENTIRELY inside that
+   band. Nothing overlaps a card: not the pill, not its 24px pressable overlay, and not the
+   accent insertion line a drag draws in that same gap (`.sp-rb-drop-*` above), which is
+   painted on the card and 3px clear of the pill.
+
+   AND IT IS TRANSPARENT TO A DRAG. The Views list reorders by drag, and the band between two
+   cards has never been a drop target — it is margin. `pointer-events: none` on the band keeps
+   it exactly that: a drag crossing the seam passes through the same dead ground it passed
+   through before, and only the pill takes pointer events back, for the click.
+
+   OFF is the window's quiet chip in miniature — surface, soft border, muted words. ON is the
+   accent-filled pill this product already speaks a live toggle in (`.mp3-rows-filter.on`):
+   tint, accent edge, accent words, 600. Dimming and lighting are done in TOKENS, never in
+   element opacity — an opacity would make the button a stacking context and trap the ::after
+   it hosts (the .wgf-tok--off lesson, owner 2026-08-26). */
+.sp-rb-seam {
+  display: flex; align-items: center; justify-content: center;
+  height: var(--sp-ctl-h-sm); margin: -5px 0 3px;
+  pointer-events: none;
+}
+.sp-rb-seam-b {
+  position: relative; pointer-events: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: var(--sp-ctl-h-sm); padding: 0 10px;
+  border: 1px solid var(--border-soft); border-radius: var(--rp);
+  background: var(--surface); color: var(--text-muted);
+  font-family: var(--font-sans); font-size: 10.5px; line-height: 1;
+  cursor: pointer; white-space: nowrap;
+}
+/* §10.3, vertical only: 22 + 2×(2 − 1) = 24. Its neighbours are the two cards it joins and
+   it takes no ground from either — 3px of the band stays clear on each side. */
+.sp-rb-seam-b::after { content: ''; position: absolute; inset: -2px 0; }
+.sp-rb-seam-b:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.sp-rb-seam-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-rb-seam-b[aria-pressed="true"] {
+  background: var(--accent-bg); border-color: var(--accent); color: var(--accent);
+  font-weight: 600;
+}
+/* An ON pill is already at its loudest, so the hover moves only the edge — brightening the
+   words would read as a second state. */
+.sp-rb-seam-b[aria-pressed="true"]:hover { color: var(--accent); border-color: var(--accent); }
+.sp-rb-seam-i { font-size: 12px; line-height: 1; }
+
+.sp-rb-view-kind {
+  flex: none; font-family: var(--font-barlow); font-size: 10px; font-weight: 700;
+  letter-spacing: .06em; color: var(--text-secondary);
+}
+.sp-rb-view-nm {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; color: var(--text-primary);
+}
+.sp-rb-view-title {
+  flex: 1 1 150px; min-width: 90px; max-width: 260px;
+  /* Native inputs cannot carry the invisible hit overlay used by glyph buttons. */
+  height: var(--sp-hit); font-size: 11px;
+}
+/* margin-left:auto so the trio sits right whether or not the card carries a name. */
+.sp-rb-btns { display: inline-flex; gap: 3px; margin-left: auto; flex: none; }
+.sp-rb-btn {
+  min-width: 24px; height: var(--sp-ctl-h-sm); padding: 0 5px;
+  border: 1px solid var(--border-soft); border-radius: var(--rxs);
+  background: var(--surface); color: var(--text-secondary);
+  font-size: 11px; line-height: 1; cursor: pointer;
+}
+/* Refused by POSITION — the ▲ of the first card, the ▼ of the last, and the same pair in
+   an `OrderRow`. `aria-disabled` and not `disabled` (§10.3): it is the arrow under the
+   reader's finger that reaches the end, and a natively disabled button drops the focus it
+   is holding. The dimming is the same either way; the hover is withdrawn with it. */
+.sp-rb-btn:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--accent); color: var(--accent); }
+.sp-rb-btn:disabled,
+.sp-rb-btn[aria-disabled="true"] { opacity: .35; cursor: default; }
+.sp-rb-btn--rm:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--status-red); color: var(--status-red); }
+
+/* Elements as ROWS, not chips (§3, «legible at rest»): the whole configuration is
+   readable without opening anything. Read-only in this task; T6-T10 make each row
+   the door to its own popover. */
+.sp-rb-els { margin-top: 7px; display: flex; flex-direction: column; gap: 4px; }
+/* The gap, not the text's own space: the two spans are flex ITEMS, and flexbox
+   blockifies them — the leading space in the summary is collapsed away, so the row
+   rendered «Impressions· BQ». The separator stays in the TEXT (that is what an AT
+   reads off `textContent`) and the gap draws it. */
+.sp-rb-el {
+  display: flex; align-items: baseline; gap: 4px; min-width: 0;
+  border: 1px solid var(--border-softer); border-radius: var(--rxs);
+  background: var(--surface); padding: 5px 8px;
+}
+.sp-rb-el-nm { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--text-primary); }
+.sp-rb-el-sum {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--text-muted);
+}
+/* The dashed add button sits under the cards, not between them. */
+.sp-rb-addview { margin-top: 2px; }
+
+/* ── Layout View editor ────────────────────────────────────────────────────
+   The hierarchy follows the stored tree on the page itself: row, column, block. There is
+   deliberately no nested scroll frame. A long Layout extends the drawer like every other
+   Builder section, so controls never disappear inside a short “Options” viewport. Depth is
+   a full border + surface step, never a vertical rail. */
+.sp-lay-tree { display: flex; flex-direction: column; gap: 8px; }
+.sp-lay-row,
+.sp-lay-col,
+.sp-lay-block {
+  min-width: 0;
+  border: 1px solid var(--border-softer);
+  border-radius: var(--rs);
+  padding: 8px;
+}
+.sp-lay-row { background: var(--surface); }
+.sp-lay-col { margin-top: 7px; background: var(--surface-alt); }
+.sp-lay-block { margin-top: 7px; background: var(--surface); }
+.sp-lay-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  min-width: 0; margin-bottom: 7px; color: var(--text-primary); font-size: 11px;
+}
+.sp-lay-head > .sp-rb-btns { margin-left: auto; }
+.sp-lay-head > .sp-lay-select { flex: 1 1 150px; width: auto; }
+.sp-lay-count { flex: none; font-weight: 600; }
+.sp-lay-field {
+  display: grid; grid-template-columns: minmax(92px, 118px) minmax(0, 1fr);
+  align-items: start; gap: 7px; margin: 6px 0;
+}
+.sp-lay-field--stack { grid-template-columns: 1fr; }
+.sp-lay-label { padding-top: 5px; font-size: 10.5px; color: var(--text-muted); }
+.sp-lay-control { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sp-lay-select { width: min(100%, 240px); height: var(--sp-ctl-h-sm); }
+.sp-lay-text { flex: 1 1 170px; width: min(100%, 360px); height: var(--sp-ctl-h-sm); }
+.sp-lay-number { width: 88px; height: var(--sp-ctl-h-sm); }
+.sp-lay-present {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--text-muted);
+}
+.sp-lay-bind,
+.sp-lay-target,
+.sp-lay-badge { min-width: 0; }
+.sp-lay-help { min-width: 0; font-size: 10px; line-height: 1.4; color: var(--text-faint); }
+.sp-lay-subitem {
+  margin: 7px 0; padding: 7px;
+  border: 1px solid var(--border-softer); border-radius: var(--rxs);
+  background: var(--surface-alt);
+}
+.sp-lay-subhead { display: flex; align-items: center; gap: 6px; font-size: 10.5px; }
+.sp-lay-subhead > .sp-rb-btn { margin-left: auto; }
+.sp-lay-addline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; }
+.sp-lay-add { margin-top: 7px; }
+.sp-lay-addline > .sp-lay-add { margin-top: 0; flex: 1 1 170px; }
+.sp-lay-inline-add { margin: 6px 0; }
+.sp-lay-json {
+  width: 100%; min-height: 112px; padding: 8px; resize: vertical;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.45;
+}
+.sp-lay-refusal {
+  margin: 0 0 8px; padding: 6px 9px;
+  border: 1px solid var(--status-amber-bold); border-radius: var(--rs);
+  background: var(--status-amber-dim); color: var(--text-primary);
+  font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere;
+}
+
+/* ── a card's own settings, and its element rows as CONTROLS (T6) ─────────────
+   The chip row inside a view card: the same chips the Data row wears, except that
+   these OPEN something — so they are buttons and they say so on hover and focus. */
+.sp-rb-row--view { margin-bottom: 8px; }
+.sp-rb-chip--act { cursor: pointer; }
+.sp-rb-chip--act:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.sp-rb-chip--act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A chip that IS a segmented control wears the segment's own frame and not a second one
+   around it: two 1px borders 3px apart on a 22px control is a box inside a box. */
+.sp-rb-chip--seg { padding: 0; border: 0; background: transparent; min-height: var(--sp-ctl-h); }
+.sp-rb-chip-l { flex: none; color: var(--text-muted); }
+/* The settings a chip carries after its subject — «· format int · target Planned
+   impressions». A KPI and a pie are ONE value, so their whole configuration rides the one
+   chip that opens it, quieter than the name it follows (the summary half of an element row,
+   in a chip). */
+.sp-rb-chip-s {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted);
+}
+/* The same sentence about a view whose configuration does NOT fit on one chip — a table has
+   four chips, so its stored facts sit after them as text rather than inside any one of them
+   (section-widget parity fix round, 2026-09-04). Text, not a control: it is the only child of
+   this row that is not pressable, and it wraps to its own line before it squeezes them. */
+.sp-rb-row-s { min-width: 0; font-size: 10.5px; color: var(--text-muted); }
+/* NO vertical padding around a 24px field, so the chip's own 26px is what sets the height
+   and the field sits inside it rather than pushing it out. It was 1px, which was right for
+   a 22px field; when the field moved onto `--sp-hit` (§10.3, below) the chip went to 28 and
+   stood two pixels proud of every chip beside it — measured at 360 on the Limit chip. */
+.sp-rb-chip--num { padding: 0 8px 0 10px; }
+/* A declared wire (§5.6), with the × that undeclares it. Same rule as the number chip: the
+   22px button rides inside the chip's 26px, and .sp-rb-row centres every chip on one axis. */
+.sp-rb-chip--wire { padding: 1px 3px 1px 10px; }
+/* On the field tier with the panel's selects and inputs, and for the same reason: a
+   number field is an <input>, so its box is its hit area (§10.3). */
+.sp-rb-num { width: 52px; text-align: right; height: var(--sp-hit); }
+.sp-rb-caret { flex: none; color: var(--text-faint); font-size: 9px; }
+
+/* An element row that OPENS its settings. The row is the frame; the button inside it is
+   the whole row minus the ×, so a click anywhere on the words opens the panel and the ×
+   stays its own control (a button inside a button is not markup a browser will keep). */
+.sp-rb-el--act { padding: 0; gap: 0; }
+.sp-rb-el-b {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: 5px; min-height: 36px;
+  padding: 5px 4px 5px 8px; background: transparent; border: 0; cursor: pointer;
+  font-family: var(--font-sans); text-align: left;
+}
+.sp-rb-el--act:hover { border-color: var(--border-hover); }
+.sp-rb-el-b:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--rxs); }
+.sp-rb-el--act > .sp-rb-btn--rm { margin: 3px 4px 3px 0; align-self: center; }
+/* Hidden, or stored-but-skipped: still legible, visibly quieter, and the WORDS say which
+   one it is — never the opacity alone. */
+.sp-rb-el--quiet .sp-rb-el-nm, .sp-rb-el--quiet .sp-rb-el-sum { color: var(--text-faint); }
+.sp-rb-el--quiet .sp-rb-sw { opacity: .45; }
+/* The series colour, as an inline glyph INSIDE the row. Never a left-edge bar: vertical
+   colour stripes are banned project-wide, and this is the shape that ban is about. */
+.sp-rb-sw {
+  flex: none; width: 9px; height: 9px; border-radius: 2px; align-self: center;
+}
+/* A dashed or calculated line is drawn dashed on the chart, so its swatch is not solid —
+   the row says «dashed» in words too, and this is the second, faster cue. */
+.sp-rb-sw--dash { border-radius: 1px; height: 3px; width: 12px; }
+.sp-rb-addel { margin-top: 6px; }
+/* The cap, said on the button itself rather than in a tooltip nobody sees. */
+.sp-rb-cap { color: var(--text-faint); font-weight: 400; }
+.sp-content-order { font-size: var(--text-11); line-height: 1.4; }
+/* THE EMPTY SLOT (§9's `incomplete`, the card half). One muted line where the elements
+   would be, at the row's own left edge so the list still starts in one place. A line and
+   not a box: an empty slot is a step not taken, and a dashed frame around it would draw
+   harder than the `+ Add` button under it that takes the step. */
+.sp-rb-empty { padding: 2px 1px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+
+/* ── the table card (T7) ──────────────────────────────────────────────────────
+   A chip holding a CHECKBOX: `totals` is one required boolean, and a native
+   checkbox says its own state without spending a colour on it. The box is 13px
+   inside a 16.5px line, so this chip carries the row's height on its own and
+   needs none of the padding surgery the number chip does. */
+.sp-rb-chip--ck { cursor: pointer; }
+.sp-rb-chip--ck:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.sp-rb-chip--ck:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sp-rb-ck {
+  flex: none; width: 13px; height: 13px; margin: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+/* What KIND of column a row is, where a value column wears its source pill. Outlined
+   rather than filled: the filled pills mean «this is where the number comes from», and
+   a Δ% takes its numbers from both of them. */
+.sp-rb-tag {
+  flex: none; font-family: var(--font-barlow); font-size: 9px; font-weight: 700;
+  letter-spacing: .06em; padding: 1px 4px; border-radius: var(--rxs);
+  border: 1px solid var(--border-soft); color: var(--text-secondary);
+}
+
+/* ── §10.3: hit areas and focus, on the 22px tier (T13) ───────────────────────
+   «Compact nested controls may remain visually 22 px, but their interactive hit area is
+   at least 24 × 24 px and does not overlap an adjacent target.» There are TWO ways to keep
+   it and the control decides which:
+
+     · a GLYPH or a PILL keeps its 22 and grows a pressable overlay into a gap NOTHING else
+       owns — the three below, plus the palette chip, whose rule sits beside the palette;
+     · a FORM control takes `--sp-hit` as its own height. Chrome renders no ::after on a
+       `<select>` or an `<input>`, so the box IS the hit area and there is no overlay to
+       grow — `.sp-pop-sel`, `.sp-pop-inp`, `.sp-rb-num`, and beside them `.sp-pop-set`,
+       `.sp-pop-rm` and `.sp-pop-fx`, which share a row with one and would otherwise stand
+       two pixels short of the field they belong to.
+
+   A CHECKBOX is neither: `.sp-rb-ck` is a 13px native box, and the LABEL around it
+   (`.sp-pop-ck`, `.sp-rb-chip--ck`) is what a reader presses — a click on the words toggles
+   it — so the label carries the floor. gate-builder knows that exemption by name.
+
+   The PREVIEW is out of scope here (`.wgf-preview`): it is P2's tile, rendered at the size a
+   dashboard renders it, and its own controls are that screen's contract — the same line the
+   horizontal-scroller rule already draws.
+
+   MEASURED, not read off this file. gate-builder walks out from each control's centre one
+   pixel at a time, asking `elementFromPoint` who owns it, and counts the columns and rows
+   that answer — the area a browser really hands a click, clipping and paint order
+   included. It fails under 24, on any pair that shares ground, and on any disagreement
+   between that walk and the arithmetic below.
+
+   THE INSET IS COUNTED FROM THE PADDING BOX, not from the border box: the containing
+   block of an absolutely positioned box is its positioned ancestor's padding box, and
+   every control here has a 1px border. `inset: -1px` therefore lands exactly on the
+   border-box edge and grows NOTHING — which is what the first draft of this block did,
+   invisibly, on all three. Each inset below is (the growth wanted) + (that 1px border).
+
+   Vertical only, wherever the neighbour is horizontal: ▲▼× sit 3px apart, the profile
+   pills 4px, the segments 2px, so growing sideways would take a neighbour's ground. */
+.sp-rb-btn { position: relative; }
+.sp-rb-btn::after { content: ''; position: absolute; inset: -2px 0; }        /* 24 × 22 → 24 × 24 */
+.sp-rb-prof-b { position: relative; }
+.sp-rb-prof-b::after { content: ''; position: absolute; inset: -2px 0; }     /* 47 × 22 → 47 × 24 */
+.sp-seg-b { position: relative; }
+.sp-seg-b::after { content: ''; position: absolute; inset: -3.5px 0; }       /* 39.6 × 19.6 → 39.6 × 24.6 */
+/* No overlay on `.sp-pop-fx` any more: it is 24 × 24 on its own, because the select it sits
+   beside is a FORM control that cannot carry one and had to take the tier itself — and a
+   ƒx button two pixels shorter than the field it belongs to reads as a different control. */
+
+/* Where focus IS, in the drawer's own ring. These four inherited the browser's default
+   because nothing in this window ever declared one for them; every chip beside them has
+   carried `2px solid var(--accent)` since T6. `.wgf-*` are the Widget Builder classes
+   too, so the rule is scoped to this window and P2's screen keeps what it had. */
+.sp-rb-btn:focus-visible,
+.sp-rb .wgf-add:focus-visible,
+.sp-rb .wgf-back:focus-visible,
+.sp-rb .wgf-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A refused `+ Add` — at the view cap, the series cap, the column cap. It keeps its Tab
+   stop (`aria-disabled`, never `disabled`) because the cap it prints is the reason, and a
+   reason nobody can land on is not a reason. Same dimming `.wgf-add:disabled` gives, and
+   the hover is withdrawn with it. */
+.sp-rb .wgf-add[aria-disabled="true"] { opacity: .4; cursor: default; }
+.sp-rb .wgf-add[aria-disabled="true"]:hover { border-color: var(--border-hover); color: var(--text-secondary); }
+/* Same rule inside a panel: a segment the grammar refuses stays focusable and says why on
+   the row under it (`.sp-pop-why`, which its `aria-describedby` names). Dimmed by TOKENS
+   and a dashed edge, never by element opacity — opacity makes the button a stacking
+   context that would trap and ghost any ::after it ever hosts (the .wgf-tok--off lesson,
+   owner 2026-08-26), and 0.4 over --text-muted was a label nobody could read. */
+.sp-seg-b[aria-disabled="true"] {
+  color: var(--text-muted); border-color: var(--border-softer); border-style: dashed;
+  cursor: default;
+}
+
+/* ── The Library screen (widget-library spec §6.2) ────────────────────────────
+   A second screen of the drawer, not an overlay: same width, same rhythm, same
+   card language as the per-pacing gallery above. Nothing here is a side rail.
+   LAST in the file deliberately — .lib-head-t, .lib-sort-s and .lib-note each
+   override a single-class rule (.sp-sect-t, .sp-inp, .blib-hint) at the same
+   specificity, so source order is what makes them win. */
+.lib-hidden { display: none; }
+.lib-sect-hd .sp-sect-t { flex: 1 1 auto; margin: 0; }
+
+/* Same row as the widget editor's head (.wgf-ed-head), and the same .wgf-back
+   button inside it — one Back affordance for both of the drawer's second screens. */
+.lib-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+/* margin:0 — .sp-sect-t's 8px bottom margin would push this heading OFF the row's
+   centre line, beside a 26px button that has none. */
+.lib-head-t { margin: 0; }
+/* The shelf pills are .blib-pills verbatim — the hero variant picker's primitive. */
+.lib-search { flex: 1 1 180px; min-width: 140px; }
+/* .sp-inp is width:100% — fine for a form field, wrong for a two-option select in
+   a flex row, where it would eat the search box's space. */
+.lib-sort-s { width: auto; }
+/* .blib-hint's 10px top margin belongs under a section, not above the card grid. */
+.lib-note { margin-top: 0; margin-bottom: 12px; }
+/* A refetch (shelf, sort or a settled search term) dims the list it is about to
+   replace instead of clearing it — no height change, no lost place, and the cards
+   stay clickable because they are still valid entries. .55, between .blib-card--off
+   (.45, an inert state) and full strength. */
+.lib-cards--busy { opacity: .55; transition: opacity .12s ease; }
+/* 21px of pill + this overlay clears the 24px minimum target without growing the
+   row — the same trick .blib-sw uses, and the bleed stays inside the 8px gaps. */
+.lib-like::before { content: ''; position: absolute; inset: -3px -2px; }
+
+/* ── Composite tiles (widget-library spec §7) ─────────────────────────────────
+   The ARRANGEMENT half of a composite: rows, and inside a row the columns. What a
+   column holds is kit.css's. A composite lives inside a WidgetFrame like every other
+   widget, so nothing here draws a card of its own — only the two column frames the
+   vocabulary has (`card` is kit's .kit-card, `signal` is below).
+
+   The rhythm is the dashboard's own: 14px between rows and between columns — the same
+   gap .dash-grid uses — and 10px between the bricks inside a column. The blocks these
+   replaced ran 2/6/8/10/12/14px depending on which of them you were reading. */
+.cmp { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* Inside a tile the cards keep the same 12px the chart plot keeps from the frame (owner,
+   2026-09-07): the layout view and the composition slot both draw straight into the flush
+   body, and their outer cards touched the tile's left, right and bottom edges. */
+.rpt .rpt-view > .cmp, .rpt > .rpt-slot.cmp { padding: 0 12px 12px; }
+/* A title and the caption under it are ONE unit — the column gap belongs between
+   things, not inside a heading. */
+.cmp-signal-t + .cmp-signal-s,
+.cmp-signal-t + .kit-note { margin-top: -6px; }
+/* One more step in: a brick sits inside a column, so it takes the alternate tone
+   rather than repeating the column's. */
+.cmp-ed-col .wgf-series { background: var(--surface-alt); }
+/* An inline note on a control row: no top margin, so it sits on the row's baseline
+   instead of 5px under it the way .wgf-help would. */
+.cmp-ed-note { font-size: 10px; color: var(--text-faint); }
+/* Inline beside the field it belongs to; as a line of its own it takes the rhythm
+   of the .wgf-help lines it sits among. */
+.cmp-ed-warn { font-size: 10px; color: var(--status-amber); }
+/* .sp-chk pads by default; on a field row that would drop it off the baseline. */
+.cmp-ed-chk { padding: 0; }
+
+/* Secondary controls in a settings popup share its input tier. */
+.sp-pop .sp-rb-num, .sp-pop .sp-pop-rm { height: var(--sp-edit-control-h); font-size: 12px; }
+.sp-pop .sp-pop-ck { font-size: 12px; }
+.rpt-share-sort { margin-left: 8px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.rpt-share-sort:hover { color: var(--accent); }
+.sp-settings-edit-lock { min-width: 0; margin: 0; padding: 0; border: 0; }
+.sp-data-update-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 12px 0; }
+.sp-data-update-row + .sp-data-update-row { border-top: 1px solid var(--border-soft); }
+.sp-data-update-title { font-size: var(--text-13); font-weight: 500; color: var(--text-primary); }
+.sp-data-update-row .sp-info-hint { margin-top: 4px; }
+.sp-data-update-row > .sp-btn { min-width: 136px; min-height: 34px; font-size: var(--text-12); }
+.sp-data-update-caution { grid-column: 1 / -1; margin: 0; font-size: var(--text-12); line-height: 1.4; color: color-mix(in srgb, var(--val-warn) 75%, var(--text-primary)); }
+.sp-data-update-status { grid-column: 1 / -1; font-size: var(--text-12); color: var(--text-muted); line-height: 1.4; }
+.sp-data-update-status:empty { display: none; }
+.sp-data-update-status--error { color: var(--error-text); }
+.mdl-foot .sp-btn { min-height: var(--sp-hit); padding: 6px 14px; }
+/* The well's 12px indent is a Pacing-tab hierarchy step (container → split); in
+   the dialog there is nothing to be indented from. */
+.ali-body .sp-split-well { margin-left: 0; }
+.ali-state .sp-tp-link { margin-left: 6px; }
+.ali-listhd .sp-tp-link { margin-left: auto; font-size: 11px; }
+.ali-row-top .sp-li-id { flex: none; }
+.ali-row-top .sp-channel-badge, .ali-row-top .sp-rate { flex: none; }
+.ali-row.is-blocked :is(.sp-li-id, .sp-channel-badge, .sp-rate, .ali-row-plan) { opacity: .55; }
+/* ── the dashboard grid: 12 columns with explicit placement, the group frames that sit
+   under their members, and the thumbnail wrapper. Missed by the first extraction pass, whose
+   filter went by class PREFIX and these do not share one with the rest. Their absence is what
+   made every tile full-width and the same height. ── */
+
+/* ── Chart grid — RETIRED (phase 3). `.charts-grid` was LegacyStack's two-column
+   charts cluster and its 700px breakpoint; both went with that component. Every
+   chart is a tile in the unified grid below, which carries the responsive rules
+   for the whole page. ── */
+
+/* ── Unified dashboard grid (widget customization, 2026-07-12) ──
+   Explicit 12-col placement; a row's height is its tallest tile. Flow tiles carry
+   their own legacy margin-bottom as STACK spacing — inside the grid the 14px gap
+   provides it, so the cell strips the child's bottom margin. A cell whose component
+   self-hides (renders null) is display:none'd; whole-row hiding is handled upstream
+   (DashGrid drops data-hidden flow rows before placement). */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: min-content;
+  gap: 14px;
+}
+.dash-cell { min-width: 0; display: flex; flex-direction: column; }
+/* Layout mode draws the same tiles (owner, 2026-09-15): the chain starts at its content wrapper,
+   and a tile its row does not stretch keeps its own height, so the corner grip drawn in the
+   cell's corner sits on the widget's bottom edge instead of the row's. Only on the grid: under
+   900px the grid is a flex column, where the same property would narrow the tile instead. */
+.dash-cell--stretch > .lm-content { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dash-cell:empty { display: none; }
+/* CARDS in a shared grid row stretch to the row's height (owner, 2026-07-13: a
+   compact chart next to a regular one left ragged card bottoms after a move).
+   Chart bodies keep their EXPLICIT height (recharts needs one — a min-height-only
+   parent renders an empty chart); the stretch lands on the card frame. */
+.dash-cell > * { margin-bottom: 0 !important; flex: 1 1 auto; }
+.lm-cell { position: relative; }
+/* §6.4 multi-select: a full OUTLINE — zero layout shift, never an edge bar. The
+   resize outline below is declared LATER on purpose, so a resizing tile's own
+   outline wins over the selection's while it is held. */
+.lm-cell--sel { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--rm); }
+/* The tile in hand, carried as itself: above its neighbours and the landing marks, lifted by
+   the pop and modal shadows at the card's own radius (the pop alone barely separated it from a
+   dark tile under it), not taking the pointer (the page under it answers nothing). */
+.lm-cell--lifted {
+  z-index: 30; pointer-events: none; will-change: transform;
+  box-shadow: var(--shadow-pop), var(--shadow-modal); border-radius: var(--r);
+}
+/* A tall tile or a full-row block stays where it is at full height (the page must not jump
+   under the pointer), dimmed, with a dashed box saying "this one is moving". */
+.lm-cell--home > * { opacity: .35; }
+.lm-cell--home::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  border: 2px dashed var(--border-hover); border-radius: var(--rm);
+}
+/* The one swap partner, sliding to its destination while the hand rests (and back when
+   it moves on): above bystanders and the landing marks (it covers its own destination
+   outline as it arrives, instead of wearing a dashed line across it), below the tile in hand. */
+.lm-cell--partner { z-index: 22; transition: transform .18s cubic-bezier(0.4, 0, 0.2, 1); }
+/* A group frame carried with its members (the members ride z 30 above it). */
+.grp-frame--lifted { position: relative; z-index: 29; will-change: transform; box-shadow: var(--shadow-pop); }
+.grp-frame--home { opacity: .45; }
+/* Touch: the handles, strips and the grip start a drag at once, so the browser must not
+   take them for a scroll; a tile body keeps panning until a 250ms hold lifts it. */
+.lm-handle, .lm-strip-handle, .lm-flowstrip, .lm-ph, .grp-lm-strip, .lm-grip { touch-action: none; }
+/* narrow-viewport pause (dirty session survives <900px; editing suspended) */
+.lm-cell--paused .lm-handle,
+.lm-cell--paused .lm-grip,
+.lm-cell--paused .lm-strip-handle { display: none; }
+.lm-cell--paused .lm-overlay,
+.lm-cell--paused .lm-flowstrip,
+.lm-cell--paused .lm-ph { cursor: default; }
+.lm-cell--resizing { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: var(--rm); }
+.lm-content { min-width: 0; }
+.lm-cell:active .lm-overlay { cursor: grabbing; }
+/* The same placeholder used as INERT CONTENT rather than as a strip: the
+   missing-library-entry tile renders inside .lm-content, where the cell's
+   .lm-overlay (z-index 4) is the drag surface. The base z-index:6 exists to lift a
+   STRIP above that overlay — inside the content it would lift the placeholder over
+   the drag surface instead, and the tile would stop being draggable where its own
+   text is. Height stays natural: this is content, so the cell sizes to it. */
+.lm-ph--inline { z-index: auto; }
+/* The ghosted switched-off tile (.lm-cell--off / .lm-off*) is GONE — spec
+   2026-09-03: a tile the user switched off is not rendered in Layout mode at all,
+   so there is no ghost to tint and no chip to switch it with. Its geometry lives
+   in the session's `parked` map, not in a class. */
+/* Which leaves one state with no tiles at all: everything switched off. The notice
+   reuses view mode's .dash-empty box and only has to span the 12 columns. */
+.lm-empty { grid-column: 1 / -1; }
+
+/* ── Group frames (widget-library phase 4, §6.4) ──
+   A group frame is a full-surface mat behind its member tiles: tint + hairline
+   full-perimeter border + a legend-style title chip straddling the top edge.
+   NEVER a left-edge accent (project ban). pointer-events: none — the frame is
+   paint, the tiles above it own every interaction.
+
+   Paint order is STRUCTURAL, not accidental: the frame is an UNPOSITIONED grid
+   item rendered first in the DOM, so it paints at the inline-block level before
+   every tile — static cells later in document order and positioned cells
+   (.dash-cell--menu, .lm-cell) alike draw over the tint. Positioning the frame
+   itself would lift it ABOVE the static cells (positioned boxes paint after
+   inline-level content) and wash the tint over their cards — which is why the
+   title chip is the positioned one instead: it has to ride over the mat's edge.
+   The -8px margin outsets the mat into the 14px grid gap: an ≈8px band of
+   colour around the group, ≈6px of clear page to any neighbouring tile. */
+.grp-frame {
+  margin: -8px; border-radius: 12px;
+  border: 1px solid var(--grp-line, transparent);
+  background: var(--grp-bg, transparent);
+  pointer-events: none;
+}
+.grp-slate  { --grp-bg: var(--grp-slate-bg); --grp-line: var(--grp-slate-line); }
+.grp-blue   { --grp-bg: var(--grp-blue-bg); --grp-line: var(--grp-blue-line); }
+.grp-teal   { --grp-bg: var(--grp-teal-bg); --grp-line: var(--grp-teal-line); }
+.grp-amber  { --grp-bg: var(--grp-amber-bg); --grp-line: var(--grp-amber-line); }
+.grp-violet { --grp-bg: var(--grp-violet-bg); --grp-line: var(--grp-violet-line); }
+.grp-rose   { --grp-bg: var(--grp-rose-bg); --grp-line: var(--grp-rose-line); }
+/* The seventh background: None (owner 2026-08-16) — no mat at all. View mode
+   never renders a None frame (DashGrid filters it out of the frames memo), so
+   this class reaches a .grp-frame only in LAYOUT mode, where the group must
+   stay visible, draggable and manageable: a neutral DASHED hairline, no wash.
+   Library previews reuse the same map — transparent mat, neutral line. */
+.grp-none   { --grp-bg: transparent; --grp-line: var(--border-hover); }
+.grp-frame.grp-none { border-style: dashed; }
+.lib-prevl-g.grp-none { border-style: dashed; }
+/* The legend chip: 18px tall, straddling the frame's top border inside the row
+   gap. position: relative so it paints with the POSITIONED boxes — above the
+   mat; its glyphs sit centred in the 18px line, clear of any card text. Text
+   stays on the existing --text-* tokens over --page-bg — the contrast audit is
+   safe by construction. */
+.grp-title {
+  position: relative; top: -10px; left: 12px; display: inline-block;
+  padding: 0 6px; font-size: 11px; line-height: 18px; color: var(--text-secondary);
+  background: var(--page-bg); border-radius: 4px; max-width: 60%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: top;
+} /* §6.4: one column, no frames */
+/* Layout mode wears the frame with a legend STRIP instead of the chip — the one
+   interactive part (drag handle + title + swatches + ⋯); the mat body stays
+   pass-through so member tiles remain individually draggable. z 7: above the
+   cell overlays (4) and handles (6); the lasso shares 7 and, later in DOM, wins. */
+.grp-lm-strip {
+  position: relative; top: -12px; left: 10px; z-index: 7;
+  display: inline-flex; align-items: center; gap: 2px;
+  height: 24px; padding: 0 3px;
+  background: var(--surface); border: 1px solid var(--grp-line, var(--border-soft));
+  border-radius: var(--rp); box-shadow: var(--shadow-card);
+  pointer-events: auto; max-width: calc(100% - 20px); cursor: grab;
+  vertical-align: top;
+}
+.grp-lm-strip:active { cursor: grabbing; }
+.grp-lm-t {
+  font-size: 11px; color: var(--text-secondary); padding: 0 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A selected frame is a full OUTLINE — the tile selection's language, zero
+   layout shift, never an edge bar. */
+.grp-frame--sel { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The six swatches, inline in the strip while picking. Each swatch wears its
+   tint's classes, so the fill is the tint's own line token — visible at strip
+   size where the 6-10% wash would not be. */
+.grp-swatches { display: inline-flex; gap: 4px; padding: 0 4px; }
+.grp-swatch {
+  width: 14px; height: 14px; border-radius: 4px; cursor: pointer; padding: 0;
+  background: var(--grp-line, var(--border-soft));
+  border: 1px solid var(--grp-line, var(--border-soft));
+}
+.grp-swatch--on,
+.grp-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The None swatch (owner 2026-08-16): an outlined square crossed corner-to-corner
+   — the "no fill" glyph. The slash is a centred 45° diagonal spanning the 14px
+   button, which is what keeps it a glyph on a square, never an edge stripe. */
+.grp-swatch--none {
+  background:
+    linear-gradient(45deg,
+      transparent calc(50% - 1px), var(--border-hover) calc(50% - 1px),
+      var(--border-hover) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+  border-color: var(--border-hover);
+}
+.wgal-card {
+  border: 1px solid var(--border-soft); border-radius: var(--rm);
+  background: var(--surface); overflow: hidden; text-align: left;
+}
+.wgal-prev {
+  height: 128px; overflow: hidden; border-bottom: 1px solid var(--border-softer);
+  background: var(--surface-alt); pointer-events: none;
+  /* Short content (a KPI is ~91px of the 128px box) sits centred instead of leaving
+     a void under it; chart/table fill the box, so centring is a no-op for them. */
+  display: flex; flex-direction: column; justify-content: center;
+}
+/* A thumbnail is a PICTURE: pointer-events are dead on the whole .wgal-prev box,
+   so any scrollbar an inner table or chart mounts at card scale (their real
+   surfaces scroll; the miniature cannot) is dead chrome that only eats preview
+   width. Hidden for the preview SUBTREE only — every thumbnail funnels through
+   .wgal-prev (gallery cards, Library cards, ScaledPreview, block member cells),
+   and nothing outside it is touched. */
+.wgal-prev, .wgal-prev * { scrollbar-width: none; }
+.wgal-prev::-webkit-scrollbar, .wgal-prev *::-webkit-scrollbar { display: none; }
+/* Tables need a real thumbnail, not a scrollable dashboard table squeezed into
+   128px. Keep the configured shape recognizable while rendering only complete,
+   bounded rows and columns; the card below already owns title and kind chrome. */
+.wgal-table-thumb {
+  width: 100%; height: 100%; overflow: hidden; box-sizing: border-box;
+  padding: 6px 8px 4px; display: flex; flex-direction: column;
+  color: var(--text-secondary);
+}
+.wgal-table-thumb--state {
+  align-items: center; justify-content: center; text-align: center;
+  font-size: 11px; color: var(--text-secondary);
+}
+.wgal-table-thumb__table {
+  width: 100%; table-layout: fixed; border-collapse: collapse;
+}
+.wgal-table-thumb__label-col { width: 46%; }
+.wgal-table-thumb th, .wgal-table-thumb td {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px 4px; line-height: 14px; font-size: 10px;
+  border-bottom: 1px solid var(--border-softer);
+}
+.wgal-table-thumb th {
+  text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary); font-weight: 700;
+}
+.wgal-table-thumb th:not(:first-child), .wgal-table-thumb td:not(:first-child) {
+  text-align: right; font-family: var(--font-mono);
+}
+.wgal-table-thumb__label {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left; font-family: var(--font-sans); font-weight: 600;
+  color: var(--text-primary);
+}
+.wgal-table-thumb__head { height: 20px; background: var(--surface-alt); }
+.wgal-table-thumb__totals {
+  height: 20px; background: var(--surface-tertiary);
+  color: var(--text-primary); font-weight: 600;
+}
+.wgal-table-thumb__row { height: 20px; }
+.wgal-table-thumb__more {
+  margin-top: auto; display: flex; justify-content: flex-end; gap: 5px;
+  min-width: 0; overflow: hidden; white-space: nowrap;
+  padding-top: 3px; font-size: 9px; line-height: 11px; font-weight: 700;
+  color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em;
+}
+/* A composite thumbnail (post-release UX round, 2026-08-16): the real tile at its
+   natural width, shrunk as a picture. The wrapper fills the thumbnail cell and
+   CLIPS; the inner block renders at the design width and transform-scales from
+   the top-left corner — content laid out at full size can never collide, whatever
+   the numbers. Pointer events are dead on the whole .wgal-prev already. */
+.wgal-scaled { position: relative; width: 100%; overflow: hidden; }
+.wgal-scaled-in { position: absolute; top: 0; left: 0; transform-origin: top left; }
+
+/* A library entry that no longer resolves: the card still lists the tile so it can
+   be deleted or reset, and says why there is no preview (widget-library §3.3).
+   --text-secondary, not --text-faint: this is the only thing the card can tell
+   the reader, and faint on --surface-alt is under AA in dark (see the note at
+   .dash-empty-h). */
+.wgal-prev--gone {
+  align-items: center; justify-content: center; text-align: center;
+  padding: 0 12px; font-size: 11px; color: var(--text-secondary);
+}
+.wgal-meta { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.wgal-title {
+  font-weight: 600; font-size: 12px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wgal-acts { display: flex; gap: 2px; }
+.wgal-acts button {
+  border: none; background: none; color: var(--text-muted); cursor: pointer;
+  padding: 3px 5px; border-radius: var(--rxs); font-size: 12px;
+}
+.wgal-acts button:hover:not(:disabled) { background: var(--hover-bg); color: var(--text-primary); }
+.wgal-acts button:disabled { opacity: .35; cursor: default; }
+.wgal-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.wgal-add:disabled { opacity: .4; cursor: default; }
+/* Four kinds since phase 3 (chart, table, KPI, block) — two to a line, because a
+   three-track grid leaves the fourth card alone on a row of its own. */
+.wgal-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.wgal-pick-card {
+  border: 1px solid var(--border-soft); border-radius: var(--rm); background: var(--surface);
+  padding: 14px 12px; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.wgal-pick-card:hover { border-color: var(--accent); }
+.wgal-pick-t {
+  font-family: var(--font-barlow); font-weight: 700; font-size: 13px;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--text-primary);
+}
+.wgal-pick-h { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.wgal-div { border: none; border-top: 1px solid var(--border-softer); margin: 16px 0 0; }
+/* The unavailable-entry sentence inside a sketch: the gallery's own words, at mat size. */
+.gc-m .wgal-prev--gone { height: auto; padding: 0; font-size: 10px; background: transparent; border: none; }
+/* Every member off: the card wears the one off look (.wgal-card--off, below), and the
+   mat dims with it the way a widget card's preview does. */
+.wgal-card--off .gc-mat { opacity: .45; }
+/* The section's one road sign each way — under the cards, not above them. */
+.wgal-grp-hint { margin-top: 8px; }
+/* --text-secondary, not the draft's --text-faint: this names a REQUIRED field at
+   10px, and faint-on-surface is 2.8:1 in dark (contrast-audit baseline) — the same
+   correction .wgal-badge took. */
+.lib-form-l {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-secondary); margin-top: 4px;
+}
+
+/* A flow tile's ⋯ has no frame to live in — it is a corner control on the cell.
+   The modifier, never the base rule: giving every .dash-cell a positioning context
+   would re-anchor absolutely-positioned descendants inside the blocks themselves. */
+.dash-cell--menu { position: relative; }
+/* pointer-events:none while invisible — a tablet's emulated hover fires on tap, so
+   a hit-testable transparent button would let the first tap open a menu nobody can
+   see. Restored on each reveal below. */
+.dash-cell--menu > .wgm-wrap {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  opacity: 0; pointer-events: none; transition: opacity .12s ease;
+}
+/* Revealed by pointer OR keyboard (focus-within), and pinned open while its own
+   menu is up — the panel is a portal, so the pointer leaves the cell the moment it
+   enters the menu. */
+.dash-cell--menu:hover > .wgm-wrap,
+.dash-cell--menu:focus-within > .wgm-wrap,
+.dash-cell--menu > .wgm-wrap--open { opacity: 1; pointer-events: auto; }
+/* Opaque and bordered here, unlike the in-frame ⋯: three block headers DO carry
+   content at their right edge (3rd Party's coverage line, Launch Plan's
+   explanation, a full Targets bar), so the control must never read as text on text. */
+.dash-cell--menu > .wgm-wrap .wgm-btn {
+  background: var(--surface); border: 1px solid var(--border-soft); box-shadow: var(--shadow-card);
+}
+.dash-cell--menu > .wgm-wrap .wgm-btn:hover,
+.dash-cell--menu > .wgm-wrap .wgm-btn[aria-expanded="true"] {
+  background: var(--surface-alt); color: var(--text-primary);
+}
+/* .dash-cell:empty hides a block whose component self-hides despite its registry
+   `visible` predicate (tile-registry.jsx header). That fallback cannot see past the
+   menu, so hide the cell when the ⋯ is the ONLY thing left in it. A browser without
+   :has() support simply skips this rule and shows what the fallback showed before
+   the menu existed — an empty row and its gap, in a state that already needs the
+   registry predicate fixed. Nothing breaks; one rare row looks untidy. */
+.dash-cell--menu:not(:has(> :not(.wgm-wrap))) { display: none; }
+
+/* Two columns at the drawer's content width, like .wgal — the cards carry live
+   previews (the same .wgal-prev box) and need the room. */
+/* align-items: start — a layout card's preview is 160 px where the others are 128, and a
+   stretched neighbour would carry a blank band under its own Add row. */
+.lib-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+
+/* ── Block and layout catalog cards (phase 4 T10, §6.2 + Q5) ──────────────────
+   Card-with-preview for every kind — a plain list is owner-rejected. Both
+   previews are full-surface tints with hairline borders; nothing here is an
+   edge rail. The kind chip is .wgal-badge's twin — the two pills read as one
+   family across the drawer's card grids. */
+.lib-kind {
+  font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  font-family: var(--font-barlow); background: var(--surface-tertiary); color: var(--text-secondary);
+  border-radius: var(--rp); padding: 3px 8px; flex: none;
+}
+/* The block preview: the same 128px box as .wgal-prev, wearing the entry's tint
+   as a MAT — grp-<bg> beside it supplies --grp-bg/--grp-line, defined for both
+   themes — with the member thumbnails as small cards ON the tint, which is
+   exactly how the band will sit on the dashboard. */
+.lib-prevblock {
+  height: 128px; overflow: hidden; padding: 8px;
+  border-bottom: 1px solid var(--grp-line, var(--border-softer));
+  background: var(--grp-bg, var(--surface-alt)); pointer-events: none;
+  display: flex; gap: 6px;
+}
+/* The nested thumbnail adapts to the member cell: MiniPreview's own box is the
+   fixed 128px .wgal-prev, which would overrun the padded mat by the padding. */
+.lib-prevb-m .wgal-prev { height: 100%; border-bottom: none; background: transparent; }
+
+/* Composition rows, chart tooltips and the tile-menu/table bits the first extraction pass missed.
+ *
+ * They were missed because that pass picked rules by the class names it could find in a
+ * `class="..."` literal, and these are composed at runtime (`cmp-row` is written with its column
+ * count in a template string, the recharts tooltip classes are handed to the chart library). The
+ * visible result was a section widget three times its height: `.cmp-row` carries its
+ * `grid-template-columns` inline, so without `display: grid` the four cards stacked instead of
+ * sitting in a row, and nothing about that reads as a missing stylesheet.
+ *
+ * Copied verbatim from the reference's `index.css`. Its `.dark` root and its `.settings-overlay` /
+ * `.settings-drawer` rules are deliberately NOT here: the theme is the Hub's (`[data-theme]`), and
+ * `settings-drawer` is a class this app already owns and styles - taking the reference's fixed
+ * off-canvas positioning for it would move the Hub's own drawer. */
+.wgt-colerr { color: var(--status-amber); margin-left: 4px; cursor: help; }
+.wgm-wrap { display: inline-flex; }
+.wgm-btn {
+  width: 24px; height: 24px; border: none; background: none; cursor: pointer;
+  border-radius: var(--rxs); color: var(--text-muted); font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.wgm-btn:hover, .wgm-btn[aria-expanded="true"] { background: var(--hover-bg); color: var(--text-primary); }
+.wgm-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wgm-item {
+  text-align: left; font-size: 13px; color: var(--text-secondary);
+  padding: 6px 10px; border: none; background: none; border-radius: var(--rs); cursor: pointer;
+}
+.wgm-item:hover:not(:disabled), .wgm-item:focus-visible { background: var(--hover-bg); color: var(--text-primary); }
+.wgm-item:disabled { opacity: .4; cursor: default; }
+.wgm-item--danger:hover:not(:disabled) { color: var(--status-red); }
+.recharts-tooltip-custom {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow-card);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.recharts-tooltip-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.recharts-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.recharts-tooltip-name {
+  color: inherit;
+}
+.recharts-tooltip-value {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-drawer, .settings-drawer.open { transition: none; }
+}
+@media (max-width: 640px) {
+  .settings-drawer { width: 100%; }
+}
+.ui-tip { position: relative; }
+.ui-tip[data-tip]:hover::after,
+.ui-tip[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 0;
+  z-index: 60;
+  width: max-content;
+  max-width: 260px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--text-primary);
+  color: var(--page-bg);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+@media (max-width: 520px) {
+  .sp-lay-select, .sp-lay-text { width: 100%; max-width: none; }
+}
+.cmp-row { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: stretch; min-width: 0; }
+.cmp-row[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cmp-row[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cmp-row[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cmp-row > * { min-width: 0; }
+.cmp-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cmp-signal { display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--dash-radius-card, 8px); padding: 18px 20px 16px; }
+.cmp-signal-t { font-size: 14px; font-weight: 600; font-family: var(--font-sans); color: var(--text-primary); }
+.cmp-signal-s { font-size: 11px; color: var(--text-muted); }
+.cmp-signal > .cmp-signal-t:only-child::after {
+  content: '—'; display: block; margin-top: 10px;
+  font-size: 13px; font-weight: 400; color: var(--text-muted);
+}
+.cmp--compact { gap: 8px; }
+.cmp--compact .cmp-row { gap: 8px; }
+.cmp--compact .cmp-signal { padding: 12px 14px; }
+@media (max-width: 700px) {
+  .cmp-row { grid-template-columns: 1fr !important; }
+}
+.cmp-ed-bad {
+  border: 1px solid var(--status-amber-bold); background: var(--status-amber-dim);
+  border-radius: var(--rs); padding: 7px 9px; margin: 2px 0 10px;
+  font-size: 11px; line-height: 1.45; color: var(--text-primary);
+}
+.cmp-ed-bad b { color: var(--status-amber); }

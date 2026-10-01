@@ -1,0 +1,15 @@
+/* Selection wrappers keep the dashboard's existing frame and brick spacing. */
+.rpt-composition-container { display: flex; flex-direction: column; gap: 10px; }
+.rpt-composition-container > .kit-card,
+.rpt-composition-container > .cmp-signal { flex: 1; }
+.rpt-composition-atom { display: flex; flex-direction: column; gap: inherit; }
+.rpt-composition-atom > .kit-pill,
+.rpt-composition-atom > .kit-delta { align-self: flex-start; }
+.rpt-composition-atom:empty,
+.rpt-composition-body:not(:has(> :not(:empty))) { display: none; }
+.rpt-composition-atom:has(> .kit-bigstat) + .rpt-composition-atom:has(> .kit-note) { margin-top: -6px; }
+.rpt-composition-signal > .cmp-signal-t + .rpt-composition-body > .rpt-composition-atom:first-child:has(> .kit-note) { margin-top: -6px; }
+/* Ended-flight readings can all decline to render. Preserve the titled panel's dash. */
+.rpt-composition-signal:not(:has(> .cmp-signal-s)):has(> .rpt-composition-body:not(:has(> :not(:empty)))) > .cmp-signal-t::after {
+  content: '—'; display: block; margin-top: 10px; font-size: 13px; font-weight: 400; color: var(--text-muted);
+}

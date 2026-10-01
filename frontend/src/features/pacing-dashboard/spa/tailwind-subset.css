@@ -1,0 +1,92 @@
+/*
+ * The Tailwind utilities the moved SPA uses, written out by hand.
+ *
+ * Pacing is a Tailwind v4 app and this Hub is not. Most of what moved here is styled by Pacing's own
+ * class names (`.rpt-*`, `.wgf-*`, `.cmp-*`) and those came with it in `pacing-spa.css` - but the
+ * markup also leans on plain utilities, `text-11` on a tick label, `mt-1` on a caption, `truncate` on
+ * a long dimension name. With no Tailwind in this app those classes matched nothing, so every one of
+ * them silently fell back to inherited type and zero spacing. That is why the charts read as too big
+ * and too heavy: their tick and legend text is `--text-10` / `--text-11`, and inheriting the Hub's
+ * 16px base instead makes a 10px label 60% larger.
+ *
+ * Installing Tailwind for this would be the wrong trade - its preflight resets every element in the
+ * Hub, to supply a list of utilities short enough to read in one screen. So the list IS this file,
+ * with Tailwind's own values: the `text-<n>` scale is Pacing's frozen design scale (font-size only,
+ * line-height inherits - deliberate on that side), and the rest are stock v4.
+ *
+ * Global rather than scoped, which is safe to assert rather than hope: no markup outside
+ * `features/pacing-dashboard/` carries any of these class names today, and the names mean what
+ * Tailwind means by them, so a future adoption would define them the same way. Anything Pacing-
+ * specific stays out - `rounded-10` is here only because it is a utility Pacing generated from its
+ * own `--radius-10` token and the moved markup asks for it by name.
+ */
+
+/* Pacing's frozen font-size scale (index.css `@theme`, 2026-07-11). */
+.text-9  { font-size: var(--text-9); }
+.text-10 { font-size: var(--text-10); }
+.text-11 { font-size: var(--text-11); }
+.text-12 { font-size: var(--text-12); }
+.text-13 { font-size: var(--text-13); }
+.text-14 { font-size: var(--text-14); }
+.text-15 { font-size: var(--text-15); }
+.text-16 { font-size: var(--text-16); }
+.text-18 { font-size: var(--text-18); }
+.text-20 { font-size: var(--text-20); }
+.text-24 { font-size: var(--text-24); }
+.text-28 { font-size: var(--text-28); }
+
+/* Stock Tailwind: these two DO carry a line-height, unlike the numeric scale above. */
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-white { color: #fff; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.uppercase { text-transform: uppercase; }
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.inline-block { display: inline-block; }
+.grid { display: grid; }
+.hidden { display: none; }
+.flex-wrap { flex-wrap: wrap; }
+.items-start { align-items: flex-start; }
+.items-center { align-items: center; }
+.items-baseline { align-items: baseline; }
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.shrink-0 { flex-shrink: 0; }
+.grow { flex-grow: 1; }
+.gap-1\.5 { gap: 0.375rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-3 { gap: 0.75rem; }
+.gap-4 { gap: 1rem; }
+
+.relative { position: relative; }
+.absolute { position: absolute; }
+.sticky { position: sticky; }
+.z-50 { z-index: 50; }
+
+.w-full { width: 100%; }
+.min-w-0 { min-width: 0; }
+.max-w-full { max-width: 100%; }
+.max-w-md { max-width: 28rem; }
+
+.p-0 { padding: 0; }
+.p-2 { padding: 0.5rem; }
+.p-6 { padding: 1.5rem; }
+.px-4 { padding-inline: 1rem; }
+.py-2 { padding-block: 0.5rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mt-4 { margin-top: 1rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-4 { margin-bottom: 1rem; }
+.ml-1 { margin-left: 0.25rem; }
+.ml-2 { margin-left: 0.5rem; }
+.mx-4 { margin-inline: 1rem; }
+
+.opacity-40 { opacity: 0.4; }
+.cursor-pointer { cursor: pointer; }
+/* Pacing's own utility: 10px is its house radius, which Tailwind's named steps skip (8 → 12). */
+.rounded-10 { border-radius: 10px; }

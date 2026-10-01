@@ -9910,6 +9910,42 @@ components:
           items:
             type: object
             additionalProperties: true
+        types:
+          type: array
+          description: >
+            One entry per line item naming its channel (`{line_item_id, type}`), as Pacing's own
+            `buildPlanByLineItem` derives it. The widget renderer reads this to label a
+            channel-grained row and to answer a channel filter; without it every line item reads as
+            `Unknown` and a channel cut collapses into one bucket.
+          items:
+            type: object
+            additionalProperties: true
+        availableSplits:
+          type: object
+          description: >
+            The dimension inventory the last build measured - which breakdown dimensions this
+            pacing's delivery actually carries, and what values each holds. A widget's dimension
+            control offers exactly what is in here; an empty object means the Breakdown cut has
+            nothing to offer and says so, rather than offering a dimension that would draw nothing.
+          additionalProperties: true
+        availableMetrics:
+          type: object
+          description: >
+            What the last build measured this pacing's delivery rows to be able to report, as
+            `{delivery: ["im", "cl", ...]}` from Pacing's metric registry. SPARSE on purpose:
+            ABSENT means the file predates the inventory and must be read as "not built yet", which
+            is a different answer from an empty list ("nothing available"). A widget naming a metric
+            outside it is refused at save time rather than drawn as zero.
+          additionalProperties: true
+        conversionTags:
+          type: string
+          enum: [own, dropped]
+          description: >
+            The conversions file's own tag state. `own` - its rows carry their dimension tags;
+            `dropped` - the build had them and shed them to stay inside the size budget. ABSENT
+            means the rows were never tagged at all, which the Conversion Action cut has to tell
+            apart from `dropped`: one is "this pacing does not do tagged conversions", the other is
+            "it does, and this file lost them".
         dimSources:
           type: object
           description: >
