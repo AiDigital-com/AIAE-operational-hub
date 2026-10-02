@@ -18,7 +18,10 @@ import { createPortal } from 'react-dom';
 
 const POPUP_GAP = 4;
 const VIEWPORT_PAD = 8;
-const POPUP_Z_INDEX = 120;
+// 310, not Pacing's 120: this popup is a portal on <body> and the Hub's settings drawer
+// (.sheet__overlay) sits at 300, so anything lower is painted behind the drawer that
+// opened it. Matches .sp-pop in pacing-spa.css, whose comment carries the full scale.
+const POPUP_Z_INDEX = 310;
 const POPUP_W = 280;
 const MAX_LIST_H = 288;
 

@@ -510,7 +510,7 @@ select.wgf-pick { width: 240px; height: var(--sp-ctl-h); }
    is taller than a KPI tile, so an in-card panel was sliced off at the card edge.
    width must match MENU_WIDTH in TileMenu.jsx. */
 .wgm-panel {
-  position: fixed; z-index: 120; width: 176px;
+  position: fixed; z-index: 310; width: 176px;
   background: var(--surface); border: 1px solid var(--border-soft);
   border-radius: var(--rm); box-shadow: 0 8px 24px var(--overlay); padding: 4px;
   display: flex; flex-direction: column;
@@ -3036,14 +3036,21 @@ textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
    below is one of the drawer's own tokens. Both surfaces are portals on <body>
    with position: fixed — the drawer body and the widget tiles are overflow-hidden
    scrollers that would slice an in-flow panel at the nearest edge.
-   z-index: the drawer sits at 100 and its overlay at 99; a popover joins the other
-   portalled popups at 120 (.wgm-panel, MultiSelect), and the Spotlight goes above
-   both because opening it replaces whatever popover was open. */
+   z-index: these numbers answer to THIS app's scale, not Pacing's. The Hub's drawer
+   (.sheet__overlay) sits at 300, its tooltip at 330, its modal at 340 and its toasts at
+   400. Every surface below is a portal on <body>, so a value under 300 renders UNDER the
+   drawer that opened it — which is exactly what happened at Pacing's original 120/130:
+   the "+ Add series" Spotlight and every builder popover were painted behind the settings
+   drawer. A popover joins the other portalled popups at 310 (.wgm-panel, MultiSelect's
+   POPUP_Z_INDEX), and the Spotlight goes to 320, above both, because opening it replaces
+   whatever popover was open. Both stay under the Hub's tooltip so a tip over a popover
+   still reads. Pacing's own copy keeps 120/130 and is correct there — do NOT carry this
+   change upstream. */
 .sp-pop {
   --sp-ctl-h: var(--sp-edit-control-h);
   --sp-ctl-h-sm: var(--sp-edit-control-h);
   position: fixed;
-  z-index: 120;
+  z-index: 310;
   box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border-soft);
@@ -3237,7 +3244,7 @@ textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
 .sp-spot-scrim {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: 320;
   background: var(--scrim-modal);
   display: grid;
   justify-items: center;
