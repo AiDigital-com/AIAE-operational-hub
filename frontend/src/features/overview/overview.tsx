@@ -406,18 +406,22 @@ export function Overview() {
             the whole gate. */}
         <div className="overview__head-actions">
           {/* §12. Delegations belong beside the list they affect: what a delegation does is add
-              somebody else's pacings to this very page, or hand yours to them. Not gated on
-              `can_create` — granting your own access is not creating a pacing, and everyone who can
-              see this page can do it. */}
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={() => setDelegationsOpen(true)}
-            aria-haspopup="dialog"
-            aria-expanded={delegationsOpen}
-          >
-            Delegations
-          </button>
+              somebody else's pacings to this very page, or hand yours to them. Gated on
+              `can_create` (owner decision 2026-10-02), the same gate Create pacing carries: without
+              it a person owns no pacings to hand over, so the panel could only ever report. The
+              RECEIVING half is not lost with the button — every delegated row names its grantor on
+              the row itself, as the "← name" pill owner-section draws. */}
+          {scope?.can_create && (
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => setDelegationsOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={delegationsOpen}
+            >
+              Delegations
+            </button>
+          )}
           {scope?.can_create && (
             <button type="button" className="button" onClick={() => setCreateOpen(true)}>
               Create pacing

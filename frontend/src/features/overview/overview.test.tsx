@@ -567,23 +567,33 @@ describe("Overview", () => {
   });
 
   it("should open the delegations panel from the header", async () => {
-    // Given: a user with no create permission - granting your own access is not creating a pacing,
-    // so the button is not gated on it
+    // Given: a user entitled to work with pacings
+    vi.mocked(listPacingOverview).mockResolvedValue(
+      aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike" })], scope: aPacingScopeV1({ can_create: true }) })
+    );
+    renderOverview("/", { roles: [] });
+    await screen.findByText("Nike");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Delegations" }));
+
+    // Then: the panel opens in place, no navigation
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("should draw no Delegations button for a scope without can_create", async () => {
+    // Given: no create permission - the same gate Create pacing carries (owner decision
+    // 2026-10-02), because without it a person owns no pacings to hand over. Receiving is
+    // unaffected: a delegated row still names its grantor on the row itself.
     vi.mocked(listPacingOverview).mockResolvedValue(
       aPacingListResponseV1({ pacings: [aPacingRowV1({ name: "Nike" })], scope: aPacingScopeV1({ can_create: false }) })
     );
     renderOverview("/", { roles: [] });
     await screen.findByText("Nike");
 
-    // Then: offered even though Create pacing is not
-    const button = screen.getByRole("button", { name: "Delegations" });
+    // Then: neither action is offered
+    expect(screen.queryByRole("button", { name: "Delegations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create pacing" })).not.toBeInTheDocument();
-
-    // When:
-    await userEvent.click(button);
-
-    // Then: the panel opens in place, no navigation
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("should hide Revalidate on an archived pacing even for an admin", async () => {
