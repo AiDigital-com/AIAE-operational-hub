@@ -57,6 +57,15 @@ export function clearFilterParams(params: URLSearchParams): void {
 /** A patch to `setFilters` - every field optional; an omitted field is left untouched in the URL. */
 export type DashboardFiltersPatch = Partial<DashboardFilters>;
 
+/**
+ * What the hook returns. The OBJECT's identity is part of the contract, not just its two fields:
+ * `pacing-dashboard.tsx` hands it to `usePacingState`, whose `useMemo` lists it as a dependency, and
+ * that memo guards `normalize()` plus `buildFactsAggregates()` - two full passes over every daily
+ * fact of the pacing. Returning a fresh literal here made that memo miss on every render, so both
+ * passes ran again whenever any unrelated page state moved (the settings drawer opening, a journal
+ * row being clicked, the refresh countdown ticking once a second), and the fresh state object
+ * re-rendered every consumer of `PacingStateProvider` with it.
+ */
 export interface UseUrlFiltersResult {
   filters: DashboardFilters;
   setFilters: (patch: DashboardFiltersPatch) => void;
@@ -140,5 +149,8 @@ export function useUrlFilters(): UseUrlFiltersResult {
     [setSearchParams]
   );
 
-  return { filters, setFilters };
+  // Both halves are already stable - `filters` is memoized on the query string, `setFilters` is a
+  // useCallback - so the wrapper is the only thing that was changing identity. See the note on
+  // UseUrlFiltersResult for what that cost.
+  return useMemo(() => ({ filters, setFilters }), [filters, setFilters]);
 }

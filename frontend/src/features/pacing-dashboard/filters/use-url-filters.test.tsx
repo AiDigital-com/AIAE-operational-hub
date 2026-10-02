@@ -131,4 +131,41 @@ describe("useUrlFilters", () => {
       cols: null,
     });
   });
+
+  // The returned OBJECT's identity is load-bearing, not only its two fields: `pacing-dashboard.tsx`
+  // passes it straight to `usePacingState`, which lists it as a `useMemo` dependency guarding
+  // `normalize()` and `buildFactsAggregates()` - two full passes over every daily fact. A fresh
+  // literal per render made that memo miss every time, so both ran again on any unrelated page
+  // state change and the resulting state object re-rendered every consumer of the provider.
+  describe("identity", () => {
+    it("returns the same object across a render that changed nothing", () => {
+      const { result, rerender } = renderHook(() => useUrlFilters(), { wrapper });
+      const first = result.current;
+      rerender();
+      expect(result.current).toBe(first);
+      expect(result.current.filters).toBe(first.filters);
+      expect(result.current.setFilters).toBe(first.setFilters);
+    });
+
+    it("returns a new object once a filter actually moves", () => {
+      const { result } = renderHook(() => useUrlFilters(), { wrapper });
+      const first = result.current;
+      act(() => {
+        result.current.setFilters({ channels: ["Display"] });
+      });
+      expect(result.current).not.toBe(first);
+      expect(result.current.filters).not.toBe(first.filters);
+      expect(result.current.filters.channels).toEqual(["Display"]);
+    });
+
+    it("keeps the same object when a patch leaves the query string unchanged", () => {
+      const { result } = renderHook(() => useUrlFilters(), { wrapper });
+      const first = result.current;
+      act(() => {
+        // Already the default: `setSearchParams` returns `prev` untouched, so nothing re-derives.
+        result.current.setFilters({ range: "all" });
+      });
+      expect(result.current).toBe(first);
+    });
+  });
 });

@@ -130,6 +130,16 @@
   --dash-radius-tab: 5px;
   --surface-hover: rgba(0, 0, 0, 0.04);
   --shadow-modal: 0 10px 30px rgba(0, 0, 0, 0.25);
+  /* Line Items (PDI_167). The timeline's six-colour segment palette, read by Timeline.jsx's
+     TL_PALETTE, and the inset top highlight the search field and a few controls draw. Values are
+     Pacing's own (its index.css lines 93 and 170), not re-picked here. */
+  --tl-0: #0009DC;
+  --tl-1: #8b5cf6;
+  --tl-2: #78b41d;
+  --tl-3: #df7d1b;
+  --tl-4: #df538f;
+  --tl-5: #0ea5c8;
+  --edge: rgba(255, 255, 255, 0.85);
 }
 
 [data-theme="dark"] {
@@ -202,6 +212,15 @@
   --grp-violet-bg: rgba(167, 139, 250, 0.10);
   --grp-violet-line: rgba(167, 139, 250, 0.32);
   --surface-hover: rgba(255, 255, 255, 0.06);
+  /* Line Items (PDI_167), dark half - Pacing's index.css lines 258 and 334. The palette is not the
+     light one dimmed: each hue is lifted so it stays legible on a dark bar. */
+  --tl-0: #6c7dff;
+  --tl-1: #b08cff;
+  --tl-2: #aef33e;
+  --tl-3: #ffbe3b;
+  --tl-4: #f472b6;
+  --tl-5: #67e8f9;
+  --edge: rgba(255, 255, 255, 0.04);
 }
 
 /* ── the moved components own rules ─────────────────────────────────────── */
@@ -4535,3 +4554,31 @@ textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
   font-size: 11px; line-height: 1.45; color: var(--text-primary);
 }
 .cmp-ed-bad b { color: var(--status-amber); }
+
+/* ── Line Items (PDI_167) ──────────────────────────────────────────────────
+   Two rules, copied from Pacing's index.css. Everything else the block draws is either an inline
+   style or a utility in tailwind-subset.css, and the timeline's segment tooltip is injected by
+   Timeline.jsx itself (`TL_TOOLTIP_CSS`) rather than living in a stylesheet.
+
+   `.lis-view` is the All lines / By channel switch; `.lis-ch-head` is a channel group header, a
+   button spanning the list width. Both were missed by the original extraction, which scanned for
+   `class="..."` literals - these two are composed at runtime, which is the same trap the feature's
+   CLAUDE.md note describes. Found here by collecting the classes off the LIVE DOM instead. */
+.lis-view {
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px 0;
+}
+
+.lis-ch-head {
+  width: 100%;
+  padding: 8px 20px;
+  background: var(--surface-alt);
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.lis-ch-head:hover { background: var(--hover-bg); }

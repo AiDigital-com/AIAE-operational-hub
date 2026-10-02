@@ -379,6 +379,85 @@ describe("PacingTab", () => {
     expect(screen.getByRole("button", { name: /^Other pacing/ })).not.toHaveAttribute("aria-current");
   });
 
+  // The list used to sit under a row holding nothing but a right-aligned Create button, so the left
+  // half of it was blank. The heading matches Reporting's, one click away, where the same list of
+  // things is titled and counted.
+  describe("list heading", () => {
+    it("titles and counts the list", async () => {
+      // Given:
+      vi.mocked(listCampaignPacings).mockResolvedValue(
+        aResponse([aPacing({ id: "p1", name: "First" }), aPacing({ id: "p2", name: "Second" })])
+      );
+
+      // When:
+      renderTab();
+
+      // Then: awaited on the COUNT, not on the heading - the heading now renders before the request
+      // resolves, so finding it proves nothing about the list having arrived.
+      expect(await screen.findByText("2 pacings")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Pacings" })).toBeInTheDocument();
+    });
+
+    it("counts one pacing in the singular", async () => {
+      // Given: the off-by-one every "N items" line gets wrong
+      vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ id: "p1", name: "Only one" })]));
+
+      // When:
+      renderTab();
+
+      // Then:
+      expect(await screen.findByText("1 pacing")).toBeInTheDocument();
+    });
+
+    it("keeps the heading for a caller who may not create, which is where the blank row came from", async () => {
+      // Given: the whole row used to hang on `can_create`, so this user saw no heading at all
+      vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([aPacing({ id: "p1", name: "First" })], false));
+
+      // When:
+      renderTab();
+
+      // Then:
+      expect(await screen.findByText("1 pacing")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Pacings" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Create Pacing" })).not.toBeInTheDocument();
+    });
+
+    it("heads the empty state too, rather than leaving the tab to open on a bare message", async () => {
+      // Given:
+      vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([]));
+
+      // When:
+      renderTab();
+
+      // Then:
+      expect(await screen.findByText("No pacings yet")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Pacings" })).toBeInTheDocument();
+      expect(screen.getByText("0 pacings")).toBeInTheDocument();
+    });
+
+    it("shows the heading while loading, but no count until the list is in", async () => {
+      // Given: a request that has not resolved
+      let release: (value: Awaited<ReturnType<typeof listCampaignPacings>>) => void = () => {};
+      vi.mocked(listCampaignPacings).mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        })
+      );
+
+      // When:
+      renderTab();
+
+      // Then: the heading is already there - the list does not appear under an untitled gap - and no
+      // count is printed, because "0 pacings" corrected a second later is worse than nothing.
+      expect(await screen.findByRole("heading", { name: "Pacings" })).toBeInTheDocument();
+      expect(screen.queryByText(/pacings?$/)).not.toBeInTheDocument();
+
+      // And once it lands, the count appears
+      release(aResponse([aPacing({ id: "p1", name: "First" })]));
+      expect(await screen.findByText("1 pacing")).toBeInTheDocument();
+    });
+  });
+
   it("shows the Create Pacing button when the caller may create, hides it otherwise (§8)", async () => {
     // Given:
     vi.mocked(listCampaignPacings).mockResolvedValue(aResponse([], false));

@@ -185,6 +185,7 @@ import {
   selectCampaign, selectDisplay, selectFacts, selectLiPlan, selectEffLIs,
   makeCampMetricsSelector, makeFullFlightMetricsSelector,
   selectAvailableSplits, selectAvailDims,
+  makeCardLIsSelector, selectEffRange, selectDeliveryFacts,
 } from './selectors.js';
 import { normalize, buildFactsAggregates } from './normalize.js';
 
@@ -201,6 +202,40 @@ export const useAvailableSplits = () => useDashboardStore(selectAvailableSplits)
  *  does materialize the lazy breakdown aggregate, so it belongs to surfaces that already pay for
  *  that — the settings drawer, which is the only thing that calls it. */
 export const useAvailDims = () => useDashboardStore(selectAvailDims);
+
+// ── what the Line Items block reads ───────────────────────────────────────────────────────────
+//
+// Four more of `useDashboard.js`, restated the same way as the ones above. Every selector under
+// them was already here — `selectors.js` moved over whole — so this is the hook layer catching up
+// with its own file, not new behaviour.
+
+/** The line items the CARD list shows: channel and label filters applied, selection NOT. Selection
+ *  highlights a card, it does not hide the others — that is why this is a different list from
+ *  `useEffLIs`, which every metric surface uses and which does filter on selection. */
+export function useCardLIs() {
+  const { filters } = useUrlFilters();
+  const selector = useMemo(() => makeCardLIsSelector(), []);
+  return useDashboardStore((s) => selector(s, filters));
+}
+
+/** The date window the filter bar resolves to — what a card clips its facts and its plan to. */
+export function useEffRange() {
+  const { filters } = useUrlFilters();
+  return useDashboardStore((s) => selectEffRange(s, filters));
+}
+
+/** Delivery-side facts with the platform Lens applied: what a split row reads. Distinct from
+ *  `useFacts`, which is the raw unfiltered aggregate. */
+export function useBreakdownFacts() {
+  const { filters } = useUrlFilters();
+  return useDashboardStore((s) => selectDeliveryFacts(s, filters));
+}
+
+/** Period-scope mode. Always false here — `usePacingState` pins it, because this app has no period
+ *  picker — and the block handles that as "no scope", which is how Pacing itself behaves with the
+ *  mode off. Exported rather than inlined so the day the Hub grows a period picker there is one
+ *  place to change, and the moved code keeps reading the name it was written against. */
+export const useSplitScopedMode = () => useDashboardStore((s) => s.splitScopedMode);
 
 /** `filtersOverride`: a chart's own period chip patches the DATA selector's filters, so a target
  *  value read from campM follows the same window as the series it annotates. */

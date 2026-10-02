@@ -10,8 +10,8 @@ import { AlertsBlock } from "../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../pacing-overview/types";
 import { savePacingDisplay, triggerPacingRefresh } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
-import { ContainersTable } from "./containers-table";
 import { DailyTable } from "./daily-table";
+import LineItemsTile from "./spa/lineitems/LineItemsTile.jsx";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { DocumentsChips } from "./documents/documents-chips";
 import type { SettingsTabId } from "./settings-section";
@@ -109,7 +109,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   }, [cooldownUntil]);
 
   const data = dashboardQuery.data;
-  const { filters, setFilters } = useUrlFilters();
+  // Kept whole, not destructured-and-rebuilt: the object goes to `usePacingState` below as a memo
+  // dependency, and a fresh `{ filters, setFilters }` literal there defeated that memo on every
+  // render. `useUrlFilters` now returns a stable object for exactly this reason.
+  const urlFilters = useUrlFilters();
+  const { filters, setFilters } = urlFilters;
 
   // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
   // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
@@ -244,7 +248,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
 
   const pacingState = usePacingState({
     data,
-    urlFilters: { filters, setFilters },
+    urlFilters,
     actions: widgetActions,
     journalHighlight,
   });
@@ -409,6 +413,18 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               of question they do — and because a click in it filters every one of them. */}
           <BreakdownPanel data={data} filters={filters} setFilters={setFilters} />
 
+          {/* §6's Line Items block, moved whole from Pacing (`spa/lineitems/`). One card per line
+              item: its figures, its margin against target, its pace, the flight bar whose segments
+              filter the page by date, and — once a card is expanded — that line item's containers
+              and their date / sub-breakdown children.
+
+              It REPLACES the "Containers and splits" table that used to sit between the journal and
+              the daily table. That table showed exactly the container readings a card now carries,
+              which would have printed the same figures twice on one page; and it only ever appeared
+              on a pacing that had containers, so a plan without them had nowhere at all to see its
+              line items. */}
+          <LineItemsTile />
+
           {/* Every per-pacing setting behind one gear, as the retired SPA had it: a right-hand
               drawer with a row of tabs and ONE Save over all of them. Three buttons opening three
               panels with three Save buttons was three places to learn and three chances to leave
@@ -444,8 +460,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onHighlightDate={setJournalHighlight}
             setFilters={setFilters}
           />
-
-          <ContainersTable metrics={metrics} />
 
           <DailyTable metrics={metrics} />
         </PacingStateProvider>
