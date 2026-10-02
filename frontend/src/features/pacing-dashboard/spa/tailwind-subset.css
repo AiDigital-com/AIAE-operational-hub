@@ -90,3 +90,109 @@
 .cursor-pointer { cursor: pointer; }
 /* Pacing's own utility: 10px is its house radius, which Tailwind's named steps skip (8 → 12). */
 .rounded-10 { border-radius: 10px; }
+
+/* ── Line Items (PDI_167) ───────────────────────────────────────────────────
+   Eighty more utilities, found the way the note at the top of this file says they have to be:
+   by collecting the class names off the LIVE DOM of the rendered block, not by reading the
+   source. Values are stock Tailwind v4, same as everything above.
+
+   `focus:outline-none` is NOT here, deliberately: it would remove the focus ring from the search
+   field with nothing put back, and this app has no Tailwind preflight re-styling focus. The field
+   keeps the browser's ring. */
+
+/* layout / box */
+.box-border { box-sizing: border-box; }
+.overflow-hidden { overflow: hidden; }
+.pointer-events-none { pointer-events: none; }
+.select-none { -webkit-user-select: none; user-select: none; }
+.flex-1 { flex: 1 1 0%; }
+.flex-shrink-0 { flex-shrink: 0; }
+.z-10 { z-index: 10; }
+.top-0 { top: 0; }
+.bottom-0 { bottom: 0; }
+.left-0 { left: 0; }
+.left-1\/2 { left: 50%; }
+/* size */
+.w-4 { width: 1rem; }
+.w-5 { width: 1.25rem; }
+.w-14 { width: 3.5rem; }
+.w-px { width: 1px; }
+.h-5 { height: 1.25rem; }
+.h-full { height: 100%; }
+.h-\[5px\] { height: 5px; }
+.h-\[6px\] { height: 6px; }
+.h-\[22px\] { height: 22px; }
+.min-h-\[44px\] { min-height: 44px; }
+.min-w-\[52px\] { min-width: 52px; }
+/* spacing */
+.mb-1 { margin-bottom: 0.25rem; }
+.mt-\[1px\] { margin-top: 1px; }
+.mt-\[2px\] { margin-top: 2px; }
+.mt-\[3px\] { margin-top: 3px; }
+.mt-\[4px\] { margin-top: 4px; }
+.px-3\.5 { padding-left: 0.875rem; padding-right: 0.875rem; }
+.px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+.px-\[6px\] { padding-left: 6px; padding-right: 6px; }
+.px-\[7px\] { padding-left: 7px; padding-right: 7px; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+.py-\[1px\] { padding-top: 1px; padding-bottom: 1px; }
+/* type */
+.font-bold { font-weight: 700; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+/* `font-[var(--font-sans)]` and `font-[var(--font-barlow)]` are deliberately NOT defined.
+   Checked against real Tailwind v4.2.2 (the version Pacing pins), including with Pacing's own
+   `@theme` block: it reads `font-[...]` as font-WEIGHT, not font-family, and emits
+   `font-weight: var(--font-barlow)`. A family name is not a valid weight, so the browser drops the
+   declaration and the element inherits. In other words these two classes do nothing in Pacing
+   either - the channel badge and the search field inherit the page font there.
+   Defining them as `font-family` here would make this block render in a face the reference never
+   used. Left unmatched so the two agree. */
+.leading-none { line-height: 1; }
+.leading-tight { line-height: 1.25; }
+.leading-snug { line-height: 1.375; }
+.leading-\[1\.3\] { line-height: 1.3; }
+.tracking-\[\.01em\] { letter-spacing: .01em; }
+.tracking-\[\.06em\] { letter-spacing: .06em; }
+.tracking-\[\.8px\] { letter-spacing: .8px; }
+.text-center { text-align: center; }
+.text-ellipsis { text-overflow: ellipsis; }
+.whitespace-nowrap { white-space: nowrap; }
+/* colour - the token is the value, so each of these is one declaration */
+.text-\[var\(--text-primary\)\] { color: var(--text-primary); }
+.text-\[var\(--text-secondary\)\] { color: var(--text-secondary); }
+.text-\[var\(--text-muted\)\] { color: var(--text-muted); }
+.text-\[var\(--status-green\)\] { color: var(--status-green); }
+.text-\[var\(--status-amber\)\] { color: var(--status-amber); }
+.text-\[var\(--status-red\)\] { color: var(--status-red); }
+.bg-\[var\(--surface\)\] { background-color: var(--surface); }
+.bg-\[var\(--surface-alt\)\] { background-color: var(--surface-alt); }
+.bg-\[var\(--border-soft\)\] { background-color: var(--border-soft); }
+.bg-\[var\(--border-hover\)\] { background-color: var(--border-hover); }
+/* border - width AND style, because this app has no Tailwind preflight to set */
+/* `border-style: solid` globally; width alone would draw nothing. */
+.border { border-width: 1px; border-style: solid; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+.border-t { border-top-width: 1px; border-top-style: solid; }
+.border-\[var\(--border-soft\)\] { border-color: var(--border-soft); }
+.rounded-full { border-radius: 9999px; }
+.rounded-\[3px\] { border-radius: 3px; }
+.shadow-\[inset_0_1px_0_var\(--edge\)\] { box-shadow: inset 0 1px 0 var(--edge); }
+/* transition - Tailwind pairs every transition-* with its default duration and easing */
+.transition-colors { transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+.transition-transform { transition-property: transform, translate, scale, rotate; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+.transition-\[opacity\,background\,border-color\] { transition-property: opacity, background, border-color; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+.transition-\[width\,left\] { transition-property: width, left; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+.duration-150 { transition-duration: 150ms; }
+.duration-200 { transition-duration: 200ms; }
+.duration-300 { transition-duration: 300ms; }
+
+/* variants */
+.hover\:bg-\[var\(--hover-bg\)\]:hover { background-color: var(--hover-bg); }
+.hover\:bg-\[var\(--accent-bg\)\]:hover { background-color: var(--accent-bg); }
+.hover\:border-\[var\(--border-hover\)\]:hover { border-color: var(--border-hover); }
+.hover\:text-\[var\(--text-secondary\)\]:hover { color: var(--text-secondary); }
+.focus\:border-\[var\(--accent\)\]:focus { border-color: var(--accent); }
+.placeholder\:text-\[var\(--text-muted\)\]::placeholder { color: var(--text-muted); }
+.last\:border-b-0:last-child { border-bottom-width: 0; }

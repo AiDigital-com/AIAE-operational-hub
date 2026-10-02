@@ -59,3 +59,53 @@ files did and can go through the same seam.
 The library panel's card thumbnails still draw through the Hub's own `widget-engine.tsx` /
 `brick-registry.tsx` / `chart-view.tsx`. Moving them onto the real renderer is what makes those
 ~1 400 lines deletable.
+
+## Line Items (PDI_167, 2026-10-01)
+
+`lineitems/` is the fourth move into this folder, and the first of a whole page BLOCK rather than of
+pure logic: `LineItemCard.jsx`, `SplitRow.jsx`, `Timeline.jsx`, `PaceBar.jsx` from Pacing's
+`pages/Dashboard/components/LineItemList/`, plus `LineItemsTile.jsx`, which is the `LineItemsTile`
+entry lifted out of Pacing's `tile-registry.jsx` together with the `SectionCard` / `SectionBoundary`
+wrappers it renders inside.
+
+Three more pure modules came with them because nothing here had them yet: `containers.js`,
+`split-metrics.js` and `currency-marker.js`. Everything else the block reads — `metrics.js`,
+`selectors.js`, `config.js`, `dim-scope.js`, `primary-cv.js`, `format.js` — was already here, which
+is most of why this was a move and not a rewrite.
+
+Changed, as everywhere in this folder, only outside function bodies:
+
+| Was | Is |
+|---|---|
+| `../../../../hooks/useDashboard.js`, `stores/dashboardStore.js`, `hooks/useUrlFilters.js` | `../store.js` — the seam, which grew `useCardLIs`, `useEffRange`, `useBreakdownFacts` and `useSplitScopedMode` for this |
+| `../../../../lib/dashboard/*`, `../../../../lib/*` | `../*` |
+| `lazyWithRetry(() => import('./SplitRow.jsx'))` | `lazy(...)` — every other lazy boundary in this app is plain `React.lazy`, and the retry wrapper's job (hard-reloading a tab holding pre-deploy chunk hashes) has no counterpart here |
+
+### What it replaced
+
+`containers-table.tsx` is gone. It showed the container readings a card now carries, so keeping both
+would have printed the same figures twice on one page — and it hid itself entirely when a pacing had
+no containers, which left a line-item-level plan with nowhere to see its line items at all. The
+`metrics.containers` computation behind it stays: the engine builds it and the crown test pins it.
+
+### What had to be supplied
+
+`pacing-spa.css` gained `.lis-view` and `.lis-ch-head` (copied from Pacing's `index.css`) and the
+`--tl-0..5` / `--edge` tokens in both themes; `tailwind-subset.css` gained 80 utilities. All of them
+were found by collecting the class names off the LIVE DOM of the rendered block — the method this
+folder's history demands, because the original extraction scanned for `class="..."` literals and
+missed everything composed at runtime. `lineitems/line-items-styles.test.tsx` runs that same pass as
+a test, so the next edit to a `className` in here reports itself.
+
+### Known, and left as the reference has it
+
+- The **All lines / By channel** switch does not mark which side is active. The markup puts a
+  `confirm` class on the chosen button and neither this app's stylesheet nor Pacing's own defines
+  `.sp-tp-link.confirm` — only `.sp-tp-link-danger.confirm`. Pacing has the same gap on the same
+  control; fixing it here would be a change to the block, not a move of it.
+- The block renders even with **no line items** — Pacing's registry entry carries no `visible`
+  predicate — so an empty plan shows the card, its heading and the search box with nothing under
+  them.
+- `SectionCard` draws Pacing's card chrome (`--dash-radius-card`, 6px) while this app's own panels
+  beside it use `--radius-lg` (10px). The borders and the heading type are within a pixel of each
+  other; the corner radius is the visible difference.

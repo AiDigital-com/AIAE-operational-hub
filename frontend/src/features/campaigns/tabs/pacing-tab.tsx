@@ -525,13 +525,27 @@ export function PacingTab() {
 
   return (
     <section className="pacing-tab">
-      {pacingsQuery.isSuccess && canCreate && (
-        <div className="pacing-tab__actions">
+      {/* Reporting's two-edge head, same shape and same values, because these two tabs sit one click
+          apart and a list titled on one and untitled on the other reads as an oversight. The heading
+          renders in EVERY state - loading, empty, error - while the button stays behind `canCreate`:
+          the whole block used to hang on that permission, so a user who may not create a pacing got
+          no heading either, and the blank half of the row was the thing being complained about.
+          `h2` under the campaign's own `h1` in campaign-workspace.tsx. */}
+      <div className="pacing-tab__head">
+        <div>
+          <h2 className="pacing-tab__title">Pacings</h2>
+          {/* Only once the list is in. Rendering it earlier would print "0 pacings" and then correct
+              itself; the row keeps its height through CSS, so nothing shifts when the count lands. */}
+          <div className="pacing-tab__sub">
+            {pacingsQuery.isSuccess && `${rows.length} pacing${rows.length === 1 ? "" : "s"}`}
+          </div>
+        </div>
+        {pacingsQuery.isSuccess && canCreate && (
           <button type="button" className="button button--sm" onClick={() => setCreating(true)}>
             Create Pacing
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {pacingsQuery.isPending && <LoadingBlock label="Loading pacings" />}
 

@@ -1,8 +1,30 @@
-/* ── §8: Create Pacing entry point ── */
-.pacing-tab__actions {
+/* ── list heading + §8's Create Pacing entry point ──────────────────────────
+   Deliberately the same values as .reporting-tab__head, not merely similar: the two tabs are one
+   click apart, so a heading a point larger or an edge two pixels off reads as a mistake rather than
+   as a different screen. Was `justify-content: flex-end` with nothing but the button in it, which is
+   the blank left half this replaces. */
+.pacing-tab__head {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 12px;
+  /* flex-start, not center: the left side is two stacked lines and the right side is a lone button.
+     Centering would hang the button halfway down the pair instead of level with the heading. */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.pacing-tab__title {
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0 0 2px;
+}
+/* Holds its line while the count is still loading, so the list below does not jump down by one line
+   when the request lands. min-height rather than a placeholder character: nothing to read out, and
+   nothing to leak into a copied selection. */
+.pacing-tab__sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  min-height: 1.5em;
 }
 
 /* ── empty state (mirrors .pacing-overview__empty) ── */
