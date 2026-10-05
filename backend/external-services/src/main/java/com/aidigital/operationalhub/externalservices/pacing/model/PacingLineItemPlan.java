@@ -43,6 +43,13 @@ import java.util.Map;
  * @param flightEnd          flight end date (YYYY-MM-DD)
  * @param pauseIntervals     manually recorded pause windows
  * @param containers         date-based plan overrides (§9/§10); opaque, see class javadoc
+ * @param dimGroups          value groups (spec 2026-10-02): this line item's dictionary saying that
+ *                           several delivered values of one naming dimension read as one named
+ *                           value, so a dim split on that name is an ordinary split with one shared
+ *                           target. Absent (null) on a line that declares none - Pacing attaches the
+ *                           key only when the list is non-empty. Opaque for {@code containers}'
+ *                           reason: the Hub forwards it to the browser-side engine, which applies
+ *                           it, and never interprets it here
  * @param nativeBudget       serialized as {@code native_budget} (an existing wire inconsistency -
  *                           every other field on this object is camelCase); the line item's budget
  *                           in its own native currency, null for a USD line item (see
@@ -71,6 +78,7 @@ public record PacingLineItemPlan(
 		String flightEnd,
 		List<PacingPauseInterval> pauseIntervals,
 		List<Map<String, Object>> containers,
+		List<Map<String, Object>> dimGroups,
 		@JsonProperty("native_budget") Double nativeBudget,
 		@JsonProperty("cost_coef") Boolean costCoef,
 		Boolean converted,

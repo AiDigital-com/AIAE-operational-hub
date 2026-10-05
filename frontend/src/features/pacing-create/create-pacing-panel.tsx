@@ -45,7 +45,7 @@ import type {
 } from "./types";
 import "./create-pacing-panel.css";
 
-const RATE_TYPES = ["CPM", "CPC", "CPV", "Flat"];
+const RATE_TYPES = ["CPM", "CPC", "CPV", "CPI", "Flat"];
 
 /** The generated contract's closed data-source vocabulary (Pacing's own `ALLOWED_DATA_SOURCES`). */
 type PacingDataSourceValue = NonNullable<NonNullable<PacingCreateV1["data"]>["source"]>;

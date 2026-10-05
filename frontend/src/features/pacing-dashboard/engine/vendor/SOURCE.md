@@ -36,6 +36,41 @@ server's unfiltered `PacingRowV1.alerts` (2026-09-25 filters follow-up, item 3).
   copy was taken; `diff -q` against `AIAE-paicing/shared/metric-registry.js` is the check that
   matters, not the SHA.
 
+- Re-copied 2026-10-05 (`pacing-core.js`, `dashboard-metrics.js`): the `paicing-azat` working tree
+  on branch `1.0.0`, which had just taken Pacing's value-groups change from `ogan-team` at
+  `a33ba97` plus the date-child budget fix at `5b77324`. Two behaviour changes, both money:
+  `buildVirtualPlanFromDateChild` now reads a selected month's OWN spend as its period budget
+  (its `target_spend` when set, else its units' share of its container's spend) instead of always
+  taking the line's budget by impression share; and value groups arrived - a line item may declare
+  that several delivered values of one naming dimension read as one named value (`dimGroups` on
+  its plan), rewritten into the rows wherever they are first read. `dashboard-metrics.js` is
+  GENERATED (`AIAE-paicing/scripts/build-dashboard-metrics.mjs`) and was regenerated for the same
+  change; it now also exports `groupIndexOf` / `groupedView`, which `../build-metrics.ts` calls in
+  `toEngineRaw`. A copy left on the old version would price a period off the wrong budget and
+  would answer a split on a group's name with zero delivery - both silently, both green.
+  Named as a working tree rather than a commit because the sync was not committed when the copy
+  was taken; `diff -q` against `AIAE-paicing/shared/` is the check that matters, not the SHA.
+
+- Re-copied 2026-10-05, second time that day (`dashboard-metrics.js`): the buy-unit fix. A line
+  item's rate type names the unit it is bought on, and campM counts each unit only over the lines
+  paced on it — so on a CPC or CPV pacing the whole `impr*` family is 0 by design. The Standard
+  Delivery card bound that family outright and drew blanks on a live CPC campaign. Seven new
+  canonical metrics (`unitActual`, `unitExpected`, `unitPlan`, `unitToDatePct`, `unitDeviation`,
+  `neededPerDayUnit`, `paceDeltaUnit`) resolve through `primaryUnit` at render instead; on a CPM
+  pacing each is byte-identical to the `impr*` metric it replaces. The same regeneration carries
+  `clExpected`, expected clicks to date over the click-paced lines, which the Daily Performance
+  table now stacks under its Clicks total instead of the whole planned clicks.
+  `vendor/std-entries.js` (the definitions) and `vendor/widget-metrics.js` (the vocabulary that
+  decides whether a settings save is accepted at all) moved with it — all three or none.
+
+- Re-copied 2026-10-05, third time that day (`pacing-core.js`, `alerts-core.js`,
+  `dashboard-metrics.js`): CPI, the fourth unit a pacing can be bought on (app-install buying).
+  It is NOT in `AIAE-paicing`'s own reference checkout — `ogan-team` has no CPI at all, so these
+  three files now DIVERGE from it on purpose, and the next sync from that branch must not
+  overwrite the divergence. A CPI line reads the CONVERSIONS column: the delivery mart carries no
+  installs of its own. Until this, such a line was read as an impressions line — its install goal
+  became an impression goal. Everything else about these files is unchanged.
+
 This directory also holds six small sibling `.d.ts` files (`dashboard-metrics.d.ts`,
 `pacing-core.d.ts`, `metric-registry.d.ts`, `currency.d.ts`, `dashboard-metrics-glue.d.ts`,
 `alerts-core.d.ts`) - these are NOT vendored, we wrote and own them (see `../vendor-types.d.ts`'s

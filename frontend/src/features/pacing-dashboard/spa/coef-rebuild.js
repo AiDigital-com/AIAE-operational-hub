@@ -54,10 +54,23 @@ export function primaryCvFingerprint(liPlan, operative) {
   }));
 }
 
+// Value groups (spec 2026-10-02, kept outside git): the dictionary decides which value a row
+// carries, so a change rebuilds the facts from the regrouped rows. Lines without groups are
+// not listed: a pacing that never used them fingerprints as '' and never rebuilds.
+export function dimGroupsFingerprint(liPlan) {
+  const out = [];
+  for (const id of Object.keys(liPlan || {}).sort()) {
+    const g = liPlan[id] && liPlan[id].dimGroups;
+    if (Array.isArray(g) && g.length) out.push([id, g]);
+  }
+  return out.length ? JSON.stringify(out) : '';
+}
+
 // Gate (spec §3.4): (coefOrMarginChanged && (hadAnyCoef || hasAnyCoef))
 //                   || (rateChanged && hasAnyCoef)
 //                   || netRatioChanged
 //                   || primaryCvChanged
+//                   || dimGroupsChanged
 // `oldOn` / `newOn` are the published primary_cv_operative flag before and after the
 // save. A flip either way rebuilds; operative on both sides compares the per-line-item
 // fingerprint; off on both sides compares '' with '' and never rebuilds.
@@ -69,7 +82,8 @@ export function shouldRebuildFacts(oldLP, newLP, oldRate, newRate, oldOn = false
   const netChanged = netFingerprint(oldLP) !== netFingerprint(newLP);
   const cvChanged = (oldOn === true) !== (newOn === true)
     || primaryCvFingerprint(oldLP, oldOn === true) !== primaryCvFingerprint(newLP, newOn === true);
-  return (marginChanged && (had || has)) || (rateChanged && has) || netChanged || cvChanged;
+  const groupsChanged = dimGroupsFingerprint(oldLP) !== dimGroupsFingerprint(newLP);
+  return (marginChanged && (had || has)) || (rateChanged && has) || netChanged || cvChanged || groupsChanged;
 }
 
 // Does any LI in the plan bill the client net of a ratio? (net cost mode, spec

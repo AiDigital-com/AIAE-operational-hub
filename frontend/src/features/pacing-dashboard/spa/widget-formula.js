@@ -43,7 +43,7 @@ export const FIELDS_DAILY = new Set(LEGACY_DAILY.concat(
 // expectedDeltas). It joined with the Daily Performance preset (section-widget parity
 // 2026-09-04): the legacy totals row stacks it under delivered impressions, and `expIm` reads
 // a different, larger number on every mixed-rate pacing.
-export const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected']);
+export const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected', 'clExpected']);
 export const FIELDS_RATES = new Set(['ctr', 'vcr', 'acr', 'cpm', 'cpc', 'cpv']);
 export const FIELDS_PLAN = new Set([
   // `costBudTotal` is the whole flight's cost budget where `costBud` is prorated inside the

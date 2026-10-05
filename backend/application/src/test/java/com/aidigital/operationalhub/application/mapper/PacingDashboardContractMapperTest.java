@@ -71,7 +71,10 @@ class PacingDashboardContractMapperTest {
 				1_000_000.0, 20.0, null, null,
 				"2026-08-01", "2026-09-30",
 				List.of(new PacingPauseInterval("2026-08-10", "2026-08-12")),
-				List.of(Map.of("target_impressions", 200_000)), null, false, false, null);
+				List.of(Map.of("target_impressions", 200_000)),
+				// Value groups: two delivered Audience values read as one named value on this line.
+				List.of(Map.of("dim_key", "audience", "name", "Brand", "values", List.of("PMax_Brand", "Search_Brand"))),
+				null, false, false, null);
 		PacingJournalEntry journal =
 				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
@@ -140,7 +143,7 @@ class PacingDashboardContractMapperTest {
 				"", List.of());
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
-				"2026-08-01", "2026-09-30", List.of(), List.of(), null, false, false, null);
+				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(), "2026-08-05",
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved

@@ -469,6 +469,119 @@ function factOutsideSplits(idx, dimKey, row) {
     return covered;
 }
 
+/* ─── Value groups (2026-10-02): several raw values of one line read as one ────
+ * A line item's dim_groups say "on this line A, B and C of Audience read as Brand".
+ * Rows are rewritten where they are first read, so a dim split on Brand is an
+ * ordinary single-value split and nothing above this point has to know. Membership
+ * is trimmed and ignores case. A row that already carries the name is a member too
+ * (it lands in the same bucket).
+ * Spec: AIAE-paicing-specs/2026-10-02-split-value-groups.md (kept outside git).
+ */
+function dimGroupFold(v) {
+    return String(v == null ? '' : v).trim().toLowerCase();
+}
+
+/** The dimensions a dim split can be declared on, hence the only columns a group may
+ *  rewrite. A dictionary naming anything else (`date`, `impressions`, `__proto__`) is ignored
+ *  here whatever a save let through: this function decides which COLUMN of a fact row changes. */
+var DIM_GROUP_KEYS = ['audience', 'comment', 'geo', 'creative', 'message', 'keyword', 'flight', 'language'];
+
+/** pairs: [{ id, groups: [{ dim_key, name, values }] }]
+ *  → null when no line has a usable group (callers then skip everything),
+ *  else { [liId]: { [dim_key]: { [foldedValue]: name } } }. The first claim wins.
+ *  A group on anything but the eight split dimensions is ignored. */
+function buildDimGroupIndex(pairs) {
+    var index = null;
+    var list = Array.isArray(pairs) ? pairs : [];
+    for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        var groups = (p && Array.isArray(p.groups)) ? p.groups : [];
+        for (var g = 0; g < groups.length; g++) {
+            var grp = groups[g];
+            if (!grp || DIM_GROUP_KEYS.indexOf(grp.dim_key) < 0) continue;
+            var name = String(grp.name == null ? '' : grp.name).trim();
+            if (!name) continue;
+            var id = String(p.id);
+            // Null-prototype maps throughout: ids, dimensions and values are data, and a
+            // value named `constructor` or a line called `__proto__` must stay data.
+            if (!index) index = Object.create(null);
+            if (!index[id]) index[id] = Object.create(null);
+            if (!index[id][grp.dim_key]) index[id][grp.dim_key] = Object.create(null);
+            var map = index[id][grp.dim_key];
+            var values = Array.isArray(grp.values) ? grp.values : [];
+            for (var v = 0; v < values.length; v++) {
+                var f = dimGroupFold(values[v]);
+                if (f && !Object.prototype.hasOwnProperty.call(map, f)) map[f] = name;
+            }
+            var nf = dimGroupFold(name);
+            if (!Object.prototype.hasOwnProperty.call(map, nf)) map[nf] = name;
+        }
+    }
+    return index;
+}
+
+/** The group name a raw value reads as on one line, or null. */
+function dimGroupNameOf(index, liId, dimKey, raw) {
+    var line = index && index[String(liId)];
+    var map = line && line[dimKey];
+    if (!map) return null;
+    var f = dimGroupFold(raw);
+    return (f && Object.prototype.hasOwnProperty.call(map, f)) ? map[f] : null;
+}
+
+function dimGroupCopy_(src) {
+    var out = {};
+    for (var k in src) { if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = src[k]; }
+    return out;
+}
+
+/** rows → THE SAME ARRAY when nothing changes (no index, no touched row); else a new
+ *  array in which each touched row is a shallow copy: the dimension set to the group
+ *  name, the original kept in row._member[dim_key]. `path` says where the dimension
+ *  columns live: [] or absent = on the row; ['filter_context', 'dims']; ['brk'].
+ *  Every object on the path is copied, never written in place (unpacked sheet rows
+ *  share one frozen `brk` per name). */
+function applyDimGroups(rows, index, path) {
+    if (!index || !Array.isArray(rows) || !rows.length) return rows;
+    var steps = Array.isArray(path) ? path : [];
+    var out = null;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var line = row ? index[String(row.line_item_id)] : null;
+        var next = row;
+        if (line) {
+            var holder = row;
+            for (var s = 0; s < steps.length && holder; s++) holder = holder[steps[s]];
+            if (holder && typeof holder === 'object') {
+                var changed = null, member = null;
+                for (var k in line) {
+                    if (!Object.prototype.hasOwnProperty.call(line, k) || holder[k] == null) continue;
+                    var f = dimGroupFold(holder[k]);
+                    if (!f || !Object.prototype.hasOwnProperty.call(line[k], f)) continue;
+                    if (!changed) { changed = {}; member = {}; }
+                    changed[k] = line[k][f];
+                    member[k] = String(holder[k]).trim();
+                }
+                if (changed) {
+                    next = dimGroupCopy_(row);
+                    var target = next;
+                    for (var q = 0; q < steps.length; q++) {
+                        target[steps[q]] = dimGroupCopy_(target[steps[q]]);
+                        target = target[steps[q]];
+                    }
+                    for (var c in changed) { if (Object.prototype.hasOwnProperty.call(changed, c)) target[c] = changed[c]; }
+                    var prev = row._member ? dimGroupCopy_(row._member) : {};
+                    for (var m in member) { if (Object.prototype.hasOwnProperty.call(member, m)) prev[m] = member[m]; }
+                    next._member = prev;
+                }
+            }
+        }
+        if (next !== row && !out) out = rows.slice(0, i);
+        if (out) out.push(next);
+    }
+    return out || rows;
+}
+
 /**
  * Parse date_children of a container. Container-scope analogue of LI-level parser.
  * Filters out children missing fs/fe or with target_impressions ≤ 0.
@@ -575,7 +688,7 @@ function dimChildExpUnits(child, container, d) {
  * Sum rate-native actual units for a dim-child across the container's window
  * up to asOf. `lsd` is the workspace per-LI split-daily aggregate:
  *   lsd['<dim_key>:<dim_value>'][date] = { im, cl, co, sp, dc }
- * `rateType` is the parent LI's rate type (CPM→im, CPC→cl, CPV→co). Dim
+ * `rateType` is the parent LI's rate type (CPM→im, CPC→cl, CPV→co, CPI→cv). Dim
  * targets resolve off container.target_impressions, which is native-unit by
  * the planImpr convention — actuals must sum the same unit, otherwise a CPC
  * dim split compares a clicks target against an impressions actual.
@@ -585,7 +698,7 @@ function dimChildActualUnits(child, container, asOf, lsd, rateType) {
     var key = child.dim_key + ':' + child.dim_value;
     var bucket = lsd[key];
     if (!bucket) return 0;
-    var f = rateType === 'CPC' ? 'cl' : rateType === 'CPV' ? 'co' : 'im';
+    var f = rateType === 'CPC' ? 'cl' : rateType === 'CPV' ? 'co' : rateType === 'CPI' ? 'cv' : 'im';
     var cap = asOf > container.fe ? container.fe : asOf;
     var sum = 0;
     for (var d in bucket) {
@@ -787,11 +900,27 @@ function findPeriodForAsOf(periods, asOf) {
     return candidates[0];
 }
 
-/** Virtual plan scoped to one date_child (temporal sub-period). */
+/** Virtual plan scoped to one date_child (temporal sub-period).
+ *  Its budget is the child's own client money, read the way the cost curve reads
+ *  it (parseDateChildren): its target_spend when set, else its units' share of its
+ *  container's spend (containerSpendEff). A selected period and the same days read
+ *  as a window then carry one budget. A container with no spend of its own spends
+ *  its units' share of the line's budget, so that case, and a child with no
+ *  container, keep the line share exactly as it was always computed. */
 function buildVirtualPlanFromDateChild(plan, child, container) {
     var ti = Number(child.target_impressions) || 0;
     var liImpr = Number(plan.planImpr) || 0;
     var share = liImpr > 0 ? ti / liImpr : 0;
+    var tsCh = child.target_spend != null && child.target_spend !== '' ? Number(child.target_spend) : 0;
+    var cTi = container ? Number(container.target_impressions) || 0 : 0;
+    var budget;
+    if (tsCh > 0) {
+        budget = tsCh;
+    } else if (cTi > 0 && Number(container.target_spend) > 0) {
+        budget = containerSpendEff(container, plan) * ti / cTi;
+    } else {
+        budget = plan.budget * share;
+    }
     var childM;
     if (child.margin_percent != null && child.margin_percent !== '') {
         childM = Number(child.margin_percent);
@@ -807,7 +936,7 @@ function buildVirtualPlanFromDateChild(plan, child, container) {
         rateType: plan.rateType || 'CPM',
         fs: child.fs,
         fe: child.fe,
-        budget: plan.budget * share,
+        budget: budget,
         planImpr: ti,
         mTgt: childM,
         ctrTgt: plan.ctrTgt,
@@ -1062,9 +1191,25 @@ function prorateRange(plan, range, asOf) {
 
 /* ─── Rate-type helpers ────────────────────────────────────────────────────── */
 
-/** Actual units based on rate type: CPC→clicks, CPV→completes, else→impressions. */
+/**
+ * Actual units based on rate type: CPC→clicks, CPV→completes, CPI→conversions,
+ * else→impressions.
+ *
+ * CPI (cost per install — Apple Ads and the rest of app-install buying) reads the
+ * CONVERSIONS column: the delivery mart carries no installs of its own
+ * (`shared/metric-registry.js` is the one list of what it has), and conversions is
+ * where an install lands. It is the same column `dynCpa` divides spend by, so the
+ * two cost-per-acquisition readings in this product count the same population.
+ *
+ * Until CPI was named here it fell into the `else`, which read a line's INSTALL goal
+ * as an impression goal and counted delivered impressions against it — a plan of 1 000
+ * installs against 500 000 impressions, 50 000% of plan, with nothing to show for it.
+ */
 function liActualUnits(p, t) {
-    return p.rateType === 'CPC' ? t.cl : p.rateType === 'CPV' ? t.co : t.im;
+    return p.rateType === 'CPC' ? t.cl
+        : p.rateType === 'CPV' ? t.co
+        : p.rateType === 'CPI' ? t.cv
+        : t.im;
 }
 
 /* ─── Derived KPIs (pure) ──────────────────────────────────────────────────── */
@@ -1101,7 +1246,7 @@ function recentDailyMetrics(plan, facts, asOf, days) {
 
     for (var di = 0; di < dates.length; di++) {
         var targetDate = dates[di];
-        var cumIm = 0, cumCl = 0, cumCo = 0, cumSp = 0, cumDc = 0;
+        var cumIm = 0, cumCl = 0, cumCo = 0, cumCv = 0, cumSp = 0, cumDc = 0;
 
         for (var fd in facts) {
             if (facts.hasOwnProperty(fd) && fd >= plan.fs && fd <= targetDate) {
@@ -1109,12 +1254,16 @@ function recentDailyMetrics(plan, facts, asOf, days) {
                 cumIm += fv.im || 0;
                 cumCl += fv.cl || 0;
                 cumCo += fv.co || 0;
+                // Conversions ride the cumulative sum because a CPI line's actual units ARE
+                // conversions (liActualUnits); without it `cumActual` is undefined there and
+                // every figure built on it — pacing index, reforecast — is NaN.
+                cumCv += fv.cv || 0;
                 cumSp += fv.sp || 0;
                 cumDc += fv.dc || 0;
             }
         }
 
-        var cumActual = liActualUnits(plan, { im: cumIm, cl: cumCl, co: cumCo });
+        var cumActual = liActualUnits(plan, { im: cumIm, cl: cumCl, co: cumCo, cv: cumCv });
         var expUnits = liExpUnits(plan, targetDate);
         var dayFact = facts[targetDate];
 
@@ -1138,6 +1287,11 @@ function recentDailyMetrics(plan, facts, asOf, days) {
             tgtRate = plan.planImpr > 0 ? netCost / plan.planImpr : 0;
         } else if (rt === 'CPV') {
             dayRate = dayFact.co > 0 ? dayFact.sp / dayFact.co : 0;
+            tgtRate = plan.planImpr > 0 ? netCost / plan.planImpr : 0;
+        } else if (rt === 'CPI') {
+            // Cost per install, over the conversions column — see liActualUnits. Same
+            // shape as CPC and CPV: a per-unit rate, so no x1000.
+            dayRate = dayFact.cv > 0 ? dayFact.sp / dayFact.cv : 0;
             tgtRate = plan.planImpr > 0 ? netCost / plan.planImpr : 0;
         } else {
             dayRate = dayFact.im > 0 ? (dayFact.sp / dayFact.im) * 1000 : 0;
@@ -1249,6 +1403,10 @@ var PacingCore = {
     factMatchesDimFilter: factMatchesDimFilter,
     buildDimScopeIndex: buildDimScopeIndex,
     factOutsideSplits: factOutsideSplits,
+    dimGroupFold: dimGroupFold,
+    buildDimGroupIndex: buildDimGroupIndex,
+    dimGroupNameOf: dimGroupNameOf,
+    applyDimGroups: applyDimGroups,
     parseDateChildren: parseDateChildren,
     containerExpUnits: containerExpUnits,
     containerExpCost: containerExpCost,

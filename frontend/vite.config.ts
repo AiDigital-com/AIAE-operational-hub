@@ -29,6 +29,7 @@ const SHARED_MODULES: Record<string, string> = {
   "@shared/value-labels": "./src/features/pacing-dashboard/vendor/value-labels.js",
   "@shared/mapping-dims": "./src/features/pacing-dashboard/vendor/mapping-dims.js",
   "@shared/primary-cv-rule": "./src/features/pacing-dashboard/vendor/primary-cv-rule.js",
+  "@shared/dim-value-groups": "./src/features/pacing-dashboard/vendor/dim-value-groups.js",
   };
 const sharedAlias = Object.fromEntries(
   Object.entries(SHARED_MODULES).map(([k, v]) => [k, sharedDir(v)])

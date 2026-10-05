@@ -8913,6 +8913,19 @@ components:
           items:
             type: object
             additionalProperties: true
+        dimGroups:
+          type: array
+          description: >
+            Value groups (spec 2026-10-02) - opaque here, same as `containers`. A line item may declare
+            that several delivered values of one naming dimension read as one named value
+            (`{ dim_key, name, values[] }`), so a dim split on that name is an ordinary split with one
+            shared target. A MATH input for the browser-side engine, which rewrites this line's
+            delivery rows with it before anything normalizes or sums them - missing here and a split on
+            a group's name finds no delivery and reads zero. Empty when the line declares none; Pacing
+            omits the key entirely in that case.
+          items:
+            type: object
+            additionalProperties: true
         nativeBudget:
           type: number
           format: double

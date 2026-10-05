@@ -78,6 +78,7 @@ const CANON = {
   neededPerDayImpr: { from: 'fl', format: 'int', unit: 'impr', needsFlight: true },
   neededPerDayClicks: { from: 'fl', format: 'int', unit: 'clicks', needsFlight: true },
   neededPerDayViews: { from: 'fl', format: 'int', unit: 'views', needsFlight: true },
+  neededPerDayInstalls: { from: 'fl', format: 'int', unit: 'installs', needsFlight: true },
   forecastDspSpend: { from: 'fl', format: 'money' },
   // The FULL-flight cost budget, and what is left of it. Canonical on purpose (T12
   // Step 0): the formula field `costBud` is range-prorated, so an expr over it printed
@@ -110,7 +111,36 @@ const CANON = {
   // plan" rather than "0.0 pp", which is what the plan-less branch (UnitCardBody:15-21)
   // needs: no badge, no colour, just the count.
   paceDeltaImpr: { from: 'derived', format: 'pp', unit: 'impr' },
+  /* ── The same seven, on the unit this pacing is actually BOUGHT on (2026-10-05) ──
+   * The legacy Delivery card was unit-aware: UnitCardBody read `primaryUnit(cm)` and drew
+   * impressions, clicks or views. Its Standard replacement could not — a stored definition
+   * names ONE metric — so it names the impressions one, and on a CPC or CPV pacing campM's
+   * whole impressions family is 0 by design (metrics.js gates CPC/CPV lines out of it). The
+   * card then printed «0% of plan-to-date», Fact 0, Needed 0, Deviation 0 and «Deliver today
+   * 0» on a campaign delivering perfectly well — the figures were sitting one family over,
+   * under `clicks*` / `views*`.
+   *
+   * These seven read UNIT_FIELDS[primaryUnit(cm)] instead, so one stored definition follows
+   * the pacing. `unit: 'buy'` is the same sentinel resolved in `hasPlan`/`windowPlanOf`: the
+   * plan gate has to ask about the RESOLVED unit, or a CPC pacing's card would be dropped for
+   * having no impressions plan. A mixed-rate pacing resolves to whichever unit `primaryUnit`
+   * names (impressions where any line is impression-paced), which is exactly what the legacy
+   * card showed there. */
+  unitToDatePct: { from: 'derived', format: 'percent', sub: 'of plan-to-date', unit: 'buy', paced: true },
+  unitActual: { from: 'derived', format: 'int', unit: 'buy' },
+  unitExpected: { from: 'derived', format: 'int', unit: 'buy' },
+  unitPlan: { from: 'derived', format: 'int', unit: 'buy' },
+  unitDeviation: { from: 'derived', format: 'int', unit: 'buy' },
+  neededPerDayUnit: { from: 'derived', format: 'int', unit: 'buy', needsFlight: true },
+  paceDeltaUnit: { from: 'derived', format: 'pp', unit: 'buy' },
 };
+
+/** The unit a `unit: 'buy'` metric resolves to on this pacing — `primaryUnit`'s answer, the
+ *  one the legacy Delivery card picked. Never null: `primaryUnit` always names one of the
+ *  three, and with no metrics at all the caller's own `!cm` guards run first. */
+function buyUnitOf(cm) {
+  return cm ? primaryUnit(cm) : 'impr';
+}
 
 /**
  * Does the campaign carry a GOAL for this unit? Not "does a line of this type exist" —
@@ -126,16 +156,20 @@ const CANON = {
  */
 function hasPlan(cm, unit) {
   if (!cm) return true; // no metrics in the context: not this layer's call to make
+  if (unit === 'buy') unit = buyUnitOf(cm);
   if (unit === 'impr') return (cm.imprPlanFlight ?? cm.imprPlan ?? cm.pI ?? 0) > 0;
   if (unit === 'clicks') return (cm.clicksPlanFlight ?? cm.clicksPlan ?? cm.planClicks ?? 0) > 0;
+  if (unit === 'installs') return (cm.installsPlanFlight ?? cm.installsPlan ?? 0) > 0;
   return (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0;
 }
 
 /** The plan a unit's pace is read over: the window's, which is the flight's unless the
  *  viewer narrowed it (campM `planWindowed`). */
 function windowPlanOf(cm, unit) {
+  if (unit === 'buy') unit = buyUnitOf(cm);
   if (unit === 'impr') return cm.imprPlan ?? cm.pI ?? 0;
   if (unit === 'clicks') return cm.clicksPlan ?? cm.planClicks ?? 0;
+  if (unit === 'installs') return cm.installsPlan ?? 0;
   return cm.viewsPlan ?? 0;
 }
 
@@ -167,6 +201,7 @@ const FIELD_FORMAT = {
   // `auto` would print its cents of an impression («298,214.29»).
   planImpr: 'int', planClicks: 'int', planViews: 'int',
   planImprTotal: 'int', planClicksTotal: 'int', planViewsTotal: 'int',
+  clExpected: 'int',
   cpm: 'money', cpc: 'money', cpv: 'money4',
   ctr: 'percent2', vcr: 'percent', acr: 'percent',
   mTgt: 'percent', ctrT: 'percent2', vcrT: 'percent', acrT: 'percent',
@@ -206,8 +241,45 @@ function derived(key, ctx) {
     if (!(plan > 0)) return null;
     return (((cm.imprActual ?? cm.im ?? 0) - (cm.imprExpected ?? cm.eI ?? 0)) / plan) * 100;
   }
+  /* The seven buy-unit metrics (2026-10-05): the impressions six just above, asked of
+   * UNIT_FIELDS[primaryUnit(cm)] instead of a fixed family. Each is campM's own field for
+   * that unit — nothing is recomputed here, so a CPC pacing's card prints exactly the numbers
+   * campM already publishes under `clicks*`, and a CPM pacing's card is byte-identical to
+   * what the impressions binds drew. */
+  if (hasOwn(BUY_UNIT_SLOT, key)) {
+    const F = UNIT_FIELDS[buyUnitOf(cm)];
+    return cm[F[BUY_UNIT_SLOT[key]]] ?? null;
+  }
+  if (key === 'neededPerDayUnit') {
+    // The FULL-flight side, like its three fixed-unit siblings above (`neededPerDayImpr` and
+    // co. are `from: 'fl'`): a daily target is a flight constant and must not move when the
+    // reader narrows the window. The unit itself is still decided on `cm`, the same object
+    // `hasPlan` asks — flCM and cm name the same pacing.
+    const fl = ctx.flCM;
+    if (!fl) return null;
+    return fl[UNIT_FIELDS[buyUnitOf(cm)].neededPerDay] ?? null;
+  }
+  if (key === 'unitDeviation') {
+    const F = UNIT_FIELDS[buyUnitOf(cm)];
+    // Fact − Needed on ONE basis, the same rule `imprDeviation` carries.
+    return (cm[F.actual] || 0) - (cm[F.expected] || 0);
+  }
+  if (key === 'paceDeltaUnit') {
+    const F = UNIT_FIELDS[buyUnitOf(cm)];
+    const plan = cm[F.plan] || 0;
+    if (!(plan > 0)) return null;
+    return (((cm[F.actual] || 0) - (cm[F.expected] || 0)) / plan) * 100;
+  }
   return null;
 }
+
+/** The four buy-unit metrics that are a straight read of one UNIT_FIELDS slot. The other
+ *  three (`unitDeviation`, `paceDeltaUnit`) are arithmetic over two of them, and
+ *  `neededPerDayUnit` is read off the FULL-flight metrics — see `derived`'s caller. */
+const BUY_UNIT_SLOT = {
+  __proto__: null,
+  unitActual: 'actual', unitExpected: 'expected', unitPlan: 'plan', unitToDatePct: 'toDate',
+};
 
 /**
  * One bind → {value, target?, invert?, sub?, format?, error?}. Never throws: a brick is

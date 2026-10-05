@@ -62,6 +62,10 @@ export function toEngineRaw(data: PacingDashboardV1): EngineRawPayload {
       flightEnd: p.flightEnd,
       containers: p.containers,
       pauseIntervals: p.pauseIntervals,
+      // Value groups (spec 2026-10-02): the line's dictionary. A MATH input, not display - it
+      // decides which value a delivery row carries, and `toEngineRaw`'s caller groups the rows
+      // with it below. Absent on a line that declares none.
+      dimGroups: p.dimGroups,
       // labels/description: added to PacingLineItemPlanV1 by STEP 7 of the migration brief.
       labels: p.labels,
       description: p.description,
@@ -74,7 +78,7 @@ export function toEngineRaw(data: PacingDashboardV1): EngineRawPayload {
       currency: p.currency,
     };
   }
-  return {
+  const payload: EngineRawPayload = {
     campaign: {
       startDate: campaign.startDate ?? "",
       endDate: campaign.endDate ?? "",
@@ -87,6 +91,12 @@ export function toEngineRaw(data: PacingDashboardV1): EngineRawPayload {
     planByLineItem,
     types: [],
   };
+  // Value groups (spec 2026-10-02): the rows are rewritten HERE, before anything normalizes or
+  // sums them, which is the same place dash-gate's Overview and the Slack summary rewrite theirs.
+  // With no line declaring a group the index is null and the payload comes straight back, so a
+  // pacing that never used them costs one object walk and copies nothing.
+  const engine = createPacingEngine();
+  return engine.groupedView(payload, engine.groupIndexOf(planByLineItem));
 }
 
 /** Every distinct `source` string a brick in this pacing's widgets names (ported from

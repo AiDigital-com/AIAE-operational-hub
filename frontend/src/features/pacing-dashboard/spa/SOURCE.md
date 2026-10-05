@@ -109,3 +109,47 @@ a test, so the next edit to a `className` in here reports itself.
 - `SectionCard` draws Pacing's card chrome (`--dash-radius-card`, 6px) while this app's own panels
   beside it use `--radius-lg` (10px). The borders and the heading type are within a pixel of each
   other; the corner radius is the visible difference.
+
+## Updated 2026-10-05 — value groups
+
+Five files here moved again, carrying Pacing's value-groups change (`AIAE-paicing` commit
+`a33ba97`, taken through the `paicing-azat` checkout on branch `1.0.0`): `normalize.js`,
+`containers.js`, `coef-rebuild.js`, `widget-data.js`, and the new door module
+`dim-value-groups.js`. Import specifiers were rewritten the same way as the original move and
+nothing inside a function was touched.
+
+Two files beside them are this app's own seam and were edited by hand, not moved:
+`store.js` (`usePacingState` now groups the payload's row slices before anything normalizes them,
+and keeps the fetched slices on `rawData`) and `report/useWidgetData.js` (hands the renderer the
+rewrite index as `dimGroupIndex`).
+
+NOT brought over, and deliberately: the CM360 half of the change (`report-render.js`'s join,
+`mapping/group-label-join.js`, `mapping/line-join.js`). It hangs off `third_party`/`mappings_v3`,
+which this app's dashboard payload does not carry at all - see `../types.ts`'s
+`PacingDashboardV1`. Also not brought over: Pacing's Settings → Pacing editor for authoring a
+dictionary, which is JSX against the SPA's own drawer. Until that exists here, a group can be
+read on this screen but not created on it.
+
+## Updated 2026-10-05 — the buy unit
+
+Seven more files moved again with Pacing's buy-unit fix: `brick-data.js` (the seven `unit*`
+canonical metrics and the `unit: 'buy'` plan gate), `widget-data.js` and `widget-formula.js`
+(`clExpected`), `metric-catalog.js` and `report-render.js` (their labels and formats),
+`widget-highlights.js` (the buy-unit metrics' facts follow the resolved unit) and
+`standard-conversion-format.js` (the read-time upgrade for stored copies of both definitions).
+Import specifiers rewritten as before; nothing inside a function touched.
+
+Covered by `rate-type-units.test.ts` beside them, which checks the behaviour HERE rather than
+trusting that the vendored copies were re-copied.
+
+## Updated 2026-10-05 — CPI
+
+Four more files moved again for the fourth rate type: `metrics.js` (the `installs*` family in
+campM, and `domRateType`), `widget-status.js` (`UNIT_FIELDS.installs`, `primaryUnit`),
+`brick-data.js` (the installs plan gate, `neededPerDayInstalls`) and `auto-controls.js` (the
+buy-unit map). `metric-catalog.js`, `report-render.js` and `widget-data.js` carry their labels
+and the impression-paced gate.
+
+CPI is NOT in Pacing's reference checkout — it diverges there on purpose, which is written down
+in `AIAE-paicing/CLAUDE.md`. `rate-type-units.test.ts` beside these files covers all four units.
+

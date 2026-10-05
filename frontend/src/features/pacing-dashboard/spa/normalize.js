@@ -3,6 +3,7 @@ import { sid } from './format.js';
 import { zeroRow, addFact } from './row-utils.js';
 import PacingCore from './pacing-core.js';
 import { makeCvCtx, overlayLiDaily, overlayLiSplitDaily, purityIndex } from './primary-cv.js';
+import { registerMembers } from './dim-value-groups.js';
 
 // { [id]: marginIndex } for coef-LIs only; {} when none (identity path). A missing
 // entry ⇒ addFact takes the raw currencyToUsd(dynamic_cost, rate) branch unchanged.
@@ -77,6 +78,9 @@ export function buildLiSplitDaily(factsDaily, rate, planMap, cvCtx = null, scope
   const LSD = {};
   const rows = Array.isArray(factsDaily) ? factsDaily : [];
   const coefIdx = buildCoefIndexMap(planMap);
+  // Value groups (spec 2026-10-02): null until a rewritten row is met, so a pacing
+  // without groups allocates and registers nothing.
+  let members = null;
 
   rows.forEach((f) => {
     const id = sid(f.line_item_id);
@@ -91,6 +95,19 @@ export function buildLiSplitDaily(factsDaily, rate, planMap, cvCtx = null, scope
       if (!LSD[id][key]) LSD[id][key] = {};
       if (!LSD[id][key][f.date]) LSD[id][key][f.date] = zeroRow();
       addFact(LSD[id][key][f.date], f, rate, rowIdx, rowK);
+      // A row a value group rewrote also lands in its member's own day map, by the same
+      // per-row rules, so the members of a group add up to the group's bucket.
+      const member = f._member && f._member[k];
+      if (member != null) {
+        // Null-prototype maps: a member is a delivered value, and one named `constructor`
+        // must be a key like any other.
+        if (!members) members = Object.create(null);
+        const byKey = (members[id] ||= Object.create(null));
+        const byMember = (byKey[key] ||= Object.create(null));
+        const days = (byMember[member] ||= {});
+        if (!days[f.date]) days[f.date] = zeroRow();
+        addFact(days[f.date], f, rate, rowIdx, rowK);
+      }
     }
   });
 
@@ -104,6 +121,7 @@ export function buildLiSplitDaily(factsDaily, rate, planMap, cvCtx = null, scope
     overlayLiSplitDaily(LSD, planMap, cvCtx, scope, purityIndex(rows), localAsOf);
   }
 
+  if (members) registerMembers(LSD, members);
   return LSD;
 }
 
@@ -170,6 +188,9 @@ export function normalize(raw) {
         primaryCv: cvNames(p.primaryConversions),
         primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
         conversionData: p.conversionData === true,
+        // Value groups (spec 2026-10-02): the line's dictionary. The store rewrites this
+        // line's rows with it before anything else reads them. normalizePlan must match.
+        dimGroups: Array.isArray(p.dimGroups) ? p.dimGroups : [],
       };
     }
   } else if (raw.planByType && typeof raw.planByType === 'object') {
@@ -273,6 +294,8 @@ export function normalizePlan(rawPlanByLineItem, campaign) {
       primaryCv: cvNames(p.primaryConversions),
       primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
       conversionData: p.conversionData === true,
+      // Value groups: same mapping as normalize() above.
+      dimGroups: Array.isArray(p.dimGroups) ? p.dimGroups : [],
     };
   }
   return LP;

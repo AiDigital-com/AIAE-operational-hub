@@ -2,6 +2,7 @@
 import { rangeOverlap } from './date-utils.js';
 import { zeroRow } from './row-utils.js';
 import { splitStateOf } from './primary-cv.js';
+import { memberDailyOf } from './dim-value-groups.js';
 
 /**
  * Pairs of containers whose date ranges overlap.
@@ -108,6 +109,34 @@ export function sumDimChild(liId, dimChild, container, range, liSplitDaily) {
   }
   if (delivered) act.cv = null;
   return act;
+}
+
+/**
+ * The members of a value-group split (spec 2026-10-02), each summed exactly as sumDimChild
+ * sums the group: the same aggregate object, the same container dates, the same range, so
+ * the members add up to the group's row. [] for a plain value.
+ *
+ * `cv` is the fact rows' own conversions. Where primary conversions apply to the line the
+ * group's number comes from tagged conversion rows instead, and the caller prints a dash.
+ * @returns {Array<{ member: string, act: object }>}
+ */
+export function sumDimMembers(liId, dimChild, container, range, liSplitDaily) {
+  const byMember = memberDailyOf(liSplitDaily)?.[liId]?.[dimChild.dim_key + ':' + dimChild.dim_value];
+  if (!byMember) return [];
+  return Object.keys(byMember).map((member) => {
+    const act = zeroRow();
+    for (const [d, v] of Object.entries(byMember[member])) {
+      if (container.fs && container.fe && (d < container.fs || d > container.fe)) continue;
+      if (range && (d < range.from || d > range.to)) continue;
+      act.im += v.im;
+      act.cl += v.cl;
+      act.sp += v.sp;
+      act.co += v.co;
+      act.cv += v.cv || 0;
+      act.dc += v.dc;
+    }
+    return { member, act };
+  });
 }
 
 // A day row that carries delivery. A row with none cannot put a line item's conversions in a

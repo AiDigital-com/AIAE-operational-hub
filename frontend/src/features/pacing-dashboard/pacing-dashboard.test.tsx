@@ -345,8 +345,48 @@ describe("PacingDashboard", () => {
     const right = grid.querySelector<HTMLElement>('[data-tile-id="w_bbb222"]');
     expect(left?.style.gridColumn).toBe("1 / span 6");
     expect(right?.style.gridColumn).toBe("7 / span 6");
-    expect(left?.style.gridRow).toBe("1");
-    expect(right?.style.gridRow).toBe("1");
+    // Row 2, not row 1: the Line Items block is a tile of this board now (2026-10-05) and it is a
+    // `flow` kind — always full width, and anchored on the slot scale ahead of a widget the saved
+    // layout places but the catalogue gives no slot. Both charts still SHARE their row, which is
+    // what this case is about; which row that is belongs to the case below.
+    expect(left?.style.gridRow).toBe("2");
+    expect(right?.style.gridRow).toBe("2");
+  });
+
+  it("should place the Line Items block as a full-width tile of the board", async () => {
+    // It used to be a fixed section BELOW the whole grid, which put a line item's own figures
+    // under the charts that roll up from them. As a tile it carries Pacing's own slot for it
+    // (600: hero 200 · Finance 300 · lineItems 600 · charts 700+), so on a pacing with the
+    // Standard widgets it lands between the summary cards and the charts.
+    const brick = (label: string) => ({
+      kind: "composite", schemaVersion: 2, profile: "chart",
+      spec: { views: [{ id: "l", kind: "layout", rows: [{ cols: [{ span: 12, bricks: [{ type: "detailCard", label, source: "planUnits" }] }] }] }] },
+    });
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(
+      aPacingDashboardV1({
+        display: {
+          rev: 1,
+          widgets: [
+            { id: "w_aaa111", title: "Left", ...brick("Left brick") },
+            { id: "w_bbb222", title: "Right", ...brick("Right brick") },
+          ],
+          layout: { version: 1, tiles: { w_aaa111: { x: 0, y: 0, w: 6, h: "M" }, w_bbb222: { x: 6, y: 0, w: 6, h: "M" } } },
+        },
+      })
+    );
+    vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1());
+    renderDashboard();
+
+    const grid = await waitFor(() => {
+      const el = document.querySelector(".dash-grid");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const block = grid.querySelector<HTMLElement>('[data-tile-id="lineItems"]');
+    expect(block, "the Line Items block is a tile of the grid").toBeTruthy();
+    expect(block?.style.gridColumn).toBe("1 / span 12");
+    // …and nowhere else on the page: a second copy under the charts is the shape this replaced.
+    expect(document.querySelectorAll('[data-tile-id="lineItems"]')).toHaveLength(1);
   });
 
   it("should offer Edit, Duplicate, Turn off and Delete on a tile itself", async () => {

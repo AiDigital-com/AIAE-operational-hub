@@ -126,7 +126,17 @@ function currentApi() {
  */
 export function usePacingState({ data, urlFilters, actions, journalHighlight }) {
   return useMemo(() => {
-    const raw = data ?? null;
+    const fetched = data ?? null;
+    // Value groups (spec 2026-10-02): a line item can say that several delivered values of one
+    // naming dimension read as one named value, so a dim split on that name is an ordinary split
+    // with one shared target. The rewrite happens where the rows are FIRST read — here, the way
+    // the retired SPA's store did it — and everything below this line sees the grouped rows, so
+    // no reader has to know. `rawData` keeps the slices as fetched for the readers that need the
+    // delivered names (a mapping is written against what the platform actually sent).
+    // The dictionary rides each line's plan as `dimGroups` (dash-gate's merge.mjs); with no
+    // groups anywhere `groupedView` hands the payload straight back, so nothing is copied.
+    const rawData = fetched;
+    const raw = fetched ? groupedView(fetched, groupIndexOf(fetched.planByLineItem)) : null;
     let LP = {};
     let facts = { factsDaily: [], liDaily: {}, liSplitDaily: {}, asOf: null, rate: 1, cvCtx: null };
     if (raw && raw.campaign && Array.isArray(raw.factsDaily)) {
@@ -146,6 +156,8 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight }) 
     return {
       campaign: raw?.campaign ?? null,
       facts,
+      // The payload as delivered; see the note at the top of this memo.
+      rawData,
       liPlan: LP,
       types: raw?.types ?? [],
       creatives: raw?.creatives ?? null,
@@ -188,6 +200,7 @@ import {
   makeCardLIsSelector, selectEffRange, selectDeliveryFacts,
 } from './selectors.js';
 import { normalize, buildFactsAggregates } from './normalize.js';
+import { groupIndexOf, groupedView } from './dim-value-groups.js';
 
 export const useCampaign = () => useDashboardStore(selectCampaign);
 export const useDisplay = () => useDashboardStore(selectDisplay);

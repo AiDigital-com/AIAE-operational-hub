@@ -124,12 +124,18 @@ export const V2_CANON_LABELS = {
   __proto__: null,
   neededSpendPerDay: 'Needed spend / day', neededPerDayImpr: 'Needed impressions / day',
   neededPerDayClicks: 'Needed clicks / day', neededPerDayViews: 'Needed views / day',
+  neededPerDayInstalls: 'Needed installs / day',
   imprToDatePct: 'Impressions vs plan-to-date', imprActual: 'Actual impressions to date',
   imprExpected: 'Expected impressions to date', imprDeviation: 'Impressions deviation to date',
   forecastDspSpend: 'Forecast DSP spend', costBudTotal: 'Cost budget (full flight)',
   costRemaining: 'Cost remaining', clientPlanCpm: 'Client plan CPM',
   clientPlanCpc: 'Client plan CPC', clientPlanCpv: 'Client plan CPV',
   bidPlanCpm: 'Bid plan CPM', dynCpm: 'Dynamic CPM', paceDeltaImpr: 'Impressions pace delta',
+  // The buy-unit seven (2026-10-05); same words as metric-catalog.js's CANON_ONLY_LABELS.
+  unitToDatePct: 'Buy unit vs plan-to-date', unitActual: 'Actual buy units to date',
+  unitExpected: 'Expected buy units to date', unitPlan: 'Planned buy units',
+  unitDeviation: 'Buy unit deviation to date', neededPerDayUnit: 'Needed buy units / day',
+  paceDeltaUnit: 'Buy unit pace delta',
 };
 
 /** The one metric switch a spec may carry (Table C caps it at one, which is WHY a bound
