@@ -490,10 +490,10 @@ function gatesOf(p, daily) {
   const isAudio = (p?.ch || '').toLowerCase() === 'audio';
   const vcrElig = isVcrEligible(p, daily);
   return {
-    // campM impressions side: CPC/CPV lines are click/view-paced, so their impressions stay
-    // out of the cpm basis (a CPC line's plan and its buying rate are clicks). The ctr basis
-    // counts every line (owner decision 2026-09-23) and needs no gate.
-    nc: rt !== 'CPC' && rt !== 'CPV',
+    // campM impressions side: CPC/CPV/CPI lines are click/view/install-paced, so their
+    // impressions stay out of the cpm basis (a CPC line's plan and its buying rate are
+    // clicks). The ctr basis counts every line (owner decision 2026-09-23) and needs no gate.
+    nc: rt !== 'CPC' && rt !== 'CPV' && rt !== 'CPI',
     vcrElig,
     isAudio,
     // cost-per-view basis (campM cpvSpendV/cpvViewsV and chart aggCpv): CPV OR
@@ -522,6 +522,10 @@ const ZERO_FLOW = {
   // substitute, so the gated one has a name of its own — the SAME name campM and the
   // canonical metric catalogue already use for it.
   imprExpected: 0,
+  // …and its clicks twin (2026-10-02): expected clicks over the CLICK-PACED lines only, campM's
+  // own `clicksExpected`. `expCl` also counts a non-CPC line's CTR target (and, on a CPV line,
+  // views times that target), which is a different number on every pacing that is not all CPC.
+  clExpected: 0,
 };
 
 // The literal above is what `addRowSums` walks, so the six added on 2026-09-08 had to be
@@ -625,7 +629,7 @@ function ratesFromSums(t, basis /* 'ts' | 'entity' | 'agg' */) {
  *  before `from` (§3 AGG rule). liExp* clamp to the plan's flight internally. An empty window
  *  — `to` before `from`, which expectedBounds answers for a window that starts after asOf, or
  *  no `to` at all on a pacing with no data yet — expects nothing. */
-const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 });
+const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 });
 function expectedDeltas(p, from, to) {
   if (!from || !to || from > to) return NO_EXPECTED;
   const base = from > p.fs
@@ -634,15 +638,19 @@ function expectedDeltas(p, from, to) {
   // Raw floats — rounding happens at RENDER, never before summation (round 6.1:
   // three LIs at 0.4 each must total 1, not 0).
   const im = liExpImpr(p, to) - base.im;
+  const cl = liExpClicks(p, to) - base.cl;
   const rt = p.rateType || 'CPM';
   return {
     expIm: im,
     expCo: liExpCost(p, to) - base.co,
-    expCl: liExpClicks(p, to) - base.cl,
+    expCl: cl,
     expVw: viewGoalUnits(p) > 0 ? im : 0,
     // The same gate `expVw` uses one line up, on the other side: this line's expected units
     // count only where those units ARE impressions (campM's impressions side, metrics.js:334).
     imprExpected: rt === 'CPC' || rt === 'CPV' ? 0 : im,
+    // …and only where they are CLICKS (campM's clicks side, its `isCpc` gate): a CPC line's
+    // own plan curve, with no other line's CTR target added.
+    clExpected: rt === 'CPC' ? cl : 0,
   };
 }
 
@@ -662,7 +670,7 @@ export function sumLiWindow(liDaily, p, id, range, boundsForExpected) {
   if (boundsForExpected) {
     const e = expectedDeltas(p, boundsForExpected.from, boundsForExpected.to);
     t.expIm += e.expIm; t.expCo += e.expCo; t.expCl += e.expCl; t.expVw += e.expVw;
-    t.imprExpected += e.imprExpected;
+    t.imprExpected += e.imprExpected; t.clExpected += e.clExpected;
   }
   return t;
 }
@@ -697,6 +705,7 @@ export function aggregateDateRows(sources, range, basis = 'ts', effLIsOverride =
       // `nc` is gatesOf's own impression-paced gate, read here for `imprExpected` — the same
       // predicate the per-day fact sums already use for imNC/spNC.
       imprPaced: g.nc,
+      clickPaced: (p.rateType || 'CPM') === 'CPC',
       expImBase: useBaseline ? liExpImpr(p, datePrev(range.from)) : 0,
       expCoBase: useBaseline ? liExpCost(p, datePrev(range.from)) : 0,
       expClBase: useBaseline ? liExpClicks(p, datePrev(range.from)) : 0,
@@ -706,7 +715,7 @@ export function aggregateDateRows(sources, range, basis = 'ts', effLIsOverride =
   const rows = [];
   for (const d of calendarDays(bounds.from, bounds.to)) {
     const t = { ...ZERO_FLOW };
-    let expIm = 0, expCo = 0, expCl = 0, expVw = 0, imprExpected = 0;
+    let expIm = 0, expCo = 0, expCl = 0, expVw = 0, imprExpected = 0, clExpected = 0;
     for (const e of perLi) {
       const v = e.dd[d];
       if (v && !(e.p.fs && e.p.fe && (d < e.p.fs || d > e.p.fe))) addFact(t, v, e.g);
@@ -715,10 +724,11 @@ export function aggregateDateRows(sources, range, basis = 'ts', effLIsOverride =
       expCl += liExpClicks(e.p, d) - e.expClBase;
       if (e.hasViewGoal) expVw += liExpImpr(e.p, d) - e.expImBase;
       if (e.imprPaced) imprExpected += liExpImpr(e.p, d) - e.expImBase;
+      if (e.clickPaced) clExpected += liExpClicks(e.p, d) - e.expClBase;
     }
     rows.push({
       date: d, ...t,
-      expIm, expCo, expCl, expVw, imprExpected,
+      expIm, expCo, expCl, expVw, imprExpected, clExpected,
       ...ratesFromSums(t, basis),
     });
   }
@@ -1241,7 +1251,11 @@ function coefficientFactReader(sources, sourceId, fieldErrors) {
       if (raw.date < e.fs || raw.date > e.fe || hasOwn(row, e.key)) continue;
       const mapping = mappings.get(e.key);
       if (mapping && raw.dims && hasOwn(raw.dims, mapping.key)) {
-        row[e.key] = groupValue(mapping.key, raw.dims[mapping.key], mapping.groups).label;
+        // Value groups (spec 2026-10-02): the source's own label is a raw value of this
+        // naming dimension, so on a line that groups it, it reads as the group. The rows'
+        // `brk` already does (the store rewrote it); this column the store cannot reach.
+        const label = groupValue(mapping.key, raw.dims[mapping.key], mapping.groups).label;
+        row[e.key] = PacingCore.dimGroupNameOf(sources.dimGroupIndex, lid, e.key, label) ?? label;
       } else if (raw.brk && hasOwn(raw.brk, e.key)) row[e.key] = raw.brk[e.key];
       else if (e.key === 'platform' && hasOwn(raw.filter_context || {}, 'platform')) row[e.key] = raw.filter_context.platform;
       else if (hasOwn(raw.filter_context?.dims || {}, e.key)) row[e.key] = raw.filter_context.dims[e.key];
@@ -1322,6 +1336,8 @@ export function dimSourceFilterPlan(sources, sourceId, brkf, platforms = sources
       out.matchers.push({
         from: 'library',
         dimKey: answering.key,
+        // The naming dimension this column answers: a line's value groups are keyed by it.
+        brkDim,
         groups: dimSourceGroups(sources, sourceId, answering.key),
         values,
       });
@@ -1399,9 +1415,15 @@ export function filterSourceRows(sources, dimKey, range = null) {
       if (!hasOwn(values || {}, field)) { unknown = true; continue; }
       const own = values[field];
       if (m.includeUnnamed && (own == null || !String(own).trim() || String(own).trim() === '-')) continue;
-      if (m.from === 'name'
-        ? !m.folded.has(String(own ?? '').trim().toLowerCase())
-        : !m.values.has(groupValue(m.dimKey, own, m.groups).label)) matches = false;
+      if (m.from === 'name') {
+        if (!m.folded.has(String(own ?? '').trim().toLowerCase())) matches = false;
+        continue;
+      }
+      // A mapped column: the source's label, then this line's value group (spec 2026-10-02),
+      // so a filter on the group's name keeps the rows the source labels with a member.
+      const label = groupValue(m.dimKey, own, m.groups).label;
+      const named = PacingCore.dimGroupNameOf(sources.dimGroupIndex, r.line_item_id, m.brkDim, label) ?? label;
+      if (!m.values.has(named)) matches = false;
     }
     if (!matches) continue;
     if (unknown) return save({ rows: [], reason: 'This source does not follow the active filters: some rows are missing the required dimension values. Clear these filters to see the breakdown.' });
@@ -1754,7 +1776,9 @@ export const NO_VALUE_LABEL = 'No value';
  * already holds (`sortReportRows`). One function, so a header click cannot float a leftover
  * to the top of a table the engine sank it in.
  */
-export const leftoverRank = (r) => (r.residual ? 2 : r.leftover ? 1 : 0);
+// «Other CM360» (a table's CM360 remainder) is last of all: on a dimension table it stands
+// beside the «Others» residual, and the two must not swap places on every header click.
+export const leftoverRank = (r) => (r.cmOther ? 3 : r.residual ? 2 : r.leftover ? 1 : 0);
 /** The volume fields a remainder is judged MATERIAL on. A sliver is rounding, not a segment:
  *  the legacy panel uses the same 1% floor on the one unit it computes (Breakdown.jsx:523). */
 const RESIDUAL_ANCHORS = ['im', 'cl', 'co', 'sp'];
@@ -2076,7 +2100,7 @@ function dimRowPlans(sources, dimKey, cut, range, bounds) {
   // …and each key's delivered impressions inside its value: the weight of that leaf plan's
   // CTR target wherever the key is weighed — its row, the Totals, a kept subset, a fold.
   const imByKey = new Map();
-  const allExp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+  const allExp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
   let totalVol = 0, coveredVol = 0, totalSpend = 0, coveredSpend = 0;
   for (const [label, org] of cut.origins) {
     // A fold («Unclassified», «No value») and the untagged remainder are not values anything
@@ -2104,12 +2128,12 @@ function dimRowPlans(sources, dimKey, cut, range, bounds) {
       ...campaignScalars(planMap, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
         false, planWindowOf(sources, range), imOf),
     };
-    const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
     if (bounds.from && bounds.to && bounds.from <= bounds.to) {
       for (const id of ids) {
         const e = expectedDeltas(planMap[id], bounds.from, bounds.to);
         exp.expIm += e.expIm; exp.expCo += e.expCo; exp.expCl += e.expCl;
-        exp.expVw += e.expVw; exp.imprExpected += e.imprExpected;
+        exp.expVw += e.expVw; exp.imprExpected += e.imprExpected; exp.clExpected += e.clExpected;
       }
     }
     for (const k of Object.keys(allExp)) allExp[k] += exp[k];
@@ -2226,7 +2250,7 @@ export function tableRowKey(r, rowType) {
  *  margins is the mistake campaignScalars exists to prevent. */
 function foldPlanScalars(dimPlans, members, sources, range) {
   const keys = [];
-  const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+  const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
   for (const m of members) {
     if (!m || !m.keys || m.keys.length === 0) continue;
     for (const k of m.keys) keys.push(k);
@@ -2382,13 +2406,13 @@ export function buildTabularModel(request, range, sources) {
     // last row of 141,000, and 40% under a row's 100% (review 2026-09-23). The Totals is that
     // last row's cumulative, as it was before; the rows that stop at asOf are the li, dateLi
     // and dim grains', whose Totals stop with them.
-    const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
     for (const id of sources.effLIs) {
       const p = sources.liPlan[id];
       if (!p) continue;
       const e = expectedDeltas(p, bounds.from, bounds.to);
       eTot.expIm += e.expIm; eTot.expCo += e.expCo; eTot.expCl += e.expCl; eTot.expVw += e.expVw;
-      eTot.imprExpected += e.imprExpected;
+      eTot.imprExpected += e.imprExpected; eTot.clExpected += e.clExpected;
     }
     Object.assign(totalsSums, eTot);
   } else if (grain.type === 'dateLi') {
@@ -2577,7 +2601,7 @@ export function buildTabularModel(request, range, sources) {
     subset = onceForKeys((keys) => {
       const sums = { ...ZERO_FLOW };
       const planKeys = [];
-      const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+      const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
       for (const key of keys) {
         if (!hasOwn(buckets, key)) continue;
         addRowSums(sums, buckets[key], custom);
@@ -3131,7 +3155,7 @@ function campaignReadingContext(sources, range) {
       if (FIELDS_PLAN.has(name)) return windowPlan()[name];
       if (FIELDS_EXPECTED.has(name)) {
         if (!expected) {
-          expected = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+          expected = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
           const bounds = expectedBounds(sources, window);
           for (const id of sources.effLIs) {
             const p = sources.liPlan[id];

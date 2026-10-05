@@ -11,7 +11,6 @@ import type { PacingRowV1 } from "../pacing-overview/types";
 import { savePacingDisplay, triggerPacingRefresh } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
 import { DailyTable } from "./daily-table";
-import LineItemsTile from "./spa/lineitems/LineItemsTile.jsx";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { DocumentsChips } from "./documents/documents-chips";
 import type { SettingsTabId } from "./settings-section";
@@ -413,17 +412,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               of question they do — and because a click in it filters every one of them. */}
           <BreakdownPanel data={data} filters={filters} setFilters={setFilters} />
 
-          {/* §6's Line Items block, moved whole from Pacing (`spa/lineitems/`). One card per line
-              item: its figures, its margin against target, its pace, the flight bar whose segments
-              filter the page by date, and — once a card is expanded — that line item's containers
-              and their date / sub-breakdown children.
-
-              It REPLACES the "Containers and splits" table that used to sit between the journal and
-              the daily table. That table showed exactly the container readings a card now carries,
-              which would have printed the same figures twice on one page; and it only ever appeared
-              on a pacing that had containers, so a plan without them had nowhere at all to see its
-              line items. */}
-          <LineItemsTile />
+          {/* §6's Line Items block is NOT here any more (2026-10-05): it is a tile of the board
+              above, placed on Pacing's own slot scale between the summary widgets and the charts
+              (`widgets/report-board.tsx`, LINE_ITEMS_ID). It used to be a fixed section below the
+              whole grid, which put a line item's own figures under the charts that roll up from
+              them. */}
 
           {/* Every per-pacing setting behind one gear, as the retired SPA had it: a right-hand
               drawer with a row of tabs and ONE Save over all of them. Three buttons opening three

@@ -19,7 +19,9 @@ const sharedAlias = Object.fromEntries(
     "@shared/value-labels": "./src/features/pacing-dashboard/vendor/value-labels.js",
     "@shared/mapping-dims": "./src/features/pacing-dashboard/vendor/mapping-dims.js",
   "@shared/primary-cv-rule": "./src/features/pacing-dashboard/vendor/primary-cv-rule.js",
+  "@shared/dim-value-groups": "./src/features/pacing-dashboard/vendor/dim-value-groups.js",
     "@shared/primary-cv-rule": "./src/features/pacing-dashboard/vendor/primary-cv-rule.js",
+    "@shared/dim-value-groups": "./src/features/pacing-dashboard/vendor/dim-value-groups.js",
   }).map(([k, v]) => [k, fileURLToPath(new URL(v, import.meta.url))])
 );
 

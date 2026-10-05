@@ -206,6 +206,16 @@ interface DashboardMetricsEngine {
     splitScopedMode: boolean,
     splitScopedPlans: unknown
   ): Record<string, unknown> | null;
+
+  /** Value groups (spec 2026-10-02). A line item can declare that several delivered values of one
+   *  naming dimension read as one named value (`dimGroups` on its plan), so a dim split on that
+   *  name is an ordinary split with one shared target. `groupIndexOf` builds the rewrite index of a
+   *  plan map - null when no line declares one - and `groupedView` rewrites a payload's row slices
+   *  with it, handing the SAME object back when there is nothing to rewrite. Group where the rows
+   *  are FIRST read, before `normalize`, the way dash-gate's Overview and Slack summary do:
+   *  nothing below that point has to know. */
+  groupIndexOf(planMap: LiPlanMap | Record<string, unknown> | null | undefined): unknown;
+  groupedView<T>(raw: T, index: unknown): T;
 }
 
 interface DashboardMetricsModule {

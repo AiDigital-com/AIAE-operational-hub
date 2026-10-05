@@ -16,7 +16,7 @@
 // One more pair collides on the concept rather than the key — the preset `spend` against
 // the field `sp`. What each side reads:
 //
-//   the 46 engine fields   widget-formula.js FIELDS_DAILY/EXPECTED/RATES/PLAN — the universe
+//   the 47 engine fields   widget-formula.js FIELDS_DAILY/EXPECTED/RATES/PLAN — the universe
 //                          a bare `{kind:'metric'}` value may name on the delivery side
 //   their unit families    chart-format.js METRIC_AXIS_FORMAT, read as a family
 //                          (percent→percent, currency→money, kilo→count, number→number)
@@ -60,7 +60,7 @@ const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const DIM_WINDOW_FIELDS = new Set(['daysLeft', 'daysPassed']);
 
 /**
- * The human names of the 49 keys a formula chip can print: 46 delivery formula fields —
+ * The human names of the 50 keys a formula chip can print: 47 delivery formula fields —
  * shown on the formula chips ("sp · Spend"), in the Builder Spotlight, and written into a
  * canonical auto label by report-render — plus the 3 CM360 comparison identifiers
  * (`cmIm` / `cmCl` / `cmCo`, spec 2026-09-16 §2.1), which share this table for the same chip
@@ -90,6 +90,8 @@ export const FIELD_LABELS = Object.freeze({
   // on a mixed-rate pacing they are different numbers and an author has to be able to see
   // which one they are picking.
   imprExpected: 'Expected impressions (impression-paced lines)',
+  // …and the click-PACED half of `expCl`, for the same reason: campM's `clicksExpected`.
+  clExpected: 'Expected clicks (click-paced lines)',
   ctr: 'CTR', vcr: 'VCR', acr: 'ACR', cpm: 'CPM', cpc: 'CPC', cpv: 'CPV',
   budget: 'Client budget', costBud: 'Cost budget', costBudTotal: 'Cost budget (full flight)',
   planImpr: 'Planned impressions', planClicks: 'Planned clicks', planViews: 'Planned views',
@@ -129,12 +131,21 @@ const CANON_ONLY_LABELS = Object.freeze({
   __proto__: null,
   neededSpendPerDay: 'Needed spend / day', neededPerDayImpr: 'Needed impressions / day',
   neededPerDayClicks: 'Needed clicks / day', neededPerDayViews: 'Needed views / day',
+  neededPerDayInstalls: 'Needed installs / day',
   imprToDatePct: 'Impressions vs plan-to-date', imprActual: 'Actual impressions to date',
   imprExpected: 'Expected impressions to date', imprDeviation: 'Impressions deviation to date',
   forecastDspSpend: 'Forecast DSP spend', costBudTotal: 'Cost budget (full flight)',
   costRemaining: 'Cost remaining', clientPlanCpm: 'Client plan CPM',
   clientPlanCpc: 'Client plan CPC', clientPlanCpv: 'Client plan CPV',
   bidPlanCpm: 'Bid plan CPM', dynCpm: 'Dynamic CPM', paceDeltaImpr: 'Impressions pace delta',
+  // The seven above, on the unit this pacing is BOUGHT on (2026-10-05) — impressions on a
+  // CPM pacing, clicks on a CPC one, views on a CPV one, resolved at render by `primaryUnit`.
+  // Labelled «buy unit» rather than naming a unit, because which one it is is the pacing's
+  // answer and not the author's.
+  unitToDatePct: 'Buy unit vs plan-to-date', unitActual: 'Actual buy units to date',
+  unitExpected: 'Expected buy units to date', unitPlan: 'Planned buy units',
+  unitDeviation: 'Buy unit deviation to date', neededPerDayUnit: 'Needed buy units / day',
+  paceDeltaUnit: 'Buy unit pace delta',
 });
 
 /**
@@ -147,11 +158,13 @@ const CANON_ONLY_LABELS = Object.freeze({
 const CANON_ONLY_FORMAT = Object.freeze({
   __proto__: null,
   neededSpendPerDay: 'money', neededPerDayImpr: 'int', neededPerDayClicks: 'int',
-  neededPerDayViews: 'int', imprToDatePct: 'percent', imprActual: 'int',
+  neededPerDayViews: 'int', neededPerDayInstalls: 'int', imprToDatePct: 'percent', imprActual: 'int',
   imprExpected: 'int', imprDeviation: 'int', forecastDspSpend: 'money',
   costBudTotal: 'money', costRemaining: 'money', clientPlanCpm: 'money',
   clientPlanCpc: 'money', clientPlanCpv: 'money4', bidPlanCpm: 'money',
   dynCpm: 'money', paceDeltaImpr: 'pp',
+  unitToDatePct: 'percent', unitActual: 'int', unitExpected: 'int', unitPlan: 'int',
+  unitDeviation: 'int', neededPerDayUnit: 'int', paceDeltaUnit: 'pp',
 });
 
 /**
@@ -186,7 +199,7 @@ const FIELD_GROUPS = [
   ['delivery', ['im', 'rc', 'cl', 'lc', 'st', 'q1', 'q2', 'q3', 'co', 'coV', 'imV', 'coViews', 'cv', 'pc', 'pv']],
   ['money', ['sp', 'dc']],
   ['rates', ['ctr', 'vcr', 'acr', 'cpm', 'cpc', 'cpv']],
-  ['plan', ['expIm', 'imprExpected', 'expCo', 'expCl', 'expVw', 'budget', 'budgetTotal', 'budgetToDate', 'costBud', 'costBudTotal',
+  ['plan', ['expIm', 'imprExpected', 'expCo', 'expCl', 'clExpected', 'expVw', 'budget', 'budgetTotal', 'budgetToDate', 'costBud', 'costBudTotal',
     'planImpr', 'planImprTotal', 'planClicks', 'planClicksTotal', 'planViews', 'planViewsTotal', 'daysLeft', 'daysPassed',
     'mTgt', 'ctrT', 'vcrT', 'acrT', 'tgtCpm']],
 ];
@@ -234,6 +247,8 @@ const TIP_BY_FIELD = {
   imprExpected: 'Cumulative to date, over the lines whose plan is counted in impressions. '
     + 'Expected impressions beside it counts every line, including a click-paced line’s '
     + 'planned clicks.',
+  clExpected: 'Cumulative to date, over the lines whose plan is counted in clicks (CPC). '
+    + 'Expected clicks beside it also counts the clicks every other line’s CTR target implies.',
   tgtCpm: 'Cost budget over planned impressions, on the CPM lines. A flight constant: it does '
     + 'not follow the widget’s window.',
   costBud: `${COST_BUD_SPAN} `

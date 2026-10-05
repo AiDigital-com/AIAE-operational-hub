@@ -15,6 +15,7 @@ import { useFilters } from '../store.js';
 import { computeEffLIs, getEffRange, getEffRangeInfo } from '../config.js';
 import { makeDimScopeResolver, makeScopeFiltersSelector, makeDeliveryFactsSelector, makePeriodDailyResolver } from '../selectors.js';
 import { periodContainerFilters } from '../container-scope.js';
+import { groupIndexOf } from '../dim-value-groups.js';
 import { memoWidgetSnapshot, widgetPlanMap } from '../widget-snapshot.js';
 import { widgetEffFilters, widgetWindow, resolveTimeScope } from '../widget-data.js';
 import PrimaryCvRule from '@shared/primary-cv-rule';
@@ -171,6 +172,10 @@ export function useWidgetData(widget, rangeOverride) {
           scopeBrkf: scopeFilters.brkf,
           containerFilters: periodContainerFilters(liPlan, periodMode ? periodKey : null, eff),
           rawLiPlan: liPlan,
+          // Value groups (spec 2026-10-02): the rewrite index of the raw plans. The page has
+          // already grouped every row slice; the one reader left is an additional-data source
+          // that answers a naming dimension with its OWN column (widget-data.js `brk_dim`).
+          dimGroupIndex: groupIndexOf(liPlan),
           // The active period, for the per-dimension plan (2026-09-12). It cannot be read back
           // off `containerFilters`: that list keeps only containers whose children cover
           // essentially the whole target, so a partial carve-out is absent from it while still

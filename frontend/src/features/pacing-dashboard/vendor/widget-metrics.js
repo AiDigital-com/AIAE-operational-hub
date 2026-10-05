@@ -15,9 +15,17 @@ var PRESET_METRICS = [
 
 var CANON_METRICS = [
   'neededSpendPerDay', 'neededPerDayImpr', 'neededPerDayClicks', 'neededPerDayViews',
+  // CPI (install-paced) line items, the fourth unit a pacing can be bought on.
+  'neededPerDayInstalls',
   'imprToDatePct', 'imprActual', 'imprExpected', 'imprDeviation',
   'forecastDspSpend', 'costBudTotal', 'costRemaining',
-  'clientPlanCpm', 'clientPlanCpc', 'clientPlanCpv', 'bidPlanCpm', 'dynCpm', 'paceDeltaImpr'
+  'clientPlanCpm', 'clientPlanCpc', 'clientPlanCpv', 'bidPlanCpm', 'dynCpm', 'paceDeltaImpr',
+  // The seven above, on the unit the pacing is BOUGHT on (2026-10-05): each resolves through
+  // `primaryUnit` at render and reads campM's impressions, clicks or views field accordingly.
+  // The Standard Delivery card binds these, so ONE stored definition is right on a CPM, a CPC
+  // and a CPV pacing — the fixed `impr*` family above is 0 on the last two by design.
+  'unitToDatePct', 'unitActual', 'unitExpected', 'unitPlan', 'unitDeviation',
+  'neededPerDayUnit', 'paceDeltaUnit'
 ];
 
 var WIDGET_METRICS = PRESET_METRICS.concat(CANON_METRICS);

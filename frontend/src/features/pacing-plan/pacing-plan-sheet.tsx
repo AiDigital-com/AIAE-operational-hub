@@ -28,7 +28,7 @@ import { seedFromCandidate, seedFromPlan, toPlanUpdateLineItem, type EditableLin
 import type { PacingDraftLineItemV1, PacingLineItemPlanV1 } from "./types";
 import "./pacing-plan.css";
 
-const RATE_TYPES = ["CPM", "CPC", "CPV", "Flat"];
+const RATE_TYPES = ["CPM", "CPC", "CPV", "CPI", "Flat"];
 
 function seedAll(planByLineItem: Record<string, PacingLineItemPlanV1>): Record<string, EditableLineItem> {
   const out: Record<string, EditableLineItem> = {};

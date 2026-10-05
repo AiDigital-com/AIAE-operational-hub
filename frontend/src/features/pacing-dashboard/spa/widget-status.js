@@ -38,7 +38,11 @@ export function primaryUnit(cm) {
   if (cm.hasImpr) return 'impr';
   if (cm.hasViews && (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0) return 'views';
   if (cm.hasClicks && (cm.clicksPlanFlight ?? cm.planClicks ?? 0) > 0) return 'clicks';
-  return cm.hasViews ? 'views' : 'clicks';
+  // Installs (CPI) sit last in the plan-bearing chain for the reason the order already
+  // encodes: the earlier a unit is, the more pacings have a plan for it. A metrics object
+  // from before this unit existed carries neither key and answers exactly as it did.
+  if (cm.hasInstalls && (cm.installsPlanFlight ?? cm.installsPlan ?? 0) > 0) return 'installs';
+  return cm.hasViews ? 'views' : cm.hasInstalls && !cm.hasClicks ? 'installs' : 'clicks';
 }
 
 export const UNIT_FIELDS = Object.freeze({
@@ -53,5 +57,9 @@ export const UNIT_FIELDS = Object.freeze({
   views: Object.freeze({
     title: 'Views', actual: 'viewsActual', expected: 'viewsExpected', plan: 'viewsPlan',
     toDate: 'viewsToDatePct', neededPerDay: 'neededPerDayViews', dailyRate: 'viewsPlanDailyRate', latest: 'latestDayViews',
+  }),
+  installs: Object.freeze({
+    title: 'Installs', actual: 'installsActual', expected: 'installsExpected', plan: 'installsPlan',
+    toDate: 'installsToDatePct', neededPerDay: 'neededPerDayInstalls', dailyRate: 'installsPlanDailyRate', latest: 'latestDayInstalls',
   }),
 });

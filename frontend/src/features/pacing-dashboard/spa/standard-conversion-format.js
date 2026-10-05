@@ -13,13 +13,19 @@ function tableSignature(view) {
   if (view.share?.columnId) out.share = { ...view.share, columnId: ids.get(view.share.columnId) || view.share.columnId };
   return stable(out);
 }
+// The Daily table's Clicks target was `planClicks` until 2026-10-05 (`clExpected` since). The
+// snapshots recognized here were stored before that, so each table is signed in both shapes.
+const withPlanClicksTarget = (view) => ({ ...view, columns: view.columns.map(column => (column.target?.value?.metric === 'clExpected'
+  ? { ...column, target: { ...column.target, value: { ...column.target.value, metric: 'planClicks' } } } : column)) });
 const legacyTables = new Set();
 for (const key of ['std:v2:daily', 'std:v2:breakdown']) {
   for (const view of stdEntry(key).definition.spec.views) {
     if (view.kind !== 'table' || !view.columns.some(column => isConversionValue(column.value))) continue;
-    const old = structuredClone(view);
-    for (const column of old.columns) if (isConversionValue(column.value) && column.format === 'count1') column.format = 'int';
-    legacyTables.add(tableSignature(old));
+    for (const shape of [view, withPlanClicksTarget(view)]) {
+      const old = structuredClone(shape);
+      for (const column of old.columns) if (isConversionValue(column.value) && column.format === 'count1') column.format = 'int';
+      legacyTables.add(tableSignature(old));
+    }
   }
 }
 const upgradedSpecs = new WeakMap();
@@ -67,6 +73,25 @@ const NEW_BUDGET_TO_DATE = 'budgetToDate';
 const OLD_BUDGET_LABEL = 'Budget Plan';
 const NEW_BUDGET_LABEL = 'Budget Plan to Date';
 
+/* ── Daily Performance clicks target (2026-10-05) ──────────────────────────────
+ * The Standard Daily table stacked `planClicks` under the Clicks total: on Full Flight the WHOLE
+ * planned clicks, beside an Impressions and a Spend that read to date. It now stacks
+ * `clExpected`, the click-paced lines' expected clicks to date. A stored table that is exactly
+ * the old Standard one (column ids aside, its conversions in either format) reads as today's;
+ * one the author changed in any way is theirs and keeps its target. */
+const OLD_DAILY_TABLES = new Set();
+for (const view of stdEntry('std:v2:daily').definition.spec.views) {
+  if (view.kind !== 'table') continue;
+  const old = withPlanClicksTarget(view);
+  const legacy = structuredClone(old);
+  for (const column of legacy.columns) if (isConversionValue(column.value) && column.format === 'count1') column.format = 'int';
+  OLD_DAILY_TABLES.add(tableSignature(old)).add(tableSignature(legacy));
+}
+const isOldDailyTable = (node) => ownValue(node, 'kind') === 'table' && Array.isArray(ownValue(node, 'columns'))
+  && OLD_DAILY_TABLES.has(tableSignature(node));
+const withExpectedClicksTarget = (view) => ({ ...view, columns: view.columns.map(column => (column.target?.value?.metric === 'planClicks'
+  ? { ...column, target: { ...column.target, value: { ...column.target.value, metric: 'clExpected' } } } : column)) });
+
 const squash = (text) => text.replace(/\s+/g, '');
 const bindsExpr = (bind, field) => !!bind && typeof bind.expr === 'string' && squash(bind.expr) === field
   && Object.keys(bind).length === 1;
@@ -95,6 +120,66 @@ function bindsOldBudgetToDate(node) {
   return typeof expr === 'string' && squash(expr) === OLD_BUDGET_TO_DATE && Object.keys(bind).length === 1;
 }
 
+/* ── The Delivery card's unit (2026-10-05) ─────────────────────────────────────
+ * The Standard Delivery card bound campM's IMPRESSIONS family: `imprToDatePct`, `imprActual`,
+ * `imprExpected`, `imprDeviation`, `neededPerDayImpr`, `paceDeltaImpr`. campM gates CPC and CPV
+ * lines out of that family on purpose, so on a click- or view-paced pacing the card printed
+ * «0% of plan-to-date», Fact 0, Needed 0, Deviation 0 and «Deliver today 0» while the real
+ * figures sat one family over. The binds are now the `unit*` ones, which resolve through
+ * `primaryUnit` at render — impressions on a CPM pacing, so this changes no number there.
+ *
+ * Each brick is matched WHOLE, the same rule `isStdDeliveryBar` above uses and for the same
+ * reason: `{ metric: 'imprActual' }` on its own is also a bind an author may have written, and
+ * only the card's own slot, with the card's own neighbouring keys, is the card's.
+ */
+const sameKeys = (node, keys) => {
+  const own = Object.keys(node);
+  return own.length === keys.length && keys.every((k) => own.includes(k));
+};
+const metricBind = (node, key, metric) => bindsMetric(ownValue(node, key), metric);
+const UNIT_OF_IMPR = {
+  __proto__: null,
+  imprToDatePct: 'unitToDatePct', imprActual: 'unitActual', imprExpected: 'unitExpected',
+  imprDeviation: 'unitDeviation', neededPerDayImpr: 'neededPerDayUnit', paceDeltaImpr: 'paceDeltaUnit',
+};
+const rebind = (bind) => ({ metric: UNIT_OF_IMPR[bind.metric] });
+
+/** The card's big «% of plan-to-date». */
+const isStdDeliveryBigStat = (node) => ownValue(node, 'type') === 'bigStat'
+  && sameKeys(node, ['type', 'bind', 'format']) && ownValue(node, 'format') === 'percent'
+  && metricBind(node, 'bind', 'imprToDatePct');
+
+/** Its bar, in either stored shape: the pre-2026-09-23 `im`/`planImpr` one and the
+ *  `imprActual`/`planImpr` one that upgrade produced. */
+const isStdDeliveryUnitBar = (node) => ownValue(node, 'type') === 'progressBar'
+  && sameKeys(node, STD_DELIVERY_BAR_KEYS) && ownValue(node, 'invert') === false
+  && (bindsExpr(ownValue(node, 'bind'), 'im') || metricBind(node, 'bind', 'imprActual'))
+  && bindsExpr(ownValue(node, 'target'), 'planImpr')
+  && metricBind(node, 'tick', 'imprExpected') && ownValue(node, 'tickLabel') === 'needed today';
+
+/** Its Fact / Needed / Deviation row, all three cells together. */
+const DELIVERY_CELLS = [['Fact', 'imprActual'], ['Needed', 'imprExpected'], ['Deviation', 'imprDeviation']];
+function isStdDeliveryStatRow(node) {
+  if (ownValue(node, 'type') !== 'statRow' || ownValue(node, 'layout') !== 'flex') return false;
+  if (!sameKeys(node, ['type', 'cells', 'layout'])) return false;
+  const cells = ownValue(node, 'cells');
+  return Array.isArray(cells) && cells.length === DELIVERY_CELLS.length
+    && cells.every((cell, i) => cell && sameKeys(cell, ['label', 'bind', 'format'])
+      && cell.label === DELIVERY_CELLS[i][0] && cell.format === 'int'
+      && bindsMetric(cell.bind, DELIVERY_CELLS[i][1]));
+}
+
+/** Its «Deliver today» row. */
+const isStdDeliveryKvRow = (node) => ownValue(node, 'type') === 'kvRow'
+  && sameKeys(node, ['type', 'label', 'bind', 'format', 'emphasis', 'sub'])
+  && ownValue(node, 'label') === 'Deliver today' && ownValue(node, 'format') === 'int'
+  && ownValue(node, 'emphasis') === 'strong' && ownValue(node, 'sub') === 'to be on plan'
+  && metricBind(node, 'bind', 'neededPerDayImpr');
+
+/** Its pace badge. */
+const isStdDeliveryBadge = (node) => ownValue(node, 'words') === 'pace'
+  && sameKeys(node, ['words', 'bind']) && metricBind(node, 'bind', 'paceDeltaImpr');
+
 function upgradeTargetsNode(node) {
   if (Array.isArray(node)) {
     let changed = false;
@@ -111,7 +196,20 @@ function upgradeTargetsNode(node) {
     if (out === node) out = { ...node };
     out[key] = value;
   };
-  if (isStdDeliveryBar(node)) set('bind', { metric: 'imprActual' });
+  if (isOldDailyTable(node)) return withExpectedClicksTarget(node);
+  // Before the 2026-09-23 bar rule: this one recognizes the SAME bar and writes the buy-unit
+  // binds, so a spec stored in either shape lands on today's in one pass.
+  if (isStdDeliveryUnitBar(node)) {
+    set('bind', { metric: 'unitActual' });
+    set('target', { metric: 'unitPlan' });
+    set('tick', { metric: 'unitExpected' });
+  } else if (isStdDeliveryBar(node)) set('bind', { metric: 'imprActual' });
+  if (isStdDeliveryBigStat(node) || isStdDeliveryKvRow(node) || isStdDeliveryBadge(node)) {
+    set('bind', rebind(ownValue(node, 'bind')));
+  }
+  if (isStdDeliveryStatRow(node)) {
+    set('cells', ownValue(node, 'cells').map((cell) => ({ ...cell, bind: rebind(cell.bind) })));
+  }
   if (bindsOldBudgetToDate(node)) {
     set('bind', { expr: NEW_BUDGET_TO_DATE });
     if (ownValue(node, 'label') === OLD_BUDGET_LABEL) set('label', NEW_BUDGET_LABEL);

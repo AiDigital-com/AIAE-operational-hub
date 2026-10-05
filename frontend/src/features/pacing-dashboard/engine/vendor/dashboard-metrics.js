@@ -85,6 +85,91 @@ function createDashboardMetrics(deps) {
     return liPlan[liId];
   }
 
+  /* ── dim-value-groups.js — value groups (spec 2026-10-02), the half this engine
+     needs, lifted verbatim. The module itself is NOT in MODULES: its other half
+     re-exports @shared/dim-value-groups (the SAVE rules — the Settings editor's,
+     not the engine's), and pulling that in would mean a fourth injected dependency
+     for symbols no figure here reads. What IS here is the read half: the rewrite
+     index and the grouped view of a payload, both PacingCore-only, and the member
+     map normalize.js registers and containers.js reads back.
+
+     A caller groups BEFORE normalize, the way the retired SPA's store did:
+
+       const index = DM.groupIndexOf(resp.planByLineItem);
+       const { LP, LD, asOf } = DM.normalize(DM.groupedView(resp, index));
+
+     Not folded into normalize() on purpose: normalize's body is a verbatim copy of
+     the original and tests/dashboard-metrics-test.mjs is what keeps it one. ── */
+  function groupIndexOf(planMap) {
+    const pairs = [];
+    for (const [id, p] of Object.entries(planMap || {})) {
+      if (p && Array.isArray(p.dimGroups) && p.dimGroups.length) pairs.push({ id, groups: p.dimGroups });
+    }
+    return pairs.length ? PacingCore.buildDimGroupIndex(pairs) : null;
+  }
+
+  function groupedSplits(availableSplits, index) {
+    if (!index || !availableSplits || typeof availableSplits !== 'object') return availableSplits;
+    let out = availableSplits;
+    for (const [liId, dims] of Object.entries(index)) {
+      for (const dim of Object.keys(dims)) {
+        const values = availableSplits[dim]?.[liId];
+        if (!Array.isArray(values)) continue;
+        const next = [];
+        let changed = false;
+        for (const v of values) {
+          const name = PacingCore.dimGroupNameOf(index, liId, dim, v);
+          const shown = name ?? v;
+          if (name != null && name !== v) changed = true;
+          if (next.includes(shown)) { changed = true; continue; }
+          next.push(shown);
+        }
+        if (!changed) continue;
+        if (out === availableSplits) out = { ...availableSplits };
+        if (out[dim] === availableSplits[dim]) out[dim] = { ...availableSplits[dim] };
+        out[dim][liId] = next;
+      }
+    }
+    return out;
+  }
+
+  function groupedView(raw, index) {
+    if (!index || !raw) return raw;
+    const apply = PacingCore.applyDimGroups;
+    const sources = raw.dimSources;
+    let nextSources = sources;
+    if (sources && typeof sources === 'object') {
+      for (const [id, entry] of Object.entries(sources)) {
+        const rows = entry && Array.isArray(entry.rows) ? apply(entry.rows, index, ['brk']) : null;
+        if (rows && rows !== entry.rows) {
+          if (nextSources === sources) nextSources = { ...sources };
+          nextSources[id] = { ...entry, rows };
+        }
+      }
+    }
+    return {
+      ...raw,
+      factsDaily: apply(raw.factsDaily, index),
+      creatives: apply(raw.creatives, index, ['filter_context', 'dims']),
+      conversions: apply(raw.conversions, index, ['filter_context', 'dims']),
+      dimSources: nextSources,
+      availableSplits: groupedSplits(raw.availableSplits, index),
+    };
+  }
+
+  /* The member map rides on the aggregate object itself, not on a field: a filtered
+     facts object is assembled from a fixed key list, so a separate field would be
+     missing under any filter or Period Scope. */
+  const MEMBERS = new WeakMap();
+
+  function registerMembers(liSplitDaily, members) {
+    if (liSplitDaily && members) MEMBERS.set(liSplitDaily, members);
+  }
+
+  function memberDailyOf(liSplitDaily) {
+    return (liSplitDaily && MEMBERS.get(liSplitDaily)) || null;
+  }
+
   /* ── format.js — sid, the five formatters detailSource prints through, and ok,
      the module-private helpers they close over: the two Intl date formats and their
      DateTimeFormat instances, the two number formats, and ok, fDs's date guard. None
@@ -688,6 +773,7 @@ function createDashboardMetrics(deps) {
 
 
 
+
   // { [id]: marginIndex } for coef-LIs only; {} when none (identity path). A missing
   // entry ⇒ addFact takes the raw currencyToUsd(dynamic_cost, rate) branch unchanged.
   function buildCoefIndexMap(planMap) {
@@ -761,6 +847,9 @@ function createDashboardMetrics(deps) {
     const LSD = {};
     const rows = Array.isArray(factsDaily) ? factsDaily : [];
     const coefIdx = buildCoefIndexMap(planMap);
+    // Value groups (spec 2026-10-02): null until a rewritten row is met, so a pacing
+    // without groups allocates and registers nothing.
+    let members = null;
 
     rows.forEach((f) => {
       const id = sid(f.line_item_id);
@@ -775,6 +864,19 @@ function createDashboardMetrics(deps) {
         if (!LSD[id][key]) LSD[id][key] = {};
         if (!LSD[id][key][f.date]) LSD[id][key][f.date] = zeroRow();
         addFact(LSD[id][key][f.date], f, rate, rowIdx, rowK);
+        // A row a value group rewrote also lands in its member's own day map, by the same
+        // per-row rules, so the members of a group add up to the group's bucket.
+        const member = f._member && f._member[k];
+        if (member != null) {
+          // Null-prototype maps: a member is a delivered value, and one named `constructor`
+          // must be a key like any other.
+          if (!members) members = Object.create(null);
+          const byKey = (members[id] ||= Object.create(null));
+          const byMember = (byKey[key] ||= Object.create(null));
+          const days = (byMember[member] ||= {});
+          if (!days[f.date]) days[f.date] = zeroRow();
+          addFact(days[f.date], f, rate, rowIdx, rowK);
+        }
       }
     });
 
@@ -788,6 +890,7 @@ function createDashboardMetrics(deps) {
       overlayLiSplitDaily(LSD, planMap, cvCtx, scope, purityIndex(rows), localAsOf);
     }
 
+    if (members) registerMembers(LSD, members);
     return LSD;
   }
 
@@ -854,6 +957,9 @@ function createDashboardMetrics(deps) {
           primaryCv: cvNames(p.primaryConversions),
           primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
           conversionData: p.conversionData === true,
+          // Value groups (spec 2026-10-02): the line's dictionary. The store rewrites this
+          // line's rows with it before anything else reads them. normalizePlan must match.
+          dimGroups: Array.isArray(p.dimGroups) ? p.dimGroups : [],
         };
       }
     } else if (raw.planByType && typeof raw.planByType === 'object') {
@@ -957,6 +1063,8 @@ function createDashboardMetrics(deps) {
         primaryCv: cvNames(p.primaryConversions),
         primaryCvStored: cvNames(p.storedPrimaryConversions) || [],
         conversionData: p.conversionData === true,
+        // Value groups: same mapping as normalize() above.
+        dimGroups: Array.isArray(p.dimGroups) ? p.dimGroups : [],
       };
     }
     return LP;
@@ -1379,13 +1487,19 @@ function createDashboardMetrics(deps) {
   }
 
   function domRateType(liPlan, eIds) {
-    const c = { CPM: 0, CPC: 0, CPV: 0 };
+    const c = { CPM: 0, CPC: 0, CPV: 0, CPI: 0 };
     for (const id of eIds) { c[liPlan[id]?.rateType || 'CPM']++; }
+    // CPI is asked first and on a STRICT majority, which is what keeps every pacing without an
+    // install-paced line byte-identical to the three-way answer below: with `c.CPI` at 0 the
+    // test is false unless every other count is 0 too, and that is the empty set the old chain
+    // already answered 'CPC' for. A tie between CPI and another unit therefore goes to the
+    // other one, the same way the chain below hands ties to the earlier unit.
+    if (c.CPI > c.CPM && c.CPI > c.CPC && c.CPI > c.CPV) return 'CPI';
     return c.CPC >= c.CPM && c.CPC >= c.CPV ? 'CPC' : c.CPV >= c.CPM && c.CPV >= c.CPC ? 'CPV' : 'CPM';
   }
 
   function rateLabel(rt) {
-    return rt === 'CPC' ? 'Clicks' : rt === 'CPV' ? 'Views' : 'Impressions';
+    return rt === 'CPC' ? 'Clicks' : rt === 'CPV' ? 'Views' : rt === 'CPI' ? 'Installs' : 'Impressions';
   }
 
   // LI participates in VCR aggregation if it has a VCR target OR any completed views.
@@ -1532,7 +1646,7 @@ function createDashboardMetrics(deps) {
     // (imprPlan) and the CPC clicks plan (clicksPlan). Subtracted from the three
     // neededPerDay* lines so a paused LI stops demanding daily delivery. Views
     // reuse viewsPlanPausedRem above. Additive — stays 0 when nothing is paused.
-    let imprPlanPausedRem = 0, clicksPlanPausedRem = 0;
+    let imprPlanPausedRem = 0, clicksPlanPausedRem = 0, installsPlanPausedRem = 0;
 
     // ── Clicks-side accumulators ───────────────────────────────────────────
     // CPC LIs only — their plan lives in planImpr by PacingCore convention.
@@ -1540,6 +1654,16 @@ function createDashboardMetrics(deps) {
     let clicksDailyRateActive = 0, clicksDailyRateAvg = 0;
     let clicksEndedCount = 0, clicksLiCount = 0;
     let hasCpc = false;
+    // Installs side — CPI line items only. The fourth unit a pacing can be bought on
+    // (app-install buying: Apple Ads and the rest), reading the CONVERSIONS column, which is
+    // where an install lands — the delivery mart carries no installs of its own, and it is the
+    // same population `dynCpa` divides spend by. Everything below mirrors the clicks block
+    // line for line; `planImpr` holds the install goal by the same convention.
+    let installsPlan = 0, installsActual = 0, installsExpected = 0;
+    let installsDailyRateActive = 0, installsDailyRateAvg = 0;
+    let installsEndedCount = 0, installsLiCount = 0;
+    let installsPlanFlight = 0, latestDayInstalls = 0;
+    let hasCpi = false;
     // Dynamic-CPC accumulators — CPC LIs ONLY.
     let cpcDc = 0, cpcCl = 0;
 
@@ -1633,9 +1757,10 @@ function createDashboardMetrics(deps) {
       const rt = p.rateType || 'CPM';
       const isCpc = rt === 'CPC';
       const isCpv = rt === 'CPV';
+      const isCpi = rt === 'CPI';
       const liFDays = Math.max(1, dI(p.fs, p.fe));
       // planImpr holds the primary delivery goal in the LI's rate-type unit:
-      // impressions (CPM), clicks (CPC), or views (CPV).
+      // impressions (CPM), clicks (CPC), views (CPV) or installs (CPI).
       const planUnit = Number(p.planImpr) || 0;
       const w = planUnit || p.budget || 1;
       // The plan SUMS follow a narrowed window; `planUnit` keeps driving weights and rates.
@@ -1663,9 +1788,9 @@ function createDashboardMetrics(deps) {
       // stays in the chart's actual bars — we only shrink the goal total.
       if (PacingCore.isLiPaused(p, asOf)) {
         // planUnit is in the LI's rate-type unit, so the delivered side must be too
-        // — subtracting impressions from a CPC/CPV goal mixes units. isCpc/isCpv are
-        // already resolved for this LI a few lines above.
-        const doneUnits = isCpc ? (m.cl || 0) : isCpv ? (m.co || 0) : (m.im || 0);
+        // — subtracting impressions from a CPC/CPV/CPI goal mixes units. isCpc/isCpv/isCpi
+        // are already resolved for this LI a few lines above.
+        const doneUnits = isCpc ? (m.cl || 0) : isCpv ? (m.co || 0) : isCpi ? (m.cv || 0) : (m.im || 0);
         if (planUnit > 0) allPlanImprPausedRem += Math.max(0, planUnit - doneUnits);
         costBudPausedRem += Math.max(0, liCostBud - (m.sp || 0));
       }
@@ -1699,11 +1824,11 @@ function createDashboardMetrics(deps) {
         }
       }
 
-      // Impressions side — impression-paced LIs only (CPM). CPC (clicks-paced)
-      // and CPV (views-paced) LIs are excluded: their planImpr is a plan-clicks /
-      // plan-views placeholder, so folding their actuals into impression delivery
-      // would produce absurd percentages.
-      if (!isCpc && !isCpv) {
+      // Impressions side — impression-paced LIs only (CPM). CPC (clicks-paced),
+      // CPV (views-paced) and CPI (install-paced) LIs are excluded: their planImpr is a
+      // plan-clicks / plan-views / plan-installs placeholder, so folding their actuals into
+      // impression delivery would produce absurd percentages.
+      if (!isCpc && !isCpv && !isCpi) {
         imprActual += m.im;
         // latest-day (= asOf) actual — window-guarded exactly like
         // OverviewBlock1.jsx:255 (`ep.fs && ep.fe && (asOf < ep.fs || asOf > ep.fe)`):
@@ -1822,6 +1947,31 @@ function createDashboardMetrics(deps) {
         }
       }
 
+      // Installs side — CPI LIs only (planImpr = plan_installs convention), the clicks block
+      // above with `cv` in place of `cl`.
+      if (isCpi) {
+        hasCpi = true;
+        installsActual += m.cv || 0;
+        if (asOf && !(p.fs && p.fe && (asOf < p.fs || asOf > p.fe))) {
+          const dayRow = liDaily[id]?.[asOf];
+          if (dayRow) latestDayInstalls += dayRow.cv || 0;
+        }
+        // `m.eI` is this line's expected UNITS, which for a CPI line are installs — the same
+        // reading the views branch takes for its own unit.
+        installsExpected += m.eI;
+        if (planUnit > 0) {
+          installsPlan += planWin;
+          installsPlanFlight += planUnit;
+          if (PacingCore.isLiPaused(p, asOf)) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
+          installsDailyRateAvg += planUnit / liFDays;
+          if (asOf && asOf >= p.fs) {
+            if (asOf > p.fe) installsEndedCount++;
+            else { const prev = datePrev(asOf); installsDailyRateActive += liExpUnits(p, asOf) - liExpUnits(p, prev); }
+          }
+          installsLiCount++;
+        }
+      }
+
       // CPV KPI spans view-based LIs (CPV-rate OR VCR-eligible: Video, CTV, OTT,
       // YouTube, Native-video…) but NOT Audio — audio tracks listen-throughs as
       // "completes" yet must never pollute cost-per-VIEW. Matches the CPV chart.
@@ -1832,7 +1982,7 @@ function createDashboardMetrics(deps) {
 
       // Variant-D formula inputs for the Plan rate card — impressions side only,
       // since the formula visualises imprPlanDailyRate. Skip CPC and CPV LIs.
-      if (!isCpc && !isCpv && asOf && asOf >= p.fs && asOf <= p.fe && planUnit > 0) {
+      if (!isCpc && !isCpv && !isCpi && asOf && asOf >= p.fs && asOf <= p.fe && planUnit > 0) {
         const containers = (p && p.containers) || [];
         let activeC = null;
         for (const c of containers) {
@@ -1870,6 +2020,8 @@ function createDashboardMetrics(deps) {
     // (a line that starts later) must not hide the unit. Equal to imprPlan / viewsPlan otherwise.
     const hasImpr = imprPlanFlight > 0;
     const hasClicks = hasCpc;
+    // hasInstalls: at least one CPI LI exists, the same rule hasClicks carries for CPC.
+    const hasInstalls = hasCpi;
     const hasViews = viewsPlanFlight > 0 || hasCpv;
 
     // ── Derived ratios ─────────────────────────────────────────────────────
@@ -1933,6 +2085,8 @@ function createDashboardMetrics(deps) {
       ? Math.round(((imprPlan - imprActual) - imprPlanPausedRem) / daysLeft) : 0;
     const neededPerDayClicks = daysLeft > 0 && clicksPlan > 0
       ? Math.round(((clicksPlan - clicksActual) - clicksPlanPausedRem) / daysLeft) : 0;
+    const neededPerDayInstalls = daysLeft > 0 && installsPlan > 0
+      ? Math.round(((installsPlan - installsActual) - installsPlanPausedRem) / daysLeft) : 0;
     const neededPerDayViews = daysLeft > 0 && viewsPlan > 0
       ? Math.round(((viewsPlan - viewsActual) - viewsPlanPausedRem) / daysLeft) : 0;
 
@@ -1940,6 +2094,7 @@ function createDashboardMetrics(deps) {
     // actual vs expected-to-date, each inside its rate-type-gated bucket.
     const imprToDatePct = imprExpected > 0 ? (imprActual / imprExpected) * 100 : 0;
     const clicksToDatePct = clicksExpected > 0 ? (clicksActual / clicksExpected) * 100 : 0;
+    const installsToDatePct = installsExpected > 0 ? (installsActual / installsExpected) * 100 : 0;
     const viewsToDatePct = viewsExpected > 0 ? (viewsActual / viewsExpected) * 100 : 0;
     const spendToDatePct = costPr > 0 ? (sp / costPr) * 100 : 0;
 
@@ -1968,16 +2123,18 @@ function createDashboardMetrics(deps) {
       }
       return u > 0 ? (perMille ? (s / u) * 1000 : s / u) : 0;
     }
-    const bidFact2dCpm = bidFact2d((rt) => rt !== 'CPC' && rt !== 'CPV', 'im', true);
+    const bidFact2dCpm = bidFact2d((rt) => rt !== 'CPC' && rt !== 'CPV' && rt !== 'CPI', 'im', true);
     const bidFact2dCpc = bidFact2d((rt) => rt === 'CPC', 'cl', false);
     const bidFact2dCpv = bidFact2d((rt) => rt === 'CPV', 'co', false);
+    const bidFact2dCpi = bidFact2d((rt) => rt === 'CPI', 'cv', false);
 
     // Spend/day at current buying rates to deliver the needed units — the exact
     // expression OverviewBlock1 computes ad-hoc (:286-289), promoted to canon.
     const neededSpendPerDay =
       (neededPerDayImpr * bidFact2dCpm) / 1000
       + neededPerDayClicks * bidFact2dCpc
-      + neededPerDayViews * bidFact2dCpv;
+      + neededPerDayViews * bidFact2dCpv
+      + neededPerDayInstalls * bidFact2dCpi;
 
     // The client's plan over the days `costPr` covers: each line's client money from the range's
     // first day to asOf (widget-data's `budgetToDate`, 2026-09-23), and the budget with no range.
@@ -1992,6 +2149,8 @@ function createDashboardMetrics(deps) {
     const allPlanImprDailyRate = Math.round(allImprEnded ? allImprDailyRateAvg : allImprDailyRateActive);
     const clicksPlanDailyEnded = clicksLiCount > 0 && clicksEndedCount === clicksLiCount;
     const clicksPlanDailyRate = Math.round(clicksPlanDailyEnded ? clicksDailyRateAvg : clicksDailyRateActive);
+    const installsPlanDailyEnded = installsLiCount > 0 && installsEndedCount === installsLiCount;
+    const installsPlanDailyRate = Math.round(installsPlanDailyEnded ? installsDailyRateAvg : installsDailyRateActive);
     const viewsPlanDailyEnded = viewsLiCount > 0 && viewsEndedCount === viewsLiCount;
     const viewsPlanDailyRate = Math.round(viewsPlanDailyEnded ? viewsDailyRateAvg : viewsDailyRateActive);
 
@@ -2022,6 +2181,11 @@ function createDashboardMetrics(deps) {
       // `clicksPlanPausedRem` was computed and left off this object until 2026-09-23, so both
       // of its readers saw 0 for a paused click-paced line.
       allPlanImprPausedRem, viewsPlanPausedRem, costBudPausedRem, imprPlanPausedRem, clicksPlanPausedRem,
+      installsPlanPausedRem,
+      // The installs family, the clicks one's twin (CPI line items).
+      installsPlan, installsActual, installsExpected, installsPlanFlight,
+      installsPlanDailyRate, installsPlanDailyEnded, neededPerDayInstalls, installsToDatePct,
+      latestDayInstalls, hasInstalls,
       clicksPlan, clicksActual, clicksExpected,
       clicksPlanDailyRate, clicksPlanDailyEnded, neededPerDayClicks,
 
@@ -2126,7 +2290,7 @@ function createDashboardMetrics(deps) {
   // expectedDeltas). It joined with the Daily Performance preset (section-widget parity
   // 2026-09-04): the legacy totals row stacks it under delivered impressions, and `expIm` reads
   // a different, larger number on every mixed-rate pacing.
-  const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected']);
+  const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected', 'clExpected']);
   const FIELDS_RATES = new Set(['ctr', 'vcr', 'acr', 'cpm', 'cpc', 'cpv']);
   const FIELDS_PLAN = new Set([
     // `costBudTotal` is the whole flight's cost budget where `costBud` is prorated inside the
@@ -4629,10 +4793,10 @@ function createDashboardMetrics(deps) {
     const isAudio = (p?.ch || '').toLowerCase() === 'audio';
     const vcrElig = isVcrEligible(p, daily);
     return {
-      // campM impressions side: CPC/CPV lines are click/view-paced, so their impressions stay
-      // out of the cpm basis (a CPC line's plan and its buying rate are clicks). The ctr basis
-      // counts every line (owner decision 2026-09-23) and needs no gate.
-      nc: rt !== 'CPC' && rt !== 'CPV',
+      // campM impressions side: CPC/CPV/CPI lines are click/view/install-paced, so their
+      // impressions stay out of the cpm basis (a CPC line's plan and its buying rate are
+      // clicks). The ctr basis counts every line (owner decision 2026-09-23) and needs no gate.
+      nc: rt !== 'CPC' && rt !== 'CPV' && rt !== 'CPI',
       vcrElig,
       isAudio,
       // cost-per-view basis (campM cpvSpendV/cpvViewsV and chart aggCpv): CPV OR
@@ -4661,6 +4825,10 @@ function createDashboardMetrics(deps) {
     // substitute, so the gated one has a name of its own — the SAME name campM and the
     // canonical metric catalogue already use for it.
     imprExpected: 0,
+    // …and its clicks twin (2026-10-02): expected clicks over the CLICK-PACED lines only, campM's
+    // own `clicksExpected`. `expCl` also counts a non-CPC line's CTR target (and, on a CPV line,
+    // views times that target), which is a different number on every pacing that is not all CPC.
+    clExpected: 0,
   };
 
   // The literal above is what `addRowSums` walks, so the six added on 2026-09-08 had to be
@@ -4764,7 +4932,7 @@ function createDashboardMetrics(deps) {
    *  before `from` (§3 AGG rule). liExp* clamp to the plan's flight internally. An empty window
    *  — `to` before `from`, which expectedBounds answers for a window that starts after asOf, or
    *  no `to` at all on a pacing with no data yet — expects nothing. */
-  const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 });
+  const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 });
   function expectedDeltas(p, from, to) {
     if (!from || !to || from > to) return NO_EXPECTED;
     const base = from > p.fs
@@ -4773,15 +4941,19 @@ function createDashboardMetrics(deps) {
     // Raw floats — rounding happens at RENDER, never before summation (round 6.1:
     // three LIs at 0.4 each must total 1, not 0).
     const im = liExpImpr(p, to) - base.im;
+    const cl = liExpClicks(p, to) - base.cl;
     const rt = p.rateType || 'CPM';
     return {
       expIm: im,
       expCo: liExpCost(p, to) - base.co,
-      expCl: liExpClicks(p, to) - base.cl,
+      expCl: cl,
       expVw: viewGoalUnits(p) > 0 ? im : 0,
       // The same gate `expVw` uses one line up, on the other side: this line's expected units
       // count only where those units ARE impressions (campM's impressions side, metrics.js:334).
       imprExpected: rt === 'CPC' || rt === 'CPV' ? 0 : im,
+      // …and only where they are CLICKS (campM's clicks side, its `isCpc` gate): a CPC line's
+      // own plan curve, with no other line's CTR target added.
+      clExpected: rt === 'CPC' ? cl : 0,
     };
   }
 
@@ -4801,7 +4973,7 @@ function createDashboardMetrics(deps) {
     if (boundsForExpected) {
       const e = expectedDeltas(p, boundsForExpected.from, boundsForExpected.to);
       t.expIm += e.expIm; t.expCo += e.expCo; t.expCl += e.expCl; t.expVw += e.expVw;
-      t.imprExpected += e.imprExpected;
+      t.imprExpected += e.imprExpected; t.clExpected += e.clExpected;
     }
     return t;
   }
@@ -4836,6 +5008,7 @@ function createDashboardMetrics(deps) {
         // `nc` is gatesOf's own impression-paced gate, read here for `imprExpected` — the same
         // predicate the per-day fact sums already use for imNC/spNC.
         imprPaced: g.nc,
+        clickPaced: (p.rateType || 'CPM') === 'CPC',
         expImBase: useBaseline ? liExpImpr(p, datePrev(range.from)) : 0,
         expCoBase: useBaseline ? liExpCost(p, datePrev(range.from)) : 0,
         expClBase: useBaseline ? liExpClicks(p, datePrev(range.from)) : 0,
@@ -4845,7 +5018,7 @@ function createDashboardMetrics(deps) {
     const rows = [];
     for (const d of calendarDays(bounds.from, bounds.to)) {
       const t = { ...ZERO_FLOW };
-      let expIm = 0, expCo = 0, expCl = 0, expVw = 0, imprExpected = 0;
+      let expIm = 0, expCo = 0, expCl = 0, expVw = 0, imprExpected = 0, clExpected = 0;
       for (const e of perLi) {
         const v = e.dd[d];
         if (v && !(e.p.fs && e.p.fe && (d < e.p.fs || d > e.p.fe))) addFactTs(t, v, e.g);
@@ -4854,10 +5027,11 @@ function createDashboardMetrics(deps) {
         expCl += liExpClicks(e.p, d) - e.expClBase;
         if (e.hasViewGoal) expVw += liExpImpr(e.p, d) - e.expImBase;
         if (e.imprPaced) imprExpected += liExpImpr(e.p, d) - e.expImBase;
+        if (e.clickPaced) clExpected += liExpClicks(e.p, d) - e.expClBase;
       }
       rows.push({
         date: d, ...t,
-        expIm, expCo, expCl, expVw, imprExpected,
+        expIm, expCo, expCl, expVw, imprExpected, clExpected,
         ...ratesFromSums(t, basis),
       });
     }
@@ -5380,7 +5554,11 @@ function createDashboardMetrics(deps) {
         if (raw.date < e.fs || raw.date > e.fe || hasOwn(row, e.key)) continue;
         const mapping = mappings.get(e.key);
         if (mapping && raw.dims && hasOwn(raw.dims, mapping.key)) {
-          row[e.key] = groupValue(mapping.key, raw.dims[mapping.key], mapping.groups).label;
+          // Value groups (spec 2026-10-02): the source's own label is a raw value of this
+          // naming dimension, so on a line that groups it, it reads as the group. The rows'
+          // `brk` already does (the store rewrote it); this column the store cannot reach.
+          const label = groupValue(mapping.key, raw.dims[mapping.key], mapping.groups).label;
+          row[e.key] = PacingCore.dimGroupNameOf(sources.dimGroupIndex, lid, e.key, label) ?? label;
         } else if (raw.brk && hasOwn(raw.brk, e.key)) row[e.key] = raw.brk[e.key];
         else if (e.key === 'platform' && hasOwn(raw.filter_context || {}, 'platform')) row[e.key] = raw.filter_context.platform;
         else if (hasOwn(raw.filter_context?.dims || {}, e.key)) row[e.key] = raw.filter_context.dims[e.key];
@@ -5461,6 +5639,8 @@ function createDashboardMetrics(deps) {
         out.matchers.push({
           from: 'library',
           dimKey: answering.key,
+          // The naming dimension this column answers: a line's value groups are keyed by it.
+          brkDim,
           groups: dimSourceGroups(sources, sourceId, answering.key),
           values,
         });
@@ -5538,9 +5718,15 @@ function createDashboardMetrics(deps) {
         if (!hasOwn(values || {}, field)) { unknown = true; continue; }
         const own = values[field];
         if (m.includeUnnamed && (own == null || !String(own).trim() || String(own).trim() === '-')) continue;
-        if (m.from === 'name'
-          ? !m.folded.has(String(own ?? '').trim().toLowerCase())
-          : !m.values.has(groupValue(m.dimKey, own, m.groups).label)) matches = false;
+        if (m.from === 'name') {
+          if (!m.folded.has(String(own ?? '').trim().toLowerCase())) matches = false;
+          continue;
+        }
+        // A mapped column: the source's label, then this line's value group (spec 2026-10-02),
+        // so a filter on the group's name keeps the rows the source labels with a member.
+        const label = groupValue(m.dimKey, own, m.groups).label;
+        const named = PacingCore.dimGroupNameOf(sources.dimGroupIndex, r.line_item_id, m.brkDim, label) ?? label;
+        if (!m.values.has(named)) matches = false;
       }
       if (!matches) continue;
       if (unknown) return save({ rows: [], reason: 'This source does not follow the active filters: some rows are missing the required dimension values. Clear these filters to see the breakdown.' });
@@ -5893,7 +6079,9 @@ function createDashboardMetrics(deps) {
    * already holds (`sortReportRows`). One function, so a header click cannot float a leftover
    * to the top of a table the engine sank it in.
    */
-  const leftoverRank = (r) => (r.residual ? 2 : r.leftover ? 1 : 0);
+  // «Other CM360» (a table's CM360 remainder) is last of all: on a dimension table it stands
+  // beside the «Others» residual, and the two must not swap places on every header click.
+  const leftoverRank = (r) => (r.cmOther ? 3 : r.residual ? 2 : r.leftover ? 1 : 0);
   /** The volume fields a remainder is judged MATERIAL on. A sliver is rounding, not a segment:
    *  the legacy panel uses the same 1% floor on the one unit it computes (Breakdown.jsx:523). */
   const RESIDUAL_ANCHORS = ['im', 'cl', 'co', 'sp'];
@@ -6215,7 +6403,7 @@ function createDashboardMetrics(deps) {
     // …and each key's delivered impressions inside its value: the weight of that leaf plan's
     // CTR target wherever the key is weighed — its row, the Totals, a kept subset, a fold.
     const imByKey = new Map();
-    const allExp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    const allExp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
     let totalVol = 0, coveredVol = 0, totalSpend = 0, coveredSpend = 0;
     for (const [label, org] of cut.origins) {
       // A fold («Unclassified», «No value») and the untagged remainder are not values anything
@@ -6243,12 +6431,12 @@ function createDashboardMetrics(deps) {
         ...campaignScalars(planMap, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
           false, planWindowOf(sources, range), imOf),
       };
-      const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+      const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
       if (bounds.from && bounds.to && bounds.from <= bounds.to) {
         for (const id of ids) {
           const e = expectedDeltas(planMap[id], bounds.from, bounds.to);
           exp.expIm += e.expIm; exp.expCo += e.expCo; exp.expCl += e.expCl;
-          exp.expVw += e.expVw; exp.imprExpected += e.imprExpected;
+          exp.expVw += e.expVw; exp.imprExpected += e.imprExpected; exp.clExpected += e.clExpected;
         }
       }
       for (const k of Object.keys(allExp)) allExp[k] += exp[k];
@@ -6365,7 +6553,7 @@ function createDashboardMetrics(deps) {
    *  margins is the mistake campaignScalars exists to prevent. */
   function foldPlanScalars(dimPlans, members, sources, range) {
     const keys = [];
-    const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+    const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
     for (const m of members) {
       if (!m || !m.keys || m.keys.length === 0) continue;
       for (const k of m.keys) keys.push(k);
@@ -6521,13 +6709,13 @@ function createDashboardMetrics(deps) {
       // last row of 141,000, and 40% under a row's 100% (review 2026-09-23). The Totals is that
       // last row's cumulative, as it was before; the rows that stop at asOf are the li, dateLi
       // and dim grains', whose Totals stop with them.
-      const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+      const eTot = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
       for (const id of sources.effLIs) {
         const p = sources.liPlan[id];
         if (!p) continue;
         const e = expectedDeltas(p, bounds.from, bounds.to);
         eTot.expIm += e.expIm; eTot.expCo += e.expCo; eTot.expCl += e.expCl; eTot.expVw += e.expVw;
-        eTot.imprExpected += e.imprExpected;
+        eTot.imprExpected += e.imprExpected; eTot.clExpected += e.clExpected;
       }
       Object.assign(totalsSums, eTot);
     } else if (grain.type === 'dateLi') {
@@ -6716,7 +6904,7 @@ function createDashboardMetrics(deps) {
       subset = onceForKeys((keys) => {
         const sums = { ...ZERO_FLOW };
         const planKeys = [];
-        const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+        const exp = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
         for (const key of keys) {
           if (!hasOwn(buckets, key)) continue;
           addRowSums(sums, buckets[key], custom);
@@ -7270,7 +7458,7 @@ function createDashboardMetrics(deps) {
         if (FIELDS_PLAN.has(name)) return windowPlan()[name];
         if (FIELDS_EXPECTED.has(name)) {
           if (!expected) {
-            expected = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0 };
+            expected = { expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 };
             const bounds = expectedBounds(sources, window);
             for (const id of sources.effLIs) {
               const p = sources.liPlan[id];
@@ -7553,7 +7741,11 @@ function createDashboardMetrics(deps) {
     if (cm.hasImpr) return 'impr';
     if (cm.hasViews && (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0) return 'views';
     if (cm.hasClicks && (cm.clicksPlanFlight ?? cm.planClicks ?? 0) > 0) return 'clicks';
-    return cm.hasViews ? 'views' : 'clicks';
+    // Installs (CPI) sit last in the plan-bearing chain for the reason the order already
+    // encodes: the earlier a unit is, the more pacings have a plan for it. A metrics object
+    // from before this unit existed carries neither key and answers exactly as it did.
+    if (cm.hasInstalls && (cm.installsPlanFlight ?? cm.installsPlan ?? 0) > 0) return 'installs';
+    return cm.hasViews ? 'views' : cm.hasInstalls && !cm.hasClicks ? 'installs' : 'clicks';
   }
 
   const UNIT_FIELDS = Object.freeze({
@@ -7568,6 +7760,10 @@ function createDashboardMetrics(deps) {
     views: Object.freeze({
       title: 'Views', actual: 'viewsActual', expected: 'viewsExpected', plan: 'viewsPlan',
       toDate: 'viewsToDatePct', neededPerDay: 'neededPerDayViews', dailyRate: 'viewsPlanDailyRate', latest: 'latestDayViews',
+    }),
+    installs: Object.freeze({
+      title: 'Installs', actual: 'installsActual', expected: 'installsExpected', plan: 'installsPlan',
+      toDate: 'installsToDatePct', neededPerDay: 'neededPerDayInstalls', dailyRate: 'installsPlanDailyRate', latest: 'latestDayInstalls',
     }),
   });
 
@@ -7718,10 +7914,23 @@ function createDashboardMetrics(deps) {
     }));
   }
 
+  // Value groups (spec 2026-10-02, kept outside git): the dictionary decides which value a row
+  // carries, so a change rebuilds the facts from the regrouped rows. Lines without groups are
+  // not listed: a pacing that never used them fingerprints as '' and never rebuilds.
+  function dimGroupsFingerprint(liPlan) {
+    const out = [];
+    for (const id of Object.keys(liPlan || {}).sort()) {
+      const g = liPlan[id] && liPlan[id].dimGroups;
+      if (Array.isArray(g) && g.length) out.push([id, g]);
+    }
+    return out.length ? JSON.stringify(out) : '';
+  }
+
   // Gate (spec §3.4): (coefOrMarginChanged && (hadAnyCoef || hasAnyCoef))
   //                   || (rateChanged && hasAnyCoef)
   //                   || netRatioChanged
   //                   || primaryCvChanged
+  //                   || dimGroupsChanged
   // `oldOn` / `newOn` are the published primary_cv_operative flag before and after the
   // save. A flip either way rebuilds; operative on both sides compares the per-line-item
   // fingerprint; off on both sides compares '' with '' and never rebuilds.
@@ -7733,7 +7942,8 @@ function createDashboardMetrics(deps) {
     const netChanged = netFingerprint(oldLP) !== netFingerprint(newLP);
     const cvChanged = (oldOn === true) !== (newOn === true)
       || primaryCvFingerprint(oldLP, oldOn === true) !== primaryCvFingerprint(newLP, newOn === true);
-    return (marginChanged && (had || has)) || (rateChanged && has) || netChanged || cvChanged;
+    const groupsChanged = dimGroupsFingerprint(oldLP) !== dimGroupsFingerprint(newLP);
+    return (marginChanged && (had || has)) || (rateChanged && has) || netChanged || cvChanged || groupsChanged;
   }
 
   // Does any LI in the plan bill the client net of a ratio? (net cost mode, spec
@@ -7971,6 +8181,7 @@ function createDashboardMetrics(deps) {
     neededPerDayImpr: { from: 'fl', format: 'int', unit: 'impr', needsFlight: true },
     neededPerDayClicks: { from: 'fl', format: 'int', unit: 'clicks', needsFlight: true },
     neededPerDayViews: { from: 'fl', format: 'int', unit: 'views', needsFlight: true },
+    neededPerDayInstalls: { from: 'fl', format: 'int', unit: 'installs', needsFlight: true },
     forecastDspSpend: { from: 'fl', format: 'money' },
     // The FULL-flight cost budget, and what is left of it. Canonical on purpose (T12
     // Step 0): the formula field `costBud` is range-prorated, so an expr over it printed
@@ -8003,7 +8214,36 @@ function createDashboardMetrics(deps) {
     // plan" rather than "0.0 pp", which is what the plan-less branch (UnitCardBody:15-21)
     // needs: no badge, no colour, just the count.
     paceDeltaImpr: { from: 'derived', format: 'pp', unit: 'impr' },
+    /* ── The same seven, on the unit this pacing is actually BOUGHT on (2026-10-05) ──
+     * The legacy Delivery card was unit-aware: UnitCardBody read `primaryUnit(cm)` and drew
+     * impressions, clicks or views. Its Standard replacement could not — a stored definition
+     * names ONE metric — so it names the impressions one, and on a CPC or CPV pacing campM's
+     * whole impressions family is 0 by design (metrics.js gates CPC/CPV lines out of it). The
+     * card then printed «0% of plan-to-date», Fact 0, Needed 0, Deviation 0 and «Deliver today
+     * 0» on a campaign delivering perfectly well — the figures were sitting one family over,
+     * under `clicks*` / `views*`.
+     *
+     * These seven read UNIT_FIELDS[primaryUnit(cm)] instead, so one stored definition follows
+     * the pacing. `unit: 'buy'` is the same sentinel resolved in `hasPlan`/`windowPlanOf`: the
+     * plan gate has to ask about the RESOLVED unit, or a CPC pacing's card would be dropped for
+     * having no impressions plan. A mixed-rate pacing resolves to whichever unit `primaryUnit`
+     * names (impressions where any line is impression-paced), which is exactly what the legacy
+     * card showed there. */
+    unitToDatePct: { from: 'derived', format: 'percent', sub: 'of plan-to-date', unit: 'buy', paced: true },
+    unitActual: { from: 'derived', format: 'int', unit: 'buy' },
+    unitExpected: { from: 'derived', format: 'int', unit: 'buy' },
+    unitPlan: { from: 'derived', format: 'int', unit: 'buy' },
+    unitDeviation: { from: 'derived', format: 'int', unit: 'buy' },
+    neededPerDayUnit: { from: 'derived', format: 'int', unit: 'buy', needsFlight: true },
+    paceDeltaUnit: { from: 'derived', format: 'pp', unit: 'buy' },
   };
+
+  /** The unit a `unit: 'buy'` metric resolves to on this pacing — `primaryUnit`'s answer, the
+   *  one the legacy Delivery card picked. Never null: `primaryUnit` always names one of the
+   *  three, and with no metrics at all the caller's own `!cm` guards run first. */
+  function buyUnitOf(cm) {
+    return cm ? primaryUnit(cm) : 'impr';
+  }
 
   /**
    * Does the campaign carry a GOAL for this unit? Not "does a line of this type exist" —
@@ -8019,16 +8259,20 @@ function createDashboardMetrics(deps) {
    */
   function hasPlan(cm, unit) {
     if (!cm) return true; // no metrics in the context: not this layer's call to make
+    if (unit === 'buy') unit = buyUnitOf(cm);
     if (unit === 'impr') return (cm.imprPlanFlight ?? cm.imprPlan ?? cm.pI ?? 0) > 0;
     if (unit === 'clicks') return (cm.clicksPlanFlight ?? cm.clicksPlan ?? cm.planClicks ?? 0) > 0;
+    if (unit === 'installs') return (cm.installsPlanFlight ?? cm.installsPlan ?? 0) > 0;
     return (cm.viewsPlanFlight ?? cm.viewsPlan ?? 0) > 0;
   }
 
   /** The plan a unit's pace is read over: the window's, which is the flight's unless the
    *  viewer narrowed it (campM `planWindowed`). */
   function windowPlanOf(cm, unit) {
+    if (unit === 'buy') unit = buyUnitOf(cm);
     if (unit === 'impr') return cm.imprPlan ?? cm.pI ?? 0;
     if (unit === 'clicks') return cm.clicksPlan ?? cm.planClicks ?? 0;
+    if (unit === 'installs') return cm.installsPlan ?? 0;
     return cm.viewsPlan ?? 0;
   }
 
@@ -8060,6 +8304,7 @@ function createDashboardMetrics(deps) {
     // `auto` would print its cents of an impression («298,214.29»).
     planImpr: 'int', planClicks: 'int', planViews: 'int',
     planImprTotal: 'int', planClicksTotal: 'int', planViewsTotal: 'int',
+    clExpected: 'int',
     cpm: 'money', cpc: 'money', cpv: 'money4',
     ctr: 'percent2', vcr: 'percent', acr: 'percent',
     mTgt: 'percent', ctrT: 'percent2', vcrT: 'percent', acrT: 'percent',
@@ -8099,8 +8344,45 @@ function createDashboardMetrics(deps) {
       if (!(plan > 0)) return null;
       return (((cm.imprActual ?? cm.im ?? 0) - (cm.imprExpected ?? cm.eI ?? 0)) / plan) * 100;
     }
+    /* The seven buy-unit metrics (2026-10-05): the impressions six just above, asked of
+     * UNIT_FIELDS[primaryUnit(cm)] instead of a fixed family. Each is campM's own field for
+     * that unit — nothing is recomputed here, so a CPC pacing's card prints exactly the numbers
+     * campM already publishes under `clicks*`, and a CPM pacing's card is byte-identical to
+     * what the impressions binds drew. */
+    if (hasOwnBrick(BUY_UNIT_SLOT, key)) {
+      const F = UNIT_FIELDS[buyUnitOf(cm)];
+      return cm[F[BUY_UNIT_SLOT[key]]] ?? null;
+    }
+    if (key === 'neededPerDayUnit') {
+      // The FULL-flight side, like its three fixed-unit siblings above (`neededPerDayImpr` and
+      // co. are `from: 'fl'`): a daily target is a flight constant and must not move when the
+      // reader narrows the window. The unit itself is still decided on `cm`, the same object
+      // `hasPlan` asks — flCM and cm name the same pacing.
+      const fl = ctx.flCM;
+      if (!fl) return null;
+      return fl[UNIT_FIELDS[buyUnitOf(cm)].neededPerDay] ?? null;
+    }
+    if (key === 'unitDeviation') {
+      const F = UNIT_FIELDS[buyUnitOf(cm)];
+      // Fact − Needed on ONE basis, the same rule `imprDeviation` carries.
+      return (cm[F.actual] || 0) - (cm[F.expected] || 0);
+    }
+    if (key === 'paceDeltaUnit') {
+      const F = UNIT_FIELDS[buyUnitOf(cm)];
+      const plan = cm[F.plan] || 0;
+      if (!(plan > 0)) return null;
+      return (((cm[F.actual] || 0) - (cm[F.expected] || 0)) / plan) * 100;
+    }
     return null;
   }
+
+  /** The four buy-unit metrics that are a straight read of one UNIT_FIELDS slot. The other
+   *  three (`unitDeviation`, `paceDeltaUnit`) are arithmetic over two of them, and
+   *  `neededPerDayUnit` is read off the FULL-flight metrics — see `derived`'s caller. */
+  const BUY_UNIT_SLOT = {
+    __proto__: null,
+    unitActual: 'actual', unitExpected: 'expected', unitPlan: 'plan', unitToDatePct: 'toDate',
+  };
 
   /**
    * One bind → {value, target?, invert?, sub?, format?, error?}. Never throws: a brick is
@@ -9367,6 +9649,7 @@ function createDashboardMetrics(deps) {
 
 
 
+
   /**
    * Pairs of containers whose date ranges overlap.
    * Container overlap is legal (spec §I4), surfaced as informational warning.
@@ -9472,6 +9755,34 @@ function createDashboardMetrics(deps) {
     }
     if (delivered) act.cv = null;
     return act;
+  }
+
+  /**
+   * The members of a value-group split (spec 2026-10-02), each summed exactly as sumDimChild
+   * sums the group: the same aggregate object, the same container dates, the same range, so
+   * the members add up to the group's row. [] for a plain value.
+   *
+   * `cv` is the fact rows' own conversions. Where primary conversions apply to the line the
+   * group's number comes from tagged conversion rows instead, and the caller prints a dash.
+   * @returns {Array<{ member: string, act: object }>}
+   */
+  function sumDimMembers(liId, dimChild, container, range, liSplitDaily) {
+    const byMember = memberDailyOf(liSplitDaily)?.[liId]?.[dimChild.dim_key + ':' + dimChild.dim_value];
+    if (!byMember) return [];
+    return Object.keys(byMember).map((member) => {
+      const act = zeroRow();
+      for (const [d, v] of Object.entries(byMember[member])) {
+        if (container.fs && container.fe && (d < container.fs || d > container.fe)) continue;
+        if (range && (d < range.from || d > range.to)) continue;
+        act.im += v.im;
+        act.cl += v.cl;
+        act.sp += v.sp;
+        act.co += v.co;
+        act.cv += v.cv || 0;
+        act.dc += v.dc;
+      }
+      return { member, act };
+    });
   }
 
   // A day row that carries delivery. A row with none cannot put a line item's conversions in a
@@ -9961,6 +10272,9 @@ function createDashboardMetrics(deps) {
     // §10's display half: a container's own reading and each child's.
     sumDateChild, sumDimChild, buildScopedDaily, dailyForContainer,
     effSplitMargin, splitActualMargin, childProgress,
+    // Value groups (spec 2026-10-02): group the payload before normalize, and open a
+    // group's split row into the members behind it.
+    groupIndexOf, groupedView, groupedSplits, registerMembers, memberDailyOf, sumDimMembers,
   };
 }
 

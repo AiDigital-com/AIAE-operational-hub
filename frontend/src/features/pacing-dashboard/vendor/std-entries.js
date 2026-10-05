@@ -22,7 +22,7 @@
  * The build stamp. LibraryCard memoizes its live preview on `updated_at`; bump this BY
  * HAND in the same commit that changes any definition below, and never otherwise.
  */
-var STD_VERSION = '2026-09-23 00:00:01.000000+00';
+var STD_VERSION = '2026-10-05 00:00:00.000000+00';
 
 // Canonical chart order. `cpm` is deliberately present as its own Standard template.
 var CHART_ORDER = [
@@ -200,28 +200,31 @@ function MARGIN_BADGE() {
 /** UnitCardBody.jsx — the verdict hero's middle card, on the impressions unit. */
 function DELIVERY_BRICKS() {
   return [
-    // :27 BigStat = cm.imprToDatePct "of plan-to-date" = actual / expected-to-date. The
-    // card is unit-aware (primaryUnit picks impressions, clicks or views); a stored
-    // definition names one unit, and impressions is the one every CPM pacing has.
-    { type: 'bigStat', bind: { metric: 'imprToDatePct' }, format: 'percent' },
+    // :27 BigStat = "of plan-to-date" = actual / expected-to-date, on the unit this pacing is
+    // BOUGHT on. It named the impressions metric until 2026-10-05, which is what UnitCardBody
+    // showed on a CPM pacing — but campM gates CPC and CPV lines out of its impressions family,
+    // so a click- or view-paced pacing read 0% of a plan of 0 while its real figures sat under
+    // `clicks*` / `views*`. `unit*` resolves through primaryUnit at render, the way the legacy
+    // card did, so ONE stored definition is right on all three.
+    { type: 'bigStat', bind: { metric: 'unitToDatePct' }, format: 'percent' },
     // :28 pct = actual / plan, tick = expected / plan, label ":31 needed today · <expected>".
     // The bar's value is the impression-PACED actual (2026-09-23), the Fact cell's own basis
     // below: `planImpr` counts the CPM-side lines only, and the formula field `im` counts
     // every line's impressions, so a CPM+CPC pacing drew 296.9% of plan on Flight. Stored
     // copies of the old `im` bind are upgraded at read time
     // (standard-conversion-format.js upgradeFlightTargets).
-    { type: 'progressBar', bind: { metric: 'imprActual' }, target: { expr: 'planImpr' }, invert: false, tick: { metric: 'imprExpected' }, tickLabel: 'needed today' },
+    { type: 'progressBar', bind: { metric: 'unitActual' }, target: { metric: 'unitPlan' }, invert: false, tick: { metric: 'unitExpected' }, tickLabel: 'needed today' },
     // :35 Fact / Needed / Deviation — ONE basis, Needed's (owner decision 2026-08-15):
     // campM's impression-paced lines, the same cm[F.actual]/cm[F.expected] the old card
     // read. The formula field `im` counts EVERY line's impressions, so a mixed
     // CPM+CPC+CPV campaign printed a Fact its own Needed disagreed with.
     { type: 'statRow', cells: [
-      { label: 'Fact', bind: { metric: 'imprActual' }, format: 'int' },
-      { label: 'Needed', bind: { metric: 'imprExpected' }, format: 'int' },
-      { label: 'Deviation', bind: { metric: 'imprDeviation' }, format: 'int' }
+      { label: 'Fact', bind: { metric: 'unitActual' }, format: 'int' },
+      { label: 'Needed', bind: { metric: 'unitExpected' }, format: 'int' },
+      { label: 'Deviation', bind: { metric: 'unitDeviation' }, format: 'int' }
     ], layout: 'flex' },
     // :42 RecoStrip = flCM.neededPerDayImpr.
-    { type: 'kvRow', label: 'Deliver today', bind: { metric: 'neededPerDayImpr' }, format: 'int', emphasis: 'strong', sub: 'to be on plan' }
+    { type: 'kvRow', label: 'Deliver today', bind: { metric: 'neededPerDayUnit' }, format: 'int', emphasis: 'strong', sub: 'to be on plan' }
   ];
 }
 
@@ -233,7 +236,7 @@ function DELIVERY_BRICKS() {
  * is null there instead, and a badge with no number draws nothing.
  */
 function DELIVERY_BADGE() {
-  return { words: 'pace', bind: { metric: 'paceDeltaImpr' } };
+  return { words: 'pace', bind: { metric: 'paceDeltaUnit' } };
 }
 
 /** FlightCardBody.jsx — two things, and there is no third to decompose into. */
@@ -267,7 +270,8 @@ var HERO_VERDICT_ROWS = [
         { type: 'statRow', cells: [
           { label: 'Impr/day', bind: { metric: 'neededPerDayImpr' }, format: 'int' },
           { label: 'Clicks/day', bind: { metric: 'neededPerDayClicks' }, format: 'int' },
-          { label: 'Views/day', bind: { metric: 'neededPerDayViews' }, format: 'int' }
+          { label: 'Views/day', bind: { metric: 'neededPerDayViews' }, format: 'int' },
+          { label: 'Installs/day', bind: { metric: 'neededPerDayInstalls' }, format: 'int' }
         ], layout: 'flex' },
         // :75 RecoStrip = flCM.neededSpendPerDay.
         { type: 'kvRow', label: 'Spend/day', bind: { metric: 'neededSpendPerDay' }, format: 'money', emphasis: 'strong' }
@@ -618,7 +622,10 @@ function dailyDefinition() {
     id: 'daily', kind: 'table', title: '', rows: { type: 'dateLi' },
     columns: [
       vcol('im', '', bq('im', 'count'), 'int', { target: planTarget('imprExpected', 'count', 'int') }),
-      vcol('cl', '', bq('cl', 'count'), 'int', { target: planTarget('planClicks', 'count', 'int') }),
+      // Expected clicks TO DATE on the click-paced lines, the twin of the impressions target
+      // above it (2026-10-05). It was `planClicks`, the whole plan on Flight, which read as a
+      // wrong expected number; `expCl` would add every other line's CTR target to it.
+      vcol('cl', '', bq('cl', 'count'), 'int', { target: planTarget('clExpected', 'count', 'int') }),
       vcol('sp', '', bq('sp', 'money'), 'money', { target: planTarget('costBud', 'money', 'money') }),
       vcol('cpm', '', bq('cpm', 'money'), 'money', { target: planTarget('tgtCpm', 'money', 'money') }),
       vcol('ctr', 'CTR %', bq('ctr', 'percent'), 'percent', { target: planTarget('ctrT', 'percent', 'percent') }),

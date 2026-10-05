@@ -72,3 +72,15 @@ these modules belong to: `report-v2.js`, `widget-metrics.js`, `std-entries.js`, 
 `layout-materialize.mjs`, `layout-geometry.mjs`, `value-labels.js`. They land here, each with its own
 row in the table above. The table is per-file on purpose: these modules do not arrive together and
 will not be re-synced together.
+
+## dim-value-groups.js (added 2026-10-05)
+
+`AIAE-paicing/shared/dim-value-groups.js`, copied byte-identical, same obligation as the rest of
+this directory. It is the SAVE half of value groups (spec 2026-10-02) - what a line item's
+dictionary may hold, which dash-gate's `db.mjs` and `api-routes.mjs` enforce on every save and
+create. The READ half (the rewrite itself) lives in `../engine/vendor/pacing-core.js`.
+
+Reached here only through `../spa/dim-value-groups.js`, the door module moved from the retired
+SPA; nothing else in this app imports it directly. Aliased as `@shared/dim-value-groups` in
+`vite.config.ts` and `vitest.config.ts`.
+

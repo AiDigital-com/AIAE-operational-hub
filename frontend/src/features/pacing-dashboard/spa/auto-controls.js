@@ -15,7 +15,7 @@
 import { DIM_KEYS } from './metric-catalog.js';
 import { domRateType } from './metrics.js';
 
-const BUY_UNIT_OF_RATE = { CPC: 'cl', CPV: 'co' };
+const BUY_UNIT_OF_RATE = { CPC: 'cl', CPV: 'co', CPI: 'cv' };
 
 /** The unit this pacing is bought on: the dominant rate type's, impressions when there is
  *  nothing to dominate. `domRateType` answers 'CPC' for an EMPTY set (0 >= 0 both ways), so
@@ -55,7 +55,7 @@ export function autoDimensionOptions(inv) {
 }
 
 /** The three metrics a buy unit can name (`buyUnitOf`'s own answers). */
-const BUY_UNIT_METRICS = ['im', 'cl', 'co'];
+const BUY_UNIT_METRICS = ['im', 'cl', 'co', 'cv'];
 /** One option of a metric switch, matched against a buy unit — the ONE spelling, so the
  *  panel that offers `defaultBy` and the resolver that reads it cannot disagree about which
  *  options the rule can reach. (The grammar keeps a `cm` source out of this set on its own:

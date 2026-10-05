@@ -155,13 +155,19 @@ export function liM(liId, liDaily, liPlan, asOf, range, splitScopedMode, splitSc
 }
 
 export function domRateType(liPlan, eIds) {
-  const c = { CPM: 0, CPC: 0, CPV: 0 };
+  const c = { CPM: 0, CPC: 0, CPV: 0, CPI: 0 };
   for (const id of eIds) { c[liPlan[id]?.rateType || 'CPM']++; }
+  // CPI is asked first and on a STRICT majority, which is what keeps every pacing without an
+  // install-paced line byte-identical to the three-way answer below: with `c.CPI` at 0 the
+  // test is false unless every other count is 0 too, and that is the empty set the old chain
+  // already answered 'CPC' for. A tie between CPI and another unit therefore goes to the
+  // other one, the same way the chain below hands ties to the earlier unit.
+  if (c.CPI > c.CPM && c.CPI > c.CPC && c.CPI > c.CPV) return 'CPI';
   return c.CPC >= c.CPM && c.CPC >= c.CPV ? 'CPC' : c.CPV >= c.CPM && c.CPV >= c.CPC ? 'CPV' : 'CPM';
 }
 
 export function rateLabel(rt) {
-  return rt === 'CPC' ? 'Clicks' : rt === 'CPV' ? 'Views' : 'Impressions';
+  return rt === 'CPC' ? 'Clicks' : rt === 'CPV' ? 'Views' : rt === 'CPI' ? 'Installs' : 'Impressions';
 }
 
 // LI participates in VCR aggregation if it has a VCR target OR any completed views.
@@ -308,7 +314,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // (imprPlan) and the CPC clicks plan (clicksPlan). Subtracted from the three
   // neededPerDay* lines so a paused LI stops demanding daily delivery. Views
   // reuse viewsPlanPausedRem above. Additive — stays 0 when nothing is paused.
-  let imprPlanPausedRem = 0, clicksPlanPausedRem = 0;
+  let imprPlanPausedRem = 0, clicksPlanPausedRem = 0, installsPlanPausedRem = 0;
 
   // ── Clicks-side accumulators ───────────────────────────────────────────
   // CPC LIs only — their plan lives in planImpr by PacingCore convention.
@@ -316,6 +322,16 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   let clicksDailyRateActive = 0, clicksDailyRateAvg = 0;
   let clicksEndedCount = 0, clicksLiCount = 0;
   let hasCpc = false;
+  // Installs side — CPI line items only. The fourth unit a pacing can be bought on
+  // (app-install buying: Apple Ads and the rest), reading the CONVERSIONS column, which is
+  // where an install lands — the delivery mart carries no installs of its own, and it is the
+  // same population `dynCpa` divides spend by. Everything below mirrors the clicks block
+  // line for line; `planImpr` holds the install goal by the same convention.
+  let installsPlan = 0, installsActual = 0, installsExpected = 0;
+  let installsDailyRateActive = 0, installsDailyRateAvg = 0;
+  let installsEndedCount = 0, installsLiCount = 0;
+  let installsPlanFlight = 0, latestDayInstalls = 0;
+  let hasCpi = false;
   // Dynamic-CPC accumulators — CPC LIs ONLY.
   let cpcDc = 0, cpcCl = 0;
 
@@ -409,9 +425,10 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     const rt = p.rateType || 'CPM';
     const isCpc = rt === 'CPC';
     const isCpv = rt === 'CPV';
+    const isCpi = rt === 'CPI';
     const liFDays = Math.max(1, dI(p.fs, p.fe));
     // planImpr holds the primary delivery goal in the LI's rate-type unit:
-    // impressions (CPM), clicks (CPC), or views (CPV).
+    // impressions (CPM), clicks (CPC), views (CPV) or installs (CPI).
     const planUnit = Number(p.planImpr) || 0;
     const w = planUnit || p.budget || 1;
     // The plan SUMS follow a narrowed window; `planUnit` keeps driving weights and rates.
@@ -439,9 +456,9 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     // stays in the chart's actual bars — we only shrink the goal total.
     if (PacingCore.isLiPaused(p, asOf)) {
       // planUnit is in the LI's rate-type unit, so the delivered side must be too
-      // — subtracting impressions from a CPC/CPV goal mixes units. isCpc/isCpv are
-      // already resolved for this LI a few lines above.
-      const doneUnits = isCpc ? (m.cl || 0) : isCpv ? (m.co || 0) : (m.im || 0);
+      // — subtracting impressions from a CPC/CPV/CPI goal mixes units. isCpc/isCpv/isCpi
+      // are already resolved for this LI a few lines above.
+      const doneUnits = isCpc ? (m.cl || 0) : isCpv ? (m.co || 0) : isCpi ? (m.cv || 0) : (m.im || 0);
       if (planUnit > 0) allPlanImprPausedRem += Math.max(0, planUnit - doneUnits);
       costBudPausedRem += Math.max(0, liCostBud - (m.sp || 0));
     }
@@ -475,11 +492,11 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
       }
     }
 
-    // Impressions side — impression-paced LIs only (CPM). CPC (clicks-paced)
-    // and CPV (views-paced) LIs are excluded: their planImpr is a plan-clicks /
-    // plan-views placeholder, so folding their actuals into impression delivery
-    // would produce absurd percentages.
-    if (!isCpc && !isCpv) {
+    // Impressions side — impression-paced LIs only (CPM). CPC (clicks-paced),
+    // CPV (views-paced) and CPI (install-paced) LIs are excluded: their planImpr is a
+    // plan-clicks / plan-views / plan-installs placeholder, so folding their actuals into
+    // impression delivery would produce absurd percentages.
+    if (!isCpc && !isCpv && !isCpi) {
       imprActual += m.im;
       // latest-day (= asOf) actual — window-guarded exactly like
       // OverviewBlock1.jsx:255 (`ep.fs && ep.fe && (asOf < ep.fs || asOf > ep.fe)`):
@@ -598,6 +615,31 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
       }
     }
 
+    // Installs side — CPI LIs only (planImpr = plan_installs convention), the clicks block
+    // above with `cv` in place of `cl`.
+    if (isCpi) {
+      hasCpi = true;
+      installsActual += m.cv || 0;
+      if (asOf && !(p.fs && p.fe && (asOf < p.fs || asOf > p.fe))) {
+        const dayRow = liDaily[id]?.[asOf];
+        if (dayRow) latestDayInstalls += dayRow.cv || 0;
+      }
+      // `m.eI` is this line's expected UNITS, which for a CPI line are installs — the same
+      // reading the views branch takes for its own unit.
+      installsExpected += m.eI;
+      if (planUnit > 0) {
+        installsPlan += planWin;
+        installsPlanFlight += planUnit;
+        if (PacingCore.isLiPaused(p, asOf)) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
+        installsDailyRateAvg += planUnit / liFDays;
+        if (asOf && asOf >= p.fs) {
+          if (asOf > p.fe) installsEndedCount++;
+          else { const prev = datePrev(asOf); installsDailyRateActive += liExpUnits(p, asOf) - liExpUnits(p, prev); }
+        }
+        installsLiCount++;
+      }
+    }
+
     // CPV KPI spans view-based LIs (CPV-rate OR VCR-eligible: Video, CTV, OTT,
     // YouTube, Native-video…) but NOT Audio — audio tracks listen-throughs as
     // "completes" yet must never pollute cost-per-VIEW. Matches the CPV chart.
@@ -608,7 +650,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
 
     // Variant-D formula inputs for the Plan rate card — impressions side only,
     // since the formula visualises imprPlanDailyRate. Skip CPC and CPV LIs.
-    if (!isCpc && !isCpv && asOf && asOf >= p.fs && asOf <= p.fe && planUnit > 0) {
+    if (!isCpc && !isCpv && !isCpi && asOf && asOf >= p.fs && asOf <= p.fe && planUnit > 0) {
       const containers = (p && p.containers) || [];
       let activeC = null;
       for (const c of containers) {
@@ -646,6 +688,8 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // (a line that starts later) must not hide the unit. Equal to imprPlan / viewsPlan otherwise.
   const hasImpr = imprPlanFlight > 0;
   const hasClicks = hasCpc;
+  // hasInstalls: at least one CPI LI exists, the same rule hasClicks carries for CPC.
+  const hasInstalls = hasCpi;
   const hasViews = viewsPlanFlight > 0 || hasCpv;
 
   // ── Derived ratios ─────────────────────────────────────────────────────
@@ -709,6 +753,8 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     ? Math.round(((imprPlan - imprActual) - imprPlanPausedRem) / daysLeft) : 0;
   const neededPerDayClicks = daysLeft > 0 && clicksPlan > 0
     ? Math.round(((clicksPlan - clicksActual) - clicksPlanPausedRem) / daysLeft) : 0;
+  const neededPerDayInstalls = daysLeft > 0 && installsPlan > 0
+    ? Math.round(((installsPlan - installsActual) - installsPlanPausedRem) / daysLeft) : 0;
   const neededPerDayViews = daysLeft > 0 && viewsPlan > 0
     ? Math.round(((viewsPlan - viewsActual) - viewsPlanPausedRem) / daysLeft) : 0;
 
@@ -716,6 +762,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // actual vs expected-to-date, each inside its rate-type-gated bucket.
   const imprToDatePct = imprExpected > 0 ? (imprActual / imprExpected) * 100 : 0;
   const clicksToDatePct = clicksExpected > 0 ? (clicksActual / clicksExpected) * 100 : 0;
+  const installsToDatePct = installsExpected > 0 ? (installsActual / installsExpected) * 100 : 0;
   const viewsToDatePct = viewsExpected > 0 ? (viewsActual / viewsExpected) * 100 : 0;
   const spendToDatePct = costPr > 0 ? (sp / costPr) * 100 : 0;
 
@@ -744,16 +791,18 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     }
     return u > 0 ? (perMille ? (s / u) * 1000 : s / u) : 0;
   }
-  const bidFact2dCpm = bidFact2d((rt) => rt !== 'CPC' && rt !== 'CPV', 'im', true);
+  const bidFact2dCpm = bidFact2d((rt) => rt !== 'CPC' && rt !== 'CPV' && rt !== 'CPI', 'im', true);
   const bidFact2dCpc = bidFact2d((rt) => rt === 'CPC', 'cl', false);
   const bidFact2dCpv = bidFact2d((rt) => rt === 'CPV', 'co', false);
+  const bidFact2dCpi = bidFact2d((rt) => rt === 'CPI', 'cv', false);
 
   // Spend/day at current buying rates to deliver the needed units — the exact
   // expression OverviewBlock1 computes ad-hoc (:286-289), promoted to canon.
   const neededSpendPerDay =
     (neededPerDayImpr * bidFact2dCpm) / 1000
     + neededPerDayClicks * bidFact2dCpc
-    + neededPerDayViews * bidFact2dCpv;
+    + neededPerDayViews * bidFact2dCpv
+    + neededPerDayInstalls * bidFact2dCpi;
 
   // The client's plan over the days `costPr` covers: each line's client money from the range's
   // first day to asOf (widget-data's `budgetToDate`, 2026-09-23), and the budget with no range.
@@ -768,6 +817,8 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   const allPlanImprDailyRate = Math.round(allImprEnded ? allImprDailyRateAvg : allImprDailyRateActive);
   const clicksPlanDailyEnded = clicksLiCount > 0 && clicksEndedCount === clicksLiCount;
   const clicksPlanDailyRate = Math.round(clicksPlanDailyEnded ? clicksDailyRateAvg : clicksDailyRateActive);
+  const installsPlanDailyEnded = installsLiCount > 0 && installsEndedCount === installsLiCount;
+  const installsPlanDailyRate = Math.round(installsPlanDailyEnded ? installsDailyRateAvg : installsDailyRateActive);
   const viewsPlanDailyEnded = viewsLiCount > 0 && viewsEndedCount === viewsLiCount;
   const viewsPlanDailyRate = Math.round(viewsPlanDailyEnded ? viewsDailyRateAvg : viewsDailyRateActive);
 
@@ -798,6 +849,11 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     // `clicksPlanPausedRem` was computed and left off this object until 2026-09-23, so both
     // of its readers saw 0 for a paused click-paced line.
     allPlanImprPausedRem, viewsPlanPausedRem, costBudPausedRem, imprPlanPausedRem, clicksPlanPausedRem,
+    installsPlanPausedRem,
+    // The installs family, the clicks one's twin (CPI line items).
+    installsPlan, installsActual, installsExpected, installsPlanFlight,
+    installsPlanDailyRate, installsPlanDailyEnded, neededPerDayInstalls, installsToDatePct,
+    latestDayInstalls, hasInstalls,
     clicksPlan, clicksActual, clicksExpected,
     clicksPlanDailyRate, clicksPlanDailyEnded, neededPerDayClicks,
 

@@ -4040,6 +4040,16 @@ textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
    2026-09-07): the layout view and the composition slot both draw straight into the flush
    body, and their outer cards touched the tile's left, right and bottom edges. */
 .rpt .rpt-view > .cmp, .rpt > .rpt-slot.cmp { padding: 0 12px 12px; }
+/* …and the top, which upstream leaves at 0 on purpose: there the tile header carries
+   `border-bottom: 0` (the `.dashboard-page` override above), so the header and the body share
+   one surface and a card starting flush under the title reads as ordinary whitespace.
+   THIS app has no `.dashboard-page` on its dashboard root — `.pdash` is its own — so every
+   tile falls back to the generic `.chart-panel__title`: a tinted bar with a 1px divider. A
+   composition then landed its first card's rounded, bordered top edge exactly on that line.
+   Only where the composition IS the first thing in the tile: a slot further down already has
+   the 14px the stack puts between slots, and a second top inset would open a gap there. */
+.chart-panel__flush > .rpt > .rpt-slot:first-child > .rpt-view > .cmp:first-child,
+.chart-panel__flush > .rpt > .rpt-slot.cmp:first-child { padding-top: 12px; }
 /* A title and the caption under it are ONE unit — the column gap belongs between
    things, not inside a heading. */
 .cmp-signal-t + .cmp-signal-s,

@@ -163,11 +163,16 @@ export function createBrickHighlightReader(ctx) {
 const FACT_METRICS = new Set([
   'margin', 'marginbar', 'pacing', 'delivery', 'cpm', 'cpc', 'cpv', 'ctr', 'vcr', 'spend', 'budget',
   'imprActual', 'imprToDatePct', 'imprDeviation', 'paceDeltaImpr', 'dynCpm', 'forecastDspSpend', 'neededSpendPerDay',
+  // The buy-unit twins (2026-10-05): same facts, on whichever unit the pacing is bought on.
+  'unitActual', 'unitToDatePct', 'unitDeviation', 'paceDeltaUnit',
 ]);
 // CTR is not here (owner decision 2026-09-23): it counts every line's impressions, so a
 // CPC-only pacing's facts are a CTR's facts too.
 const IMPRESSION_METRICS = new Set(['imprActual', 'imprToDatePct', 'imprDeviation', 'paceDeltaImpr', 'dynCpm', 'cpm', 'forecastDspSpend']);
 const FLIGHT_FACT_METRICS = new Set(['forecastDspSpend', 'neededSpendPerDay']);
+/** The buy-unit metrics, whose unit is the pacing's answer rather than the metric's — resolved
+ *  exactly the way the `delivery` preset below resolves its own. */
+const BUY_UNIT_METRICS = new Set(['unitActual', 'unitToDatePct', 'unitDeviation', 'paceDeltaUnit']);
 const RATE_METRICS = new Set(['ctr', 'cpm', 'cpc', 'cpv', 'vcr']);
 const has = (object, key) => object != null && Object.hasOwn(object, key);
 const scopeIds = (ctx) => ctx?.effLIs ?? ctx?.data?.sources?.effLIs;
@@ -227,7 +232,7 @@ function factPolicy(owner, ctx, extra) {
   if (metric) {
     if (!FACT_METRICS.has(metric)) return null;
     let unit = IMPRESSION_METRICS.has(metric) ? 'impr' : metric === 'vcr' ? 'vcr' : metric === 'cpv' ? 'cpvRate' : null;
-    if (metric === 'delivery') {
+    if (metric === 'delivery' || BUY_UNIT_METRICS.has(metric)) {
       // The same unit the Delivery reading picks: on the whole-flight plan, so a narrowed
       // window holding none of the impressions plan does not flip it (2026-09-23).
       const cm = ctx?.cm;

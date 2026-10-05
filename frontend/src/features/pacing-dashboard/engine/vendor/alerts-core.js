@@ -115,20 +115,20 @@ function buildState(inp) {
 
 /* ── Rate-native activity ──────────────────────────────────────────────────── */
 
-/* Native activity unit per rate type — CPM→im, CPC→cl, CPV→co; unknown/absent
+/* Native activity unit per rate type — CPM→im, CPC→cl, CPV→co, CPI→cv; unknown/absent
  * ⇒ im. This MIRRORS PacingCore.liActualUnits: alerts-core is a self-contained
  * UMD and cannot require pacing-core, so tests/alerts-native-canon-test.mjs
  * locks the two implementations together. */
 function nativeField(rateType) {
   var rt = String(rateType || 'CPM').toUpperCase();
-  return rt === 'CPC' ? 'cl' : rt === 'CPV' ? 'co' : 'im';
+  return rt === 'CPC' ? 'cl' : rt === 'CPV' ? 'co' : rt === 'CPI' ? 'cv' : 'im';
 }
 function nativeUnits(plan, totals) {
   var f = nativeField(plan && plan.rateType);
   return Number(totals && totals[f]) || 0;
 }
 function unitWord(nf) {
-  return nf === 'cl' ? 'clicks' : nf === 'co' ? 'completes' : 'impr';
+  return nf === 'cl' ? 'clicks' : nf === 'co' ? 'completes' : nf === 'cv' ? 'installs' : 'impr';
 }
 
 /* ── Settle gate ──────────────────────────────────────────────────────────── */
@@ -370,15 +370,15 @@ function detectRateCostAbovePlan(state, cfg) {
     var plan = liPlan[id];
     if (!plan) continue;
     var rt = plan.rateType;
-    if (rt !== 'CPC' && rt !== 'CPV') continue;   // CPM covered by bid_fact_above_plan
+    if (rt !== 'CPC' && rt !== 'CPV' && rt !== 'CPI') continue;   // CPM covered by bid_fact_above_plan
 
     var budget = +(plan.budget || 0);
     var mTgt = +(plan.mTgt || 0);
     var cost = budget * (1 - mTgt / 100);
     if (!(cost > 0)) continue;
 
-    // planImpr is the planned native total for both CPC (plan-clicks) and CPV
-    // (plan-views) — the canonical convention (see metrics.js campM).
+    // planImpr is the planned native total for CPC (plan-clicks), CPV (plan-views)
+    // and CPI (plan-installs) alike — the canonical convention (see metrics.js campM).
     var denom = +(plan.planImpr || 0);
     if (!(denom > 0)) continue;
     var planned = cost / denom;
@@ -387,7 +387,7 @@ function detectRateCostAbovePlan(state, cfg) {
     var dd = liDaily[id] || {};
     for (var d in dd) {
       sp += (+dd[d].sp || 0);
-      units += rt === 'CPC' ? (+dd[d].cl || 0) : (+dd[d].co || 0);
+      units += rt === 'CPC' ? (+dd[d].cl || 0) : rt === 'CPI' ? (+dd[d].cv || 0) : (+dd[d].co || 0);
     }
     if (!(units > 0)) continue;
     var actual = sp / units;

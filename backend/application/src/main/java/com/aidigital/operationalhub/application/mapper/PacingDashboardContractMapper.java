@@ -386,6 +386,7 @@ public class PacingDashboardContractMapper {
 				.flightStart(parseDate(plan.flightStart()))
 				.flightEnd(parseDate(plan.flightEnd()))
 				.containers(plan.containers() == null ? List.of() : plan.containers())
+				.dimGroups(plan.dimGroups() == null ? List.of() : plan.dimGroups())
 				.nativeBudget(plan.nativeBudget())
 				.costCoef(plan.costCoef())
 				.converted(plan.converted())
