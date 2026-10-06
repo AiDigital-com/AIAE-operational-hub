@@ -10,7 +10,7 @@ import {
 // `miniSeries` is the TILE's own mini-chart path, and the preview takes it whole rather than
 // rebuilding the cm/delivery split beside it (§2.7). `cmMarkerOf` is the split's own question,
 // imported so the two can never disagree about which lines the delivery engine may see.
-import { brickValue, cellValue, canonicalNote, miniSeries } from './brick-data.js';
+import { brickValue, cellValue, tickValue, canonicalNote, miniSeries } from './brick-data.js';
 import { cmMarkerOf } from './cm-formula-context.js';
 import { buildSeriesModel, sourceFilterReason } from './widget-data.js';
 import { dimSourceMissingReason } from './dim-sources-norm.js';
@@ -368,7 +368,7 @@ export function buildFormulaPreview({
     } else if (target.kind === 'atomTarget') {
       out = brickValue({ bind: brick.target, format: brick.format }, ctx); label = `${label} target`;
     } else if (target.kind === 'atomTick') {
-      out = brickValue({ bind: brick.tick, format: brick.format }, ctx); label = brick.tickLabel || 'Marker result';
+      out = tickValue(brick, ctx); label = brick.tickLabel || 'Marker result';
     } else if (target.kind === 'atomValue') {
       out = brickValue(brick, ctx);
     } else {

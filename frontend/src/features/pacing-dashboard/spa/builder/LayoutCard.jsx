@@ -9,10 +9,12 @@ import ConfirmModal from '../ConfirmModal.jsx';
 import Spotlight from '../Spotlight.jsx';
 import './LayoutFields.css';
 import { LIMITS, formatLegal } from '../report-v2.js';
-import { updateView } from '../report-draft.js';
+import { updateView, chipPlacement } from '../report-draft.js';
 import { formulaScopeFor } from '../formula-scope.js';
 import { isCmBearing } from '../cm-formula-context.js';
 import { validate as validateFormula } from '../widget-formula.js';
+import { compileClient, writerForm } from '../chips/compile.js';
+import { isChipHolder, holderFace } from '../chips/info.js';
 import FormulaField from './FormulaField.jsx';
 import ViewFrame from './ViewFrame.jsx';
 import LayoutContentEntry from './LayoutContentEntry.jsx';
@@ -41,8 +43,9 @@ const DATE_FORMULA_SCOPE = formulaScopeFor({ type: 'date' });
  *  cell, a target and a marker are WINDOW numbers and a mini-chart line is a run of days, so
  *  the join is the scope's own, the one the block's value is already validated by. `cmOnly`
  *  is «this owner's own value reads CM360»: its rules are then read off the matched pairs,
- *  where `im` is the pair's delivery half, exactly as on a cm-fed column. */
-const brickCmSlot = (scope, expr) => ({ rows: scope.cm, total: null, refusal: scope.cmRefusal, cmOnly: isCmBearing(expr) });
+ *  where `im` is the pair's delivery half, exactly as on a cm-fed column. `holder` is the
+ *  bind or the line itself, so a CM360 chip counts as the text did. */
+const brickCmSlot = (scope, holder) => ({ rows: scope.cm, total: null, refusal: scope.cmRefusal, cmOnly: isCmBearing(holder) });
 
 const FORMAT_LABEL = {
   __proto__: null,
@@ -73,8 +76,12 @@ const UNIT_LABEL = { __proto__: null, impressions: 'Impressions', clicks: 'Click
 
 const pairs = (values, labels) => values.map((value) => [value, labels?.[value] || value]);
 
+/** The words a closed row prints for a formula holder: a chip holder's face (`Impressions / 2`),
+ *  never its refs (formula chips P1-editor); a text holder's own text. */
+const exprFace = (holder) => (isChipHolder(holder) ? holderFace(holder) : holder?.expr);
+
 function bindingSummary(bind) {
-  const label = layoutBindingEntry(bind)?.label || bind?.expr || bind?.reading || bind?.metric;
+  const label = layoutBindingEntry(bind)?.label || exprFace(bind) || bind?.reading || bind?.metric;
   return typeof label === 'string' && label ? label : 'Choose a value';
 }
 
@@ -88,6 +95,15 @@ function bindingFormulaError(bind, label) {
   // A brick bind, target, tick, stat-row cell and container badge are WINDOW slots (§2.5):
   // one number over the widget's own window, read off the reader the Layout context carries.
   // The join rides on the scope, so this call only has to stop dropping it.
+  if (isChipHolder(bind)) {
+    // A chip holder: the client rules the server cannot know (spec §3), on the window slot,
+    // then the writer's own refusal (decision h): a CM360 chip with no text spelling.
+    const placement = chipPlacement(AGG_FORMULA_SCOPE, bind);
+    const compiled = compileClient(bind, placement, 'bind');
+    if (!compiled.ok) return `${label}: ${compiled.errors[0].message}`;
+    const written = writerForm(bind, placement, 'bind');
+    return written.form === 'refused' ? `${label}: ${written.message}` : null;
+  }
   const result = validateFormula(bind.expr, AGG_FORMULA_SCOPE.contextKind, AGG_FORMULA_SCOPE.fieldSet,
     { cm: AGG_FORMULA_SCOPE.cm, cmRefusal: AGG_FORMULA_SCOPE.cmRefusal });
   return result.ok ? null : `${label}: ${result.error}`;
@@ -258,16 +274,17 @@ export function BindEditor({ label, bind, onChange, invalidKey, onInvalid, previ
       </Field>
       {both && <div className="sp-lay-help">This stored value has more than one binding. Choose one above, or edit the formula to use it.</div>}
       {formulaOpen && <Field label="Formula">
-        <FormulaField key={`${invalidKey}:formula`} label={`${label} formula`} value={typeof value.expr === 'string' ? value.expr : ''}
-          {...AGG_FORMULA_SCOPE} previewFormula={previewFormula} startAdvanced hideEditorTrigger requireEditorValue editorOpen={dialogOpen}
+        <FormulaField key={`${invalidKey}:formula`} label={`${label} formula`} value={value}
+          {...AGG_FORMULA_SCOPE} slot="bind" previewFormula={previewFormula} startAdvanced hideEditorTrigger requireEditorValue editorOpen={dialogOpen}
           onEditorOpenChange={(open) => { setDialogOpen(open); if (!open && !hasOwn(value, 'expr')) setFormulaOpen(false); }}
           allowEmpty={!hasOwn(value, 'expr')}
-          onChange={(next) => onChange(mergeLayoutFields(value, { metric: undefined, reading: undefined, expr: next }))}
+          // The holder's text and, only beside chips, its map: `mergeLayoutFields` drops a stale map.
+          onChange={(next) => onChange(mergeLayoutFields(value, { metric: undefined, reading: undefined, expr: next.expr, chips: next.chips }))}
           onDraftState={(_, bad) => onInvalid(`${invalidKey}:formula`, bad)} />
       </Field>}
       <Spotlight open={picking} context={{ label: `Choose ${label.toLowerCase()}`, anchor: 'kpi' }} items={items}
         onPick={choose} onClose={() => setPicking(false)} />
-      <UnknownFields value={value} knownKeys={['metric', 'expr', 'reading']} label={label}
+      <UnknownFields value={value} knownKeys={['metric', 'expr', 'reading', 'chips']} label={label}
         invalidKey={`${invalidKey}:bind-extra`} onInvalid={onInvalid} onChange={onChange} />
     </div>
   );
@@ -442,13 +459,26 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
       ? { type, layout: 'flex', cells: [entry] } : { type, series: [entry] };
     const refusal = layoutViewRefusal({ id: 'entry', kind: 'layout', title: '', rows: [{ cols: [{ span: null, frame: 'none', bricks: [brick] }] }] });
     if (refusal) return refusal;
-    const expr = type === 'statRow' ? entry?.bind?.expr : entry?.expr;
+    // The holder: a cell's bind, or the line itself (`{id, label, expr, chips?}`).
+    const holder = type === 'statRow' ? entry?.bind : entry;
+    const expr = holder?.expr;
     if (typeof expr === 'string') {
       // A stat-row cell is a window slot; a mini-chart line is a DATE slot and joins per day
       // (§2.5). Both scopes come from formulaScopeFor, so each already knows its own join.
       const scope = type === 'statRow' ? AGG_FORMULA_SCOPE : DATE_FORMULA_SCOPE;
-      const check = validateFormula(expr, scope.contextKind, scope.fieldSet, { cm: scope.cm, cmRefusal: scope.cmRefusal });
-      if (!check.ok) return check.error;
+      if (isChipHolder(holder)) {
+        // A chip holder: the client rules the server cannot know (spec §3), on this slot, then
+        // the writer's own refusal (decision h): a chip with no text spelling where text is stored.
+        const slot = type === 'statRow' ? 'bind' : 'miniSeries';
+        const placement = chipPlacement(scope, holder);
+        const compiled = compileClient(holder, placement, slot);
+        if (!compiled.ok) return compiled.errors[0].message;
+        const written = writerForm(holder, placement, slot);
+        if (written.form === 'refused') return written.message;
+      } else {
+        const check = validateFormula(expr, scope.contextKind, scope.fieldSet, { cm: scope.cm, cmRefusal: scope.cmRefusal });
+        if (!check.ok) return check.error;
+      }
     }
     return [...invalidEntries].some((candidate) => candidate.startsWith(`${key}:`)) ? 'Finish editing the extra fields.' : null;
   };
@@ -459,7 +489,7 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
     noValue={type === 'header' || type === 'note' || (type === 'pill' && hasOwn(value, 'text'))}
     dependencies={{ target: !!value.target || layoutBindingHasIntrinsicTarget(value.bind)
       || type === 'unitBars' || type === 'rateRows' || type === 'detailCard' || type === 'flightBullet', marker: !!value.tick || type === 'unitBars' }}
-    formulaScope={AGG_FORMULA_SCOPE} cm={brickCmSlot(AGG_FORMULA_SCOPE, value.bind?.expr)}
+    formulaScope={AGG_FORMULA_SCOPE} cm={brickCmSlot(AGG_FORMULA_SCOPE, value.bind)}
     onEditingChange={(bad) => markEntryInvalid(`${invalidKey}:highlights`, bad)}
     onOpen={() => { setOpenEntry(null); setFormulaEntry(null); }} onChange={(next) => set({ highlights: next })} />;
   const setMarker = (fields) => {
@@ -470,8 +500,9 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
   const preview = formulaPreview && widget && viewId ? (kind, fields, extra = {}) => formulaPreview({
     ...widget, spec: updateView(widget.spec, viewId, (node) => ({ ...node, brick: mergeLayoutFields(value, fields) })),
   }, { kind, viewId, ...extra }) : null;
+  // The preview reads the holder the editor hands it: its text and, only beside chips, its map.
   const previewBinding = (kind, field, current = value[field]) => preview
-    ? (expr) => preview(kind, { [field]: mergeLayoutFields(current, { metric: undefined, reading: undefined, expr }) }) : undefined;
+    ? (holder) => preview(kind, { [field]: mergeLayoutFields(current, { metric: undefined, reading: undefined, expr: holder.expr, chips: holder.chips }) }) : undefined;
   const previewTarget = previewBinding('atomTarget', 'target');
   const bind = (label = 'Value') => (
     <BindEditor
@@ -641,7 +672,7 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
           const key = session.keys[index];
           const cellKey = `${invalidKey}:entry:${key}`;
           const binding = layoutBindingEntry(current.bind);
-          const summary = [binding?.label || current.bind?.expr || current.bind?.reading || current.bind?.metric || 'Choose a value',
+          const summary = [binding?.label || exprFace(current.bind) || current.bind?.reading || current.bind?.metric || 'Choose a value',
             FORMAT_LABEL[current.format] || current.format].filter(Boolean).join(' · ');
           return (
             <Fragment key={key}><LayoutContentEntry label={current.label || bindingSummary(current.bind)} summary={summary}
@@ -650,13 +681,13 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
               removeLabel={`Remove value ${index + 1}`} onRemove={() => removeEntry(cells, 'cells', index)}>
               <Field label="Label"><TextField label={`Value ${index + 1} label`} value={current.label} maxLength={LIMITS.label} onChange={(next) => patchCell(index, { label: next })} /></Field>
               <BindEditor label="Reads" bind={current.bind} active={openEntry === key}
-                previewFormula={preview ? (expr) => preview('atomCell', { cells: cells.map((cell, i) => i === index
-                  ? mergeLayoutFields(current, { bind: mergeLayoutFields(current.bind, { metric: undefined, reading: undefined, expr }) }) : cell) }, { index }) : undefined} invalidKey={cellKey} onInvalid={markEntryInvalid} onChange={(next, entry) => patchCell(index, { bind: next, ...(entry ? { format: bindingFormat(current.format, entry) } : {}) })} />
+                previewFormula={preview ? (holder) => preview('atomCell', { cells: cells.map((cell, i) => i === index
+                  ? mergeLayoutFields(current, { bind: mergeLayoutFields(current.bind, { metric: undefined, reading: undefined, expr: holder.expr, chips: holder.chips }) }) : cell) }, { index }) : undefined} invalidKey={cellKey} onInvalid={markEntryInvalid} onChange={(next, entry) => patchCell(index, { bind: next, ...(entry ? { format: bindingFormat(current.format, entry) } : {}) })} />
               <FormatField value={current.format} onChange={(next) => patchCell(index, { format: next })} />
               <UnknownFields value={current} knownKeys={['label', 'bind', 'format', 'highlights']} label={`Value ${index + 1}`} invalidKey={`${cellKey}:extra`} onInvalid={markEntryInvalid} onChange={(next) => set({ cells: cells.map((item, i) => (i === index ? next : item)) })} />
             </LayoutContentEntry>
             <HighlightChildren owner={current} ownerType="cell" dependencies={{ target: layoutBindingHasIntrinsicTarget(current.bind) }}
-              formulaScope={AGG_FORMULA_SCOPE} cm={brickCmSlot(AGG_FORMULA_SCOPE, current.bind?.expr)}
+              formulaScope={AGG_FORMULA_SCOPE} cm={brickCmSlot(AGG_FORMULA_SCOPE, current.bind)}
               onEditingChange={(bad) => markEntryInvalid(`${cellKey}:highlights`, bad)}
               onOpen={() => { setOpenEntry(null); setFormulaEntry(null); }} onChange={(next) => patchCell(index, { highlights: next })} />
             </Fragment>
@@ -702,9 +733,10 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
           const current = isObj(line) ? line : {};
           const key = session.keys[index];
           const lineKey = `${invalidKey}:entry:${key}`;
-          const binding = layoutBindingEntry({ expr: current.expr });
+          // The line itself is the holder (`{ id, label, expr, chips? }`): its entry and its face read the map.
+          const binding = layoutBindingEntry({ expr: current.expr, ...(current.chips ? { chips: current.chips } : {}) });
           return (
-            <Fragment key={key}><LayoutContentEntry label={current.label || binding?.label || current.expr || 'Choose a formula'} summary={binding?.label || current.expr}
+            <Fragment key={key}><LayoutContentEntry label={current.label || binding?.label || exprFace(current) || 'Choose a formula'} summary={binding?.label || exprFace(current)}
               marker={<span className="sp-rb-sw" style={{ background: `var(--pal-${index % 2})` }} aria-hidden="true" />}
               error={entryError(line, lineKey)} open={openEntry === key}
               onOpen={() => toggleEntry(key)} onClose={() => closeEntry(key)}
@@ -715,21 +747,22 @@ export function BlockEditor({ block, spec, path, onChange, onInvalid, widget, vi
                 <FormulaField
                   key={`${lineKey}:formula`}
                   label={`Line ${index + 1} formula`}
-                  value={current.expr}
+                  value={current}
                   {...DATE_FORMULA_SCOPE}
-                  previewFormula={preview ? (expr) => preview('atomMiniSeries', { series: series.map((line, i) => i === index
-                    ? mergeLayoutFields(current, { expr }) : line) }, { elementId: current.id, index }) : undefined}
+                  slot="miniSeries"
+                  previewFormula={preview ? (holder) => preview('atomMiniSeries', { series: series.map((line, i) => i === index
+                    ? mergeLayoutFields(current, { expr: holder.expr, chips: holder.chips }) : line) }, { elementId: current.id, index }) : undefined}
                   startAdvanced
                   editorOpen={openEntry === key && formulaEntry === key}
                   onEditorOpenChange={(open) => setFormulaEntry(open ? key : null)}
-                  onChange={(next) => patchSeries(index, { expr: next })}
+                  onChange={(next) => patchSeries(index, { expr: next.expr, chips: next.chips })}
                   onDraftState={(_, bad) => markEntryInvalid(`${lineKey}:formula`, bad)}
                 />
               </Field>
-              <UnknownFields value={current} knownKeys={['id', 'label', 'expr', 'highlights']} label={`Line ${index + 1}`} invalidKey={`${lineKey}:extra`} onInvalid={markEntryInvalid} onChange={(next) => set({ series: series.map((item, i) => (i === index ? next : item)) })} />
+              <UnknownFields value={current} knownKeys={['id', 'label', 'expr', 'chips', 'highlights']} label={`Line ${index + 1}`} invalidKey={`${lineKey}:extra`} onInvalid={markEntryInvalid} onChange={(next) => set({ series: series.map((item, i) => (i === index ? next : item)) })} />
             </LayoutContentEntry>
             <HighlightChildren owner={current} ownerType="miniSeries" formulaScope={DATE_FORMULA_SCOPE}
-              cm={brickCmSlot(DATE_FORMULA_SCOPE, current.expr)}
+              cm={brickCmSlot(DATE_FORMULA_SCOPE, current)}
               onEditingChange={(bad) => markEntryInvalid(`${lineKey}:highlights`, bad)}
               onOpen={() => { setOpenEntry(null); setFormulaEntry(null); }} onChange={(next) => patchSeries(index, { highlights: next })} />
             </Fragment>
@@ -994,9 +1027,9 @@ export function BadgeEditor({ col, onFields, invalidKey, onInvalid, allowHide = 
         <div className="sp-rb-els"><LayoutContentEntry label={bindingSummary(badge?.bind)} settingsTitle="Badge value"
           error={readingError} open={open} onOpen={() => setOpen((previous) => !previous)} onClose={() => setOpen(false)}>
         <BindEditor label="Badge reading" bind={badge?.bind} active={open}
-          previewFormula={formulaPreview && widget && viewId ? (expr) => formulaPreview({ ...widget,
+          previewFormula={formulaPreview && widget && viewId ? (holder) => formulaPreview({ ...widget,
             spec: updateView(widget.spec, viewId, (node) => ({ ...node, badge: mergeLayoutFields(badge,
-              { bind: mergeLayoutFields(badge?.bind, { metric: undefined, reading: undefined, expr }) }) })),
+              { bind: mergeLayoutFields(badge?.bind, { metric: undefined, reading: undefined, expr: holder.expr, chips: holder.chips }) }) })),
           }, { kind: 'containerBadge', viewId }) : undefined} invalidKey={`${invalidKey}:badge`} onInvalid={markInvalid} onChange={(next) => onFields({ badge: mergeLayoutFields(badge, { bind: next }) })} />
         </LayoutContentEntry></div>
       ) : null}

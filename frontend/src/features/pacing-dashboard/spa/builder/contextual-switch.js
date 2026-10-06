@@ -140,12 +140,13 @@ export function switchableKpiForAtom(atom) {
   const brick=atom?.brick;
   if (atom?.kind !== 'atom' || !['bigStat','kvRow'].includes(brick?.type)) return null;
   const family={int:'count',count1:'count',money:'money',money4:'money',percent:'percent',percent2:'percent',pp:'percent',number2:'number',plain2:'number'}[brick.format];
-  if (!family || !brick.bind?.expr || Object.keys(brick.bind).some((k)=>k !== 'expr') || brick.sub) return null;
+  if (!family || !brick.bind?.expr || Object.keys(brick.bind).some((k)=>k !== 'expr' && k !== 'chips') || brick.sub) return null;
   if (Object.keys(atom).some((k)=>!['id','kind','brick','span','besideNext'].includes(k))) return null;
   if (Object.keys(brick).some((k)=>!['type','label','bind','target','invert','format','emphasis','sub'].includes(k))) return null;
-  if (brick.target && (!brick.target.expr || Object.keys(brick.target).some((k)=>k !== 'expr'))) return null;
-  const out={id:atom.id,kind:'kpi',title:brick.label || '',value:{kind:'formula',expr:brick.bind.expr,unitFamily:family},format:brick.format,deltaVsOtherSource:false};
-  if (brick.target) out.target={value:{kind:'formula',expr:brick.target.expr,unitFamily:family},invert:!!brick.invert};
+  if (brick.target && (!brick.target.expr || Object.keys(brick.target).some((k)=>k !== 'expr' && k !== 'chips'))) return null;
+  // A chip map (formula chips P0) travels beside its text, after `unitFamily` (spec §3 key order).
+  const out={id:atom.id,kind:'kpi',title:brick.label || '',value:{kind:'formula',expr:brick.bind.expr,unitFamily:family,...(brick.bind.chips ? {chips:brick.bind.chips} : {})},format:brick.format,deltaVsOtherSource:false};
+  if (brick.target) out.target={value:{kind:'formula',expr:brick.target.expr,unitFamily:family,...(brick.target.chips ? {chips:brick.target.chips} : {})},invert:!!brick.invert};
   for (const key of ['span','besideNext']) if (Object.hasOwn(atom,key)) out[key]=atom[key];
   return out;
 }

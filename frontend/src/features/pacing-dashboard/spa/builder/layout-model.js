@@ -13,14 +13,19 @@ import {
 } from '../report-v2.js';
 import { LAYOUT_READING_OPTIONS } from '../layout-readings.js';
 import { CATALOG } from '../metric-catalog.js';
-import { updateView } from '../report-draft.js';
+import { updateView, draftCtx } from '../report-draft.js';
 import { formulaScopeFor } from '../formula-scope.js';
 import { normalizeRateUnitsForSeries } from '../layout-options.js';
+// Formula chips P0: a chip bind is matched by the legacy field its one chip loads as, never by
+// the `_c1` in its text.
+import { holderInfo } from '../chips/info.js';
 
 const hasOwn = (o, key) => Object.prototype.hasOwnProperty.call(o, key);
 const isObj = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const arr = (value) => (Array.isArray(value) ? value : []);
 const clone = (value) => structuredClone(value);
+/** The field a formula bind reads: its chip's legacy field, or its trimmed text. */
+const bindKeyOf = (bind) => (bind.chips ? holderInfo(bind).legacyField : (typeof bind.expr === 'string' ? bind.expr.trim() : ''));
 
 export const LAYOUT_BLOCK_CHOICES = Object.freeze([
   ['bigStat', 'Big number', 'One value, with an optional label and target'],
@@ -139,8 +144,9 @@ export const LAYOUT_VALUES = Object.freeze(CATALOG.filter((entry) => entry.kind 
 export function layoutBindingEntry(bind) {
   if (!isObj(bind) || ['metric', 'expr', 'reading'].filter((key) => hasOwn(bind, key)).length !== 1) return null;
   if (hasOwn(bind, 'reading')) return LAYOUT_VALUES.find((entry) => entry.kind === 'reading' && entry.key === bind.reading) || null;
+  const key = bindKeyOf(bind);
   return LAYOUT_VALUES.find((entry) => entry.kind === 'canonical'
-    ? bind.metric === entry.key : typeof bind.expr === 'string' && bind.expr.trim() === entry.key) || null;
+    ? bind.metric === entry.key : key === entry.key) || null;
 }
 export const layoutBindingFor = (entry) => entry?.kind === 'reading' ? { reading: entry.key }
   : entry?.kind === 'canonical' ? { metric: entry.key } : { expr: entry?.key || '' };
@@ -154,7 +160,7 @@ export function suggestLayoutTarget(block) {
     return ['margin', 'cpm', 'spend', 'ctr', 'vcr', 'cpc', 'cpv', 'budget', 'marginbar'].includes(bind.metric)
       ? { metric: bind.metric } : null;
   }
-  const target = ({ __proto__: null, sp: 'costBud', dc: 'budget', im: 'planImpr', cl: 'planClicks', coViews: 'planViews', ctr: 'ctrT', vcr: 'vcrT', acr: 'acrT' })[bind.expr?.trim()];
+  const target = ({ __proto__: null, sp: 'costBud', dc: 'budget', im: 'planImpr', cl: 'planClicks', coViews: 'planViews', ctr: 'ctrT', vcr: 'vcrT', acr: 'acrT' })[bindKeyOf(bind)];
   return target ? { expr: target } : null;
 }
 
@@ -242,6 +248,10 @@ export function replaceUnknownLayoutFields(value, knownKeys, extras) {
 export function mergeLayoutFields(value, fields) {
   if (!isObj(value) || !isObj(fields)) return value;
   const out = { ...value };
+  // A formula handed without its chips is the TEXT form (formula chips P1-editor): the map
+  // the old text carried goes with it, or the server reads a stale map beside new words.
+  // A chip holder is written as `{ expr, chips }`, which keeps the map.
+  if (hasOwn(fields, 'expr') && !hasOwn(fields, 'chips')) delete out.chips;
   for (const [key, field] of Object.entries(fields)) {
     if (field === undefined) delete out[key];
     else out[key] = clone(field);
@@ -489,7 +499,10 @@ export function patchLayoutMiniSeries(spec, viewId, rowIndex, colIndex, blockInd
 
 /** The exact strict normalizer's first refusal, for the always-visible card banner. */
 export function layoutViewRefusal(view) {
+  // The draft gate's facts, with the Layout's own metric list in place of the canonical one:
+  // a block holding a chip map is refused without `normChips` (formula chips P1-editor).
   const result = normLayoutView(view, '/view', {
+    ...draftCtx({}),
     isCanonicalMetric: (key) => LAYOUT_METRICS.some((metric) => metric.key === key),
   });
   return result.ok ? null : result.detail;

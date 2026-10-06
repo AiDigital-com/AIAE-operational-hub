@@ -258,8 +258,9 @@ function MoneyStatBrick({ brick, ctx }) {
   // ever looks at `expr`, so a bind carrying both would put a gross twin summed from the
   // formula under a canonical number. grossAgg must answer for the figure on screen.
   const exprOnly = !!(brick.bind?.expr && brick.bind.metric == null && brick.bind.reading == null);
+  // grossAgg reads a chip HOLDER or a legacy NAME, never a plain {expr} object (formula chips P1).
   const gross = (brick.role === 'client' && exprOnly && ctx.data?.sources)
-    ? grossAgg(brick.bind.expr, ctx.data.range, ctx.data.sources) : null;
+    ? grossAgg(brick.bind.chips ? brick.bind : brick.bind.expr, ctx.data.range, ctx.data.sources) : null;
   // The caption carries the basis wherever the pair is DRAWN — gross leads, net rides
   // underneath, and both are dollars, so only the word tells them apart (§7).
   // `showsGrossPair` is the very predicate MoneyValue draws on, asked here so the caption

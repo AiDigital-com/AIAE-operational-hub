@@ -33,6 +33,9 @@ been synced from `ogan-team` at `823a42d`.
 | `mapping-dims.js` | `shared/mapping-dims.js` | `1.0.0` | 2026-10-01 | `b7df1cbae3b0d931…` | the CM360 mapping dimension vocabulary |
 | `layout-geometry.mjs` | `shared/layout-geometry.mjs` | `1.0.0` | 2026-10-01 | `18290a7a0c1537bb…` | saved-layout tile geometry: normalize, compact |
 | `layout-materialize.mjs` | `shared/layout-materialize.mjs` | `1.0.0` | 2026-10-01 | `e449812f387d6191…` | applying a saved Layout — mints fresh widget and group instances |
+| `formula-chips.js` | `shared/formula-chips.js` | `1.0.0` | 2026-10-06 | `3142ae3cb4167a70…` | the formula-chip catalogue: what a chip is, which settings each takes, and the shape check of a stored chip map |
+| `line-item-columns.js` | `shared/line-item-columns.js` | `1.0.0` | 2026-10-06 | `15cab2b17515ae1d…` | `display.lineItems` — the Line Items block's columns, sort, view and rows; dash-gate validates an incoming one with it |
+| `refresh-freshness.js` | `shared/refresh-freshness.js` | `1.0.0` | 2026-10-06 | `bae02ce0aff9bba6…` | how far behind a pacing's data is, and the words for it |
 
 Verify any row with:
 
@@ -72,6 +75,34 @@ these modules belong to: `report-v2.js`, `widget-metrics.js`, `std-entries.js`, 
 `layout-materialize.mjs`, `layout-geometry.mjs`, `value-labels.js`. They land here, each with its own
 row in the table above. The table is per-file on purpose: these modules do not arrive together and
 will not be re-synced together.
+
+## Re-copied 2026-10-06 — the reference catch-up
+
+`report-v2.js` (`6f929f1010bc8343…`), `std-entries.js` (`5e49c6e3bf49bb6f…`) and
+`widget-metrics.js` (`6c2e36e8f97c3857…`) were re-copied, and the three new rows above landed, when
+`AIAE-paicing` took the maths it was missing from `ogan-team` (2026-09-29 … `c8a725d`). What moved
+in each:
+
+- `report-v2.js` — formula chips (`39884a0`..`445b94e`): a formula slot now holds `{expr, chips}`,
+  not a string, and the grammar reads and normalizes the chip map. Also `tickFormat`, the progress
+  bar's marker format (`3679c20`).
+- `std-entries.js` — 32 Standard templates became **34**: «Impressions to Hit Budget»
+  (`706f42e`/`915d01d`) and the Line items table (`85d353c`). Neither is the sections cutover —
+  that shrinks `dash-blocks.js`'s block-id domain, and both of these leave it alone, which is why
+  they could come while the cutover still cannot.
+- `widget-metrics.js` — the eleven `hitBudget*` canonical metrics. This file is the vocabulary a
+  settings save is checked against, so it and `std-entries.js` move together or not at all.
+
+The grammar epoch was deliberately NOT bumped. The reference went 7→8 for chips and 8→9 for
+`tickFormat`; `AIAE-paicing`'s server sits at 2, and epochs 3–7 include the sections cutover it has
+not adopted, so claiming 9 would advertise a capability it does not have. The client-side constant
+in `../spa/report-v2.js` does read 8 — it is inert here, because this app echoes the `capabilities`
+object the server sends rather than constructing the marker itself (see `../api.ts`).
+
+OUR DIVERGENCE in `formula-chips.js`, not to be overwritten by the next sync: the line filter names
+`cpi` and the catalogue offers «CPI lines». The reference has no CPI rate type, and its filter was
+written as «not CPC and not CPV», so an install-paced line passed as impression-paced — which is
+also the DEFAULT a rate chip picks. Guarded by `AIAE-paicing/tests/rate-type-units-test.mjs`.
 
 ## dim-value-groups.js (added 2026-10-05)
 

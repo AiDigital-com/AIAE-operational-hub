@@ -53,7 +53,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { placeMenu } from './menu-placement.js';
-import { openNativeSelect, usePopups, useFocusOnOpen } from './PopupCoordinator.jsx';
+import { openCombobox, openNativeSelect, usePopups, useFocusOnOpen } from './PopupCoordinator.jsx';
 
 const POPOVER_GAP = 4;
 const POPOVER_EDGE = 8;
@@ -176,6 +176,9 @@ export function PopoverPanel({
     if (!active) return undefined;
     function onEscape(e) {
       if (e.key !== 'Escape' || e.defaultPrevented || e.cancelBubble) return;
+      // An open suggestion list in a formula field inside this panel is the field's: its own
+      // handler dismisses the list and stops the key, so this panel stands back without taking it.
+      if (openCombobox(e.target)) return;
       // Leave the browser's default action intact so this Escape closes the native list.
       // Stop propagation so the drawer behind this portalled panel cannot take it too.
       if (openNativeSelect(e.target)) { e.stopPropagation(); return; }

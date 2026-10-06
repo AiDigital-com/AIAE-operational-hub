@@ -22,7 +22,7 @@
  * The build stamp. LibraryCard memoizes its live preview on `updated_at`; bump this BY
  * HAND in the same commit that changes any definition below, and never otherwise.
  */
-var STD_VERSION = '2026-10-05 00:00:00.000000+00';
+var STD_VERSION = '2026-10-06 00:00:01.000000+00';
 
 // Canonical chart order. `cpm` is deliberately present as its own Standard template.
 var CHART_ORDER = [
@@ -67,7 +67,7 @@ var KPI_META = {
   cpv: ['CPV', 'money4', 'Cost per completed view against the plan.']
 };
 // Canonical ready-card order; all three are ordinary Layout Widgets.
-var CARD_ORDER = ['budget', 'marginbar', 'flight'];
+var CARD_ORDER = ['budget', 'marginbar', 'flight', 'budgetgap'];
 
 // Seed slots (§9). ONE scale shared with the flow blocks, so the migration can lay a
 // dashboard out in today's reading order without a second table:
@@ -251,6 +251,55 @@ function FLIGHT_BRICKS() {
   ];
 }
 
+/**
+ * «Impressions to Hit Budget» (owner request 2026-09-29): the plan is delivered in full, but at
+ * today's client rate (Dyn CPM, Dyn CPV, Dyn CPC: client cost over units) it bills less than
+ * the client budget. The card says how many units to add, one rate type at a time and in its
+ * own unit, so each lands exactly on its client budget at its own rate, averaged over the
+ * flight or, under period scope, the selected period (campM's hitBudget* metrics, metrics.js).
+ * Negative: the budget runs out before the plan. Per day: plan remainder included, from now to
+ * the end. The readings are campaign-level (flCM), so a narrowed Range filter does not move
+ * them. A unit the pacing does not buy drops its rows (kvRow draws nothing for an absent
+ * unit). No delta chip: under and over budget are both off target. The panel has no title;
+ * the tile frame already names the card. One footnote says what every row would repeat; it
+ * sits last because a heading over the per-day row would be left over nothing once the flight
+ * ends and that row drops. Stored copies of the first, CPM-only version are
+ * upgraded at read time (standard-conversion-format.js, «Impressions to Hit Budget»).
+ *
+ * A COMPOSED card (container and atoms), unlike the three ready cards before it: a composed
+ * view reads its canonical metrics over the widget's own lines (report-render.js
+ * compositionContext), so a copy scoped to one channel answers for that channel. A Layout
+ * view reads them off the dashboard, and the first version's formulas already followed the
+ * widget's scope. The tree is the one the Builder makes of a one-panel Layout
+ * (composition-model.js toCompositionSpec), keys in report-v2's stored order.
+ *
+ * The install rows are OURS: the reference has no CPI rate type, so its card names three
+ * units. A CPI line falls into its impressions branch there — install goal and client budget
+ * into the impressions row, delivered impressions standing in for the units — so the row it
+ * prints is unusable. Ours gives installs their own row, and kvRow draws nothing on a pacing
+ * that buys no installs, which is every pacing the reference knows.
+ */
+function BUDGET_GAP_BRICKS() {
+  return [
+    { type: 'kvRow', label: 'Impressions to add', bind: { metric: 'hitBudgetAddImpr' }, format: 'int', emphasis: 'strong' },
+    { type: 'kvRow', label: 'Views to add', bind: { metric: 'hitBudgetAddViews' }, format: 'int', emphasis: 'strong' },
+    { type: 'kvRow', label: 'Clicks to add', bind: { metric: 'hitBudgetAddClicks' }, format: 'int', emphasis: 'strong' },
+    { type: 'kvRow', label: 'Installs to add', bind: { metric: 'hitBudgetAddInstalls' }, format: 'int', emphasis: 'strong' },
+    { type: 'statRow', cells: [
+      { label: 'Budget', bind: { metric: 'hitBudgetPlan' }, format: 'money' },
+      { label: 'Projected', bind: { metric: 'hitBudgetProjected' }, format: 'money' },
+      { label: 'Gap', bind: { metric: 'hitBudgetGap' }, format: 'money' }
+    ], layout: 'flex' },
+    { type: 'statRow', cells: [
+      { label: 'Impr/day', bind: { metric: 'hitBudgetPerDayImpr' }, format: 'int' },
+      { label: 'Views/day', bind: { metric: 'hitBudgetPerDayViews' }, format: 'int' },
+      { label: 'Clicks/day', bind: { metric: 'hitBudgetPerDayClicks' }, format: 'int' },
+      { label: 'Installs/day', bind: { metric: 'hitBudgetPerDayInstalls' }, format: 'int' }
+    ], layout: 'flex' },
+    { type: 'note', align: 'start', text: 'Negative: the budget runs out before the plan. Per day: from today, to land on budget.', style: 'caption' }
+  ];
+}
+
 // ── Verdict hero (VerdictHero.jsx) ────────────────────────────────────────────
 // :61 the three-zone band, :79 the three cards (Budget / Unit / Margin bodies).
 // The band is index.css `.vh-band` — `2fr 1fr 1fr`, so 6/3/3 twelfths — and each zone
@@ -355,7 +404,9 @@ var CARD_ROWS = {
 var CARD_META = {
   budget: ['Budget', 'Spend against plan-to-date, with the needed-today mark.'],
   marginbar: ['Margin meter', 'Margin on a target-anchored meter.'],
-  flight: ['Flight', 'Day of the flight, and days remaining.']
+  flight: ['Flight', 'Day of the flight, and days remaining.'],
+  budgetgap: ['Impressions to Hit Budget',
+    'Impressions, views and clicks to add so each rate type lands on its client budget at its own average Dyn rate over the flight or the selected period. Negative when the budget runs out before the plan.']
 };
 
 function metricValue(metric, family) {
@@ -424,6 +475,19 @@ function widgetDefinition(title, profile, controls, views) {
       views: views, interactions: [], formatDefaultsVersion: 1
     }
   };
+}
+
+/** A one-panel card as the Builder composes it: root, one row, one card-framed panel. */
+function composedCardDefinition(title, bricks) {
+  var items = [];
+  for (var i = 0; i < bricks.length; i++) items.push({ id: 'item' + (i + 1), kind: 'atom', brick: bricks[i] });
+  return widgetDefinition(title, 'card', [], [
+    { id: 'layout', kind: 'container', title: '', direction: 'column', frame: 'none', children: [
+      { id: 'row1', kind: 'container', title: '', direction: 'row', frame: 'none', children: [
+        { id: 'panel1', kind: 'container', title: '', direction: 'column', frame: 'card', children: items, span: 12 }
+      ] }
+    ] }
+  ]);
 }
 
 function layoutDefinition(title, profile, rows) {
@@ -688,6 +752,31 @@ function breakdownDefinition() {
     ]);
 }
 
+/** «Line items table» (Line Items settings spec 2026-10-01, Part W1): every line item as a
+ *  row with the delivery and plan columns an author picks. No pace column on purpose: a
+ *  line's expected units are in its own buy unit, so a formula against impressions would be
+ *  wrong on click- and view-paced lines; pacing stays the Line Items block's job. */
+function lineItemsTableDefinition() {
+  return sectionDefinition('Line items table', 'delivery', { type: 'delivery' }, [], [{
+    id: 'lines', kind: 'table', title: '', rows: { type: 'li' },
+    columns: [
+      vcol('im', 'Impressions', bq('im', 'count'), 'int'),
+      vcol('cl', 'Clicks', bq('cl', 'count'), 'int'),
+      vcol('sp', 'Spend', bq('sp', 'money'), 'money', { target: planTarget('costBud', 'money', 'money') }),
+      vcol('cpm', 'CPM', bq('cpm', 'money'), 'money'),
+      vcol('ctr', 'CTR', bq('ctr', 'percent'), 'percent2', { target: planTarget('ctrT', 'percent', 'percent2') }),
+      vcol('cv', 'Conv', bq('cv', 'count'), 'count1', { hideWhenEmpty: true }),
+      vcol('cvr', 'CVR', { kind: 'formula', expr: 'cv / cl * 100', unitFamily: 'percent' }, 'percent2', { hideWhenEmpty: true }),
+      vcol('days_left', 'Days left', bq('daysLeft', 'number'), 'int'),
+      vcol('mtgt', 'Margin target', bq('mTgt', 'percent'), 'percent2')
+    ],
+    sort: { columnId: 'sp', dir: 'desc' },
+    totals: true,
+    limit: 20,
+    search: true
+  }]);
+}
+
 function seed(key, name, description, definition, seedSlot) {
   return entry(key, name, description, definition, seedSlot);
 }
@@ -716,6 +805,9 @@ STD_ENTRIES.push(seed('std:v2:breakdown', 'Breakdown',
   'A donut and a table on the dimension the viewer picks; the chips follow the pacing.', breakdownDefinition(), SLOT_BREAKDOWN));
 STD_ENTRIES.push(seed('std:v2:daily', 'Daily Performance',
   'Date by line item, twelve columns and totals.', dailyDefinition(), SLOT_DAILY));
+// Below the daily section, above the KPI presets (slot order is the catalogue's order).
+STD_ENTRIES.push(seed('std:v2:line-items-table', 'Line items table',
+  'Every line item as a row, with the delivery and plan columns you choose.', lineItemsTableDefinition(), SLOT_DAILY + 50));
 for (var k = 0; k < PRESET_ORDER.length; k++) {
   var kk = PRESET_ORDER[k], meta = KPI_META[kk];
   STD_ENTRIES.push(seed('std:v2:kpi:' + kk, meta[0], meta[2], kpiDefinition(kk), SLOT_KPI + k));
@@ -723,7 +815,8 @@ for (var k = 0; k < PRESET_ORDER.length; k++) {
 for (var a = 0; a < CARD_ORDER.length; a++) {
   var ak = CARD_ORDER[a];
   STD_ENTRIES.push(seed('std:v2:card:' + ak, CARD_META[ak][0], CARD_META[ak][1],
-    layoutDefinition(CARD_META[ak][0], 'card', CARD_ROWS[ak]), SLOT_CARD + a));
+    ak === 'budgetgap' ? composedCardDefinition(CARD_META[ak][0], BUDGET_GAP_BRICKS())
+      : layoutDefinition(CARD_META[ak][0], 'card', CARD_ROWS[ak]), SLOT_CARD + a));
 }
 
 var STD_BY_KEY = Object.create(null);

@@ -56,6 +56,21 @@ export function openNativeSelect(target) {
 }
 
 /**
+ * Whether Escape currently belongs to an expanded combobox list — the chip field's suggestion
+ * list (TokenField), which the field's own handler dismisses and stops. A window-capture guard
+ * runs before React hands the key to that handler, so it has to stand back with a plain return
+ * (no stopPropagation: the field's handler is what stops the key). `aria-expanded` is the one
+ * fact a combobox publishes about its list, so a closed one answers false and the surrounding
+ * popup still closes on its next Escape. A shell with a combobox of its OWN (the Spotlight's
+ * search) excludes that node before asking.
+ */
+export function openCombobox(target) {
+  return typeof target?.getAttribute === 'function'
+    && target.getAttribute('role') === 'combobox'
+    && target.getAttribute('aria-expanded') === 'true';
+}
+
+/**
  * Host side. Returns the context value — `{ open, close, closeAll, isOpen,
  * openId, registerPortal, portalsRef }` — which the host both puts on the context
  * and reads `openId` from for its own `aria-owns`.

@@ -1,0 +1,111 @@
+/* The chip field (formula chips P1-editor). Heights follow the control tier: --sp-ctl-h is 26px
+   in a card and 32px inside .sp-pop (index.css remaps it there), so one rule serves both.
+   The field takes the .sp-inp look (surface-alt, soft border, --rs corners) so it sits in a row of
+   inputs as one of them. Its border is an inset ring, not a border: the hidden input is the full
+   control height and a chip is the 24px hit minimum, so a border would push a 26px field to 28.
+   Every flex line of the field is the control height too (the gaps and the text tokens carry it),
+   so a wrapped formula is N lines of one height, the chips centred in each. */
+/* In a .wgf-row the field takes the room beside the buttons, as the input it replaces did with
+   flex: 1 (the host passes no style); in a block parent width keeps it full width. */
+.wgf-tf-wrap { position: relative; flex: 1 1 0; width: 100%; min-width: 0; }
+/* The slot width (the 1px bar plus the empty 1ch input) is stated once, on the field, and
+   registered as a length so it computes to pixels in the field's own mono font and reaches every
+   child as that same number: a chip resolves `ch` in its sans face, so an unregistered
+   `calc(1ch + 1px)` would fold a different width there than a gap or a text token folds. */
+@property --wgf-slot { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.wgf-tf {
+  --wgf-slot: calc(1ch + 1px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; box-sizing: border-box;
+  /* The right padding carries the trailing slot (see the slot rules below), so the right edge
+     breathes like the left and a typed word never reaches the ring. */
+  min-height: var(--sp-ctl-h); padding: 0 calc(6px + var(--wgf-slot)) 0 6px; border-radius: var(--rs);
+  box-shadow: inset 0 0 0 1px var(--border-soft); background: var(--surface-alt);
+  color: var(--text-primary); font: 12px/1 var(--font-mono); cursor: text; transition: box-shadow .15s;
+}
+.wgf-tf:hover, .wgf-tf:focus-within { box-shadow: inset 0 0 0 1px var(--border-hover); }
+.wgf-tf--disabled { opacity: .6; pointer-events: none; }
+/* Non-empty invalid text: the ring and tint the `.sp-inp.wgf-inp--err` input wore, read off the
+   hidden input's aria-invalid so the field and the screen reader say the same thing. */
+.wgf-tf:has(> .wgf-tf-input[aria-invalid="true"]) { box-shadow: inset 0 0 0 1px var(--val-error-bd); background: var(--val-error-bg); }
+
+/* A chip: a 24px hit box (26px inside .sp-pop) whose visible pill sits inside a 2px clear ring, so
+   the pill never touches the field's edge; the pill's own 1px line is an inset ring at the padding edge.
+   A chip is at most the line less the slot it carries as its left margin (and 1px against a
+   sub-pixel sum), so its outer width never exceeds the line: a long face is clipped with an
+   ellipsis, and the slot after it stays on the chip's line and stretches that line to the tier.
+   At 100% the chip's outer width is one slot too wide, flex-wrap puts the chip on a line of its
+   own (the chip's height, not the tier) and the trailing slot wraps onto an empty line under it. */
+.wgf-tf-chip {
+  --wgf-chip-h: max(var(--sp-hit), calc(var(--sp-ctl-h) - 6px));
+  display: inline-block; box-sizing: border-box; height: var(--wgf-chip-h); max-width: calc(100% - var(--wgf-slot) - 1px); padding: 0 8px; border: 2px solid transparent; border-radius: var(--rp);
+  background: var(--surface-tertiary); background-clip: padding-box; box-shadow: inset 0 0 0 1px var(--border-soft);
+  color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); line-height: calc(var(--wgf-chip-h) - 4px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: box-shadow .15s;
+}
+.wgf-tf-chip:hover { box-shadow: inset 0 0 0 1px var(--border-hover); }
+.wgf-tf-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wgf-tf-chip--sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+.wgf-tf-chip--bad { background: var(--status-red-dim); box-shadow: inset 0 0 0 1px var(--status-red); }
+
+/* Text tokens stand the full control height: a line of text alone is as tall as a line with the
+   input, and a press anywhere on the token's height places the caret beside it. */
+.wgf-tf-op, .wgf-tf-num, .wgf-tf-fn, .wgf-tf-word { line-height: var(--sp-ctl-h); white-space: pre; }
+.wgf-tf-op, .wgf-tf-num { color: var(--text-secondary); }
+.wgf-tf-fn { color: var(--text-primary); }
+.wgf-tf-word--bad { color: var(--status-red); text-decoration: underline wavy; }
+
+/* The slot between two tokens: a click target that places the caret there. It is as wide as the
+   caret slot (the 1px bar and the empty 1ch input), so the tokens do not shift when the caret moves,
+   and the control height tall, so every line of a wrapped formula is one height.
+   Every token carries the slot before it as its own left margin, and every piece of a slot (a gap;
+   the bar; the input) folds its own width away through a negative right margin, so a slot takes no
+   room of its own in the flex line: a line then breaks before a TOKEN and never between a slot and
+   its token, so every line of a wrapped formula starts at one left edge (the first line's leading
+   slot folds into the first token's margin like any other; without this a later line began flush
+   at the padding edge, one slot to the left of the first). The slot after the last token folds the
+   same way, into the field's right padding (which carries one slot, see .wgf-tf), so it can never
+   wrap onto an empty line of its own when the last token ends near the edge. The input's box
+   starts on the bar's own pixel column; it is transparent, so the bar shows through. A typed
+   word's input grows past the margin it sits in and pushes the tokens after it, as typing in a
+   text field does. */
+.wgf-tf-gap { display: inline-block; width: var(--wgf-slot); margin-right: calc(-1 * var(--wgf-slot)); min-height: var(--sp-ctl-h); align-self: stretch; }
+.wgf-tf > .wgf-tf-chip, .wgf-tf > .wgf-tf-op, .wgf-tf > .wgf-tf-num, .wgf-tf > .wgf-tf-fn, .wgf-tf > .wgf-tf-word, .wgf-tf > .wgf-tf-ph { margin-left: var(--wgf-slot); }
+.wgf-tf-caret { display: inline-block; width: 1px; margin-right: -1px; height: var(--sp-hit); background: var(--text-primary); opacity: 0; }
+.wgf-tf:focus-within .wgf-tf-caret { opacity: 1; animation: wgf-tf-blink 1s steps(2) infinite; }
+/* A chip with the focus (after a click on it) is the one insertion point: the bar beside it stays
+   hidden. Only the input and the chips can hold focus inside the field, so this is the blink gated on
+   the input's own focus; a browser without :has() keeps the blink rather than losing the bar. */
+.wgf-tf:has(> .wgf-tf-chip:focus) .wgf-tf-caret { opacity: 0; animation: none; }
+@keyframes wgf-tf-blink { to { opacity: 0; } }
+/* The hint of an empty field: placeholder-coloured text standing where the first token would, not a
+   click target (a press on it falls through to the field and focuses the input). */
+.wgf-tf-ph { order: 1; line-height: var(--sp-ctl-h); color: var(--text-faint); white-space: nowrap; pointer-events: none; }
+/* The hidden input: the full control height, no chrome, the field's own font, and no caret of its
+   own while the bar above stands for it; while a word is typed its own caret marks the place.
+   Empty it is the slot less the bar (its inline width is 1ch, the same length), and it folds that
+   width away like the gap does. A typed word stands one slot after the token before it, where
+   its chip lands on commit (every token carries that slot as its left margin), so the content
+   does not jump when the word becomes a chip; the right margin still folds the trailing air. */
+.wgf-tf-input {
+  box-sizing: border-box; height: var(--sp-ctl-h); min-width: calc(var(--wgf-slot) - 1px); padding: 0; border: 0; outline: 0;
+  margin: 0 calc(1px - var(--wgf-slot)) 0 0;
+  background: transparent; color: inherit; font: inherit; caret-color: transparent;
+}
+.wgf-tf-input--word { caret-color: auto; margin-left: var(--wgf-slot); }
+
+/* The suggestion list, inline under the field (decision k): a combobox listbox. */
+.wgf-tf-sugg {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 2; box-sizing: border-box;
+  margin: 2px 0 0; padding: 4px 0; list-style: none; max-height: 240px; overflow: auto;
+  border: 1px solid var(--border-soft); border-radius: var(--rs); background: var(--surface); box-shadow: var(--shadow-pop);
+}
+.wgf-tf-opt {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; box-sizing: border-box; min-height: var(--sp-hit);
+  padding: 4px 10px; cursor: pointer; font: 12px/1.3 var(--font-sans); color: var(--text-primary);
+}
+.wgf-tf-opt--on { background: var(--accent-bg); }
+.wgf-tf-opt--off { color: var(--text-faint); cursor: default; }
+.wgf-tf-opt-face { font-weight: 600; }
+.wgf-tf-opt-alias { color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; }
+.wgf-tf-opt--off .wgf-tf-opt-alias { color: inherit; }
+.wgf-tf-opt-why { flex-basis: 100%; color: var(--text-secondary); font-size: 11px; }

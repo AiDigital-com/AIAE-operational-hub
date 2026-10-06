@@ -38,10 +38,13 @@ import {
 } from './metric-catalog.js';
 import { autoLabel, CALC_LABELS, CALC_SKIP_REASON, cmFeedOf, guideBasisOf, resolveValue } from './report-render.js';
 import WidgetMetrics from '@shared/widget-metrics';
+import FormulaChips from '@shared/formula-chips';
 import { parse as parseFormula, validate as validateFormula, NO_CM_JOIN, PIE_NO_CM } from './widget-formula.js';
 import { formulaScopeFor } from './formula-scope.js';
 import { isCmBearing } from './cm-formula-context.js';
 import { dimIsNamebuilder } from './widget-data.js';
+import { isChipHolder } from './chips/info.js';
+import { compileClient } from './chips/compile.js';
 
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
@@ -103,7 +106,7 @@ export const CM_NO_SCOPE = 'a CM360 widget takes no widget scope; its rows come 
 /* ── validation ───────────────────────────────────────────────────────────── */
 
 /**
- * The two facts `normReport` cannot reach from inside a dependency-free UMD, in the client's
+ * The three facts `normReport` cannot reach from inside a dependency-free UMD, in the client's
  * own answer to each — the mirror of the adapter widgets-validate builds (:459-470).
  *
  * `env.dimSourceCatalog` is injectable so a test can exercise the strict half past today's
@@ -111,13 +114,54 @@ export const CM_NO_SCOPE = 'a CM360 widget takes no widget scope; its rows come 
  * applies to CATALOGUED sources only, and a per-pacing source is judged on its shape alone —
  * refusing one here would fail EVERY settings save from that drawer the moment a source was
  * renamed (metric-catalog's `checkDimKey` carries the whole rule).
+ *
+ * Exported for the highlight editor and the Layout entries (formula chips P1-editor): each
+ * normalises a rule or a block on its own, and without the same three facts a chip holder
+ * is refused there with «no chip catalogue was injected», at Apply instead of at Save.
  */
-function draftCtx(env) {
+export function draftCtx(env) {
   const catalog = env && env.dimSourceCatalog;
   return {
     checkDimKey: (where, key) => checkDimKey(where, key, catalog ? { catalog } : undefined),
     isCanonicalMetric: (k) => WidgetMetrics.WIDGET_METRICS.includes(k),
+    // The third injected fact: the chip map a formula holder may carry (formula chips P0).
+    normChips: (chips, expr, at, slot) => FormulaChips.norm(chips, expr, at, slot),
   };
+}
+
+/**
+ * chipPlacement(scope, holder, join) → what `compileClient` judges a chip holder on (formula
+ * chips P1-editor): the slot's grain, join and field set off its formula scope, and `cm`, the
+ * TEXT rule compile.js reads — does the holder carry a `source: 'cm360'` chip (not
+ * `isCmBearing`, which also answers for a matched BQ chip). `join` overrides the scope's join
+ * where the slot's is not its grain's: a highlight's pair (`{cm, cmRefusal}`, an explicit
+ * `cm: null` meaning «no join»). One residence for the three gates that build it — the draft
+ * gate below, the highlight editor and the Layout entries — so they cannot drift apart.
+ */
+export function chipPlacement(scope, holder, join) {
+  return {
+    grain: scope.grain, role: 'row',
+    cm: Object.values(holder.chips || {}).some((c) => c && c.source === 'cm360'),
+    cmJoin: join && hasOwn(join, 'cm') ? join.cm : scope.cm,
+    cmRefusal: join && join.cmRefusal ? join.cmRefusal : scope.cmRefusal,
+    fieldSet: scope.fieldSet,
+  };
+}
+
+/** The slot a pointer names, in compile.js's words; a bound option is judged by the slot of
+ *  the element that consumes it, never by the switch. */
+function slotOfPointer(pointer, consumer) {
+  const p = consumer || pointer;
+  if (/\/columns\/\d+\/target\/value$/.test(p)) return 'columnTarget';
+  if (/\/target\/value$/.test(p)) return 'target';
+  if (/\/guide\/value$/.test(p)) return 'guide';
+  if (/\/columns\/\d+\/value$/.test(p)) return 'column';
+  if (/\/series\/\d+\/value$/.test(p)) return 'series';
+  if (/\/share\/value$/.test(p)) return 'share';
+  if (/\/highlights\//.test(p)) return 'highlight';
+  if (/\/controls\//.test(p)) return 'option';
+  if (/\/brick\/|\/rows\/|\/badge\//.test(p)) return /series\/\d+$/.test(p) ? 'miniSeries' : 'bind';
+  return 'value';
 }
 
 /**
@@ -273,6 +317,15 @@ export function validateReportDraft(widget, env) {
       ? env
       : { ...(env || {}), dimPlanEligible: grain?.type === 'control' || dimIsNamebuilder(grain?.key) };
     const scope = formulaScopeFor(grain, cmOverride ? { ...scopeEnv, ...cmOverride } : scopeEnv);
+    if (isChipHolder(value)) {
+      // A chip holder (formula chips P1-editor). The grammar has already checked the map's
+      // shape; this is the client half of spec §3, the rules the server cannot know, each
+      // refusal pointing at its chip so the editor outlines it, or at the expression when no
+      // one chip is to blame (a window function on a grain with no days).
+      const compiled = compileClient(value, chipPlacement(scope, value), slotOfPointer(pointer, consumer));
+      if (!compiled.ok) for (const e of compiled.errors) reportFormula(e.ref ? `${pointer}/chips/${e.ref}` : `${pointer}/expr`, e.message);
+      return;
+    }
     // The SLOT decides whether a CM360 formula is legal here, and which sentence it is
     // refused with (§2.5). This is the only rail a stored cm-bearing formula passes: the
     // server validator parses no formula content, so a gate that guessed the join wrong
@@ -901,12 +954,13 @@ function assembleColumn(c, cur) {
     format: pick(c, 'format', pick(cur, 'format', 'auto')),
   };
   // The OPTIONAL keys (§5.2, section-widget parity 2026-09-04; `buyUnit` since the sections
-  // cutover 2026-09-07), carried forward and appended where the normalizer puts them. This
+  // cutover 2026-09-07; `totalAs` since formula chips P1), carried forward and appended where
+  // the normalizer puts them. This
   // assembles a column from a LITERAL rather than a spread, so a key nobody listed here is
   // dropped by an edit that never mentioned it: changing a Daily Performance column's format
   // would otherwise take its plan, its hide-when-empty rule and its blanked zero away with
   // it. A further key must be listed too.
-  for (const k of ['target', 'hideWhenEmpty', 'zeroAs', 'highlightExtremes', 'highlightDirection', 'buyUnit', 'highlights']) {
+  for (const k of ['target', 'hideWhenEmpty', 'zeroAs', 'highlightExtremes', 'highlightDirection', 'buyUnit', 'totalAs', 'highlights']) {
     const v = pick(c, k, pick(cur, k, undefined));
     if (v !== undefined) out[k] = v;
   }
@@ -2054,8 +2108,10 @@ export function dimensionGrains(spec) {
  * predicate for both, because «remove the CM360 source» has to NAME every element that goes
  * and then remove exactly those:
  *   · a `cm` metric — Table B's own rule, the source is on the value;
- *   · a FORMULA that names one of the three CM360 identifiers (§2.10) — the source is in the
- *     identifier, which is why a formula carries no `source` key and never gained one.
+ *   · a FORMULA that names one of the three CM360 identifiers (§2.10), or carries a CM360
+ *     chip (formula chips P0) — the source is in the identifier or the chip, which is why a
+ *     formula carries no `source` key and never gained one. `isCmBearing` is asked about the
+ *     HOLDER, never its text, so a chip map is read wherever the text was.
  * A canonical metric is delivery-only by shape and is neither.
  *
  * Edited HERE and nowhere else: `cmElements` reads it, `dropCmElements`'s four arms (chart,
@@ -2063,11 +2119,11 @@ export function dimensionGrains(spec) {
  * beside them is how the confirm ends up naming three elements and removing two.
  */
 const isCmValue = (v) => isObj(v)
-  && ((v.kind === 'metric' && v.source === 'cm') || (v.kind === 'formula' && isCmBearing(v.expr)));
+  && ((v.kind === 'metric' && v.source === 'cm') || (v.kind === 'formula' && isCmBearing(v)));
 /** A highlight rule naming CM360 in any of the four slots `checkAlerts` judges (§2.8). */
 const cmBearingRule = (rules) => arr(rules).some((r) => isObj(r) && [r.input, r.guard,
   isObj(r.condition) ? r.condition.threshold : null, isObj(r.condition) ? r.condition.upper : null]
-  .some((slot) => isObj(slot) && typeof slot.expr === 'string' && isCmBearing(slot.expr)));
+  .some((slot) => isObj(slot) && isCmBearing(slot)));
 /** The rule out, the owner untouched: the number a column or series draws is not the rule's,
  *  and an author removing the CM360 source still wants the column. The last rule leaving
  *  takes the key with it rather than storing an empty list; the grammar would accept the
@@ -2080,10 +2136,10 @@ const dropCmRules = (node) => {
   return next;
 };
 
-/** A Layout BINDING that reads it. A block carries no `source` key and no value union, so the
- *  identifiers inside its formula are the whole of the question (§2.1). */
-const isCmExpr = (e) => typeof e === 'string' && isCmBearing(e);
-const isCmBind = (b) => isObj(b) && isCmExpr(b.expr);
+/** A Layout BINDING or mini-chart LINE that reads it. A block carries no `source` key and no
+ *  value union, so the identifiers inside its formula, or the chips beside it, are the whole
+ *  of the question (§2.1). A line is its own holder (`{id, label, expr, chips?}`). */
+const isCmBind = (b) => isObj(b) && isCmBearing(b);
 /** The plain word a block's TYPE prints when its own label is absent. Clearing the field
  *  DELETES the key (LayoutCard.jsx:160), it does not blank it, so an unlabelled block is
  *  ordinary editing, not a corrupt draft — and the word it wears has to be one a reader
@@ -2118,7 +2174,7 @@ function cmBrickLabels(brick) {
   const out = [];
   if (brickOwnValueIsCm(brick)) out.push(name);
   arr(brick.cells).forEach((cell, i) => { if (isObj(cell) && isCmBind(cell.bind)) out.push(cell.label || `cell ${i + 1}`); });
-  arr(brick.series).forEach((line, i) => { if (isObj(line) && isCmExpr(line.expr)) out.push(line.label || `line ${i + 1}`); });
+  arr(brick.series).forEach((line, i) => { if (isCmBind(line)) out.push(line.label || `line ${i + 1}`); });
   return out;
 }
 /** A cm-bearing highlight RULE living on the block itself, a stat-row cell or a mini-chart
@@ -2152,7 +2208,7 @@ const brickLeavesWhole = (brick) => {
   const cells = arr(brick.cells);
   if (cells.length && cells.every((cell) => isObj(cell) && isCmBind(cell.bind))) return true;
   const series = arr(brick.series);
-  return series.length > 0 && series.every((line) => isObj(line) && isCmExpr(line.expr));
+  return series.length > 0 && series.every((line) => isCmBind(line));
 };
 
 /**
@@ -2245,7 +2301,7 @@ export function cmElements(spec) {
         }
       });
       arr(brick.series).forEach((line, i) => {
-        if (isObj(line) && !isCmExpr(line.expr) && cmBearingRule(line.highlights)) {
+        if (isObj(line) && !isCmBind(line) && cmBearingRule(line.highlights)) {
           highlightAt(line.label || `line ${i + 1}`);
         }
       });
@@ -2361,7 +2417,7 @@ export function dropCmElements(spec) {
     }
     if (isCmBind(next.tick)) {
       // …and a marker label with no marker is the same refusal, one key over.
-      const { tick, tickLabel, ...rest } = next;
+      const { tick, tickLabel, tickFormat, ...rest } = next;
       next = rest;
     }
     if (arr(next.cells).length) {
@@ -2375,7 +2431,7 @@ export function dropCmElements(spec) {
     }
     if (arr(next.series).length) {
       const series = arr(next.series)
-        .filter((s) => !(isObj(s) && isCmExpr(s.expr)))
+        .filter((s) => !isCmBind(s))
         .map(dropCmRules);
       if (!series.length) return null;
       if (series.length !== next.series.length || series.some((s, i) => s !== next.series[i])) {

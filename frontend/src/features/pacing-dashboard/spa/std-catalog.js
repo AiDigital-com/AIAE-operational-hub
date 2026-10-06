@@ -33,7 +33,7 @@ function deepFreeze(v) {
  * cloned. It is a COPY because the UMD object is also consumed outside the workspace;
  * browser-side protection must not reach back into that shared module.
  *
- * 32 small objects, cloned once: the cost is a fraction of a millisecond at start-up.
+ * 34 small objects, cloned once: the cost is a fraction of a millisecond at start-up.
  */
 export const STD_ENTRIES = Object.freeze(StdEntries.STD_ENTRIES.map((e) => deepFreeze(structuredClone(e))));
 

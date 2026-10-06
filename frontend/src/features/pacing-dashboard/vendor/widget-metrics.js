@@ -20,6 +20,12 @@ var CANON_METRICS = [
   'imprToDatePct', 'imprActual', 'imprExpected', 'imprDeviation',
   'forecastDspSpend', 'costBudTotal', 'costRemaining',
   'clientPlanCpm', 'clientPlanCpc', 'clientPlanCpv', 'bidPlanCpm', 'dynCpm', 'paceDeltaImpr',
+  // «Impressions to Hit Budget» (2026-09-29): per rate type, in that type's own unit.
+  'hitBudgetAddImpr', 'hitBudgetAddViews', 'hitBudgetAddClicks',
+  'hitBudgetPerDayImpr', 'hitBudgetPerDayViews', 'hitBudgetPerDayClicks',
+  'hitBudgetPlan', 'hitBudgetProjected', 'hitBudgetGap',
+  // The install-paced twins, ours — the reference has no CPI rate type.
+  'hitBudgetAddInstalls', 'hitBudgetPerDayInstalls',
   // The seven above, on the unit the pacing is BOUGHT on (2026-10-05): each resolves through
   // `primaryUnit` at render and reads campM's impressions, clicks or views field accordingly.
   // The Standard Delivery card binds these, so ONE stored definition is right on a CPM, a CPC

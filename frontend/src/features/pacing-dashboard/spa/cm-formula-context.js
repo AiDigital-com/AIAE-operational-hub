@@ -9,6 +9,7 @@
 // identifier reads which half of a joined pair. A second copy of that table is how a chip
 // and the cell under it end up describing different numbers.
 import { CM_FORMULA_ONLY, evaluateOne, FIELDS_CM_DELIVERY, FUNCTIONS, identifiersOfAst, pairsServe, parse } from './widget-formula.js';
+import FormulaChips from '@shared/formula-chips';
 
 /** identifier → the CM360 metric it reads off `pair.cm360`. NULL-prototype and frozen: it is
  *  looked up BY A NAME that comes out of stored config, and on a plain object
@@ -44,9 +45,17 @@ export const CM_ID_RE = /\bcm(?:Im|Cl|Co)\b/;
 /** Does this expression NAME one of the three? A regex, deliberately: it runs per column,
  *  per series, per share and per guide on every builder keystroke, and it must answer for
  *  half-typed text without a parse. Text that names one and does not parse is cm-bearing and
- *  unstorable, which is the draft gate's business, not this function's. */
-export function isCmBearing(expr) {
-  return typeof expr === 'string' && CM_ID_RE.test(expr);
+ *  unstorable, which is the draft gate's business, not this function's.
+ *
+ *  It takes a HOLDER too (formula chips P0): `{expr, chips?}` is cm-bearing when its text
+ *  names one of the three or a chip in its map reads CM360 (`FormulaChips.anyCm`). A string
+ *  is answered exactly as before. */
+export function isCmBearing(exprOrHolder) {
+  if (exprOrHolder && typeof exprOrHolder === 'object') {
+    if (exprOrHolder.chips) return FormulaChips.anyCm(exprOrHolder.chips) || (typeof exprOrHolder.expr === 'string' && CM_ID_RE.test(exprOrHolder.expr));
+    return typeof exprOrHolder.expr === 'string' && CM_ID_RE.test(exprOrHolder.expr);
+  }
+  return typeof exprOrHolder === 'string' && CM_ID_RE.test(exprOrHolder);
 }
 
 /** Every read of the comparison a parsed formula makes, first-seen order. `side` says which

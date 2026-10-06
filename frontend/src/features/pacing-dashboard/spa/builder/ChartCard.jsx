@@ -51,6 +51,7 @@ import {
   setChartTitleAuto, setOrientation, setTopN, setViewTitle, setX, validateReportDraft,
 } from '../report-draft.js';
 import { cmRefusal, dimPlanEnv, sourceEnv, sourceStep, sourcesFor, spotlightItems, valueReadsCm } from '../spotlight-items.js';
+import { formulaValue } from './FormulaEditorDialog.jsx';
 import SeriesPopover, { guideWith } from './SeriesPopover.jsx';
 import GuidePopover from './GuidePopover.jsx';
 import { PopRow, Seg, word } from './rows.jsx';
@@ -347,9 +348,9 @@ export default function ChartCard({
     });
   };
 
-  const onFormula = (expr, family) => {
+  const onFormula = (stored, family) => {
     const { mode, seriesId } = spot;
-    const value = { kind: 'formula', expr, unitFamily: family };
+    const value = formulaValue(stored, family);
     if (mode === 'add') {
       const [id] = mintIds(1);
       setPending({ kind: 'series', id });
@@ -363,9 +364,9 @@ export default function ChartCard({
     setGuideValue(seriesId, value);
   };
 
-  const previewFormula = (expr, unitFamily) => {
+  const previewFormula = (stored, unitFamily) => {
     const { mode, seriesId } = spot;
-    const value = { kind: 'formula', expr, unitFamily };
+    const value = formulaValue(stored, unitFamily);
     const elementId = mode === 'add' ? newNodeId(spec, 'formula_preview') : seriesId;
     const next = mode === 'add' ? addOne(spec, elementId, value, null)
       : patchSeries(spec, view.id, elementId, mode === 'guide'
@@ -595,6 +596,8 @@ export default function ChartCard({
         formulaSlot={spot && spot.mode !== 'x' ? {
           value: spot.mode === 'guide' ? series.find((s) => s.id === spot.seriesId)?.guide?.value : series.find((s) => s.id === spot.seriesId)?.value,
           ...formulaScope,
+          // The slot in compile.js's words: which stored form a chip formula gets (decision h).
+          slot: spot.mode === 'guide' ? 'guide' : 'series',
           // The mart-metrics inventory travels with the slot, so the door at the bottom of
           // the value map says what FormulaField and the full editor already say.
           availableMetrics: env.availableMetrics,

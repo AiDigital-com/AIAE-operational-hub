@@ -35,9 +35,15 @@ describe("the moved SPA layer", () => {
     expect(typeof addView).toBe("function");
   });
 
-  it("sees the Standard catalog the shared sync widened to 32", () => {
-    expect(STD_ENTRIES.length).toBe(32);
+  it("sees the Standard catalog the shared sync widened to 34", () => {
+    expect(STD_ENTRIES.length).toBe(34);
     expect(stdEntry("std:v2:breakdown")).toBeTruthy(); // one of the four that arrived
+    // Two arrived with the 2026-10-06 port of Pacing's reference: «Impressions to Hit Budget»
+    // and the Line items table. Neither is the sections cutover — that shrinks the block-id
+    // domain in dash-blocks.js, and these two leave it alone. The catalog now matches the
+    // reference template for template.
+    expect(stdEntry("std:v2:card:budgetgap")).toBeTruthy();
+    expect(stdEntry("std:v2:line-items-table")).toBeTruthy();
   });
 
   it("carries the widget-set ops the tile menu needs", () => {

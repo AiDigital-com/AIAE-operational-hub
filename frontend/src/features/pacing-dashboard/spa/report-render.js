@@ -32,6 +32,11 @@ import { NO_CM_JOIN, PIE_NO_CM, SHARE_NO_WINDOW, FIELDS_PLAN, evaluateMaskedSeri
 // runtime refusal and the editor's cannot drift into two spellings of one rule.
 import { CM_IDS, cmEvalAt, cmFieldRefusal, cmMarkerOf, cmSeriesContext, cmValueAt, isCmBearing } from './cm-formula-context.js';
 import { campM } from './metrics.js';
+// Formula chips P0 (docs/2026-10-01-formula-chips.md §7): the one reader for what a holder
+// reads, and the sentence a slot prints when a chip holder reaches an engine that cannot read
+// it yet. No chip evaluator ships in P0, so a chip holder is refused loudly, never a zero.
+import { CHIPS_NOT_READABLE, holderFace, holderInfo, isChipHolder } from './chips/info.js';
+import { CHIP_CM_NOT_YET } from './chips/resolve.js';
 import { brickValue, coefModeOf, netModeOf } from './brick-data.js';
 import {
   buildSeriesModel, buildCategoryModel, buildTabularModel, kpiValue, expressionsShowEmptyWithoutFacts,
@@ -131,6 +136,12 @@ export const V2_CANON_LABELS = {
   costRemaining: 'Cost remaining', clientPlanCpm: 'Client plan CPM',
   clientPlanCpc: 'Client plan CPC', clientPlanCpv: 'Client plan CPV',
   bidPlanCpm: 'Bid plan CPM', dynCpm: 'Dynamic CPM', paceDeltaImpr: 'Impressions pace delta',
+  hitBudgetAddImpr: 'Impressions to hit budget', hitBudgetAddViews: 'Views to hit budget',
+  hitBudgetAddClicks: 'Clicks to hit budget', hitBudgetPerDayImpr: 'Impressions / day to hit budget',
+  hitBudgetPerDayViews: 'Views / day to hit budget', hitBudgetPerDayClicks: 'Clicks / day to hit budget',
+  hitBudgetAddInstalls: 'Installs to hit budget', hitBudgetPerDayInstalls: 'Installs / day to hit budget',
+  hitBudgetPlan: 'Client budget (lines with a goal)', hitBudgetProjected: 'Projected client spend',
+  hitBudgetGap: 'Budget gap at current rates',
   // The buy-unit seven (2026-10-05); same words as metric-catalog.js's CANON_ONLY_LABELS.
   unitToDatePct: 'Buy unit vs plan-to-date', unitActual: 'Actual buy units to date',
   unitExpected: 'Expected buy units to date', unitPlan: 'Planned buy units',
@@ -330,6 +341,10 @@ export function valueToExpr(resolved, datasetType) {
   if (!resolved || typeof resolved !== 'object') return null;
   if (resolved.kind === 'formula') {
     if (typeof resolved.expr !== 'string') return null;
+    // A chip holder (formula chips P0) is not engine input: no chip evaluator ships yet, and
+    // the engine would read `_c1` as an unknown field. Every caller's null branch below
+    // prints CHIPS_NOT_READABLE for it.
+    if (resolved.chips) return null;
     // A formula naming cmIm / cmCl / cmCo is ADAPTER-fed (§2.2), so the answer here is the
     // same null a cm metric gets: the engine has no column for a CM360 count on any grain,
     // and handing it one draws «Unknown field "cmIm"» under a header the author wrote about
@@ -549,7 +564,7 @@ function pacingMetricLabel(metric, wording) {
 }
 
 /** The name ONE value goes by, with no switch in the picture. */
-function valueLabel(v, wording) {
+export function valueLabel(v, wording) {
   if (!v || typeof v !== 'object') return '';
   if (v.kind === 'metric') {
     const k = typeof v.metric === 'string' ? v.metric : '';
@@ -562,6 +577,8 @@ function valueLabel(v, wording) {
     return FIELD_LABELS[k] || V2_CM_LABELS[k] || k;
   }
   if (v.kind === 'formula') {
+    // A chip holder reads as its chips' faces, never as the `_c1` refs in its text.
+    if (v.chips) return holderFace(v);
     // A bare field typed as a formula reads as that field. Arithmetic reads as itself:
     // nobody can name an expression but its author, which is exactly what a manual label
     // is for.
@@ -700,6 +717,15 @@ const COUNT_PLAN_FIELDS = new Set(['planImpr', 'planClicks', 'planViews', 'planI
 const DECIMAL_FORMATS = new Set(['auto', 'plain2', 'number2']);
 export function wholePlanFormat(format, resolved, datasetType) {
   if (!DECIMAL_FORMATS.has(format || 'auto')) return format;
+  if (resolved && resolved.kind === 'formula' && resolved.chips) {
+    // A chip holder is read off its chip, never off the `_c1` in its text: a lone
+    // `Planned units` chip is the count-plan class whatever its unit and span (every one of
+    // its units is a count), exactly as the six legacy fields are.
+    const field = holderInfo(resolved).legacyField;
+    const ref = typeof resolved.expr === 'string' ? resolved.expr.trim() : '';
+    const chip = Object.prototype.hasOwnProperty.call(resolved.chips, ref) ? resolved.chips[ref] : null;
+    return COUNT_PLAN_FIELDS.has(field) || (chip && chip.base === 'plannedUnits') ? 'int' : format;
+  }
   const expr = resolved ? valueToExpr(resolved, datasetType ?? null) : null;
   return typeof expr === 'string' && COUNT_PLAN_FIELDS.has(expr.replace(/\s+/g, '')) ? 'int' : format;
 }
@@ -1066,7 +1092,14 @@ function aggReading(resolved, datasetType, range, sources, campCtx, overWindow =
   const expr = valueToExpr(resolved, datasetType);
   if (expr == null) {
     const feed = cmFeedOf(resolved, datasetType);
-    return feed ? { value: null, cm: feed, error: null, warned: false } : none;
+    if (feed) return { value: null, cm: feed, error: null, warned: false };
+    if (!isChipHolder(resolved)) return none;
+    // A chip holder (formula chips P1) is evaluated by the chip engine through the one door
+    // every aggregate read comes through.
+    if (!sources) return none;
+    const chipOut = kpiValue(resolved, range, sources);
+    if (chipOut.error) return { value: null, cm: null, error: chipOut.error, warned: false };
+    return { value: Number.isFinite(chipOut.value) ? chipOut.value : null, cm: null, error: null, warned: false };
   }
   if (!sources) return none;
   const out = kpiValue({ expr }, range, sources);
@@ -1242,6 +1275,7 @@ export function buildReportChartModel(view, spec, controlState, data, campCtx) {
     } else {
       const feed = cmFeedOf(resolved, datasetType);
       if (feed) { entry.cm = feed; cmPending = true; }
+      else if (isChipHolder(resolved)) errors[s.id] = CHIPS_NOT_READABLE;
       feeds.push({ kind: 'none', axis: s.axis, guide: s.guide || null, resolved, accumulate: s.accumulate });
     }
     series.push(entry);
@@ -2072,8 +2106,14 @@ function computeReportTableModel(view, spec, controlState, data, campCtx) {
       feeds.push({ kind: 'const', value: out.absent ? null : out.value });
     } else {
       const feed = cmFeedOf(resolved, datasetType);
-      if (feed) { entry.cm = feed; cmPending = true; }
-      feeds.push({ kind: 'none' });
+      if (feed) { entry.cm = feed; cmPending = true; feeds.push({ kind: 'none' }); }
+      else if (isChipHolder(resolved) && rowType === 'li' && !holderInfo(resolved).cm) {
+        // A chip column on line item rows (formula chips P1): the engine evaluates it per line.
+        feeds.push({ kind: 'engine', source: { expr: resolved.expr, chips: resolved.chips, ...(c.totalAs ? { totalAs: c.totalAs } : {}) } });
+      } else {
+        if (isChipHolder(resolved)) colErrors[c.id] = holderInfo(resolved).cm ? CHIP_CM_NOT_YET : CHIPS_NOT_READABLE;
+        feeds.push({ kind: 'none' });
+      }
     }
     // `auto` is the author saying «you pick», and this is the pick: the value's own unit
     // family. `fmtV2`'s `auto` prints a bare number — money with no symbol and no grouping,
@@ -2145,7 +2185,8 @@ function computeReportTableModel(view, spec, controlState, data, campCtx) {
   // Reserved outside the stored column-id grammar; never a visible column or sort target.
   const shareKey = '__share__';
   const shareValues = new Map();
-  let shareError = shareValue && shareExpr == null && !shareCm ? 'The row share has no readable delivery metric' : null;
+  let shareError = shareValue && shareExpr == null && !shareCm
+    ? (isChipHolder(shareResolved) ? CHIPS_NOT_READABLE : 'The row share has no readable delivery metric') : null;
   if (sources) {
     // ENGINE-fed columns are the only ones the expression model is asked about; a canonical or CM-fed column
     // is filled in below, and passing it as an expression would ask the engine for a field
@@ -2210,8 +2251,9 @@ function computeReportTableModel(view, spec, controlState, data, campCtx) {
     // today's exact shape. The keep-list's predicate, without its `hideWhenEmpty` filter: a
     // drawn column is explained whether or not it could ever have hidden.
     if (cvNote || modelRows.some((r) => r.cvReason)) {
+      // A chip source answers from its map, so the whole source is handed over (formula chips P1).
       cvCols = new Set(columns.filter((c, i) => feeds[i].kind === 'engine'
-        && expressionReadsConversions(feeds[i].source.field ?? feeds[i].source.expr)).map((c) => c.id));
+        && expressionReadsConversions(feeds[i].source.field ?? (feeds[i].source.chips ? feeds[i].source : feeds[i].source.expr))).map((c) => c.id));
     }
     // The engine's subset total (the rows a search box keeps) through the same cell mapping
     // the Totals row took: a const column keeps its constant, a refused one its em dash, a
@@ -2275,7 +2317,7 @@ function computeReportTableModel(view, spec, controlState, data, campCtx) {
   // Asked only when a column could hide at all, so every other table skips the parse.
   const keepConv = sources && columns.some((c) => c.hideWhenEmpty) && primaryCvInView(sources)
     ? new Set(columns.filter((c, i) => c.hideWhenEmpty && feeds[i].kind === 'engine'
-      && expressionReadsConversions(feeds[i].source.field ?? feeds[i].source.expr)).map((c) => c.id))
+      && expressionReadsConversions(feeds[i].source.field ?? (feeds[i].source.chips ? feeds[i].source : feeds[i].source.expr))).map((c) => c.id))
     : null;
   const drawn = visibleColumns(columns, modelRows, totals, colErrors, keepConv);
   // A saved breakdown may sort by a video-only column that disappears on audio.
@@ -2735,6 +2777,7 @@ export function buildReportPieModel(view, spec, controlState, data, campCtx) {
     // the adapter", and nothing is coming. The pie answers now, in the same shape the
     // canonical refusal above answers in — no slices and a sentence saying why.
     if (cmFeedOf(resolved, datasetType)) errors[id] = PIE_NO_CM;
+    else if (isChipHolder(resolved)) errors[id] = CHIPS_NOT_READABLE;
     return out;
   }
   if (!sources) return out;

@@ -85,6 +85,24 @@ function createDashboardMetrics(deps) {
     return liPlan[liId];
   }
 
+  /* ── metric-catalog.js — NOT in MODULES, and this is the whole of it the engine gets.
+     «Fixed chart guides» (reference 3679c20) made brick-data.js read CATALOG for one thing:
+     FIELD_DEFAULT_FORMAT, the per-field default print format. Its only reader is impliedFormat,
+     whose only reader is tickValue — the progress bar's tick label, which this bundle does NOT
+     export, because a tick is drawn in a browser and never computed server-side.
+
+     Pulling metric-catalog.js in to satisfy it was tried and rejected: it needs report-v2,
+     dim-sources-norm, chart-format and conversion-format, none of which belong in a metric
+     engine, and the bundle grew 1 200 lines for a constant nothing here reads. Injecting it as a
+     fourth dependency was rejected too — every caller (merge.mjs, the Hub's engine-loader, the
+     tests) would have to pass it, and the Hub would have to vendor the catalogue as well.
+
+     So the catalogue is EMPTY here. brick-data's lines are present verbatim, as the parity test
+     requires; FIELD_DEFAULT_FORMAT is simply an empty Map, so impliedFormat falls through to
+     its unit-family answer. WARNING FOR WHOEVER EXPORTS tickValue FROM THIS BUNDLE: do not,
+     until the catalogue is really here — it would answer with the fallback format and look right. ── */
+  const CATALOG = [];
+
   /* ── dim-value-groups.js — value groups (spec 2026-10-02), the half this engine
      needs, lifted verbatim. The module itself is NOT in MODULES: its other half
      re-exports @shared/dim-value-groups (the SAVE rules — the Settings editor's,
@@ -1208,6 +1226,33 @@ function createDashboardMetrics(deps) {
     return v;
   }
 
+  /**
+   * The campaign's own flight (2026-09-29): from the earliest start to the latest end of
+   * `plans`. `days` is its length; `passed` the days of it through the last data day, inside
+   * `range` when one is given (the rule prorateRange keeps for one line); `left` the days after
+   * the last data day until the latest end, whatever the range. The campaign is over only when
+   * its last line is: the average of the lines' own days left read «Flight ended» on a pacing
+   * whose last two of fourteen lines still had three days to go. Counted like prorate: calendar
+   * days, both ends included.
+   */
+  function campaignSpan(plans, asOf, range = null) {
+    let fs = '', fe = '';
+    for (const p of plans) {
+      if (!p || !p.fs || !p.fe) continue;
+      if (!fs || p.fs < fs) fs = p.fs;
+      if (!fe || p.fe > fe) fe = p.fe;
+    }
+    if (!fs) return { fs: null, fe: null, days: 0, passed: 0, left: 0 };
+    const days = Math.max(1, dI(fs, fe));
+    const toDate = asOf && asOf >= fs ? dI(fs, asOf < fe ? asOf : fe) : 0;
+    let passed = toDate;
+    if (range) {
+      const ov = rangeOverlap(range.from, range.to, fs, fe);
+      passed = ov && asOf && asOf >= ov.start ? dI(fs, asOf < ov.end ? asOf : ov.end) : 0;
+    }
+    return { fs, fe, days, passed, left: Math.max(0, days - toDate) };
+  }
+
   /* ── Plan inside a narrowed window (2026-09-23) ───────────────────────────────
    * When the viewer narrows the date window, a widget's PLAN follows it the way its delivered
    * numbers already do. The plan of a window is the part of the line's plan curve that falls
@@ -1647,6 +1692,42 @@ function createDashboardMetrics(deps) {
     // neededPerDay* lines so a paused LI stops demanding daily delivery. Views
     // reuse viewsPlanPausedRem above. Additive — stays 0 when nothing is paused.
     let imprPlanPausedRem = 0, clicksPlanPausedRem = 0, installsPlanPausedRem = 0;
+    // «Needed per day», one unit at a time (2026-09-29): each running line's own remaining over
+    // its own days left, summed — `need` the sum, `left` the remaining it covers, `lines` how many
+    // lines carry some, `days` their shared days left (null once two differ). A line that has
+    // ended, is paused, has not started, or is at or above its plan asks for nothing, and its surplus no longer
+    // offsets another line's shortfall. It was the campaign's whole remaining over the lines'
+    // average days left: an ended line's unrecoverable shortfall inflated it, and when most lines
+    // had ended the average rounded to 0 days and the question stopped being asked.
+    // `installs` is the fourth bucket, which the reference has no rate type for: CPI is ours, and
+    // it mirrors the other three here the way it already does everywhere else in this file. On a
+    // pacing with no install-paced line every figure below is byte-identical to the three-unit
+    // reference, because the bucket stays empty.
+    const need = { impr: { need: 0, left: 0, lines: 0, days: undefined },
+      clicks: { need: 0, left: 0, lines: 0, days: undefined },
+      views: { need: 0, left: 0, lines: 0, days: undefined },
+      installs: { need: 0, left: 0, lines: 0, days: undefined } };
+    const addNeed = (unit, remaining, daysLeftLine) => {
+      if (!(remaining > 0) || !(daysLeftLine > 0)) return;
+      const u = need[unit];
+      u.need += remaining / daysLeftLine;
+      u.left += remaining;
+      u.lines++;
+      u.days = u.days === undefined || u.days === daysLeftLine ? daysLeftLine : null;
+    };
+    // «Impressions to Hit Budget» (2026-09-29): the lines with a delivery goal, one rate type at a
+    // time and in that type's own unit (impressions, clicks, views), against their own client
+    // budget. `lines` keeps each one's budget, client cost and own days left for the per-day split.
+    // Budget and plan are the whole flight's (the period's under period scope) while `units` /
+    // `dc` follow `range`, so the card reads these off the range-free flCM, where both halves
+    // cover the same days.
+    const hitBucket = () => ({ budget: 0, plan: 0, units: 0, dc: 0, lines: [] });
+    // `installs` is the fourth bucket, ours: the reference has no CPI rate type, so a CPI line
+    // falls into its `impr` branch there and pays its INSTALL goal and client budget into the
+    // impressions row while its delivered IMPRESSIONS stand in for the units — the card then
+    // prints an impressions figure no one can act on. Its own bucket keeps each unit honest; on
+    // a pacing with no install-paced line every figure below is byte-identical to the reference.
+    const hit = { impr: hitBucket(), clicks: hitBucket(), views: hitBucket(), installs: hitBucket() };
 
     // ── Clicks-side accumulators ───────────────────────────────────────────
     // CPC LIs only — their plan lives in planImpr by PacingCore convention.
@@ -1753,6 +1834,13 @@ function createDashboardMetrics(deps) {
       }
 
       if (p.fe && p.fe > scopeEnd) scopeEnd = p.fe;
+      // This line's own days left for «Needed per day»: calendar, range-free, the campaign's
+      // days-left rule for one line. 0 once it has ended, while it is paused, and before it starts
+      // (it cannot deliver yet; the Slack summary's pre-flight guard reads such a line as 0 too).
+      // With no data day at all every line still counts, as before.
+      const prLine = prorate(p, asOf);
+      const lineDaysLeft = PacingCore.isLiPaused(p, asOf) || prLine.st === 'not_started'
+        ? 0 : Math.max(0, prLine.fDays - prLine.dP);
 
       const rt = p.rateType || 'CPM';
       const isCpc = rt === 'CPC';
@@ -1766,6 +1854,15 @@ function createDashboardMetrics(deps) {
       // The plan SUMS follow a narrowed window; `planUnit` keeps driving weights and rates.
       const planWin = win ? unitsInWindow(p, win) : planUnit;
       const budWin = win ? budgetInWindow(p, win) : p.budget;
+      if (planUnit > 0) {
+        const h = hit[isCpc ? 'clicks' : isCpv ? 'views' : isCpi ? 'installs' : 'impr'];
+        const units = (isCpc ? m.cl : isCpv ? m.co : isCpi ? m.cv : m.im) || 0;
+        h.budget += p.budget || 0;
+        h.plan += planUnit;
+        h.units += units;
+        h.dc += m.clientPr || 0;
+        h.lines.push({ budget: p.budget || 0, dc: m.clientPr || 0, days: lineDaysLeft });
+      }
 
       // General (always)
       clientPr += m.clientPr;
@@ -1846,6 +1943,7 @@ function createDashboardMetrics(deps) {
           imprPlan += planWin;
           imprPlanFlight += planUnit;
           if (PacingCore.isLiPaused(p, asOf)) imprPlanPausedRem += Math.max(0, planWin - (m.im || 0));
+          addNeed('impr', planWin - (m.im || 0), lineDaysLeft);
           imprDailyRateAvg += planUnit / liFDays;
           if (asOf && asOf >= p.fs) {
             if (asOf > p.fe) imprEndedCount++;
@@ -1893,6 +1991,7 @@ function createDashboardMetrics(deps) {
           if (dayRow) latestDayClicks += dayRow.cl || 0;
         }
         if (PacingCore.isLiPaused(p, asOf)) clicksPlanPausedRem += Math.max(0, liClicksPlanWin - (m.cl || 0));
+        if (liClicksPlan > 0) addNeed('clicks', liClicksPlanWin - (m.cl || 0), lineDaysLeft);
         clicksExpected += m.eCl || 0;
         // Daily rate for clicks side: liExpUnits already prorates planImpr
         // (which IS plan-clicks for CPC).
@@ -1934,6 +2033,7 @@ function createDashboardMetrics(deps) {
           viewsPlan += planWin;
           viewsPlanFlight += planUnit;
           if (PacingCore.isLiPaused(p, asOf)) viewsPlanPausedRem += Math.max(0, planWin - (m.co || 0));
+          addNeed('views', planWin - (m.co || 0), lineDaysLeft);
           cpvViewsPlan += planWin;
           cpvViewsPlanFlight += planUnit;
           viewsDailyRateAvg += planUnit / liFDays;
@@ -1963,6 +2063,7 @@ function createDashboardMetrics(deps) {
           installsPlan += planWin;
           installsPlanFlight += planUnit;
           if (PacingCore.isLiPaused(p, asOf)) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
+          addNeed('installs', planWin - (m.cv || 0), lineDaysLeft);
           installsDailyRateAvg += planUnit / liFDays;
           if (asOf && asOf >= p.fs) {
             if (asOf > p.fe) installsEndedCount++;
@@ -2058,12 +2159,15 @@ function createDashboardMetrics(deps) {
     // Delivery reading prints there, not a 0 that reads «on plan». Flight keeps its 0.
     const pac = pacWt > 0 ? pacW / pacWt : (win ? null : 0);
 
-    const daysLeft = effLIs.length > 0
-      ? Math.max(0, Math.round(effLIs.reduce((s, id) => {
-          const pr = prorate(getEffPlan(liPlan, id, splitScopedMode, splitScopedPlans), asOf);
-          return s + (pr.fDays - pr.dP);
-        }, 0) / effLIs.length))
-      : 0;
+    // The campaign's own flight, earliest start to latest end of the lines in view (2026-09-29):
+    // days left run to the LAST line's end, so «Flight ended» waits for the last line, as the
+    // Overview's days remaining always has. It was the average of the lines' own days left.
+    // `flightSpanDay` / `flightSpanDays` are «Day X of Y» on that same flight (inside `range`
+    // for the day, like one line's prorateRange); `daysLeft` stays range-free.
+    const span = campaignSpan(effLIs.map((id) => getEffPlan(liPlan, id, splitScopedMode, splitScopedPlans)), asOf, range);
+    const daysLeft = span.left;
+    const flightSpanDay = span.passed;
+    const flightSpanDays = span.days;
 
     const tgtCpm = cpmImprSum > 0 ? (cpmBudSum / cpmImprSum * 1000) : null;
     // Bid Plan (cost side) + Plan rate (client side) per type, each from ITS OWN
@@ -2078,17 +2182,40 @@ function createDashboardMetrics(deps) {
     const clientPlanCpm = imprPlanFlight > 0 ? imprClientBud / imprPlanFlight * 1000 : 0;
     const clientPlanCpc = cpcPlanClicks > 0 ? cpcClientBud / cpcPlanClicks : 0;
     const clientPlanCpv = cpvViewsPlanFlight > 0 ? cpvClientBud / cpvViewsPlanFlight : 0;
-    // Subtract paused-LI remaining only (no Math.max clamp) so a non-paused
-    // campaign stays byte-identical — including the legacy negative value when
-    // over-delivered. *PausedRem is 0 when nothing is paused.
-    const neededPerDayImpr = daysLeft > 0 && imprPlan > 0
-      ? Math.round(((imprPlan - imprActual) - imprPlanPausedRem) / daysLeft) : 0;
-    const neededPerDayClicks = daysLeft > 0 && clicksPlan > 0
-      ? Math.round(((clicksPlan - clicksActual) - clicksPlanPausedRem) / daysLeft) : 0;
-    const neededPerDayInstalls = daysLeft > 0 && installsPlan > 0
-      ? Math.round(((installsPlan - installsActual) - installsPlanPausedRem) / daysLeft) : 0;
-    const neededPerDayViews = daysLeft > 0 && viewsPlan > 0
-      ? Math.round(((viewsPlan - viewsActual) - viewsPlanPausedRem) / daysLeft) : 0;
+    // The sums built line by line above (`need`). Never negative: a line ahead of plan asks for 0.
+    const neededPerDayImpr = Math.round(need.impr.need);
+    const neededPerDayClicks = Math.round(need.clicks.need);
+    const neededPerDayInstalls = Math.round(need.installs.need);
+    const neededPerDayViews = Math.round(need.views.need);
+    // What the «Needed per day» notes explain it with (brick-data.js): the remaining it covers,
+    // over how many lines, and their shared days left (null when the lines' days differ).
+    const neededBasis = (u) => ({ left: u.left, lines: u.lines, days: u.days === undefined ? null : u.days });
+
+    // «Impressions to Hit Budget» (2026-09-29), per unit: at the unit's own average Dyn rate
+    // (dc / units, the rate Dyn CPM / CPC / CPV print), the budget buys `budget × units / dc`.
+    // To add = that − plan: negative when the budget runs out before the plan. Per day = line by
+    // line, as «Needed per day» asks it: the money the line has left, in units at the unit's rate,
+    // over its own days left. Money, not units: the unit's rate is an average, and a line bought
+    // three times dearer than it would be asked for a third of the units it can buy. Summed
+    // over the lines, the money left is the unit's own (budget − dc), so the rows agree with the
+    // total. A line that has ended, is paused or has not started asks for nothing today, and
+    // one already past its budget asks for 0 rather than offset another line's shortfall. A unit
+    // with no client cost yet has no rate: its numbers are null (an em dash) and its budget
+    // stands in for its projection.
+    const hitRated = (h) => h.units > 0 && h.dc > 0;
+    const hitAdd = (h) => (hitRated(h) ? Math.round(h.budget * h.units / h.dc - h.plan) : null);
+    const hitPerDay = (h) => {
+      if (!hitRated(h)) return null;
+      const perDollar = h.units / h.dc;
+      let sum = 0;
+      for (const l of h.lines) if (l.days > 0) sum += Math.max(0, l.budget - l.dc) * perDollar / l.days;
+      return Math.round(sum);
+    };
+    const hitUnits = [hit.impr, hit.clicks, hit.views, hit.installs].filter((h) => h.plan > 0);
+    const hitBudgetPlan = hitUnits.reduce((s, h) => s + h.budget, 0);
+    const hitBudgetProjected = hitUnits.some(hitRated)
+      ? hitUnits.reduce((s, h) => s + (hitRated(h) ? h.plan * h.dc / h.units : h.budget), 0) : null;
+    const hitBudgetGap = hitBudgetProjected == null ? null : hitBudgetPlan - hitBudgetProjected;
 
     // Block-library canon (spec 2026-07-16 §3): per-unit to-date pacing —
     // actual vs expected-to-date, each inside its rate-type-gated bucket.
@@ -2163,15 +2290,24 @@ function createDashboardMetrics(deps) {
       mA, mT, pac, ctr, ctrT, vcr: vcr2, vcrT, cvr: cvr2, cpm, cpv, dynCpm, dynCpc, dynCpv, dynCpa, tgtCpm,
       // Net cost mode: GROSS twins, shown beside their net originals.
       clientPrGross, budGross, dynCpmGross, dynCpcGross, dynCpvGross, dynCpaGross,
-      avgTP, totalDP, totalFD, daysLeft,
+      avgTP, totalDP, totalFD, daysLeft, flightSpanDay, flightSpanDays,
       scopeEnd: scopeEnd || null,
       bidPlanCpm, bidPlanCpc, bidPlanCpv,
       bidFact2dCpm, bidFact2dCpc, bidFact2dCpv,
       forecastDspSpend, clientPlanCpm, clientPlanCpc, clientPlanCpv,
+      // «Impressions to Hit Budget» (read off flCM).
+      hitBudgetAddImpr: hitAdd(hit.impr), hitBudgetAddClicks: hitAdd(hit.clicks), hitBudgetAddViews: hitAdd(hit.views),
+      hitBudgetPerDayImpr: hitPerDay(hit.impr), hitBudgetPerDayClicks: hitPerDay(hit.clicks),
+      hitBudgetPerDayViews: hitPerDay(hit.views),
+      hitBudgetAddInstalls: hitAdd(hit.installs), hitBudgetPerDayInstalls: hitPerDay(hit.installs),
+      hitBudgetPlan, hitBudgetProjected, hitBudgetGap,
 
       // Explicit impressions / clicks split
       imprPlan, imprActual, imprExpected, imprSpend,
       imprPlanDailyRate, imprPlanDailyEnded, neededPerDayImpr,
+      // The basis of the neededPerDay* (the notes under «Needed per day»).
+      neededImprBasis: neededBasis(need.impr), neededClicksBasis: neededBasis(need.clicks),
+      neededViewsBasis: neededBasis(need.views), neededInstallsBasis: neededBasis(need.installs),
       // All-lines impressions plan (any rate type) — the total expIm reaches.
       // Drives the dailyImpr reforecast so it paces to the SAME total as Plan.
       allPlanImpr, allPlanImprDailyRate,
@@ -2367,7 +2503,13 @@ function createDashboardMetrics(deps) {
     abs: { arity: [1, 1], tsOnly: false },
     round: { arity: [1, 2], tsOnly: false },
     if: { arity: [3, 3], tsOnly: false },
+    and: { arity: [2, 2], tsOnly: false },
+    or: { arity: [2, 2], tsOnly: false },
   };
+
+  // The two functions that read their arguments as conditions: each argument may be a
+  // comparison, and the call itself may stand where if() wants its condition.
+  const LOGIC_FNS = new Set(['and', 'or']);
 
   /** What a window function gets off a date axis. It has a name because it now has TWO
    *  speakers: `validate` below, while the author is typing, and report-render.js's CM360
@@ -2458,15 +2600,19 @@ function createDashboardMetrics(deps) {
       if (isOp('-')) { take(); return { t: 'neg', e: parseUnary() }; }
       return parsePrimary();
     }
-    function parseCond() {
+    // An expression with an optional comparison after it: what and() / or() take as arguments.
+    function parseCompared() {
       const l = parseExpr();
       const t = peek();
-      if (!t || t.t !== 'op' || !CMP_OPS.has(t.op)) {
-        fail('if() needs a comparison as its first argument, e.g. if(im > 0, …, …)');
-      }
+      if (!t || t.t !== 'op' || !CMP_OPS.has(t.op)) return l;
       const op = take().op;
       const r = parseExpr();
       return { t: 'cmp', op, l, r };
+    }
+    function parseCond() {
+      const node = parseCompared();
+      if (node.t === 'cmp' || (node.t === 'call' && LOGIC_FNS.has(node.fn))) return node;
+      fail('if() needs a comparison, and() or or() as its first argument, e.g. if(im > 0, …, …)');
     }
     function parsePrimary() {
       const t = peek();
@@ -2488,6 +2634,9 @@ function createDashboardMetrics(deps) {
             if (!isOp(',')) fail('if() expects 3 arguments');
             take();
             args.push(parseExpr());
+          } else if (LOGIC_FNS.has(fn)) {
+            args.push(parseCompared());
+            while (isOp(',')) { take(); args.push(parseCompared()); }
           } else if (!isOp(')')) {
             args.push(parseExpr());
             while (isOp(',')) { take(); args.push(parseExpr()); }
@@ -2520,7 +2669,7 @@ function createDashboardMetrics(deps) {
       if (left) {
         const shown = left.t === 'num' ? left.v : (left.name ?? left.op);
         if (left.t === 'op' && CMP_OPS.has(left.op)) {
-          return { ok: false, error: 'Comparisons are only allowed inside if(cond, a, b)' };
+          return { ok: false, error: 'Comparisons are only allowed inside if(cond, a, b), and(a, b) or or(a, b)' };
         }
         return { ok: false, error: `Unexpected "${shown}" after the end of the formula` };
       }
@@ -2711,6 +2860,10 @@ function createDashboardMetrics(deps) {
               return guard(Math.round(ev(a[0]) * f) / f, state);
             }
             case 'if': return ev(a[0]) ? ev(a[1]) : ev(a[2]);
+            case 'and': case 'or': {
+              const l = ev(a[0]), r = ev(a[1]);
+              return (n.fn === 'and' ? l && r : l || r) ? 1 : 0;
+            }
             default:
               // Window functions have no meaning without a date axis; validate() blocks
               // them in 'agg' — reaching here means a stored config bypassed validation.
@@ -2839,6 +2992,12 @@ function createDashboardMetrics(deps) {
               const c = ev(a[0]), t = ev(a[1]), e = ev(a[2]);
               const out = new Array(n);
               for (let i = 0; i < n; i++) out[i] = c[i] ? t[i] : e[i];
+              return out;
+            }
+            case 'and': case 'or': {
+              const l = ev(a[0]), r = ev(a[1]);
+              const out = new Array(n);
+              for (let i = 0; i < n; i++) out[i] = (node.fn === 'and' ? l[i] && r[i] : l[i] || r[i]) ? 1 : 0;
               return out;
             }
             default: state.warned = true; return zeros();
@@ -3031,6 +3190,17 @@ function createDashboardMetrics(deps) {
                 // The condition is read on the same day: a branch chosen from a day nobody
                 // measured is not a choice, so an absent condition makes the day absent too.
                 p[i] = c.present[i] && take.present[i];
+              }
+              return both(out, p);
+            }
+            case 'and': case 'or': {
+              // As min / max: a day either operand did not join is not a day the rule read.
+              const l = ev(a[0]), r = ev(a[1]);
+              const out = new Array(n);
+              const p = new Array(n);
+              for (let i = 0; i < n; i++) {
+                out[i] = (node.fn === 'and' ? l.values[i] && r.values[i] : l.values[i] || r.values[i]) ? 1 : 0;
+                p[i] = l.present[i] && r.present[i];
               }
               return both(out, p);
             }
@@ -4356,6 +4526,17 @@ function createDashboardMetrics(deps) {
 
 
 
+  // Formula chips P0 (docs/2026-10-01-formula-chips.md §7): the one reader for what a holder
+  // reads. A chip holder reaches the scanners below as `{expr, chips}`; no chip evaluator ships
+  // in P0, so the engine paths refuse it with CHIPS_NOT_READABLE rather than reading `_c1` as 0.
+
+  // Formula chips P1: the chip engine serves the aggregate and line item grains through the
+  // doors below (kpiValue, compileColumns, the li rows, totalsCells); every other grain still
+  // prints the P0 sentence. resolve.js imports this module back (the legacy fast path reads the
+  // campaign context), and neither side touches the other at load, so the cycle is inert.
+
+
+
 
 
 
@@ -4723,7 +4904,7 @@ function createDashboardMetrics(deps) {
     // its rate type, weighted by delivered impressions (weightedCtrT, read lazily below).
     let mW = 0, mWt = 0, vcW = 0, vcWt = 0, acW = 0, acWt = 0;
     const ctrIds = [];
-    let dpSum = 0, dlSum = 0, n = 0;
+    const spanPlans = [];
     // The target-CPM pair, campM's own (metrics.js:365/538): cost budget over plan impressions,
     // both summed over CPM-RATE lines only, both full-flight. `foldBasis` deliberately does not
     // lift this gate the way it lifts the vcrT one: a CPC line's `planImpr` holds plan
@@ -4756,9 +4937,7 @@ function createDashboardMetrics(deps) {
       if (vcrRateOk && !isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { vcW += p.vcrTgt * w; vcWt += w; }
       if (isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { acW += p.vcrTgt * w; acWt += w; }
       if (rt === 'CPM') { cpmBudSum += costBudOf(p); cpmImprSum += (Number(p.planImpr) || 0); }
-      // days: campM canon — average of per-LI prorated (fDays − dP) / dP.
-      const pr = prorate(p, asOf);
-      dpSum += pr.dP; dlSum += (pr.fDays - pr.dP); n++;
+      spanPlans.push(p);
     }
     out.mTgt = mWt > 0 ? mW / mWt : 0;
     // NULL, not 0, when no line in the set carries the target — campM's own answer
@@ -4781,8 +4960,12 @@ function createDashboardMetrics(deps) {
     // Same null-not-zero rule, same reason: a pacing with no CPM line has no target CPM, and
     // «$0.00» under a real CPM would read as a goal nobody set.
     out.tgtCpm = cpmImprSum > 0 ? (cpmBudSum / cpmImprSum) * 1000 : null;
-    out.daysPassed = n > 0 ? Math.max(0, Math.round(dpSum / n)) : 0;
-    out.daysLeft = n > 0 ? Math.max(0, Math.round(dlSum / n)) : 0;
+    // days: campM canon (2026-09-29) — the set's own flight, earliest start to latest end
+    // (campaignSpan), range-free like campM's daysLeft. It was the average of the lines' own
+    // days, which read 0 days left while the last lines were still running.
+    const span = campaignSpan(spanPlans, asOf);
+    out.daysPassed = span.fs ? span.days - span.left : 0;
+    out.daysLeft = span.left;
     return out;
   }
 
@@ -4836,6 +5019,10 @@ function createDashboardMetrics(deps) {
   // pins `MetricRegistry.ADDED_DELIVERY_KEYS` against, so a seventh cannot be forgotten here.
   const ZERO_FLOW_KEYS = Object.freeze(Object.keys(ZERO_FLOW));
 
+  /** A fresh ZERO_FLOW record, in ZERO_FLOW's own key order (formula chips P1): the record a
+   *  line-facts window is built on is THIS object, so a chip sum and a legacy sum are one float path. */
+  const zeroFlow = () => ({ ...ZERO_FLOW });
+
   // `rate` converts the row's client cost to USD and is passed ONLY by callers whose
   // rows have not been through it yet. The two fact aggregates have: normalize.js
   // runs every fact through row-utils' addFact, which applies the campaign rate as
@@ -4864,6 +5051,11 @@ function createDashboardMetrics(deps) {
     if (g.nc) { t.imNC += v.im || 0; t.spNC += v.sp || 0; }
     if (g.cpvBasis) { t.cpvSp += v.sp || 0; t.cpvCo += v.co || 0; }
   }
+
+  /** widget-data's own per-day accumulator, exported under its full name so nobody confuses it
+   *  with row-utils' addFact (which reads raw mart rows and applies currency and k). The three-
+   *  argument form is the one sumLiWindow uses: rows out of a fact aggregate are already USD and net. */
+  const addWindowFact = (t, v, g) => addFactTs(t, v, g);
 
   /** Re-sum rows that already carry the gated bases (totals over pre-gated rows). */
   function addRowSums(t, r, customKeys = []) {
@@ -5232,11 +5424,14 @@ function createDashboardMetrics(deps) {
   function readsCvField(c) {
     if (!c) return false;
     if (c.kind === 'field') return CV_FIELDS.has(c.field);
+    if (c.kind === 'chips') return c.info.cv;
     return c.kind === 'expr' && astNamesAny(c.ast, CV_FIELDS);
   }
 
-  /** The same question about a stored expression, for the renderer's column rules. */
+  /** The same question about a stored expression, for the renderer's column rules. A chip
+   *  holder answers from its map (formula chips P0). */
   function expressionReadsConversions(expr) {
+    if (isChipHolder(expr)) return holderInfo(expr).cv;
     if (typeof expr !== 'string' || !expr) return false;
     const parsed = parse(expr);
     return !!(parsed.ok && parsed.ast) && astNamesAny(parsed.ast, CV_FIELDS);
@@ -5471,8 +5666,25 @@ function createDashboardMetrics(deps) {
     return 0;
   }
 
-  function compileColumns(columns, contextKind, fieldSet) {
+  /** One chip column cell on a line row (formula chips P1). The first error on any row becomes
+   *  the column's: the renderer prints one sentence for the column, as for a refused formula. */
+  function chipCell(c, line, sources, range, colErrors) {
+    const out = evaluateHolderLine(c.holder, line, sources, range);
+    if (out.error && !colErrors[c.id]) colErrors[c.id] = out.error;
+    return out.error ? null : out.value;
+  }
+
+  function compileColumns(columns, contextKind, fieldSet, grainType = null) {
     return (columns || []).map((c) => {
+      if (isChipHolder(c.source)) {
+        // A chip column (formula chips P1) is served on the line item grain; every other grain
+        // still prints the reason.
+        if (grainType !== 'li') return { ...c, kind: 'error', error: CHIPS_NOT_READABLE };
+        const compiled = compileHolder(c.source);
+        if (compiled.error) return { ...c, kind: 'error', error: compiled.error };
+        if (compiled.windowed) return { ...c, kind: 'error', error: CHIP_NO_DATE_AXIS };
+        return { ...c, kind: 'chips', holder: c.source, totalAs: c.source.totalAs || null, info: holderInfo(c.source) };
+      }
       if (c.source?.field != null) {
         // Bare field refs are validated like idents (round-6: an unknown/plan-in-dim
         // field must surface as a column error, not a silent 0).
@@ -6500,6 +6712,8 @@ function createDashboardMetrics(deps) {
   function columnReads(c, fields) {
     if (!c) return false;
     if (c.kind === 'field') return fields.has(c.field);
+    // A chip column reads the legacy field each of its chips stands on (formula chips P1).
+    if (c.kind === 'chips') return Object.values(c.holder.chips).some((ch) => { const d = FormulaChips.CATALOG[ch.base]; return !!(d && d.legacy && fields.has(d.legacy)); });
     if (c.kind !== 'expr') return false;
     let found = false;
     (function walk(n) {
@@ -6517,6 +6731,24 @@ function createDashboardMetrics(deps) {
    *  grain. A plan scalar is a constant of the window — every row prints the same budget — and
    *  passes through untouched, as the rows above the Totals do. */
   const CALENDAR_EXPECTED_FIELDS = FIELDS_EXPECTED;
+
+  /** The sum of a chip column's non-null cells over the rows (all, or the kept line ids); null
+   *  when every cell is null. The rows before the limit: a Totals row is about the cut. */
+  function sumOfRows(rows, colId, ids, order) {
+    const kept = ids ? new Set([...ids].map(String)) : null;
+    const byId = new Map(rows.map((r) => [String(r.liId), r]));
+    let total = null;
+    // Summed in the cut's own order (effLIs), never the authored sort's, so the same rows add up
+    // to the same float whichever column the table is sorted by.
+    for (const id of order || []) {
+      const r = byId.get(String(id));
+      if (!r || (kept && !kept.has(String(id)))) continue;
+      const v = r.cells[colId];
+      if (v == null) continue;
+      total = (total ?? 0) + v;
+    }
+    return total;
+  }
 
   /** The rates whose population is EMPTY in these sums on the campaign ('agg') basis — ctr
    *  over every line's impressions, cpm over the non-click-bought lines', vcr over the eligible
@@ -6611,8 +6843,8 @@ function createDashboardMetrics(deps) {
     const fieldSet = isDim
       ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId, grain.key)
       : (contextKind === 'ts' ? TS_FIELDS : AGG_FIELDS);
-    const cols = compileColumns(request.columns, contextKind, fieldSet).map((column) => {
-      if (!highlightSafe || column.kind === 'error') return column;
+    const cols = compileColumns(request.columns, contextKind, fieldSet, grain.type).map((column) => {
+      if (!highlightSafe || column.kind === 'error' || column.kind === 'chips') return column;
       const resolved = column.kind === 'field' ? { kind: 'metric', metric: column.field }
         : { kind: 'formula', expr: column.source.expr };
       const error = unavailableMetric(resolved, sources, isDim ? grain.key : null);
@@ -6958,6 +7190,7 @@ function createDashboardMetrics(deps) {
             cvRowOff && readsCvField(c) ? null
               : c.kind === 'field' ? readField(c.field, sums, scalars, fieldSet, 'entity')
               : c.kind === 'expr' ? evalOne(c.ast, aggCtx(sums, scalars, 'entity', highlightSafe)).value
+              : c.kind === 'chips' ? chipCell(c, { id, plan: p, sums, scalars }, sources, range, colErrors)
               : null,
           ])),
         };
@@ -6980,7 +7213,8 @@ function createDashboardMetrics(deps) {
         for (const id of ids) addRowSums(sums, sumLiWindow(sources.liDaily, sources.liPlan[id], id, range, expBounds));
         const scalars = campaignScalars(sources.liPlan, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
           false, planWindowOf(sources, range), impr);
-        return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums) };
+        // `ids`: the kept line ids, for a chip column's Totals over the subset (formula chips P1).
+        return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums), ids };
       };
     }
 
@@ -7019,6 +7253,9 @@ function createDashboardMetrics(deps) {
       };
     })() : null;
 
+    // Every row before the limit: a chip column's `sumOfRows` Totals is about the cut, not about
+    // the rows a Top N happened to keep (formula chips P1).
+    const allRows = rows;
     if (request.limit && rows.length > request.limit) rows = rows.slice(0, request.limit);
 
     // Totals: aggregate-then-compute; window-fn / error columns → null (renderer "—").
@@ -7041,17 +7278,28 @@ function createDashboardMetrics(deps) {
     let retotal = null;
     // One Totals row from one set of sums: the whole cut's below, a kept subset's in `retotal`.
     // `planNull` is the date grains' rule (CALENDAR_PLAN_FIELDS); `unplanned` the dim cut's.
-    const totalsCells = ({ sums, scalars, unplanned, planNull, silentRates, cvNull }) => {
+    const totalsCells = ({ sums, scalars, unplanned, planNull, silentRates, cvNull, ids = null }) => {
       const basis = isDim || contextKind === 'ts' ? 'ts' : 'agg';
       return Object.fromEntries(cols.map((c) => {
         if (unplanned && planCols && planCols.has(c.id)) return [c.id, null];
         if (planNull && columnReads(c, CALENDAR_EXPECTED_FIELDS)) return [c.id, null];
-        if (silentRates && silentRates.size && columnReads(c, silentRates)) return [c.id, null];
+        // A chip column keeps its own silence (the chip engine answers empty over an empty
+        // population), never the legacy rate populations' (formula chips P1, plan decision b).
+        if (silentRates && silentRates.size && c.kind !== 'chips' && columnReads(c, silentRates)) return [c.id, null];
         // One totals rule (spec §3): a line item that is unavailable here empties every total
         // built on conversions — the cut's when any in-view line item is, a subset's when one of
         // the kept rows is.
         if (cvNull && readsCvField(c)) return [c.id, null];
         if (c.kind === 'field') return [c.id, readField(c.field, sums, scalars, fieldSet, basis)];
+        if (c.kind === 'chips') {
+          // A chip column's Totals (formula chips P1): as its `totalAs` says, else the chip
+          // over the cut (the whole cut, or the kept line ids a search box left standing).
+          if (c.totalAs === 'none') return [c.id, null];
+          if (c.totalAs === 'sumOfRows') return [c.id, sumOfRows(allRows, c.id, ids, sources.effLIs)];
+          const out = evaluateHolderAgg(c.holder, sources, range, ids ? { ids } : {});
+          if (out.error && !colErrors[c.id]) colErrors[c.id] = out.error;
+          return [c.id, out.error ? null : out.value];
+        }
         if (c.kind !== 'expr' || c.windowed) return [c.id, null];
         return [c.id, evalOne(c.ast, aggCtx(sums, scalars, basis, highlightSafe)).value];
       }));
@@ -7117,6 +7365,12 @@ function createDashboardMetrics(deps) {
     const cvMask = cvDateMask(sources, cal, sources.effLIs, range);
     const errors = {};
     const series = (expressions || []).map((s) => {
+      // A chip holder (formula chips P0) has no evaluator yet: refused, never a line of zeros
+      // read off `_c1`.
+      if (isChipHolder(s)) {
+        errors[s.id] = CHIPS_NOT_READABLE;
+        return { id: s.id, label: s.label, values: cal.map(() => 0), warned: true };
+      }
       const v = validate(s.expr, 'ts', TS_FIELDS);
       if (!v.ok) {
         errors[s.id] = formulaSay(v);
@@ -7539,12 +7793,34 @@ function createDashboardMetrics(deps) {
   }
 
   function kpiValue(widget, range, sources) {
+    if (isChipHolder(widget)) {
+      // A chip holder (formula chips P1) is evaluated by the chip engine over the same window.
+      // It is answered here, at the door every aggregate read comes through (a KPI, a guide, a
+      // Layout brick), because `aggRead` below is handed the TEXT and could not tell `_c1` from
+      // an unknown field. `error` is set only when there is one.
+      const out = evaluateHolderAgg(widget, sources, range);
+      const res = { value: out.value, warned: false };
+      if (out.error) res.error = out.error;
+      if (widget.target?.expr) {
+        const t = isChipHolder(widget.target) ? evaluateHolderAgg(widget.target, sources, range) : legacyAggRead(widget.target.expr, range, sources);
+        if (t.error) res.error = res.error || t.error;
+        else { res.target = t.value; res.delta = res.value == null || t.value == null ? null : res.value - t.value; }
+      }
+      return res;
+    }
     const v = validate(widget.expr, 'agg', AGG_FIELDS);
     if (!v.ok) return { value: 0, warned: true, error: formulaSay(v) };
     const ctx = campaignReadingContext(sources, range);
     const r = aggRead(widget.expr, ctx);
     const out = { value: r.value, warned: r.warned };
     if (widget.target?.expr) {
+      if (isChipHolder(widget.target)) {
+        // A chip target under a text value (formula chips P1): the chip engine reads it.
+        const t = evaluateHolderAgg(widget.target, sources, range);
+        if (t.error) out.error = t.error;
+        else { out.target = t.value; out.delta = r.value == null || t.value == null ? null : r.value - t.value; }
+        return out;
+      }
       const tv = validate(widget.target.expr, 'agg', AGG_FIELDS);
       if (tv.ok) {
         const t = aggRead(widget.target.expr, ctx);
@@ -7559,6 +7835,12 @@ function createDashboardMetrics(deps) {
       }
     }
     return out;
+  }
+  /** A text target under a chip value: validated and read the way the legacy branch reads one. */
+  function legacyAggRead(expr, range, sources) {
+    const tv = validate(expr, 'agg', AGG_FIELDS);
+    if (!tv.ok) return { value: null, error: tv.error };
+    return aggRead(expr, campaignReadingContext(sources, range));
   }
 
   /**
@@ -7583,7 +7865,22 @@ function createDashboardMetrics(deps) {
    * its own, and it never follows the window. `budgetToDate` (2026-09-23) is client money too:
    * its twin is each line's plan to date over the same days, over that line's own `k`.
    */
-  function grossAgg(expr, range, sources) {
+  // The four names grossAgg answers for, in their chip spelling (spec §2.2).
+  function grossNameOf(h) {
+    const ref = typeof h.expr === 'string' ? h.expr.trim() : '';
+    const c = /^_c\d{1,2}$/.test(ref) && hasOwn(h.chips, ref) ? h.chips[ref] : null;
+    if (!c) return null;
+    if (c.base === 'spend' && c.money === 'clientNet' && Object.keys(c).length === 2) return 'dc';
+    if (c.base === 'budget' && c.money === 'clientNet') {
+      if (c.span === 'widgetPeriod' && Object.keys(c).length === 3) return 'budget';
+      if (c.span === 'widgetToDate' && Object.keys(c).length === 3) return 'budgetToDate';
+      if (Object.keys(c).length === 2) return 'budgetTotal';
+    }
+    return null;
+  }
+
+  function grossAgg(exprOrHolder, range, sources) {
+    const expr = isChipHolder(exprOrHolder) ? grossNameOf(exprOrHolder) : exprOrHolder;
     if (expr !== 'budget' && expr !== 'budgetTotal' && expr !== 'budgetToDate' && expr !== 'dc') return null;
     const bounds = calendarBounds(sources, range);
     const planWindow = expr === 'budget' ? planWindowOf(sources, range) : null;
@@ -7675,6 +7972,8 @@ function createDashboardMetrics(deps) {
     const out = { fact: false, plan: false };
     const scan = (src) => {
       if (!src) return;
+      // A chip holder answers from its map (formula chips P0), never by parsing `_c1`.
+      if (isChipHolder(src)) { const i = holderInfo(src); out.fact ||= i.fact; out.plan ||= i.plan; return; }
       try {
         (function walk(n) {
           if (!n) return;
@@ -8005,11 +8304,13 @@ function createDashboardMetrics(deps) {
   // `margin` and `marginbar` are both `cm.mA`, computed FROM net. The client plan rates and
   // the dynamic client CPM are client money printed net with no gross twin beside them. Every
   // other reading — `budget`, `pacing`, `spend`, `cpm`, the delivery and needed-per-day ones —
-  // is media-side, a count or a percentage, and has no client basis to state.
+  // is media-side, a count or a percentage, and has no client basis to state. The three
+  // «Impressions to Hit Budget» money readings (2026-09-29) are client money, net like `budget`.
   const READING_BASIS = new Map([
     ['margin', 'margin'], ['marginbar', 'margin'],
     ['clientPlanCpm', 'net'], ['clientPlanCpc', 'net'], ['clientPlanCpv', 'net'],
     ['dynCpm', 'net'],
+    ['hitBudgetPlan', 'net'], ['hitBudgetProjected', 'net'], ['hitBudgetGap', 'net'],
   ]);
 
   // The name a basis key goes by where the delivery-field catalogue has none. `mA` is campM's
@@ -8078,20 +8379,23 @@ function createDashboardMetrics(deps) {
 
 /* ══ workspace/src/lib/dashboard/layout-readings.js ═══════════════════════════════════════════ */
   // Named domain readings for ordinary Layout bindings. The old Flight brick and its
-  // editable recipe share exactly the same range-aware day averaging and flight remainder.
+  // editable recipe share exactly the same campaign flight: its range-aware day and its remainder.
 
   const LAYOUT_READING_OPTIONS = Object.freeze([
-    { key: 'flight.day', label: 'Flight day', note: 'Average elapsed days of effective line items in the selected window.', format: 'int' },
-    { key: 'flight.total', label: 'Flight duration', note: 'Average flight duration of effective line items in the selected window.', format: 'int' },
-    { key: 'flight.remaining', label: 'Flight days remaining', note: 'Remaining days across the full flight.', format: 'int' },
+    { key: 'flight.day', label: 'Flight day', note: 'Days from the earliest line item start to the last data day in the selected window.', format: 'int' },
+    { key: 'flight.total', label: 'Flight duration', note: 'Days from the earliest line item start to the latest line item end.', format: 'int' },
+    { key: 'flight.remaining', label: 'Flight days remaining', note: 'Days after the last data day until the latest line item end.', format: 'int' },
   ].map((entry) => Object.freeze(entry)));
 
-  function flightProgress(cm, flCM, effLIs) {
-    const n = Math.max(1, (effLIs || []).length);
+  // The campaign's own flight, earliest line start to latest line end (metrics.js campaignSpan,
+  // 2026-09-29), so «Day X of Y · N days left» adds up: X + N = Y on the flight. They were the
+  // averages of the lines' own days, which on a pacing whose lines end on different dates read
+  // «Flight ended» with two lines still running. `effLIs` is kept for callers; the span is cm's.
+  function flightProgress(cm, flCM, effLIs) { // eslint-disable-line no-unused-vars
     const left = Math.max(0, (flCM && flCM.daysLeft) || 0);
     return {
-      day: Math.round(((cm && cm.totalDP) || 0) / n),
-      total: Math.round(((cm && cm.totalFD) || 0) / n),
+      day: (cm && cm.flightSpanDay) || 0,
+      total: (cm && cm.flightSpanDays) || 0,
       daysLeft: left,
       daysLeftText: left === 0 ? 'flight ended' : left === 1 ? '1 day left' : `${left} days left`,
     };
@@ -8126,6 +8430,11 @@ function createDashboardMetrics(deps) {
   // `canonicalValue`), so importing it back would be a real cycle. `cmEvalAt` lives in
   // `cm-formula-context.js` for this reason, and `report-render.js` only re-exports it.
 
+  // Formula chips P0: a chip bind's format is its chip's legacy field's, and its value is
+  // refused with the one sentence until a chip evaluator ships.
+
+
+
   // `FIELDS_PLAN` is the vocabulary a WINDOW reading may name beside the comparison (§2.4): both
   // cm slots in this file are window readings — a block, and a mini-chart line whose plan half is
   // the window's — so both run the gate against the same set the KPI rail runs it against.
@@ -8134,6 +8443,7 @@ function createDashboardMetrics(deps) {
 
   // The one predicate that says whether a money figure actually DRAWS its gross twin —
   // asked per ROW here, so a rate label can never claim a basis the row does not show.
+
 
 
   // The word bands live in ONE place — the composite
@@ -8214,6 +8524,21 @@ function createDashboardMetrics(deps) {
     // plan" rather than "0.0 pp", which is what the plan-less branch (UnitCardBody:15-21)
     // needs: no badge, no colour, just the count.
     paceDeltaImpr: { from: 'derived', format: 'pp', unit: 'impr' },
+    // «Impressions to Hit Budget» (2026-09-29): full flight, or the period under period scope,
+    // whatever the Range filter says. Each unit's pair is absent on a pacing with no goal in it,
+    // so the card's cells for views and clicks drop on a CPM-only pacing; null (an em dash)
+    // while a unit has no client cost to take a rate from.
+    hitBudgetAddImpr: { from: 'fl', format: 'int', unit: 'impr' },
+    hitBudgetAddViews: { from: 'fl', format: 'int', unit: 'views' },
+    hitBudgetAddClicks: { from: 'fl', format: 'int', unit: 'clicks' },
+    hitBudgetPerDayImpr: { from: 'fl', format: 'int', unit: 'impr', needsFlight: true },
+    hitBudgetPerDayViews: { from: 'fl', format: 'int', unit: 'views', needsFlight: true },
+    hitBudgetPerDayClicks: { from: 'fl', format: 'int', unit: 'clicks', needsFlight: true },
+    hitBudgetAddInstalls: { from: 'fl', format: 'int', unit: 'installs' },
+    hitBudgetPerDayInstalls: { from: 'fl', format: 'int', unit: 'installs', needsFlight: true },
+    hitBudgetPlan: { from: 'fl', format: 'money' },
+    hitBudgetProjected: { from: 'fl', format: 'money' },
+    hitBudgetGap: { from: 'fl', format: 'money' },
     /* ── The same seven, on the unit this pacing is actually BOUGHT on (2026-10-05) ──
      * The legacy Delivery card was unit-aware: UnitCardBody read `primaryUnit(cm)` and drew
      * impressions, clicks or views. Its Standard replacement could not — a stored definition
@@ -8309,6 +8634,27 @@ function createDashboardMetrics(deps) {
     ctr: 'percent2', vcr: 'percent', acr: 'percent',
     mTgt: 'percent', ctrT: 'percent2', vcrT: 'percent', acrT: 'percent',
   };
+
+  /** The bare field a formula bind names, by the key `bindValue` reads `FIELD_FORMAT` with. */
+  const bareFieldOf = (bind) => (bind && bind.expr ? (bind.chips ? holderInfo(bind).legacyField : bind.expr) : null);
+  /** The catalogue's default format per delivery field: the one a new block is born with. */
+  const FIELD_DEFAULT_FORMAT = new Map(CATALOG.filter((entry) => entry.kind === 'metric')
+    .map((entry) => [entry.key, entry.defaultFormat]));
+  const FAMILY_FORMAT = { __proto__: null, count: 'int', money: 'money', percent: 'percent' };
+  const knownFormat = (format) => (format && format !== 'auto' ? format : null);
+  /**
+   * What a formula bind's own words say about its unit, where the engine's format is silent:
+   * the catalogue's default for a bare field (`cl` is a count `FIELD_FORMAT` knows nothing
+   * about, a conversion prints one decimal), else the unit family its chips agree on — a single
+   * chip with settings, which has no bare field, or a sum of same-unit ones (`unitOf`). A ratio,
+   * a product or a number has no unit to name, and neither does a text the parser refuses.
+   */
+  function impliedFormat(bind) {
+    if (!bind || !bind.expr) return null;
+    const byField = knownFormat(FIELD_DEFAULT_FORMAT.get(bareFieldOf(bind)));
+    if (byField) return byField;
+    try { return FAMILY_FORMAT[unitOf(bind)] || null; } catch { return null; }
+  }
 
   /**
    * Metrics that mean nothing before the first delivered day. OverviewBlock1:481 refuses
@@ -8429,7 +8775,17 @@ function createDashboardMetrics(deps) {
       }
     }
     if (!bind || !bind.expr) return { value: null };
-    const fmt = hasOwnBrick(FIELD_FORMAT, bind.expr) ? FIELD_FORMAT[bind.expr] : null;
+    const key = bareFieldOf(bind);
+    const fmt = hasOwnBrick(FIELD_FORMAT, key) ? FIELD_FORMAT[key] : null;
+    // A chip bind (formula chips P1) is evaluated by the chip engine through kpiValue's door,
+    // never handed to the delivery engine as text, which would read `_c1` as an unknown field.
+    if (bind.chips) {
+      if (holderInfo(bind).cm) return { value: null, format: fmt, error: CHIP_CM_NOT_YET };
+      if (!ctx.data?.sources) return { value: null, format: fmt };
+      const o = kpiValue(bind, ctx.data.range, ctx.data.sources);
+      if (o.error) return { value: null, error: o.error, format: fmt };
+      return { value: o.value, warned: false, format: fmt };
+    }
     // A cm-bearing binding is never handed to the delivery engine (§2.2): `cmIm` is no field of
     // it, and the population it counts is the mapping's rather than the pacing's. Five slots
     // arrive here (a block's value, its target, a progress marker, a stat-row cell, a badge)
@@ -8514,6 +8870,29 @@ function createDashboardMetrics(deps) {
       // nothing left to wait for — so a caller can tell the two silences apart.
       pending: !!v.pending,
     };
+  }
+
+  /**
+   * A progress bar's MARKER → the brickValue shape, in the format it prints in.
+   *
+   * In order: the author's `tickFormat`; the marker's OWN unit (a bare `expCo` or a canonical
+   * metric, as the Standard bars print today; a bare field or chip the catalogue names, so the
+   * editor's default `expIm` is a whole count on any bar); and only then the bar's, because a
+   * formula has no unit of its own and the marker stands on the bar's scale (its place is
+   * marker / target): the bar value's format or unit, then the bar target's. A formula over a
+   * bar of formulas has no unit anyone can name and stays `auto` until the author picks one.
+   * Feedback 2026-10-02: «needed today · 3,038.16» on a clicks bar, «5,311.48» with no $ on a
+   * budget one.
+   */
+  function tickValue(brick, ctx, bar) {
+    const c = ctx || {};
+    const tick = brickValue({ bind: brick && brick.tick }, c);
+    if (!brick || !brick.tick) return tick;
+    const format = knownFormat(brick.tickFormat)
+      || knownFormat(tick.format) || impliedFormat(brick.tick)
+      || knownFormat((bar || brickValue(brick, c)).format) || impliedFormat(brick.bind)
+      || (brick.target ? knownFormat(bindValue(brick.target, c).format) || impliedFormat(brick.target) : null);
+    return format ? { ...tick, format } : tick;
   }
 
   /** A statRow cell is a brick with fewer opinions. */
@@ -8947,20 +9326,22 @@ function createDashboardMetrics(deps) {
       const clicksNeeded = flCM.neededPerDayClicks ?? 0;
       const viewsNeeded = flCM.neededPerDayViews ?? 0;
       const spendNeeded = flCM.neededSpendPerDay ?? 0;
-      // The «X ÷ N days» notes explain the headline beside them, which is flCM's needed per
-      // day: the whole flight's plan, less what the whole flight delivered, less what a line
-      // paused right now will not be asked for (metrics.js neededPerDay*). Every term is flCM's,
-      // so the note is the headline times the days left — never the window's delivery against
-      // the flight's plan.
-      const imA = flCM.imprActual ?? flCM.im ?? 0;
+      // The notes explain the headline beside them with its own terms (metrics.js, the
+      // neededPerDay* sums and their `needed*Basis`, 2026-09-29): what the running lines below
+      // plan still have to deliver, each over its own days left. When those lines share one days
+      // left, the note is the headline times the days, «X ÷ N days»; otherwise it says how many
+      // lines it sums. Every term is flCM's, never the window's delivery against the flight's plan.
       const imP = flCM.imprPlan ?? flCM.pI ?? 0;
-      const imR = flCM.imprPlanPausedRem ?? 0;
-      const clA = flCM.clicksActual ?? flCM.cl ?? 0;
       const clP = flCM.clicksPlan ?? flCM.planClicks ?? 0;
-      const clR = flCM.clicksPlanPausedRem ?? 0;
-      const vwA = flCM.viewsActual ?? 0;
       const vwP = flCM.viewsPlan ?? 0;
-      const vwR = flCM.viewsPlanPausedRem ?? 0;
+      const needNote = (plan, basis, word) => {
+        if (!(plan > 0)) return null;
+        const b = basis || { left: 0, lines: 0, days: null };
+        if (!(b.lines > 0)) return `No ${word} left to deliver on running line items.`;
+        return b.days != null
+          ? `${fI(b.left)} ${word} ÷ ${b.days} days.`
+          : `${fI(b.left)} ${word} left on ${b.lines} line items, each over its own days left.`;
+      };
       // The per-type breakdown of the needed spend (:571-574): needed units × that rate
       // type's 2-day buying rate, which is what neededSpendPerDay actually sums.
       const parts = [];
@@ -8970,15 +9351,15 @@ function createDashboardMetrics(deps) {
       const note = (t) => (flightEnded ? null : t);
       return {
         lines: [
-          showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(imP > 0 ? `${fI(imP - imA - imR)} impr ÷ ${flCM.daysLeft} days.` : null), imprNeeded) : null,
+          showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(needNote(imP, flCM.neededImprBasis, 'impr')), imprNeeded) : null,
           showClicks
             ? (clicksHasPlan
-              ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(clP > 0 ? `${fI(clP - clA - clR)} clicks ÷ ${flCM.daysLeft} days.` : null), clicksNeeded)
+              ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(needNote(clP, flCM.neededClicksBasis, 'clicks')), clicksNeeded)
               : muted('Clicks plan not set'))
             : null,
           showViews
             ? (viewsHasPlan
-              ? line(`${fI(viewsNeeded)}/day`, 'views', note(vwP > 0 ? `${fI(vwP - vwA - vwR)} views ÷ ${flCM.daysLeft} days.` : null), viewsNeeded)
+              ? line(`${fI(viewsNeeded)}/day`, 'views', note(needNote(vwP, flCM.neededViewsBasis, 'views')), viewsNeeded)
               : muted('Views plan not set'))
             : null,
           spendNeeded > 0 ? line(`${f$(spendNeeded)}/day`, 'spend', note(parts.length ? `${parts.join(' + ')}.` : null), spendNeeded) : null,
@@ -9283,6 +9664,34 @@ function createDashboardMetrics(deps) {
       }
     }
     return keys;
+  }
+
+  /**
+   * The same walk as collectSplitKeys, keeping WHICH line items declare each split:
+   * '<dim_key>:<dim_value>' → Set of line item ids. The filter pop-up's count for a Scope
+   * dim value (spec 2026-10-01) reads it; collectSplitKeys and its Set stay as they are.
+   * @param {Object} liPlan  map id → LI plan
+   * @returns {Map<string, Set<string>>}
+   */
+  function splitLinesByKey(liPlan) {
+    const lines = new Map();
+    if (!liPlan) return lines;
+    for (const id of Object.keys(liPlan)) {
+      const li = liPlan[id];
+      if (!li) continue;
+      const containers = Array.isArray(li.containers) ? li.containers : [];
+      for (const container of containers) {
+        const children = Array.isArray(container.dim_children) ? container.dim_children : [];
+        for (const child of children) {
+          if (!child || child.dim_key == null || child.dim_value == null) continue;
+          if (!(dimAbs(child, container) > 0)) continue;
+          const key = child.dim_key + ':' + child.dim_value;
+          if (!lines.has(key)) lines.set(key, new Set());
+          lines.get(key).add(String(id));
+        }
+      }
+    }
+    return lines;
   }
 
   /**
