@@ -32,6 +32,7 @@ import {
   setLimit, setRows, setShare, setSort, setTotals, setViewTitle, setViewSettings, validateReportDraft,
 } from '../report-draft.js';
 import { cmRefusal, deltaMetricStep, dimPlanEnv, sourceEnv, sourceStep, sourcesFor, spotlightItems, valueReadsCm } from '../spotlight-items.js';
+import { formulaValue } from './FormulaEditorDialog.jsx';
 import ColumnPopover from './ColumnPopover.jsx';
 import TargetPopover from './TargetPopover.jsx';
 import SortPopover from './SortPopover.jsx';
@@ -390,9 +391,9 @@ export default function TableCard({
     });
   };
 
-  const onFormula = (expr, family) => {
+  const onFormula = (stored, family) => {
     const { mode, columnId } = spot;
-    const value = { kind: 'formula', expr, unitFamily: family };
+    const value = formulaValue(stored, family);
     if (mode === 'add') {
       const [id] = mintIds(1);
       setPending(id);
@@ -407,9 +408,9 @@ export default function TableCard({
     reopen(columnId);
   };
 
-  const previewFormula = (expr, unitFamily) => {
+  const previewFormula = (stored, unitFamily) => {
     const { mode, columnId } = spot;
-    const value = { kind: 'formula', expr, unitFamily };
+    const value = formulaValue(stored, unitFamily);
     const elementId = mode === 'add' ? newNodeId(spec, 'formula_preview') : columnId;
     const column = columns.find((item) => item.id === elementId);
     const fields = mode === 'target'
@@ -681,6 +682,8 @@ export default function TableCard({
         formulaSlot={spot && spot.mode !== 'rows' ? {
           value: spot.mode === 'target' ? columns.find((c) => c.id === spot.columnId)?.target?.value : columns.find((c) => c.id === spot.columnId)?.value,
           ...formulaScope,
+          // The slot in compile.js's words: which stored form a chip formula gets (decision h).
+          slot: spot.mode === 'target' ? 'columnTarget' : 'column',
           // The mart-metrics inventory travels with the slot, so the door at the bottom of
           // the value map says what FormulaField and the full editor already say.
           availableMetrics: env.availableMetrics,

@@ -33,6 +33,7 @@ import {
   datasetTypeOf, setTarget, setViewTitle, validateReportDraft, updateView,
 } from '../report-draft.js';
 import { cmRefusal, sourceEnv, sourceStep, sourcesFor, spotlightItems, valueReadsCm } from '../spotlight-items.js';
+import { formulaValue } from './FormulaEditorDialog.jsx';
 import KpiPopover from './KpiPopover.jsx';
 import TargetPopover from './TargetPopover.jsx';
 import { viewAt } from './ask-grammar.js';
@@ -168,8 +169,8 @@ export default function KpiCard({
     setPick({ mode: spot, entry, options, question: `Read ${entry.label} from:` });
   };
 
-  const onFormula = (expr, family) => {
-    const next = { kind: 'formula', expr, unitFamily: family };
+  const onFormula = (stored, family) => {
+    const next = formulaValue(stored, family);
     // A formula declares its own family, so nothing here re-mints the format: the author
     // said what the expression is in, and `badCellFormat` names a format that cannot print it.
     if (spot === 'target') return setTargetValue(next);
@@ -177,8 +178,8 @@ export default function KpiCard({
     reopen();
   };
 
-  const previewFormula = (expr, unitFamily) => {
-    const nextValue = { kind: 'formula', expr, unitFamily };
+  const previewFormula = (stored, unitFamily) => {
+    const nextValue = formulaValue(stored, unitFamily);
     const next = spot === 'target'
       ? setTarget(spec, view.id, { ...view.target, value: nextValue, invert: !!view.target?.invert })
       : pickViewValue(spec, view.id, nextValue, null);
@@ -282,6 +283,8 @@ export default function KpiCard({
         formulaSlot={spot ? {
           value: spot === 'target' ? view.target?.value : value,
           ...FORMULA_SCOPE,
+          // The slot in compile.js's words: which stored form a chip formula gets (decision h).
+          slot: spot === 'target' ? 'target' : 'value',
           // The mart-metrics inventory travels with the slot, so the door at the bottom of
           // the value map says what FormulaField and the full editor already say.
           availableMetrics: env.availableMetrics,

@@ -20,6 +20,11 @@ import { kpiValue, buildSeriesModel, campaignWindowScalars } from './widget-data
 // `canonicalValue`), so importing it back would be a real cycle. `cmEvalAt` lives in
 // `cm-formula-context.js` for this reason, and `report-render.js` only re-exports it.
 import { cmMarkerOf, cmEvalAt, cmFieldRefusal, cmSeriesContext } from './cm-formula-context.js';
+// Formula chips P0: a chip bind's format is its chip's legacy field's, and its value is
+// refused with the one sentence until a chip evaluator ships.
+import { holderInfo } from './chips/info.js';
+import { unitOf } from './chips/tokens.js';
+import { CHIP_CM_NOT_YET } from './chips/resolve.js';
 // `FIELDS_PLAN` is the vocabulary a WINDOW reading may name beside the comparison (§2.4): both
 // cm slots in this file are window readings — a block, and a mini-chart line whose plan half is
 // the window's — so both run the gate against the same set the KPI rail runs it against.
@@ -30,6 +35,7 @@ import { anyCoef, anyNet, basisLabel, coefLabels } from './coef-rebuild.js';
 // asked per ROW here, so a rate label can never claim a basis the row does not show.
 import { showsGrossPair } from './dual-money.js';
 import { readingFor } from './widget-metric-readings.js';
+import { CATALOG } from './metric-catalog.js';
 // The word bands live in ONE place — the composite
 // reads the same functions block1 and the ready cards read, so the hero and the card
 // beside it can never call the same delta by two different words.
@@ -111,6 +117,21 @@ const CANON = {
   // plan" rather than "0.0 pp", which is what the plan-less branch (UnitCardBody:15-21)
   // needs: no badge, no colour, just the count.
   paceDeltaImpr: { from: 'derived', format: 'pp', unit: 'impr' },
+  // «Impressions to Hit Budget» (2026-09-29): full flight, or the period under period scope,
+  // whatever the Range filter says. Each unit's pair is absent on a pacing with no goal in it,
+  // so the card's cells for views and clicks drop on a CPM-only pacing; null (an em dash)
+  // while a unit has no client cost to take a rate from.
+  hitBudgetAddImpr: { from: 'fl', format: 'int', unit: 'impr' },
+  hitBudgetAddViews: { from: 'fl', format: 'int', unit: 'views' },
+  hitBudgetAddClicks: { from: 'fl', format: 'int', unit: 'clicks' },
+  hitBudgetPerDayImpr: { from: 'fl', format: 'int', unit: 'impr', needsFlight: true },
+  hitBudgetPerDayViews: { from: 'fl', format: 'int', unit: 'views', needsFlight: true },
+  hitBudgetPerDayClicks: { from: 'fl', format: 'int', unit: 'clicks', needsFlight: true },
+  hitBudgetAddInstalls: { from: 'fl', format: 'int', unit: 'installs' },
+  hitBudgetPerDayInstalls: { from: 'fl', format: 'int', unit: 'installs', needsFlight: true },
+  hitBudgetPlan: { from: 'fl', format: 'money' },
+  hitBudgetProjected: { from: 'fl', format: 'money' },
+  hitBudgetGap: { from: 'fl', format: 'money' },
   /* ── The same seven, on the unit this pacing is actually BOUGHT on (2026-10-05) ──
    * The legacy Delivery card was unit-aware: UnitCardBody read `primaryUnit(cm)` and drew
    * impressions, clicks or views. Its Standard replacement could not — a stored definition
@@ -206,6 +227,27 @@ const FIELD_FORMAT = {
   ctr: 'percent2', vcr: 'percent', acr: 'percent',
   mTgt: 'percent', ctrT: 'percent2', vcrT: 'percent', acrT: 'percent',
 };
+
+/** The bare field a formula bind names, by the key `bindValue` reads `FIELD_FORMAT` with. */
+const bareFieldOf = (bind) => (bind && bind.expr ? (bind.chips ? holderInfo(bind).legacyField : bind.expr) : null);
+/** The catalogue's default format per delivery field: the one a new block is born with. */
+const FIELD_DEFAULT_FORMAT = new Map(CATALOG.filter((entry) => entry.kind === 'metric')
+  .map((entry) => [entry.key, entry.defaultFormat]));
+const FAMILY_FORMAT = { __proto__: null, count: 'int', money: 'money', percent: 'percent' };
+const knownFormat = (format) => (format && format !== 'auto' ? format : null);
+/**
+ * What a formula bind's own words say about its unit, where the engine's format is silent:
+ * the catalogue's default for a bare field (`cl` is a count `FIELD_FORMAT` knows nothing
+ * about, a conversion prints one decimal), else the unit family its chips agree on — a single
+ * chip with settings, which has no bare field, or a sum of same-unit ones (`unitOf`). A ratio,
+ * a product or a number has no unit to name, and neither does a text the parser refuses.
+ */
+function impliedFormat(bind) {
+  if (!bind || !bind.expr) return null;
+  const byField = knownFormat(FIELD_DEFAULT_FORMAT.get(bareFieldOf(bind)));
+  if (byField) return byField;
+  try { return FAMILY_FORMAT[unitOf(bind)] || null; } catch { return null; }
+}
 
 /**
  * Metrics that mean nothing before the first delivered day. OverviewBlock1:481 refuses
@@ -326,7 +368,17 @@ function bindValue(bind, ctx) {
     }
   }
   if (!bind || !bind.expr) return { value: null };
-  const fmt = hasOwn(FIELD_FORMAT, bind.expr) ? FIELD_FORMAT[bind.expr] : null;
+  const key = bareFieldOf(bind);
+  const fmt = hasOwn(FIELD_FORMAT, key) ? FIELD_FORMAT[key] : null;
+  // A chip bind (formula chips P1) is evaluated by the chip engine through kpiValue's door,
+  // never handed to the delivery engine as text, which would read `_c1` as an unknown field.
+  if (bind.chips) {
+    if (holderInfo(bind).cm) return { value: null, format: fmt, error: CHIP_CM_NOT_YET };
+    if (!ctx.data?.sources) return { value: null, format: fmt };
+    const o = kpiValue(bind, ctx.data.range, ctx.data.sources);
+    if (o.error) return { value: null, error: o.error, format: fmt };
+    return { value: o.value, warned: false, format: fmt };
+  }
   // A cm-bearing binding is never handed to the delivery engine (§2.2): `cmIm` is no field of
   // it, and the population it counts is the mapping's rather than the pacing's. Five slots
   // arrive here (a block's value, its target, a progress marker, a stat-row cell, a badge)
@@ -411,6 +463,29 @@ export function brickValue(brick, ctx) {
     // nothing left to wait for — so a caller can tell the two silences apart.
     pending: !!v.pending,
   };
+}
+
+/**
+ * A progress bar's MARKER → the brickValue shape, in the format it prints in.
+ *
+ * In order: the author's `tickFormat`; the marker's OWN unit (a bare `expCo` or a canonical
+ * metric, as the Standard bars print today; a bare field or chip the catalogue names, so the
+ * editor's default `expIm` is a whole count on any bar); and only then the bar's, because a
+ * formula has no unit of its own and the marker stands on the bar's scale (its place is
+ * marker / target): the bar value's format or unit, then the bar target's. A formula over a
+ * bar of formulas has no unit anyone can name and stays `auto` until the author picks one.
+ * Feedback 2026-10-02: «needed today · 3,038.16» on a clicks bar, «5,311.48» with no $ on a
+ * budget one.
+ */
+export function tickValue(brick, ctx, bar) {
+  const c = ctx || {};
+  const tick = brickValue({ bind: brick && brick.tick }, c);
+  if (!brick || !brick.tick) return tick;
+  const format = knownFormat(brick.tickFormat)
+    || knownFormat(tick.format) || impliedFormat(brick.tick)
+    || knownFormat((bar || brickValue(brick, c)).format) || impliedFormat(brick.bind)
+    || (brick.target ? knownFormat(bindValue(brick.target, c).format) || impliedFormat(brick.target) : null);
+  return format ? { ...tick, format } : tick;
 }
 
 /** A statRow cell is a brick with fewer opinions. */
@@ -844,20 +919,22 @@ export function detailSource(source, ctx, withReadings = false) {
     const clicksNeeded = flCM.neededPerDayClicks ?? 0;
     const viewsNeeded = flCM.neededPerDayViews ?? 0;
     const spendNeeded = flCM.neededSpendPerDay ?? 0;
-    // The «X ÷ N days» notes explain the headline beside them, which is flCM's needed per
-    // day: the whole flight's plan, less what the whole flight delivered, less what a line
-    // paused right now will not be asked for (metrics.js neededPerDay*). Every term is flCM's,
-    // so the note is the headline times the days left — never the window's delivery against
-    // the flight's plan.
-    const imA = flCM.imprActual ?? flCM.im ?? 0;
+    // The notes explain the headline beside them with its own terms (metrics.js, the
+    // neededPerDay* sums and their `needed*Basis`, 2026-09-29): what the running lines below
+    // plan still have to deliver, each over its own days left. When those lines share one days
+    // left, the note is the headline times the days, «X ÷ N days»; otherwise it says how many
+    // lines it sums. Every term is flCM's, never the window's delivery against the flight's plan.
     const imP = flCM.imprPlan ?? flCM.pI ?? 0;
-    const imR = flCM.imprPlanPausedRem ?? 0;
-    const clA = flCM.clicksActual ?? flCM.cl ?? 0;
     const clP = flCM.clicksPlan ?? flCM.planClicks ?? 0;
-    const clR = flCM.clicksPlanPausedRem ?? 0;
-    const vwA = flCM.viewsActual ?? 0;
     const vwP = flCM.viewsPlan ?? 0;
-    const vwR = flCM.viewsPlanPausedRem ?? 0;
+    const needNote = (plan, basis, word) => {
+      if (!(plan > 0)) return null;
+      const b = basis || { left: 0, lines: 0, days: null };
+      if (!(b.lines > 0)) return `No ${word} left to deliver on running line items.`;
+      return b.days != null
+        ? `${fI(b.left)} ${word} ÷ ${b.days} days.`
+        : `${fI(b.left)} ${word} left on ${b.lines} line items, each over its own days left.`;
+    };
     // The per-type breakdown of the needed spend (:571-574): needed units × that rate
     // type's 2-day buying rate, which is what neededSpendPerDay actually sums.
     const parts = [];
@@ -867,15 +944,15 @@ export function detailSource(source, ctx, withReadings = false) {
     const note = (t) => (flightEnded ? null : t);
     return {
       lines: [
-        showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(imP > 0 ? `${fI(imP - imA - imR)} impr ÷ ${flCM.daysLeft} days.` : null), imprNeeded) : null,
+        showImpr ? line(`${fI(imprNeeded)}/day`, 'impr', note(needNote(imP, flCM.neededImprBasis, 'impr')), imprNeeded) : null,
         showClicks
           ? (clicksHasPlan
-            ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(clP > 0 ? `${fI(clP - clA - clR)} clicks ÷ ${flCM.daysLeft} days.` : null), clicksNeeded)
+            ? line(`${fI(clicksNeeded)}/day`, 'clicks', note(needNote(clP, flCM.neededClicksBasis, 'clicks')), clicksNeeded)
             : muted('Clicks plan not set'))
           : null,
         showViews
           ? (viewsHasPlan
-            ? line(`${fI(viewsNeeded)}/day`, 'views', note(vwP > 0 ? `${fI(vwP - vwA - vwR)} views ÷ ${flCM.daysLeft} days.` : null), viewsNeeded)
+            ? line(`${fI(viewsNeeded)}/day`, 'views', note(needNote(vwP, flCM.neededViewsBasis, 'views')), viewsNeeded)
             : muted('Views plan not set'))
           : null,
         spendNeeded > 0 ? line(`${f$(spendNeeded)}/day`, 'spend', note(parts.length ? `${parts.join(' + ')}.` : null), spendNeeded) : null,

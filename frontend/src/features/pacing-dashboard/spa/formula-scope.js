@@ -39,7 +39,8 @@ export function formulaScopeFor(grain, env = {}) {
   // the metric catalog takes it from the caller: this module knows nothing about a pacing.
   // Absent, the palette is what it has always been.
   const dimBase = isDim && env.dimPlanEligible ? DIM_DECLARED_FIELDS_SET : DIM_FIELDS_SET;
-  const scope = { contextKind, isDim, fieldSet: isDim ? dimBase : TS_FIELDS, fieldLabels: NO_LABELS, cm, cmRefusal };
+  // `grain` is the slot's grain type, read by the editor's chip strip (formula chips P0).
+  const scope = { contextKind, isDim, grain: type, fieldSet: isDim ? dimBase : TS_FIELDS, fieldLabels: NO_LABELS, cm, cmRefusal };
   // A switch may span unrelated sources. Only their common delivery vocabulary is safe
   // without a source binding on each token. Configured names remain editable while an
   // aux file is loading or stale: file availability is the renderer's separate concern.

@@ -228,6 +228,18 @@ export function useWidgetData(widget, rangeOverride) {
           asOf: facts.asOf,
           // widget-data.js planWindowOf: the plan scalars follow `range` only when this is true.
           planFollowsRange,
+          // The scope window with no asOf cap (formula chips P1): under period scope or dim
+          // scope a chip's own window must stay inside it. `wideRange` (config.js) is the same
+          // walk with the cap; null when nothing is scoped. Mirrors the keys it reads.
+          scope: scopeMode && scopePlans ? (() => {
+            let from = null, to = null;
+            for (const vp of Object.values(scopePlans)) {
+              if (!vp) continue;
+              if (!from || vp.fs < from) from = vp.fs;
+              if (!to || vp.fe > to) to = vp.fe;
+            }
+            return from && to ? { from, to } : null;
+          })() : null,
           liNames: liNames || {},
           flightStart: campaign.startDate,
           flightEnd: campaign.endDate,

@@ -76,6 +76,10 @@ import ReportV2 from '@shared/report-v2';
 //   pairing is legal and has no refused state to explain), and the sentence stayed in the
 //   grammar, where it guards hand-made JSON. A forward with no consumer is a wording nobody
 //   reads and everybody has to keep true.
+// The CHIPS half (formula chips P0, reader only): `holderIsCm` (does a holder `{expr, chips?}`
+//   read CM360, by text or by chip), `chipsAnyCm` (the chip half of that answer) and
+//   `FLOW_BASES` (the chip a bare flow field loads as). Their consumer is the client's one
+//   reader for «what does this holder read», so it asks the grammar instead of re-typing them.
 export const {
   HIGHLIGHT_OPS, HIGHLIGHT_COLORS, HIGHLIGHT_SCOPES, HIGHLIGHT_STROKE_WIDTHS, HIGHLIGHT_OWNER_TYPES,
   highlightStyleKeys, normHighlight, normHighlights,
@@ -84,6 +88,7 @@ export const {
   // reader is the render path's `viewHoldsCm`: a view whose only CM360 expression is a
   // highlight must still publish its plan, and the answer has to be the grammar's own.
   anyCmHighlight,
+  holderIsCm, chipsAnyCm, FLOW_BASES,
   POINTER_SEP, RANGE_VALUES, PERIOD_CHOICES, WIDGET_PROFILES,
   CELL_FORMATS, FORMATS_BY_FAMILY, BASIS_FAMILY,
   ADDITIVE_FAMILIES, LIMITS, COLOR_SLOTS, VIEW_KINDS, ROW_SORT_KEY,
@@ -98,6 +103,8 @@ export const {
   LAYOUT_STATROW_LAYOUTS, LAYOUT_PILL_VARIANTS, LAYOUT_BADGE_WORDS,
   LAYOUT_DELIVERY_ONLY, LAYOUT_GLOBAL_PERIOD_ONLY, LAYOUT_NO_PERIOD_CONTROL, LAYOUT_NO_SCOPE,
   ROW_TYPES, DELTA_ROW_TYPES, COLUMN_KINDS, SORT_DIRS,
+  // …and TOTAL_AS (formula chips P1): how a chip column's Totals row reads.
+  TOTAL_AS,
   KPI_BASES, KPI_DENSITIES, TARGET_BANDS, COLUMN_ZERO_AS,
   walkViewNodes, flattenViews, leafViews, specByteLimit,
   normValue, normLabel, normControls, normLayoutView,
@@ -190,7 +197,8 @@ export function libraryAddBlocked(entry) {
  * (2026-09-05); 4 added named domain readings and authored brick options (2026-09-06);
  * 5 is the sections cutover (2026-09-07), which shrank the enabled{} id domain to the four
  * functional blocks; 6 adds Highlight children (2026-09-09); 7 adds calculated child Guides
- * (2026-09-10). Older readers cannot preserve these
+ * (2026-09-10); 8 adds formula chips, the writer release (2026-10); 9 adds the progress bar's
+ * marker format, `tickFormat` (2026-10-02). Older readers cannot preserve these
  * closed-grammar fields when editing, and an older writer still speaks the four section ids
  * the server no longer stores.
  *
@@ -199,7 +207,7 @@ export function libraryAddBlocked(entry) {
  * told about. `tests/dashboard/report-widget.test.js` reads both residences out of their source
  * text, so a bump on one side alone goes red there.
  */
-export const WIDGET_UNIFICATION_EPOCH = 7;
+export const WIDGET_UNIFICATION_EPOCH = 9;
 export const WIDGET_PROTOCOL = Object.freeze({
   contextWidgetSpec: 2,
   contextWidgetUnification: WIDGET_UNIFICATION_EPOCH,

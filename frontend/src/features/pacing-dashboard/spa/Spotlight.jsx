@@ -36,7 +36,7 @@
 //                that can print a sentence rather than hint one
 //   onPick       (item) => void, an enabled row was chosen
 //   onClose      asked to close: Escape with no query, or a click on the scrim
-//   formulaSlot  {contextKind, fieldSet, fieldLabels?, cm?, cmRefusal?, cmUnavailable?,
+//   formulaSlot  {contextKind, fieldSet, fieldLabels?, grain?, cm?, cmRefusal?, cmUnavailable?,
 //                value?, availableMetrics?, onCommit(expr, family), onDraftState(bad)} —
 //                `cm` / `cmRefusal` are the SLOT's CM360 join and its sentence, and they
 //                arrive with the rest of `formulaScopeFor`'s scope, which the caller spreads
@@ -55,7 +55,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  openNativeSelect, usePopups, useFocusOnOpen, useOpenerRestore, useInertBackground,
+  openCombobox, openNativeSelect, usePopups, useFocusOnOpen, useOpenerRestore, useInertBackground,
 } from './PopupCoordinator.jsx';
 import { fieldSetFor } from './builder/FormulaField.jsx';
 import { FormulaEditorContent } from './builder/FormulaEditorDialog.jsx';
@@ -183,7 +183,15 @@ export function SpotlightPanel({
   useLayoutEffect(() => {
     function onEscape(e) {
       if (e.key !== 'Escape') return;
+      // An open suggestion list in the formula field is the field's: its own handler dismisses
+      // the list and stops the key. The search is a combobox too, and ITS list is this panel's.
+      if (e.target !== inputRef.current && openCombobox(e.target)) return;
       if (openNativeSelect(e.target)) { e.stopPropagation(); return; }
+      // A chip settings panel open inside this Spotlight is a popup of its own and takes the
+      // Escape aimed at it. This panel's root carries the same marker, and an Escape inside it
+      // (the search, an option, the formula content) is this panel's own.
+      const marked = e.target?.closest?.('[data-dp-popup="1"]');
+      if (marked && marked !== rootRef.current) return;
       // A formula dialog opened from an inline field is a child modal. Let that
       // dialog consume Escape so cancelling it cannot also close this Spotlight.
       if (e.target?.closest?.('[data-dp-modal="1"]')) return;
@@ -407,7 +415,9 @@ export function SpotlightPanel({
                 hidden={!formulaOpen} inert={formulaOpen ? undefined : ''}
                 style={formulaOpen ? undefined : { display: 'none' }}>
                 <FormulaEditorContent
-                  value={storedFormula?.expr ?? ''}
+                  // The stored value is the holder (formula chips P1-editor): the content reads
+                  // its `expr` and `chips` and ignores `kind` and `unitFamily`, which are its own props.
+                  value={storedFormula || ''}
                   unitFamily={storedFormula?.unitFamily ?? DEFAULT_FAMILY}
                   contextKind={formulaSlot.contextKind}
                   fieldSet={formulaFields}
@@ -415,12 +425,14 @@ export function SpotlightPanel({
                   cm={formulaSlot.cm}
                   cmRefusal={formulaSlot.cmRefusal}
                   cmUnavailable={formulaSlot.cmUnavailable}
+                  grain={formulaSlot.grain}
+                  slot={formulaSlot.slot || 'value'}
                   previewFormula={formulaSlot.previewFormula}
                   availableMetrics={formulaSlot.availableMetrics}
                   requireValue
                   applyLabel={formulaSlot.value ? 'Apply' : 'Add'}
                   cancelLabel="Back"
-                  onApply={(expr, family) => formulaSlot.onCommit?.(expr, family)}
+                  onApply={(stored, family) => formulaSlot.onCommit?.(stored, family)}
                   onCancel={() => {
                     formulaSlot.onDraftState?.(false);
                     setFormulaOpen(false);

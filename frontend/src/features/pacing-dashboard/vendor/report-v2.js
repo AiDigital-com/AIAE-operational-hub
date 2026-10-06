@@ -34,9 +34,12 @@
  * viewer's SELECTION, which is a different question from what the widget offers.
  *
  * INJECTED FACTS. This file is dependency-free UMD: it cannot reach dim-sources.mjs and it
- * cannot import a sibling. Two facts arrive from the host through `ctx`:
+ * cannot import a sibling. Three facts arrive from the host through `ctx`:
  *     ctx.checkDimKey(where, key) -> { ok: true, key } | { ok: false, detail }
  *     ctx.isCanonicalMetric(key)  -> boolean
+ *     ctx.normChips(chips, expr, at, slot) -> { ok: true, out } | { ok: false, detail }
+ *       (shared/formula-chips.js norm: the chip map a formula holder may carry; the grammar
+ *        parses no arithmetic and knows no catalogue, so the map's shape is the host's answer)
  * The contract is a RETURNED result, never a throw: nothing here catches, and a rejection
  * becomes fail(at, detail). The dash-gate adapter bridges the throwing checkDimKey and
  * strips the widget prefix it adds, so the prefix lands exactly once.
@@ -100,6 +103,10 @@ var FORMATS_BY_FAMILY = {
 // this UMD stays dependency-free, the WIDGET_ID_RE trade). A bare one of these as a DATE-chart
 // guide is a window SUM drawn against per-day series — spec §7.2 keeps that refusal.
 var FLOW_FIELDS = ['im', 'cl', 'sp', 'co', 'coViews', 'cv', 'pc', 'pv', 'dc', 'st', 'q1', 'q2', 'q3', 'rc', 'lc'];
+// RESTATED from shared/formula-chips.js: the chip a bare flow field loads as. A one-chip holder
+// whose chip carries only `base` IS that field (§7.2's test), and nothing else is.
+// tests/report-v2-test.mjs pins it to FormulaChips.legacyFieldOf over the whole catalogue.
+var FLOW_BASES = { impressions: 'im', clicks: 'cl', completes: 'co', spend: 'sp', conversions: 'cv', linkClicks: 'lc', reach: 'rc', videoStarts: 'st', firstQuartiles: 'q1', midpoints: 'q2', thirdQuartiles: 'q3' };
 // The spec root (§5, Table H). One dataset decides everything CM360 about a widget; nothing
 // is derived from its content.
 var DATASET_TYPES = ['delivery', 'deliveryCm360'];
@@ -176,6 +183,9 @@ var ROW_TYPES = ['date', 'li', 'dateLi', 'dim', 'control'];
 // of inheriting a Δ% by silence.
 var DELTA_ROW_TYPES = ['date'];
 var COLUMN_KINDS = ['value', 'delta'];
+// How the Totals row reads a CHIP column (formula chips P1). Absent = recompute over the cut,
+// the legacy rule; sumOfRows = the rows before the limit; none = nothing.
+var TOTAL_AS = ['sumOfRows', 'none'];
 var SORT_DIRS = ['asc', 'desc'];
 // What a table column prints where its number is exactly 0 (§5.2, section-widget parity
 // 2026-09-04). `blank` is the empty-cell placeholder — the legacy Daily Performance section's
@@ -273,6 +283,7 @@ var LIMITS = {
   layoutCells: 4, layoutSeries: 2, layoutSpan: 12, layoutBindings: 152,
   specBytes: 48000, compositionSpecBytes: 96000, // UTF-8 bytes; recursive geometry adds IDs and wrappers to legacy content
   nodeId: 20, label: 60, support: 120, title: 80, formula: 500, mappingId: 40, // CHARACTERS
+  chips: 24, chipWhere: 4, // a chip map's LENGTH and a chip's where rows (shared/formula-chips.js LIMITS, test-pinned)
   chartTopN: 100, pieTopN: 20, tableLimit: 1000, breakdownMaxSelected: 20 // the largest STORED VALUE
 };
 // Not in LIMITS: LIMITS holds caps, and this is a FLOOR. §6 sets it for both switches — one
@@ -352,6 +363,7 @@ Object.freeze(GUIDE_MODES);
 Object.freeze(CELL_FORMATS);
 Object.freeze(FORMATS_BY_FAMILY);
 Object.freeze(FLOW_FIELDS);
+Object.freeze(FLOW_BASES);
 Object.freeze(DATASET_TYPES);
 Object.freeze(MAPPING_MODES);
 Object.freeze(INTERACTION_TYPES);
@@ -380,6 +392,7 @@ Object.freeze(BASIS_FAMILY);
 Object.freeze(ROW_TYPES);
 Object.freeze(DELTA_ROW_TYPES);
 Object.freeze(COLUMN_KINDS);
+Object.freeze(TOTAL_AS);
 Object.freeze(SORT_DIRS);
 Object.freeze(LAYOUT_BRICK_TYPES);
 Object.freeze(LAYOUT_FRAMES);
@@ -471,11 +484,32 @@ function badNodeId(v, at, what) {
 
 /** Highlight formulas follow normValue's syntax doctrine: the client parses; the wire
  * validates type, blankness and size. An absent reference remains repairable after
- * its Guide/Target/Marker is removed; only an impossible owner kind is refused. */
-function normHighlightExpr(v, at) {
-  if (typeof v !== 'string' || !v.replace(/\s/g, '')) return fail(at, 'formula is empty');
-  if (v.length > LIMITS.formula) return fail(at, 'formula is over ' + LIMITS.formula + ' characters');
-  return { ok: true, out: v };
+ * its Guide/Target/Marker is removed; only an impossible owner kind is refused.
+ * The holder is `{ expr, chips? }`: the chip map rides after `expr` (appendChips). */
+function normHighlightHolder(holder, at, ctx) {
+  var v = holder.expr;
+  if (typeof v !== 'string' || !v.replace(/\s/g, '')) return fail(at + '/expr', 'formula is empty');
+  if (v.length > LIMITS.formula) return fail(at + '/expr', 'formula is over ' + LIMITS.formula + ' characters');
+  return appendChips(holder, { expr: v }, v, at, ctx, 'highlight');
+}
+
+/** The optional chip map on a formula holder (formula chips P0, reader only). `out` is the
+ *  holder being built; the map is APPENDED so a holder without chips keeps its bytes. The
+ *  check is the injected `ctx.normChips`, handed `at + '/chips'`, so its refusal already
+ *  carries the full pointer down to the chip and is passed on as it is; a host answer that
+ *  does not start with that pointer gets it prefixed once. */
+function appendChips(v, out, expr, at, ctx, slot) {
+  if (!has(v, 'chips')) return { ok: true, out: out };
+  var chipsAt = at + '/chips';
+  if (!ctx || typeof ctx.normChips !== 'function') return fail(chipsAt, 'no chip catalogue was injected');
+  var r = ctx.normChips(v.chips, expr, chipsAt, slot);
+  if (!r || typeof r !== 'object') return fail(chipsAt, 'the chip check gave no answer');
+  if (r.ok !== true) {
+    var detail = typeof r.detail === 'string' ? r.detail : 'chips were refused';
+    return detail.indexOf(chipsAt) === 0 ? { ok: false, detail: detail } : fail(chipsAt, detail);
+  }
+  out.chips = r.out;
+  return { ok: true, out: out };
 }
 
 function highlightStyleKeys(ownerType, owner) {
@@ -488,22 +522,23 @@ function highlightStyleKeys(ownerType, owner) {
   return ['color', 'background', 'bold'];
 }
 
-function normHighlightThreshold(t, at, ownerType) {
+function normHighlightThreshold(t, at, ownerType, ctx) {
   var bad = obj(t, at, 'a highlight threshold');
   if (bad) return bad;
   var reference = t.kind === 'target' || t.kind === 'guide' || t.kind === 'marker';
   if (t.kind !== 'number' && t.kind !== 'formula' && !reference) return fail(at + '/kind', 'a highlight threshold is number, formula, target, guide or marker');
   bad = onlyKeys(t, at, t.kind === 'number' ? ['kind', 'value']
-    : t.kind === 'formula' ? ['kind', 'expr'] : ['kind', 'factor', 'offset']);
+    : t.kind === 'formula' ? ['kind', 'expr', 'chips'] : ['kind', 'factor', 'offset']);
   if (bad) return bad;
   var out = { kind: t.kind };
   if (t.kind === 'number') {
     if (typeof t.value !== 'number' || !isFinite(t.value)) return fail(at + '/value', 'a highlight threshold must be a finite number');
     out.value = t.value;
   } else if (t.kind === 'formula') {
-    var expr = normHighlightExpr(t.expr, at + '/expr');
-    if (!expr.ok) return expr;
-    out.expr = expr.out;
+    var holder = normHighlightHolder(t, at, ctx);
+    if (!holder.ok) return holder;
+    out.expr = holder.out.expr;
+    if (has(holder.out, 'chips')) out.chips = holder.out.chips;
   } else {
     var targets = ['column', 'kpi', 'bigStat', 'meter', 'gauge', 'moneyStat', 'kvRow', 'pill',
       'progressBar', 'flightBullet', 'unitBars', 'rateRows', 'detailCard'];
@@ -524,8 +559,9 @@ function normHighlightThreshold(t, at, ownerType) {
 }
 
 /** Public shared validation for one editor transaction. ownerType identifies the
- * containing slot; optional owner supplies bar and computed-text applicability. */
-function normHighlight(rule, at, ownerType, owner) {
+ * containing slot; optional owner supplies bar and computed-text applicability. Optional
+ * ctx carries `normChips` (INJECTED FACTS); without it a rule holding chips is refused. */
+function normHighlight(rule, at, ownerType, owner, ctx) {
   var bad = obj(rule, at, 'a highlight');
   if (bad) return bad;
   if (!inList(HIGHLIGHT_OWNER_TYPES, ownerType)) return fail(at, 'this element cannot own highlights');
@@ -547,12 +583,12 @@ function normHighlight(rule, at, ownerType, owner) {
     var readingInput = has(input, 'reading');
     var shareInput = has(input, 'kind');
     if ((exprInput ? 1 : 0) + (readingInput ? 1 : 0) + (shareInput ? 1 : 0) !== 1) return fail(inputAt, 'a highlight input is one formula, domain reading or pie share');
-    bad = onlyKeys(input, inputAt, exprInput ? ['expr'] : readingInput ? ['reading'] : ['kind']);
+    bad = onlyKeys(input, inputAt, exprInput ? ['expr', 'chips'] : readingInput ? ['reading'] : ['kind']);
     if (bad) return bad;
     if (exprInput) {
-      var inputExpr = normHighlightExpr(input.expr, inputAt + '/expr');
-      if (!inputExpr.ok) return inputExpr;
-      out.input = { expr: inputExpr.out };
+      var inputHolder = normHighlightHolder(input, inputAt, ctx);
+      if (!inputHolder.ok) return inputHolder;
+      out.input = inputHolder.out;
     } else if (readingInput) {
       if (!inList(LAYOUT_DOMAIN_READINGS, input.reading)) return fail(inputAt + '/reading', 'unknown domain reading');
       out.input = { reading: input.reading };
@@ -572,11 +608,11 @@ function normHighlight(rule, at, ownerType, owner) {
   if (!inList(HIGHLIGHT_OPS, condition.op)) return fail(conditionAt + '/op', 'unknown highlight comparison');
   var range = condition.op === 'between' || condition.op === 'outside';
   if (range !== has(condition, 'upper')) return fail(conditionAt + '/upper', 'only between and outside require an upper threshold');
-  var threshold = normHighlightThreshold(condition.threshold, conditionAt + '/threshold', ownerType);
+  var threshold = normHighlightThreshold(condition.threshold, conditionAt + '/threshold', ownerType, ctx);
   if (!threshold.ok) return threshold;
   out.condition = { op: condition.op, threshold: threshold.out };
   if (range) {
-    var upper = normHighlightThreshold(condition.upper, conditionAt + '/upper', ownerType);
+    var upper = normHighlightThreshold(condition.upper, conditionAt + '/upper', ownerType, ctx);
     if (!upper.ok) return upper;
     if (threshold.out.kind === 'number' && upper.out.kind === 'number' && threshold.out.value > upper.out.value) return fail(conditionAt + '/upper', 'the upper threshold must be at least the lower threshold');
     out.condition.upper = upper.out;
@@ -585,12 +621,14 @@ function normHighlight(rule, at, ownerType, owner) {
     var guardAt = at + '/guard';
     bad = obj(rule.guard, guardAt, 'a highlight guard');
     if (bad) return bad;
-    bad = onlyKeys(rule.guard, guardAt, ['expr', 'min']);
+    bad = onlyKeys(rule.guard, guardAt, ['expr', 'min', 'chips']);
     if (bad) return bad;
-    var guardExpr = normHighlightExpr(rule.guard.expr, guardAt + '/expr');
-    if (!guardExpr.ok) return guardExpr;
+    var guardHolder = normHighlightHolder(rule.guard, guardAt, ctx);
+    if (!guardHolder.ok) return guardHolder;
     if (typeof rule.guard.min !== 'number' || !isFinite(rule.guard.min) || rule.guard.min < 0) return fail(guardAt + '/min', 'minimum data volume must be a finite non-negative number');
-    out.guard = { expr: guardExpr.out, min: rule.guard.min };
+    // `{ expr, min, chips? }`: the map rides after `min`, so a guard without chips keeps its bytes.
+    out.guard = { expr: guardHolder.out.expr, min: rule.guard.min };
+    if (has(guardHolder.out, 'chips')) out.guard.chips = guardHolder.out.chips;
   }
   var styleAt = at + '/style';
   bad = obj(rule.style, styleAt, 'a highlight style');
@@ -625,14 +663,14 @@ function normHighlight(rule, at, ownerType, owner) {
   return { ok: true, out: out };
 }
 
-function normHighlights(list, at, ownerType, owner) {
+function normHighlights(list, at, ownerType, owner, ctx) {
   if (!inList(HIGHLIGHT_OWNER_TYPES, ownerType)) return fail(at, 'this element cannot own highlights');
   if (!Array.isArray(list)) return fail(at, 'highlights must be an array');
   if (list.length > LIMITS.highlights) return fail(at, 'an element holds at most ' + LIMITS.highlights + ' highlights');
   var seen = {};
   var out = [];
   for (var i = 0; i < list.length; i++) {
-    var rule = normHighlight(list[i], at + '/' + i, ownerType, owner);
+    var rule = normHighlight(list[i], at + '/' + i, ownerType, owner, ctx);
     if (!rule.ok) return rule;
     if (has(seen, rule.out.id)) return fail(at + '/' + i + '/id', 'duplicate highlight id "' + rule.out.id + '"');
     seen[rule.out.id] = true;
@@ -650,12 +688,21 @@ function withoutHighlights(owner) {
   return out;
 }
 
-function appendHighlights(owner, result, at, ownerType) {
+function appendHighlights(owner, result, at, ownerType, ctx) {
   if (!result.ok || !has(owner, 'highlights')) return result;
-  var highlights = normHighlights(owner.highlights, at + '/highlights', ownerType, owner);
+  var highlights = normHighlights(owner.highlights, at + '/highlights', ownerType, owner, ctx);
   if (!highlights.ok) return highlights;
   result.out.highlights = highlights.out;
   return result;
+}
+
+/** The chip-check slot a value's pointer answers (see normValue's docblock). */
+function slotOf(at) {
+  if (/\/target\/value$/.test(at)) return 'target';
+  if (at.indexOf('/controls/') !== -1) return 'option';
+  if (at.indexOf('/columns/') !== -1) return 'column';
+  if (at.indexOf('/share/') !== -1) return 'share';
+  return 'value';
 }
 
 /**
@@ -668,8 +715,13 @@ function appendHighlights(owner, result, at, ownerType) {
  * compatibility, pie summability and the cumulative rule all read it. It is checked for
  * CONSISTENCY here; it is derived from the metric catalogue exactly once, at the moment
  * the client mints the value.
+ *
+ * `slot` (optional) names where the value lives for the chip check (FormulaChips.norm's
+ * `slot`: a table aggregate is refused where no rows stand under it). The pointer answers
+ * it for every slot but two that look alike on the pointer, which their callers pass:
+ * `guide` (normGuide) and `pie` (normPieViewBody).
  */
-function normValue(v, at, ctx) {
+function normValue(v, at, ctx, slot) {
   var bad = obj(v, at, 'a value');
   if (bad) return bad;
   if (!inList(VALUE_KINDS, v.kind)) return fail(at, 'unknown value kind "' + show(v.kind) + '"');
@@ -720,14 +772,16 @@ function normValue(v, at, ctx) {
   }
 
   if (v.kind === 'formula') {
-    bad = onlyKeys(v, at, ['kind', 'expr', 'unitFamily']);
+    bad = onlyKeys(v, at, ['kind', 'expr', 'unitFamily', 'chips']);
     if (bad) return bad;
     // CONTENT is not parsed (§7.1: the client is the syntax gate, and a broken expression
     // only ever breaks its own tile). Length and blankness are the whole server rule.
     if (typeof v.expr !== 'string' || !v.expr.replace(/\s/g, '')) return fail(at, 'formula is empty');
     if (v.expr.length > LIMITS.formula) return fail(at, 'formula is over ' + LIMITS.formula + ' characters');
     if (!inList(UNIT_FAMILIES, v.unitFamily)) return fail(at, 'a formula declares its unitFamily; "' + show(v.unitFamily) + '" is not one of count, money, percent, number');
-    return { ok: true, out: { kind: 'formula', expr: v.expr, unitFamily: v.unitFamily } };
+    // `chips` is APPENDED (formula chips spec §3), so a value without it keeps its bytes.
+    return appendChips(v, { kind: 'formula', expr: v.expr, unitFamily: v.unitFamily }, v.expr, at, ctx,
+      typeof slot === 'string' ? slot : slotOf(at));
   }
 
   if (v.kind === 'canonical') {
@@ -1145,7 +1199,7 @@ function cmBrickWalk(value, depth, budget) {
     for (i = 0; i < value.length; i++) if (cmBrickWalk(value[i], depth + 1, budget)) return true;
     return false;
   }
-  if (typeof value.expr === 'string' && CM_EXPR_RE.test(value.expr)) return true;
+  if (typeof value.expr === 'string' && holderIsCm(value)) return true;
   // Every key but `highlights`, on purpose. An object carrying a string `expr` under a brick
   // IS a binding, whatever slot holds it, so a slot the brick grammar grows later is one this
   // walk already reads. A typed list of slots would go stale the day that happens, and the
@@ -1200,8 +1254,26 @@ function cmBrickHighlightWalk(value, depth, budget) {
  * for it (specWantsCm), refuse an entity scope over it, and count it as a consumer (6d).
  */
 function exprIsCmBearing(v) {
-  return !!v && typeof v === 'object' && v.kind === 'formula'
-    && typeof v.expr === 'string' && CM_EXPR_RE.test(v.expr);
+  return !!v && typeof v === 'object' && v.kind === 'formula' && holderIsCm(v);
+}
+
+// RESTATED from shared/formula-chips.js (this file imports nothing): which chip reads CM360.
+// tests/report-v2-test.mjs pins it to FormulaChips.anyCm over the whole catalogue.
+function chipsAnyCm(chips) {
+  var k, c;
+  if (!chips || typeof chips !== 'object') return false;
+  for (k in chips) {
+    if (!has(chips, k)) continue;
+    c = chips[k];
+    if (c && (c.source === 'cm360' || c.source === 'bqMatched' || c.base === 'discrepancy')) return true;
+  }
+  return false;
+}
+/** A holder reads CM360 by text (a cm identifier) or by chip (formula chips spec §3). */
+function holderIsCm(v) {
+  if (!v || typeof v !== 'object') return false;
+  if (typeof v.expr === 'string' && CM_EXPR_RE.test(v.expr)) return true;
+  return chipsAnyCm(v.chips);
 }
 
 /**
@@ -1359,11 +1431,24 @@ function normStyle(st, at) {
 
 /** The flow field a value IS, or '' when it is not one — the §7.2 test, which reads a BARE
  *  field only: a metric value naming one, or a formula that is nothing but one. `sp / im`
- *  contains two and is not one. */
+ *  contains two and is not one. A formula carrying chips is read through its map instead:
+ *  `_c1` whose one chip is a bare flow base IS that field (chipFlowField). */
 function flowFieldOf(v) {
   if (v.kind === 'metric' && FLOW_FIELDS.indexOf(v.metric) !== -1) return v.metric;
+  if (v.kind === 'formula' && v.chips) return chipFlowField(v);
   if (v.kind === 'formula' && FLOW_FIELDS.indexOf(v.expr.trim()) !== -1) return v.expr.trim();
   return '';
+}
+function chipFlowField(v) {
+  var ref, chip, k, n = 0;
+  if (!v.chips || typeof v.chips !== 'object' || typeof v.expr !== 'string') return '';
+  ref = v.expr.replace(/^\s+|\s+$/g, '');
+  if (!/^_c\d{1,2}$/.test(ref) || !has(v.chips, ref)) return '';
+  chip = v.chips[ref];
+  if (!chip || typeof chip !== 'object') return '';
+  for (k in chip) if (has(chip, k)) { if (k !== 'base') return ''; n++; }
+  if (n !== 1 || typeof chip.base !== 'string' || !has(FLOW_BASES, chip.base)) return '';
+  return FLOW_FIELDS.indexOf(FLOW_BASES[chip.base]) !== -1 ? FLOW_BASES[chip.base] : '';
 }
 
 /**
@@ -1391,7 +1476,7 @@ function normGuide(g, at, env, ctx, ownerValue) {
     if (!calculation.ok) return calculation;
     out = calculation.out;
   } else {
-    var val = normValue(g.value, at + '/value', ctx);
+    var val = normValue(g.value, at + '/value', ctx, 'guide');
     if (!val.ok) return val;
     if (val.out.kind === 'bound') return fail(at + '/value', 'a guide is a fixed reference line; it may not follow the metric switch');
     // A bare flow is a window total, not a daily target. Calculation Guides use the
@@ -1518,7 +1603,7 @@ function normSeriesPaint(s, at) {
  * the cumulative refusal name the offending switch option.
  */
 function normSeries(s, at, env, ctx) {
-  return appendHighlights(s, normSeriesBody(withoutHighlights(s), at, env, ctx), at, 'series');
+  return appendHighlights(s, normSeriesBody(withoutHighlights(s), at, env, ctx), at, 'series', ctx);
 }
 
 function normSeriesBody(s, at, env, ctx) {
@@ -1832,7 +1917,7 @@ function normColumnTarget(t, at, ctx) {
 }
 
 function normColumn(c, at, env, ctx) {
-  return appendHighlights(c, normColumnBody(withoutHighlights(c), at, env, ctx), at, 'column');
+  return appendHighlights(c, normColumnBody(withoutHighlights(c), at, env, ctx), at, 'column', ctx);
 }
 
 function normColumnBody(c, at, env, ctx) {
@@ -1845,7 +1930,7 @@ function normColumnBody(c, at, env, ctx) {
   // branch sets make its type check lead for correctness), so being first only decides which
   // detail a doubly-invalid column gets. The position becomes load-bearing the day the sets diverge.
   if (!inList(COLUMN_KINDS, c.kind)) return fail(at, 'unknown column kind "' + show(c.kind) + '"; a column prints a value or a Δ%');
-  bad = onlyKeys(c, at, ['id', 'kind', 'label', 'labelAuto', 'value', 'format', 'target', 'hideWhenEmpty', 'zeroAs', 'highlightExtremes', 'highlightDirection', 'buyUnit']);
+  bad = onlyKeys(c, at, ['id', 'kind', 'label', 'labelAuto', 'value', 'format', 'target', 'hideWhenEmpty', 'zeroAs', 'highlightExtremes', 'highlightDirection', 'buyUnit', 'totalAs']);
   if (bad) return bad;
   bad = badNodeId(c.id, at, 'column id');
   if (bad) return bad;
@@ -1911,6 +1996,12 @@ function normColumnBody(c, at, env, ctx) {
   if (has(c, 'hideWhenEmpty') && c.hideWhenEmpty !== true) {
     return fail(at + '/hideWhenEmpty', 'hideWhenEmpty is true or absent; a column that always prints simply does not carry it');
   }
+  // Formula chips P1: how the Totals row reads a chip column. Absent = recompute over the
+  // cut (the legacy rule); sumOfRows = the rows before the limit; none = nothing.
+  if (has(c, 'totalAs')) {
+    if (!inList(TOTAL_AS, c.totalAs)) return fail(at + '/totalAs', 'totalAs is sumOfRows or none, not ' + show(c.totalAs));
+    if (val.out.kind !== 'formula' || !val.out.chips) return fail(at + '/totalAs', 'totalAs belongs to a chip column');
+  }
   if (has(c, 'zeroAs') && COLUMN_ZERO_AS.indexOf(c.zeroAs) === -1) {
     return fail(at + '/zeroAs', 'a zero prints as ' + COLUMN_ZERO_AS.join(' or ') + ', not "' + show(c.zeroAs) + '"');
   }
@@ -1941,6 +2032,7 @@ function normColumnBody(c, at, env, ctx) {
   if (has(c, 'highlightExtremes')) cout.highlightExtremes = true;
   if (has(c, 'highlightDirection')) cout.highlightDirection = c.highlightDirection;
   if (has(c, 'buyUnit')) cout.buyUnit = c.buyUnit;
+  if (has(c, 'totalAs')) cout.totalAs = c.totalAs;
   return { ok: true, out: cout };
 }
 
@@ -2207,7 +2299,7 @@ function normKpiSupport(s, at) {
  * middle of the key order, so the out object is built in that order (normTableView's note).
  */
 function normKpiView(v, at, env, ctx) {
-  return appendHighlights(v, normKpiViewBody(withoutHighlights(v), at, env, ctx), at, 'kpi');
+  return appendHighlights(v, normKpiViewBody(withoutHighlights(v), at, env, ctx), at, 'kpi', ctx);
 }
 
 function normKpiViewBody(v, at, env, ctx) {
@@ -2289,7 +2381,7 @@ function normKpiViewBody(v, at, env, ctx) {
  * summing a ratio across slices is the same defect. Deliberately stricter than §5.4's sentence.
  */
 function normPieView(v, at, env, ctx) {
-  return appendHighlights(v, normPieViewBody(withoutHighlights(v), at, env, ctx), at, 'pie');
+  return appendHighlights(v, normPieViewBody(withoutHighlights(v), at, env, ctx), at, 'pie', ctx);
 }
 
 function normPieViewBody(v, at, env, ctx) {
@@ -2301,7 +2393,7 @@ function normPieViewBody(v, at, env, ctx) {
   if (typeof v.title !== 'string') return fail(at, 'title must be a string');
   if (v.title.length > LIMITS.title) return fail(at, 'title is over ' + LIMITS.title + ' characters');
 
-  var val = normValue(v.value, at + '/value', ctx);
+  var val = normValue(v.value, at + '/value', ctx, 'pie');
   if (!val.ok) return val;
   // What a pie may CUT (owner, 2026-08-23 — §15), before what its family may SUM. Four kinds of
   // number have no shares to divide, and none of them is caught by the family rule below:
@@ -2473,7 +2565,7 @@ function normLayoutBind(v, at, ctx, budget) {
   var hasExpr = has(v, 'expr');
   var hasReading = has(v, 'reading');
   if ((hasMetric ? 1 : 0) + (hasExpr ? 1 : 0) + (hasReading ? 1 : 0) !== 1) return fail(at, 'bind a canonical metric, domain reading or formula, exactly one');
-  bad = onlyKeys(v, at, hasMetric ? ['metric'] : hasReading ? ['reading'] : ['expr']);
+  bad = onlyKeys(v, at, hasMetric ? ['metric'] : hasReading ? ['reading'] : ['expr', 'chips']);
   if (bad) return bad;
   budget.bindings++;
   var bindingLimit = budget.bindingLimit || LIMITS.layoutBindings;
@@ -2493,7 +2585,7 @@ function normLayoutBind(v, at, ctx, budget) {
   }
   if (typeof v.expr !== 'string' || !v.expr.replace(/\s/g, '')) return fail(at, 'formula is empty');
   if (v.expr.length > LIMITS.formula) return fail(at, 'formula is over ' + LIMITS.formula + ' characters');
-  return { ok: true, out: { expr: v.expr } };
+  return appendChips(v, { expr: v.expr }, v.expr, at, ctx, 'bind');
 }
 
 function normLayoutFormat(v, at) {
@@ -2560,7 +2652,7 @@ function normLayoutUnitSelection(values, allowed, at) {
 }
 
 function normLayoutBrick(b, at, ctx, budget) {
-  return appendHighlights(b, normLayoutBrickBody(withoutHighlights(b), at, ctx, budget), at, b && b.type);
+  return appendHighlights(b, normLayoutBrickBody(withoutHighlights(b), at, ctx, budget), at, b && b.type, ctx);
 }
 
 function normLayoutBrickBody(b, at, ctx, budget) {
@@ -2689,7 +2781,7 @@ function normLayoutBrickBody(b, at, ctx, budget) {
       if (!cellBind.ok) return cellBind;
       var cellFormat = normLayoutFormat(cell.format, cellAt + '/format');
       if (!cellFormat.ok) return cellFormat;
-      var cellResult = appendHighlights(cell, { ok: true, out: { label: cellLabel.out, bind: cellBind.out, format: cellFormat.out } }, cellAt, 'cell');
+      var cellResult = appendHighlights(cell, { ok: true, out: { label: cellLabel.out, bind: cellBind.out, format: cellFormat.out } }, cellAt, 'cell', ctx);
       if (!cellResult.ok) return cellResult;
       cells.push(cellResult.out);
     }
@@ -2714,7 +2806,7 @@ function normLayoutBrickBody(b, at, ctx, budget) {
       var ms = b.series[si];
       bad = obj(ms, msAt, 'a mini-chart series');
       if (bad) return bad;
-      bad = onlyKeys(ms, msAt, ['id', 'label', 'expr', 'highlights']);
+      bad = onlyKeys(ms, msAt, ['id', 'label', 'expr', 'chips', 'highlights']);
       if (bad) return bad;
       bad = badNodeId(ms.id, msAt, 'series id');
       if (bad) return bad;
@@ -2727,7 +2819,10 @@ function normLayoutBrickBody(b, at, ctx, budget) {
       budget.bindings++;
       var seriesBindingLimit = budget.bindingLimit || LIMITS.layoutBindings;
       if (budget.bindings > seriesBindingLimit) return fail(msAt, 'a ' + (budget.bindingLimit ? 'composition' : 'Layout') + ' stores at most ' + seriesBindingLimit + ' bindings');
-      var miniResult = appendHighlights(ms, { ok: true, out: { id: ms.id, label: msLabel.out, expr: ms.expr } }, msAt, 'miniSeries');
+      // `chips` rides after `expr`, before any highlights, so a line without it keeps its bytes.
+      var miniLine = appendChips(ms, { id: ms.id, label: msLabel.out, expr: ms.expr }, ms.expr, msAt, ctx, 'miniSeries');
+      if (!miniLine.ok) return miniLine;
+      var miniResult = appendHighlights(ms, miniLine, msAt, 'miniSeries', ctx);
       if (!miniResult.ok) return miniResult;
       miniSeries.push(miniResult.out);
     }
@@ -2755,7 +2850,7 @@ function normLayoutBrickBody(b, at, ctx, budget) {
   if (b.type === 'moneyStat') allowed.push('role');
   if (b.type === 'kvRow') allowed = allowed.concat(['emphasis', 'sub']);
   if (b.type === 'pill') allowed.push('variant');
-  if (b.type === 'progressBar') allowed = allowed.concat(['tick', 'tickLabel', 'tone', 'size']);
+  if (b.type === 'progressBar') allowed = allowed.concat(['tick', 'tickLabel', 'tone', 'size', 'tickFormat']);
   bad = onlyKeys(b, at, allowed);
   if (bad) return bad;
 
@@ -2820,6 +2915,16 @@ function normLayoutBrickBody(b, at, ctx, budget) {
       var tickLabel = normLayoutText(b.tickLabel, at + '/tickLabel', LIMITS.label, false);
       if (!tickLabel.ok) return tickLabel;
       out.tickLabel = tickLabel.out;
+    }
+    // The marker's own number format (2026-10-02). Sparse and last, so a bar stored before it
+    // keeps its bytes: absent means the marker prints in its bar's format, which is why
+    // `auto` is never stored, and a format with no marker to print is nobody's setting.
+    if (has(b, 'tickFormat')) {
+      if (!has(b, 'tick')) return fail(at + '/tickFormat', 'a marker format needs a marker');
+      if (b.tickFormat === 'auto') return fail(at + '/tickFormat', 'marker format follows the bar when omitted');
+      var tickFormat = normLayoutFormat(b.tickFormat, at + '/tickFormat');
+      if (!tickFormat.ok) return tickFormat;
+      out.tickFormat = tickFormat.out;
     }
   }
   return { ok: true, out: out };
@@ -3227,7 +3332,7 @@ function anyCmHighlight(v) {
       var slots = [r.input, r.guard, c.threshold, c.upper];
       for (k = 0; k < slots.length; k++) {
         var s = slots[k];
-        if (s && typeof s === 'object' && typeof s.expr === 'string' && CM_EXPR_RE.test(s.expr)) return true;
+        if (s && typeof s === 'object' && typeof s.expr === 'string' && holderIsCm(s)) return true;
       }
     }
   }
@@ -3801,6 +3906,16 @@ var ReportV2 = {
   COLOR_SLOTS: COLOR_SLOTS,
   ROW_SORT_KEY: ROW_SORT_KEY,
   FLOW_FIELDS: FLOW_FIELDS,
+  // Formula chips P0 (reader only). FLOW_BASES and chipsAnyCm RESTATE shared/formula-chips.js
+  // (pinned in tests/report-v2-test.mjs); their consumer is the client's chip info reader.
+  // The chip a bare flow field loads as: `flowFieldOf`'s §7.2 test, read on a chip map.
+  FLOW_BASES: FLOW_BASES,
+  // Which chip map reads CM360 (FormulaChips.anyCm, restated).
+  chipsAnyCm: chipsAnyCm,
+  // A holder `{expr, chips?}` reads CM360 by text or by chip: the one answer behind the fetch gate.
+  holderIsCm: holderIsCm,
+  // The flow field a value IS, or '': exported so the suite pins the chip arm to the catalogue.
+  flowFieldOf: flowFieldOf,
   NODE_ID_RE: NODE_ID_RE,
   X_TYPES: X_TYPES,
   ORIENTATIONS: ORIENTATIONS,
@@ -3841,6 +3956,7 @@ var ReportV2 = {
   ROW_TYPES: ROW_TYPES,
   DELTA_ROW_TYPES: DELTA_ROW_TYPES,
   COLUMN_KINDS: COLUMN_KINDS,
+  TOTAL_AS: TOTAL_AS,
   COLUMN_ZERO_AS: COLUMN_ZERO_AS,
   SORT_DIRS: SORT_DIRS,
   KPI_BASES: KPI_BASES, KPI_DENSITIES: KPI_DENSITIES, TARGET_BANDS: TARGET_BANDS,

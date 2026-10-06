@@ -153,3 +153,56 @@ and the impression-paced gate.
 CPI is NOT in Pacing's reference checkout — it diverges there on purpose, which is written down
 in `AIAE-paicing/CLAUDE.md`. `rate-type-units.test.ts` beside these files covers all four units.
 
+
+## Updated 2026-10-06 — the reference catch-up
+
+`AIAE-paicing` took the maths it was missing from `ogan-team` (everything that branch gained
+between 2026-09-29 and its head `c8a725d`, bar the CM360 join), and the moved copies here were
+brought along with it. 45 files touched, 9 new. What a user can see:
+
+- **Formula chips** (`39884a0`..`445b94e`, 26 commits). A formula is no longer a string the author
+  has to remember: it is chips with suggestions, each carrying its own settings — period, which
+  lines, which unit, how many days, which source. The engine is the new `chips/` folder, eight
+  modules; the editor is `builder/TokenField.jsx` and `builder/ChipSettingsPanel.jsx` (new), with
+  `builder/FormulaField.jsx` and `builder/FormulaEditorDialog.jsx` rewritten around them. Legacy
+  text formulas are shown as chips automatically (`chips/migrate.js`). `and()` and `or()` join the
+  formula functions in `widget-formula.js`.
+- **A campaign's days left and «Needed per day»** (`972f994`): `pacing-calc.js` gains
+  `campaignSpan`, `metrics.js` sums the need line by line, `layout-readings.js` reads «Day X of Y»
+  off the campaign's own flight, and `brick-data.js` writes the note under the figure from the new
+  `needed*Basis`. This fixes a pacing printing «Flight ended» while two of its fourteen lines still
+  ran.
+- **«Impressions to Hit Budget»** (`706f42e`, `915d01d`): the metrics in `metrics.js` /
+  `brick-data.js` / `metric-catalog.js` / `widget-highlights.js`, the card in
+  `../vendor/std-entries.js`, and the read-time upgrade of its first CPM-only version in
+  `standard-conversion-format.js`.
+- **Line Items column settings** (`85d353c`): `line-item-columns.js` and `display-norm.js` (both
+  new). The engine is here and validated; PERSISTENCE IS NOT — that needs a dash-gate migration
+  `AIAE-paicing` has not taken, so a change made in this UI will not survive a reload.
+- **Data freshness** (`85d353c`): `refresh-freshness.js`, `relative-time.js` (both new).
+- **Chart guides and the progress bar's marker** (`3679c20`): `brick-data.js` learns the format a
+  field prints in when none is named.
+
+Not moved, on purpose: `filter-spotlight-core.js` (this app has its own filter bar, and the
+reference's version needs three more modules that were never taken), `auto-refresh.js` (it drives a
+dash-gate lane that was not ported), and `ChipStrip.jsx` (dead in the reference too once the real
+chip field landed).
+
+### Two layering numbers were rebased, and they were already wrong
+
+`FormulaEditorDialog.css`'s `.fxd-scrim` (150 → **305**) and `ChipSettingsPanel.jsx`'s `PANEL_Z`
+(160 → **310**). Both came over with Pacing's own z-index scale, where the settings drawer sits at
+100 — here it is `.sheet__overlay` at 300, so the whole formula editor painted UNDERNEATH the drawer
+that opened it. This is the same rebase `pacing-spa.css` already records for `.sp-pop` and
+`.sp-spot-scrim`; these two arrived in a later commit and were missed. The ladder is now
+drawer 300 < dialog 305 < popovers and the chip panel 310 < Spotlight 320 < tooltip 330. Pacing's
+own 150/160 are correct against its drawer at 100 — do NOT carry this change upstream.
+
+### Our divergence from the reference
+
+The chip line filter names `cpi`, and the catalogue offers «CPI lines». The reference has no CPI
+rate type and wrote the test as «not CPC and not CPV», so an install-paced line passed as
+impression-paced — in `chips/line-facts.js` twice and in `chips/resolve.js`, where it also summed
+an install goal into plan CPM. `impressionPaced` is the first entry of the rate-chip option list,
+so that wrong answer arrived by default. Guarded by
+`AIAE-paicing/tests/rate-type-units-test.mjs`.

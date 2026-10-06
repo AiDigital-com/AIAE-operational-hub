@@ -71,6 +71,47 @@ server's unfiltered `PacingRowV1.alerts` (2026-09-25 filters follow-up, item 3).
   installs of its own. Until this, such a line was read as an impressions line — its install goal
   became an impression goal. Everything else about these files is unchanged.
 
+- Re-copied 2026-10-06 (`dashboard-metrics.js` only): the reference catch-up. `AIAE-paicing` took
+  six pieces of maths it was missing from `ogan-team` (everything that branch gained between
+  2026-09-29 and its head `c8a725d`, bar the CM360 join), and the generated engine was rebuilt on
+  each. The five that move a number here:
+
+  - **A campaign's days left run to the LAST line's end** (`972f994`). They were the average of the
+    lines' own days, which read «Flight ended» on a pacing whose last two of fourteen lines still
+    had three days to go, and hid «Needed per day» behind the same 0. `campaignSpan` is new in
+    `pacing-calc.js`; campM gains `flightSpanDay` / `flightSpanDays` and `daysLeft` now comes from
+    it. On a pacing whose lines share one flight every figure is what it was.
+  - **«Needed per day» is summed line by line** (same commit): each running line's own remaining
+    over its own days left. An ended line's unrecoverable shortfall no longer inflates it and a
+    line ahead of plan no longer offsets another's. campM gains `neededImprBasis` /
+    `neededClicksBasis` / `neededViewsBasis`, which the note under the figure is written from.
+  - **«Impressions to Hit Budget»** (`915d01d`, `706f42e`): eleven new canonical metrics —
+    `hitBudgetAdd*`, `hitBudgetPerDay*`, `hitBudgetPlan`, `hitBudgetProjected`, `hitBudgetGap` —
+    answering how many more units each rate type must deliver to land on its client budget, at its
+    own average Dyn rate. `vendor/std-entries.js` carries the card that binds them and
+    `vendor/widget-metrics.js` the vocabulary that lets a save through: all three or none.
+  - **Formula chips** (`39884a0`..`445b94e`, 26 commits): a formula is now a holder, `{expr, chips}`,
+    not a string. The grammar half lands in `vendor/report-v2.js` and `vendor/formula-chips.js`
+    (new); the evaluator lives in `spa/chips/` and is not vendored. `and()` and `or()` join the
+    formula functions.
+  - **The progress bar's marker format** (`3679c20`): `tickFormat` in the grammar, and the format a
+    field prints in when none is named.
+
+  Proof the catch-up moved nothing it should not have: `AIAE-paicing`'s campM golden was re-recorded
+  against this engine and compared field by field with the reference's own — across six cases and
+  both ranges, NOT ONE field both sides answer moved. The sixteen that appeared are all CPI, below.
+
+  OUR DIVERGENCES, carried into this copy on purpose and not to be overwritten by the next sync from
+  `ogan-team`: CPI gets its own bucket in «Needed per day» and in «Impressions to Hit Budget» (the
+  reference knows three units, so an install-paced line would pay its install goal and its delivered
+  IMPRESSIONS into the impressions bucket), and the chip engine's line filter names CPI instead of
+  testing for «not CPC and not CPV». Guarded by `AIAE-paicing/tests/rate-type-units-test.mjs`.
+
+  NOT taken: the CM360 join by line item (`0b9dbed`, ~20 functions in `report-render.js`) — that lane
+  posts to an n8n that is not deployed; the sections cutover, still unadopted on both sides; and the
+  grammar epoch bump 7→8→9, because this service's server sits at 2 and epochs 3–7 include the
+  cutover it does not have. Saying 9 would advertise a capability it lacks.
+
 This directory also holds six small sibling `.d.ts` files (`dashboard-metrics.d.ts`,
 `pacing-core.d.ts`, `metric-registry.d.ts`, `currency.d.ts`, `dashboard-metrics-glue.d.ts`,
 `alerts-core.d.ts`) - these are NOT vendored, we wrote and own them (see `../vendor-types.d.ts`'s

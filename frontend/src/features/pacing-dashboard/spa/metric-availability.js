@@ -1,9 +1,12 @@
 // Metric inventories are shared by value pickers, report readings and Alert formulas.
 // Keep this module below the data engine in the import graph.
 import MetricRegistry from '@shared/metric-registry';
+import FormulaChips from '@shared/formula-chips';
 import { identifiersOf } from './widget-formula.js';
 
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+/** The legacy fields a chip map stands on, for the availability judgement a text formula gets. */
+const chipLegacyFields = (chips) => Object.values(chips).map((c) => FormulaChips.CATALOG[c.base]?.legacy).filter(Boolean);
 
 /**
  * The two sentences of spec 2026-09-08 §3.6. `inventory` is the blob's `availableMetrics`
@@ -47,7 +50,9 @@ export function unavailableMetric(resolved, sources, grainKey) {
     inventory = src && Array.isArray(src.metrics) ? { delivery: src.metrics } : null;
   }
   const keys = resolved.kind === 'metric' ? [resolved.metric]
-    : resolved.kind === 'formula' ? identifiersOf(resolved.expr) : [];
+    // A chip holder names no legacy field in its text (`_c1`): P1 serves it through the chip
+    // engine, so it is judged by the legacy fields its chips stand on (chips/resolve.js).
+    : resolved.kind === 'formula' ? (resolved.chips ? chipLegacyFields(resolved.chips) : identifiersOf(resolved.expr)) : [];
   for (const k of keys) {
     const why = metricAvailability(k, inventory);
     if (why) return why;

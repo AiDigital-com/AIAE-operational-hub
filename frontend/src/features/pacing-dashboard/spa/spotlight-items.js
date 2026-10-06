@@ -328,14 +328,14 @@ export const CM_NO_PIE = 'A pie cuts one delivery total into shares, and a CM360
 /**
  * Does this VALUE read CM360? Two shapes, one word for the chip (§2.10):
  *   · a `cm` METRIC says so on the value;
- *   · a FORMULA says so in its identifiers, which is why a formula carries no `source` key
- *     and never gained one.
+ *   · a FORMULA says so in its identifiers or in its chips (the HOLDER is asked, never its
+ *     text), which is why a formula carries no `source` key and never gained one.
  * Every card asks it about the row it is drawing. It lives here, beside the rest of the
  * builder's value rules, because a chip that disagreed with the sentence under it, or with
  * the header the tile draws (`nameColumns`), is the product telling one author two things.
  */
 export const valueReadsCm = (value) => !!value && typeof value === 'object'
-  && ((value.kind === 'metric' && value.source === 'cm') || isCmBearing(value.expr));
+  && ((value.kind === 'metric' && value.source === 'cm') || isCmBearing(value));
 
 /**
  * cmRefusal(env) → why a cm value cannot be read HERE, or null when it can.

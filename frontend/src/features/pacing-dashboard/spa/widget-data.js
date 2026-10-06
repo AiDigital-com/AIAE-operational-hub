@@ -51,7 +51,17 @@ import {
 } from './widget-formula.js';
 import { evaluateHighlightOne, evaluateHighlightSeries } from './highlight-expression.js';
 import { unavailableMetric } from './metric-availability.js';
-import { liExpImpr, liExpCost, liExpClicks, prorate, cachedProrateRange, unitsInWindow, budgetInWindow, budgetToDate } from './pacing-calc.js';
+// Formula chips P0 (docs/2026-10-01-formula-chips.md §7): the one reader for what a holder
+// reads. A chip holder reaches the scanners below as `{expr, chips}`; no chip evaluator ships
+// in P0, so the engine paths refuse it with CHIPS_NOT_READABLE rather than reading `_c1` as 0.
+import { CHIPS_NOT_READABLE, holderInfo, isChipHolder } from './chips/info.js';
+// Formula chips P1: the chip engine serves the aggregate and line item grains through the
+// doors below (kpiValue, compileColumns, the li rows, totalsCells); every other grain still
+// prints the P0 sentence. resolve.js imports this module back (the legacy fast path reads the
+// campaign context), and neither side touches the other at load, so the cycle is inert.
+import { evaluateHolderAgg, evaluateHolderLine, CHIP_NO_DATE_AXIS } from './chips/resolve.js';
+import { compileHolder } from './chips/strict.js';
+import { liExpImpr, liExpCost, liExpClicks, cachedProrateRange, campaignSpan, unitsInWindow, budgetInWindow, budgetToDate } from './pacing-calc.js';
 import { isVcrEligible, viewGoalUnits, domRateType, hasCtrTarget, ctrTargetAccumulator } from './metrics.js';
 import { dI, datePrev } from './date-utils.js';
 import { groupValue } from './dim-groups.js';
@@ -61,6 +71,7 @@ import { parseBreakdownFilters, groupBreakdownFilters, filterAuxRows, OUTSIDE_KE
 import { catalogExtraMetrics, mappedExtraMetrics } from './dim-sources-norm.js';
 import { collectDeclaredDimKeys, collectDimPlans, normDimValue } from './dim-scope.js';
 import Currency from '@shared/currency';
+import FormulaChips from '@shared/formula-chips';
 import MetricRegistry from '@shared/metric-registry';
 import ValueLabels from '@shared/value-labels';
 // One question only: is this line paused right now (manual intervals ∪ auto out-of-schedule)?
@@ -201,7 +212,7 @@ export function widgetEffFilters(widget, globalFilters) {
 
 /* ── plan scalars ─────────────────────────────────────────────────────────── */
 
-function costBudOf(p) {
+export function costBudOf(p) {
   return (p.budget || 0) * (1 - (p.mTgt || 0) / 100);
 }
 
@@ -420,7 +431,7 @@ export function campaignScalars(liPlan, effLIs, asOf, flightStart, flightEnd, ra
   // its rate type, weighted by delivered impressions (weightedCtrT, read lazily below).
   let mW = 0, mWt = 0, vcW = 0, vcWt = 0, acW = 0, acWt = 0;
   const ctrIds = [];
-  let dpSum = 0, dlSum = 0, n = 0;
+  const spanPlans = [];
   // The target-CPM pair, campM's own (metrics.js:365/538): cost budget over plan impressions,
   // both summed over CPM-RATE lines only, both full-flight. `foldBasis` deliberately does not
   // lift this gate the way it lifts the vcrT one: a CPC line's `planImpr` holds plan
@@ -453,9 +464,7 @@ export function campaignScalars(liPlan, effLIs, asOf, flightStart, flightEnd, ra
     if (vcrRateOk && !isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { vcW += p.vcrTgt * w; vcWt += w; }
     if (isAudio && p.vcrTgt != null && Number.isFinite(p.vcrTgt) && p.vcrTgt > 0) { acW += p.vcrTgt * w; acWt += w; }
     if (rt === 'CPM') { cpmBudSum += costBudOf(p); cpmImprSum += (Number(p.planImpr) || 0); }
-    // days: campM canon — average of per-LI prorated (fDays − dP) / dP.
-    const pr = prorate(p, asOf);
-    dpSum += pr.dP; dlSum += (pr.fDays - pr.dP); n++;
+    spanPlans.push(p);
   }
   out.mTgt = mWt > 0 ? mW / mWt : 0;
   // NULL, not 0, when no line in the set carries the target — campM's own answer
@@ -478,14 +487,18 @@ export function campaignScalars(liPlan, effLIs, asOf, flightStart, flightEnd, ra
   // Same null-not-zero rule, same reason: a pacing with no CPM line has no target CPM, and
   // «$0.00» under a real CPM would read as a goal nobody set.
   out.tgtCpm = cpmImprSum > 0 ? (cpmBudSum / cpmImprSum) * 1000 : null;
-  out.daysPassed = n > 0 ? Math.max(0, Math.round(dpSum / n)) : 0;
-  out.daysLeft = n > 0 ? Math.max(0, Math.round(dlSum / n)) : 0;
+  // days: campM canon (2026-09-29) — the set's own flight, earliest start to latest end
+  // (campaignSpan), range-free like campM's daysLeft. It was the average of the lines' own
+  // days, which read 0 days left while the last lines were still running.
+  const span = campaignSpan(spanPlans, asOf);
+  out.daysPassed = span.fs ? span.days - span.left : 0;
+  out.daysLeft = span.left;
   return out;
 }
 
 /* ── per-LI gate classification ───────────────────────────────────────────── */
 
-function gatesOf(p, daily) {
+export function gatesOf(p, daily) {
   const rt = p?.rateType || 'CPM';
   const isAudio = (p?.ch || '').toLowerCase() === 'audio';
   const vcrElig = isVcrEligible(p, daily);
@@ -533,6 +546,10 @@ const ZERO_FLOW = {
 // pins `MetricRegistry.ADDED_DELIVERY_KEYS` against, so a seventh cannot be forgotten here.
 export const ZERO_FLOW_KEYS = Object.freeze(Object.keys(ZERO_FLOW));
 
+/** A fresh ZERO_FLOW record, in ZERO_FLOW's own key order (formula chips P1): the record a
+ *  line-facts window is built on is THIS object, so a chip sum and a legacy sum are one float path. */
+export const zeroFlow = () => ({ ...ZERO_FLOW });
+
 // `rate` converts the row's client cost to USD and is passed ONLY by callers whose
 // rows have not been through it yet. The two fact aggregates have: normalize.js
 // runs every fact through row-utils' addFact, which applies the campaign rate as
@@ -562,8 +579,13 @@ function addFact(t, v, g, rate, k) {
   if (g.cpvBasis) { t.cpvSp += v.sp || 0; t.cpvCo += v.co || 0; }
 }
 
+/** widget-data's own per-day accumulator, exported under its full name so nobody confuses it
+ *  with row-utils' addFact (which reads raw mart rows and applies currency and k). The three-
+ *  argument form is the one sumLiWindow uses: rows out of a fact aggregate are already USD and net. */
+export const addWindowFact = (t, v, g) => addFact(t, v, g);
+
 /** Re-sum rows that already carry the gated bases (totals over pre-gated rows). */
-function addRowSums(t, r, customKeys = []) {
+export function addRowSums(t, r, customKeys = []) {
   for (const k of Object.keys(ZERO_FLOW)) t[k] += r[k] || 0;
   // Only declared additive source metrics join totals/folds. Summing every numeric
   // property would also sum rates and allow undeclared source fields to leak in.
@@ -572,7 +594,7 @@ function addRowSums(t, r, customKeys = []) {
 
 /** Canonical rates per context basis (see file header): 'ts' ≡ chart rows,
  *  'entity' ≡ sumLI/Breakdown plain ratios, 'agg' ≡ campM. */
-function ratesFromSums(t, basis /* 'ts' | 'entity' | 'agg' */) {
+export function ratesFromSums(t, basis /* 'ts' | 'entity' | 'agg' */) {
   if (basis === 'ts') {
     return {
       ctr: t.im > 0 ? (t.cl / t.im) * 100 : 0,
@@ -630,7 +652,7 @@ function ratesFromSums(t, basis /* 'ts' | 'entity' | 'agg' */) {
  *  — `to` before `from`, which expectedBounds answers for a window that starts after asOf, or
  *  no `to` at all on a pacing with no data yet — expects nothing. */
 const NO_EXPECTED = Object.freeze({ expIm: 0, expCo: 0, expCl: 0, expVw: 0, imprExpected: 0, clExpected: 0 });
-function expectedDeltas(p, from, to) {
+export function expectedDeltas(p, from, to) {
   if (!from || !to || from > to) return NO_EXPECTED;
   const base = from > p.fs
     ? { im: liExpImpr(p, datePrev(from)), co: liExpCost(p, datePrev(from)), cl: liExpClicks(p, datePrev(from)) }
@@ -929,11 +951,14 @@ function astNamesAny(ast, names) {
 function readsCvField(c) {
   if (!c) return false;
   if (c.kind === 'field') return CV_FIELDS.has(c.field);
+  if (c.kind === 'chips') return c.info.cv;
   return c.kind === 'expr' && astNamesAny(c.ast, CV_FIELDS);
 }
 
-/** The same question about a stored expression, for the renderer's column rules. */
+/** The same question about a stored expression, for the renderer's column rules. A chip
+ *  holder answers from its map (formula chips P0). */
 export function expressionReadsConversions(expr) {
+  if (isChipHolder(expr)) return holderInfo(expr).cv;
   if (typeof expr !== 'string' || !expr) return false;
   const parsed = parse(expr);
   return !!(parsed.ok && parsed.ast) && astNamesAny(parsed.ast, CV_FIELDS);
@@ -970,7 +995,7 @@ function planReaches(p, range) {
 /** The line items of `ids` whose conversions `sources.liDaily` cannot answer inside `range`.
  *  A line item the view keeps nothing of is not in view: its conversions read 0, like its
  *  delivery, and it never nulls a total (spec §4). */
-function cvOffIds(sources, ids, range) {
+export function cvOffIds(sources, ids, range) {
   const daily = sources && sources.liDaily;
   if (!daily || !cvStateOf(daily)) return [];
   return (ids || []).map(String).filter((id) => cvBlocksTotals(daily, id)
@@ -1033,7 +1058,7 @@ function newCvBlock(ids) {
 
 /** A day row or a source row, in the engine's short names, that carries delivery. A row with none
  *  cannot put a line item in a bucket (spec §4: the buckets its delivery touches). */
-function dayHasDelivery(v) {
+export function dayHasDelivery(v) {
   return !!v && ((Number(v.im) || 0) > 0 || (Number(v.cl) || 0) > 0 || (Number(v.co) || 0) > 0
     || (Number(v.sp) || 0) > 0 || (Number(v.dc) || 0) > 0);
 }
@@ -1168,8 +1193,25 @@ function fieldValue(name, sums, scalars, fieldSet, basis = 'agg') {
   return 0;
 }
 
-function compileColumns(columns, contextKind, fieldSet) {
+/** One chip column cell on a line row (formula chips P1). The first error on any row becomes
+ *  the column's: the renderer prints one sentence for the column, as for a refused formula. */
+function chipCell(c, line, sources, range, colErrors) {
+  const out = evaluateHolderLine(c.holder, line, sources, range);
+  if (out.error && !colErrors[c.id]) colErrors[c.id] = out.error;
+  return out.error ? null : out.value;
+}
+
+function compileColumns(columns, contextKind, fieldSet, grainType = null) {
   return (columns || []).map((c) => {
+    if (isChipHolder(c.source)) {
+      // A chip column (formula chips P1) is served on the line item grain; every other grain
+      // still prints the reason.
+      if (grainType !== 'li') return { ...c, kind: 'error', error: CHIPS_NOT_READABLE };
+      const compiled = compileHolder(c.source);
+      if (compiled.error) return { ...c, kind: 'error', error: compiled.error };
+      if (compiled.windowed) return { ...c, kind: 'error', error: CHIP_NO_DATE_AXIS };
+      return { ...c, kind: 'chips', holder: c.source, totalAs: c.source.totalAs || null, info: holderInfo(c.source) };
+    }
     if (c.source?.field != null) {
       // Bare field refs are validated like idents (round-6: an unknown/plan-in-dim
       // field must surface as a column error, not a silent 0).
@@ -2197,6 +2239,8 @@ function readsPlanField(c) { return columnReads(c, DIM_PLAN_FIELDS); }
 function columnReads(c, fields) {
   if (!c) return false;
   if (c.kind === 'field') return fields.has(c.field);
+  // A chip column reads the legacy field each of its chips stands on (formula chips P1).
+  if (c.kind === 'chips') return Object.values(c.holder.chips).some((ch) => { const d = FormulaChips.CATALOG[ch.base]; return !!(d && d.legacy && fields.has(d.legacy)); });
   if (c.kind !== 'expr') return false;
   let found = false;
   (function walk(n) {
@@ -2214,6 +2258,24 @@ function columnReads(c, fields) {
  *  grain. A plan scalar is a constant of the window — every row prints the same budget — and
  *  passes through untouched, as the rows above the Totals do. */
 const CALENDAR_EXPECTED_FIELDS = FIELDS_EXPECTED;
+
+/** The sum of a chip column's non-null cells over the rows (all, or the kept line ids); null
+ *  when every cell is null. The rows before the limit: a Totals row is about the cut. */
+function sumOfRows(rows, colId, ids, order) {
+  const kept = ids ? new Set([...ids].map(String)) : null;
+  const byId = new Map(rows.map((r) => [String(r.liId), r]));
+  let total = null;
+  // Summed in the cut's own order (effLIs), never the authored sort's, so the same rows add up
+  // to the same float whichever column the table is sorted by.
+  for (const id of order || []) {
+    const r = byId.get(String(id));
+    if (!r || (kept && !kept.has(String(id)))) continue;
+    const v = r.cells[colId];
+    if (v == null) continue;
+    total = (total ?? 0) + v;
+  }
+  return total;
+}
 
 /** The rates whose population is EMPTY in these sums on the campaign ('agg') basis — ctr
  *  over every line's impressions, cpm over the non-click-bought lines', vcr over the eligible
@@ -2308,8 +2370,8 @@ export function buildTabularModel(request, range, sources) {
   const fieldSet = isDim
     ? dimFieldSetFor(sources, parseDimSourceKey(grain.key)?.sourceId, grain.key)
     : (contextKind === 'ts' ? TS_FIELDS : AGG_FIELDS);
-  const cols = compileColumns(request.columns, contextKind, fieldSet).map((column) => {
-    if (!highlightSafe || column.kind === 'error') return column;
+  const cols = compileColumns(request.columns, contextKind, fieldSet, grain.type).map((column) => {
+    if (!highlightSafe || column.kind === 'error' || column.kind === 'chips') return column;
     const resolved = column.kind === 'field' ? { kind: 'metric', metric: column.field }
       : { kind: 'formula', expr: column.source.expr };
     const error = unavailableMetric(resolved, sources, isDim ? grain.key : null);
@@ -2655,6 +2717,7 @@ export function buildTabularModel(request, range, sources) {
           cvRowOff && readsCvField(c) ? null
             : c.kind === 'field' ? readField(c.field, sums, scalars, fieldSet, 'entity')
             : c.kind === 'expr' ? evalOne(c.ast, aggCtx(sums, scalars, 'entity', highlightSafe)).value
+            : c.kind === 'chips' ? chipCell(c, { id, plan: p, sums, scalars }, sources, range, colErrors)
             : null,
         ])),
       };
@@ -2677,7 +2740,8 @@ export function buildTabularModel(request, range, sources) {
       for (const id of ids) addRowSums(sums, sumLiWindow(sources.liDaily, sources.liPlan[id], id, range, expBounds));
       const scalars = campaignScalars(sources.liPlan, ids, sources.asOf, sources.flightStart, sources.flightEnd, range,
         false, planWindowOf(sources, range), impr);
-      return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums) };
+      // `ids`: the kept line ids, for a chip column's Totals over the subset (formula chips P1).
+      return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums), ids };
     };
   }
 
@@ -2716,6 +2780,9 @@ export function buildTabularModel(request, range, sources) {
     };
   })() : null;
 
+  // Every row before the limit: a chip column's `sumOfRows` Totals is about the cut, not about
+  // the rows a Top N happened to keep (formula chips P1).
+  const allRows = rows;
   if (request.limit && rows.length > request.limit) rows = rows.slice(0, request.limit);
 
   // Totals: aggregate-then-compute; window-fn / error columns → null (renderer "—").
@@ -2738,17 +2805,28 @@ export function buildTabularModel(request, range, sources) {
   let retotal = null;
   // One Totals row from one set of sums: the whole cut's below, a kept subset's in `retotal`.
   // `planNull` is the date grains' rule (CALENDAR_PLAN_FIELDS); `unplanned` the dim cut's.
-  const totalsCells = ({ sums, scalars, unplanned, planNull, silentRates, cvNull }) => {
+  const totalsCells = ({ sums, scalars, unplanned, planNull, silentRates, cvNull, ids = null }) => {
     const basis = isDim || contextKind === 'ts' ? 'ts' : 'agg';
     return Object.fromEntries(cols.map((c) => {
       if (unplanned && planCols && planCols.has(c.id)) return [c.id, null];
       if (planNull && columnReads(c, CALENDAR_EXPECTED_FIELDS)) return [c.id, null];
-      if (silentRates && silentRates.size && columnReads(c, silentRates)) return [c.id, null];
+      // A chip column keeps its own silence (the chip engine answers empty over an empty
+      // population), never the legacy rate populations' (formula chips P1, plan decision b).
+      if (silentRates && silentRates.size && c.kind !== 'chips' && columnReads(c, silentRates)) return [c.id, null];
       // One totals rule (spec §3): a line item that is unavailable here empties every total
       // built on conversions — the cut's when any in-view line item is, a subset's when one of
       // the kept rows is.
       if (cvNull && readsCvField(c)) return [c.id, null];
       if (c.kind === 'field') return [c.id, readField(c.field, sums, scalars, fieldSet, basis)];
+      if (c.kind === 'chips') {
+        // A chip column's Totals (formula chips P1): as its `totalAs` says, else the chip
+        // over the cut (the whole cut, or the kept line ids a search box left standing).
+        if (c.totalAs === 'none') return [c.id, null];
+        if (c.totalAs === 'sumOfRows') return [c.id, sumOfRows(allRows, c.id, ids, sources.effLIs)];
+        const out = evaluateHolderAgg(c.holder, sources, range, ids ? { ids } : {});
+        if (out.error && !colErrors[c.id]) colErrors[c.id] = out.error;
+        return [c.id, out.error ? null : out.value];
+      }
       if (c.kind !== 'expr' || c.windowed) return [c.id, null];
       return [c.id, evalOne(c.ast, aggCtx(sums, scalars, basis, highlightSafe)).value];
     }));
@@ -2814,6 +2892,12 @@ export function buildSeriesModel(expressions, range, sources, highlightSafe = fa
   const cvMask = cvDateMask(sources, cal, sources.effLIs, range);
   const errors = {};
   const series = (expressions || []).map((s) => {
+    // A chip holder (formula chips P0) has no evaluator yet: refused, never a line of zeros
+    // read off `_c1`.
+    if (isChipHolder(s)) {
+      errors[s.id] = CHIPS_NOT_READABLE;
+      return { id: s.id, label: s.label, values: cal.map(() => 0), warned: true };
+    }
     const v = validate(s.expr, 'ts', TS_FIELDS);
     if (!v.ok) {
       errors[s.id] = formulaSay(v);
@@ -3109,7 +3193,7 @@ function aggRead(expr, ctx) {
 const aggregateContexts = new WeakMap();
 const AGGREGATE_WINDOWS = 4;
 
-function campaignReadingContext(sources, range) {
+export function campaignReadingContext(sources, range) {
   let cache;
   const key = range ? JSON.stringify([range.from, range.to]) : '__all__';
   if (Object.isFrozen(sources)) {
@@ -3236,12 +3320,34 @@ export function kpiHighlightValue(expr, range, sources) {
 }
 
 export function kpiValue(widget, range, sources) {
+  if (isChipHolder(widget)) {
+    // A chip holder (formula chips P1) is evaluated by the chip engine over the same window.
+    // It is answered here, at the door every aggregate read comes through (a KPI, a guide, a
+    // Layout brick), because `aggRead` below is handed the TEXT and could not tell `_c1` from
+    // an unknown field. `error` is set only when there is one.
+    const out = evaluateHolderAgg(widget, sources, range);
+    const res = { value: out.value, warned: false };
+    if (out.error) res.error = out.error;
+    if (widget.target?.expr) {
+      const t = isChipHolder(widget.target) ? evaluateHolderAgg(widget.target, sources, range) : legacyAggRead(widget.target.expr, range, sources);
+      if (t.error) res.error = res.error || t.error;
+      else { res.target = t.value; res.delta = res.value == null || t.value == null ? null : res.value - t.value; }
+    }
+    return res;
+  }
   const v = validate(widget.expr, 'agg', AGG_FIELDS);
   if (!v.ok) return { value: 0, warned: true, error: formulaSay(v) };
   const ctx = campaignReadingContext(sources, range);
   const r = aggRead(widget.expr, ctx);
   const out = { value: r.value, warned: r.warned };
   if (widget.target?.expr) {
+    if (isChipHolder(widget.target)) {
+      // A chip target under a text value (formula chips P1): the chip engine reads it.
+      const t = evaluateHolderAgg(widget.target, sources, range);
+      if (t.error) out.error = t.error;
+      else { out.target = t.value; out.delta = r.value == null || t.value == null ? null : r.value - t.value; }
+      return out;
+    }
     const tv = validate(widget.target.expr, 'agg', AGG_FIELDS);
     if (tv.ok) {
       const t = aggRead(widget.target.expr, ctx);
@@ -3256,6 +3362,12 @@ export function kpiValue(widget, range, sources) {
     }
   }
   return out;
+}
+/** A text target under a chip value: validated and read the way the legacy branch reads one. */
+function legacyAggRead(expr, range, sources) {
+  const tv = validate(expr, 'agg', AGG_FIELDS);
+  if (!tv.ok) return { value: null, error: tv.error };
+  return aggRead(expr, campaignReadingContext(sources, range));
 }
 
 /**
@@ -3280,7 +3392,22 @@ export function kpiValue(widget, range, sources) {
  * its own, and it never follows the window. `budgetToDate` (2026-09-23) is client money too:
  * its twin is each line's plan to date over the same days, over that line's own `k`.
  */
-export function grossAgg(expr, range, sources) {
+// The four names grossAgg answers for, in their chip spelling (spec §2.2).
+function grossNameOf(h) {
+  const ref = typeof h.expr === 'string' ? h.expr.trim() : '';
+  const c = /^_c\d{1,2}$/.test(ref) && hasOwn(h.chips, ref) ? h.chips[ref] : null;
+  if (!c) return null;
+  if (c.base === 'spend' && c.money === 'clientNet' && Object.keys(c).length === 2) return 'dc';
+  if (c.base === 'budget' && c.money === 'clientNet') {
+    if (c.span === 'widgetPeriod' && Object.keys(c).length === 3) return 'budget';
+    if (c.span === 'widgetToDate' && Object.keys(c).length === 3) return 'budgetToDate';
+    if (Object.keys(c).length === 2) return 'budgetTotal';
+  }
+  return null;
+}
+
+export function grossAgg(exprOrHolder, range, sources) {
+  const expr = isChipHolder(exprOrHolder) ? grossNameOf(exprOrHolder) : exprOrHolder;
   if (expr !== 'budget' && expr !== 'budgetTotal' && expr !== 'budgetToDate' && expr !== 'dc') return null;
   const bounds = calendarBounds(sources, range);
   const planWindow = expr === 'budget' ? planWindowOf(sources, range) : null;
@@ -3372,6 +3499,8 @@ export function expressionFieldKinds(expressions) {
   const out = { fact: false, plan: false };
   const scan = (src) => {
     if (!src) return;
+    // A chip holder answers from its map (formula chips P0), never by parsing `_c1`.
+    if (isChipHolder(src)) { const i = holderInfo(src); out.fact ||= i.fact; out.plan ||= i.plan; return; }
     try {
       (function walk(n) {
         if (!n) return;

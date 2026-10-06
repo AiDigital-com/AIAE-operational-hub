@@ -135,6 +135,33 @@ export function cachedProrateRange(plan, range, asOf) {
   return v;
 }
 
+/**
+ * The campaign's own flight (2026-09-29): from the earliest start to the latest end of
+ * `plans`. `days` is its length; `passed` the days of it through the last data day, inside
+ * `range` when one is given (the rule prorateRange keeps for one line); `left` the days after
+ * the last data day until the latest end, whatever the range. The campaign is over only when
+ * its last line is: the average of the lines' own days left read «Flight ended» on a pacing
+ * whose last two of fourteen lines still had three days to go. Counted like prorate: calendar
+ * days, both ends included.
+ */
+export function campaignSpan(plans, asOf, range = null) {
+  let fs = '', fe = '';
+  for (const p of plans) {
+    if (!p || !p.fs || !p.fe) continue;
+    if (!fs || p.fs < fs) fs = p.fs;
+    if (!fe || p.fe > fe) fe = p.fe;
+  }
+  if (!fs) return { fs: null, fe: null, days: 0, passed: 0, left: 0 };
+  const days = Math.max(1, dI(fs, fe));
+  const toDate = asOf && asOf >= fs ? dI(fs, asOf < fe ? asOf : fe) : 0;
+  let passed = toDate;
+  if (range) {
+    const ov = rangeOverlap(range.from, range.to, fs, fe);
+    passed = ov && asOf && asOf >= ov.start ? dI(fs, asOf < ov.end ? asOf : ov.end) : 0;
+  }
+  return { fs, fe, days, passed, left: Math.max(0, days - toDate) };
+}
+
 /* ── Plan inside a narrowed window (2026-09-23) ───────────────────────────────
  * When the viewer narrows the date window, a widget's PLAN follows it the way its delivered
  * numbers already do. The plan of a window is the part of the line's plan curve that falls

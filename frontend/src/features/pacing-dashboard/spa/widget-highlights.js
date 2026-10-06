@@ -163,13 +163,21 @@ export function createBrickHighlightReader(ctx) {
 const FACT_METRICS = new Set([
   'margin', 'marginbar', 'pacing', 'delivery', 'cpm', 'cpc', 'cpv', 'ctr', 'vcr', 'spend', 'budget',
   'imprActual', 'imprToDatePct', 'imprDeviation', 'paceDeltaImpr', 'dynCpm', 'forecastDspSpend', 'neededSpendPerDay',
+  'hitBudgetAddImpr', 'hitBudgetAddViews', 'hitBudgetAddClicks', 'hitBudgetPerDayImpr', 'hitBudgetPerDayViews',
+  'hitBudgetPerDayClicks', 'hitBudgetAddInstalls', 'hitBudgetPerDayInstalls', 'hitBudgetProjected', 'hitBudgetGap',
   // The buy-unit twins (2026-10-05): same facts, on whichever unit the pacing is bought on.
   'unitActual', 'unitToDatePct', 'unitDeviation', 'paceDeltaUnit',
 ]);
 // CTR is not here (owner decision 2026-09-23): it counts every line's impressions, so a
 // CPC-only pacing's facts are a CTR's facts too.
 const IMPRESSION_METRICS = new Set(['imprActual', 'imprToDatePct', 'imprDeviation', 'paceDeltaImpr', 'dynCpm', 'cpm', 'forecastDspSpend']);
-const FLIGHT_FACT_METRICS = new Set(['forecastDspSpend', 'neededSpendPerDay']);
+const FLIGHT_FACT_METRICS = new Set(['forecastDspSpend', 'neededSpendPerDay', 'hitBudgetAddImpr', 'hitBudgetAddViews',
+  'hitBudgetAddClicks', 'hitBudgetPerDayImpr', 'hitBudgetPerDayViews', 'hitBudgetPerDayClicks', 'hitBudgetAddInstalls',
+  'hitBudgetPerDayInstalls', 'hitBudgetProjected', 'hitBudgetGap']);
+// The «Impressions to Hit Budget» readings that stand on one unit's lines (2026-09-29).
+const HIT_BUDGET_UNIT = { __proto__: null, hitBudgetAddImpr: 'impr', hitBudgetPerDayImpr: 'impr',
+  hitBudgetAddViews: 'views', hitBudgetPerDayViews: 'views', hitBudgetAddClicks: 'clicks', hitBudgetPerDayClicks: 'clicks',
+  hitBudgetAddInstalls: 'installs', hitBudgetPerDayInstalls: 'installs' };
 /** The buy-unit metrics, whose unit is the pacing's answer rather than the metric's — resolved
  *  exactly the way the `delivery` preset below resolves its own. */
 const BUY_UNIT_METRICS = new Set(['unitActual', 'unitToDatePct', 'unitDeviation', 'paceDeltaUnit']);
@@ -222,7 +230,7 @@ function domainReading(key, ctx) {
   // A supplied domain value remains valid in previews without a fact snapshot.
   // Missing metrics must not become layoutReading's fallback zero, however.
   const source = key === 'flight.remaining' ? ctx?.flCM : ctx?.cm;
-  const field = { 'flight.remaining': 'daysLeft', 'flight.day': 'totalDP', 'flight.total': 'totalFD' }[key];
+  const field = { 'flight.remaining': 'daysLeft', 'flight.day': 'flightSpanDay', 'flight.total': 'flightSpanDays' }[key];
   return field && Number.isFinite(source?.[field]) ? layoutReading(key, ctx) : null;
 }
 
@@ -231,7 +239,8 @@ function factPolicy(owner, ctx, extra) {
   const metric = owner.bind?.metric;
   if (metric) {
     if (!FACT_METRICS.has(metric)) return null;
-    let unit = IMPRESSION_METRICS.has(metric) ? 'impr' : metric === 'vcr' ? 'vcr' : metric === 'cpv' ? 'cpvRate' : null;
+    let unit = IMPRESSION_METRICS.has(metric) ? 'impr' : metric === 'vcr' ? 'vcr' : metric === 'cpv' ? 'cpvRate'
+      : HIT_BUDGET_UNIT[metric] || null;
     if (metric === 'delivery' || BUY_UNIT_METRICS.has(metric)) {
       // The same unit the Delivery reading picks: on the whole-flight plan, so a narrowed
       // window holding none of the impressions plan does not flip it (2026-09-23).
@@ -292,9 +301,11 @@ export function brickHighlightResult(owner, ctx, reading = {}, extra = {}) {
   const reader = createBrickHighlightReader(ctx);
   // Follow brickValue's binding precedence: a canonical/domain reading wins
   // over any stale expr key still present in a repairable draft.
-  const expr = owner.bind?.metric || owner.bind?.reading ? null : owner.bind?.expr || owner.expr;
-  // A block whose own value reads CM360 has every rule expression read off the pairs.
-  const onPairs = isCmBearing(expr);
+  const holder = owner.bind?.metric || owner.bind?.reading ? null : owner.bind?.expr ? owner.bind : owner.expr ? owner : null;
+  const expr = holder ? holder.expr : null;
+  // A block whose own value reads CM360 has every rule expression read off the pairs. The
+  // HOLDER is asked (the bind, or the line itself), so a CM360 chip counts as the text did.
+  const onPairs = isCmBearing(holder);
   const readFormula = extra.readFormula || ((formula) => reader(formula, { ...extra, onPairs }));
   const available = !reading.error && !reading.absent && (expr ? readNumber(readFormula(expr)) != null
     : owner.bind?.reading ? readNumber(domainReading(owner.bind.reading, ctx)) != null

@@ -5,6 +5,9 @@ import { HIGHLIGHT_OPS, HIGHLIGHT_COLORS, HIGHLIGHT_STROKE_WIDTHS, LIMITS, normH
 import { formulaScopeFor } from '../formula-scope.js';
 import FormulaField from './FormulaField.jsx';
 import { validate as validateFormula, NO_CM_JOIN } from '../widget-formula.js';
+import { draftCtx, chipPlacement } from '../report-draft.js';
+import { compileClient, writerForm } from '../chips/compile.js';
+import { isChipHolder, holderFace } from '../chips/info.js';
 import { highlightUsesContextExpressions } from './highlight-capabilities.js';
 import { readRelativeCondition, makeRelativeCondition, relativeConditionSummary } from './highlight-condition.js';
 import ContentRow from './ContentRow.jsx';
@@ -20,6 +23,10 @@ const DEFAULT_SCOPE = formulaScopeFor({ type: 'agg' });
 // A caller that names no slot has no CM360 join: a cm-bearing expression is refused with the
 // same sentence the draft validator gives, and everything else behaves as it always has.
 const DEFAULT_CM = Object.freeze({ rows: null, total: null, refusal: NO_CM_JOIN, cmOnly: false });
+// The three facts the grammar cannot know, the SAME ones the draft gate injects: without
+// `normChips` a rule holding a chip map is refused with «no chip catalogue was injected»
+// (formula chips P1-editor), here at Apply instead of at Save.
+const DRAFT_CTX = draftCtx({});
 /** Does this owner's CM360 join open a formula slot at all, either half? One question, asked
  *  identically by the editor (`HighlightEditor`) and by the collapsed rules list
  *  (`HighlightChildren`) — written once so the two cannot drift onto different answers. */
@@ -85,21 +92,35 @@ export function highlightDependencyProblem(rule, ownerType, dependencies = {}) {
 }
 
 export function highlightEditorProblem(rule, ownerType, scope = DEFAULT_SCOPE, noValue = false, owner, cm = DEFAULT_CM) {
-  const result = normHighlights([rule], '/highlights', ownerType, owner);
+  const result = normHighlights([rule], '/highlights', ownerType, owner, DRAFT_CTX);
   if (!result.ok) return result.detail.slice(result.detail.indexOf(POINTER_SEP) + POINTER_SEP.length);
   if (noValue && !rule.input) return 'Choose a numeric input for this content.';
-  const expressions = [rule.input?.expr, rule.condition?.threshold?.expr, rule.condition?.upper?.expr, rule.guard?.expr];
-  for (const expr of expressions) {
+  const holders = [rule.input, rule.condition?.threshold, rule.condition?.upper, rule.guard];
+  for (const holder of holders) {
+    const expr = holder?.expr;
     if (expr === undefined) continue;
     // One pair per judgement `checkAlerts` makes (§2.5, §2.8): the CONTEXT decides window
     // functions and the field set, the CM360 SLOT decides the join, and they move
     // independently. A `both` rule is judged twice, and a `total` rule on rows that do not
     // join is refused — which the context alone cannot express, because the total is judged
-    // as an aggregate whether or not any row carries a pair.
-    const pairs = ownerType === 'column' && rule.scope === 'total' ? [['agg', cm.total]]
-      : ownerType === 'column' && rule.scope === 'both' ? [[scope.contextKind, cm.rows], ['agg', cm.total]]
-        : [[scope.contextKind, cm.rows]];
-    for (const [kind, slot] of pairs) {
+    // as an aggregate whether or not any row carries a pair. The GRAIN rides with the
+    // context: a total is the aggregate's, which is what the draft gate judges a chip by.
+    const pairs = ownerType === 'column' && rule.scope === 'total' ? [['agg', cm.total, 'agg']]
+      : ownerType === 'column' && rule.scope === 'both' ? [[scope.contextKind, cm.rows, scope.grain], ['agg', cm.total, 'agg']]
+        : [[scope.contextKind, cm.rows, scope.grain]];
+    for (const [kind, slot, grain] of pairs) {
+      if (isChipHolder(holder)) {
+        // A chip holder: the client rules the server cannot know (spec §3), on this pair's
+        // placement, with the first refusal's sentence.
+        const placement = chipPlacement({ ...scope, grain }, holder, { cm: slot, cmRefusal: cm.refusal });
+        const compiled = compileClient(holder, placement, 'highlight');
+        if (!compiled.ok) return compiled.errors[0].message;
+        // A highlight stores the legacy text (decision h): a chip with no spelling here cannot be
+        // stored, and Apply says which one.
+        const written = writerForm(holder, placement, 'highlight');
+        if (written.form === 'refused') return written.message;
+        continue;
+      }
       const parsed = validateFormula(expr, kind, scope.fieldSet, { cm: slot, cmRefusal: cm.refusal, cmOnly: cm.cmOnly });
       if (!parsed.ok) return [parsed.error, parsed.hint].filter(Boolean).join('. ');
     }
@@ -130,9 +151,18 @@ function Input({ label, value, onChange, numeric = false, placeholder, ...props 
  * highlight scoped to the total is judged as an aggregate, where window functions are
  * illegal — so the field cannot accept an expression the editor then refuses.
  */
-function formulaRow({ label, ariaLabel, value, onChange, scope, contextKind, cm, cmRefusal, cmOnly, disabled, allowEmpty = true }) {
+/** The slot object with a field's holder written into it (formula chips P1-editor): the text
+ *  and, only beside chips, the map, so a holder written back as text drops a stale map. */
+function withHolder(slot, holder) {
+  const next = { ...slot, expr: holder.expr, chips: holder.chips };
+  if (next.chips === undefined) delete next.chips;
+  return next;
+}
+
+function formulaRow({ label, ariaLabel, holder, onChange, scope, contextKind, cm, cmRefusal, cmOnly, disabled, allowEmpty = true }) {
   if (disabled) {
-    return <PopRow label={label}><Input label={ariaLabel} value={value} disabled onChange={() => {}} /></PopRow>;
+    // Read-only, so the face (as LayoutCard's closed rows print it), never a chip's `_c1` ref.
+    return <PopRow label={label}><Input label={ariaLabel} value={isChipHolder(holder) ? holderFace(holder) : holder?.expr} disabled onChange={() => {}} /></PopRow>;
   }
   return (
     <div className="sp-pop-row sp-pop-row--stack">
@@ -140,10 +170,12 @@ function formulaRow({ label, ariaLabel, value, onChange, scope, contextKind, cm,
       <span className="sp-pop-ctl">
         <FormulaField
           label={ariaLabel}
-          value={value ?? ''}
+          value={holder ?? ''}
           contextKind={contextKind || scope.contextKind}
           fieldSet={scope.fieldSet}
           fieldLabels={scope.fieldLabels}
+          grain={scope.grain}
+          slot="highlight"
           // The STRICTER of the joins the draft validator will judge this expression in, so
           // the palette offers the CM360 group exactly where Apply will accept it.
           cm={cm}
@@ -193,9 +225,9 @@ function ThresholdFields({ label, value, onChange, dependencies, allowContextExp
       </Select>
     </PopRow>
     {kind === 'number' ? <PopRow label="Value"><Input label={`${label} value`} value={value.value} numeric onChange={(next) => onChange({ ...value, value: next })} /></PopRow>
-      : kind === 'formula' ? formulaRow({ label: 'Formula', ariaLabel: `${label} formula`, value: value.expr,
+      : kind === 'formula' ? formulaRow({ label: 'Formula', ariaLabel: `${label} formula`, holder: value,
         scope, contextKind, cm, cmRefusal, cmOnly, disabled: !allowContextExpressions,
-        onChange: (expr) => onChange({ ...value, expr }) })
+        onChange: (holder) => onChange(withHolder(value, holder)) })
         : simple ? null : <>
           <PopRow label="Multiply by"><Input label={`${label} multiplier`} value={value.factor ?? 1} numeric onChange={(factor) => onChange(merge(value, { factor: factor === 1 ? undefined : factor }))} /></PopRow>
           <PopRow label="Then add"><Input label={`${label} offset`} value={value.offset ?? 0} numeric onChange={(offset) => onChange(merge(value, { offset: offset === 0 ? undefined : offset }))} /></PopRow>
@@ -323,10 +355,10 @@ export function HighlightEditor({ initial, ownerType, dependencies = {}, formula
           {allowContextExpressions || inputKind === 'reading' ? <option value="reading" disabled={!allowContextExpressions}>Flight reading</option> : null}
         </Select>
       </PopRow>
-      {inputKind === 'formula' ? formulaRow({ label: 'Formula', ariaLabel: 'Highlight input formula', value: draft.input?.expr,
+      {inputKind === 'formula' ? formulaRow({ label: 'Formula', ariaLabel: 'Highlight input formula', holder: draft.input,
         scope: formulaScope, contextKind: strictContext, cm: strictCm, cmRefusal: cm.refusal, cmOnly: cm.cmOnly,
         disabled: !formulasAllowed,
-        onChange: (expr) => set({ input: { expr } }) }) : null}
+        onChange: (holder) => set({ input: withHolder({}, holder) }) }) : null}
       {inputKind === 'reading' ? <PopRow label="Reading"><Select label="Highlight flight reading" value={draft.input.reading} disabled={!allowContextExpressions}
         onChange={(reading) => set({ input: { reading } })}>{Object.entries(READINGS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></PopRow> : null}
   </>;
@@ -424,10 +456,10 @@ export function HighlightEditor({ initial, ownerType, dependencies = {}, formula
         {formulasAllowed || draft.guard ? <PopRow label="Minimum data"><label className="sp-pop-ck"><input type="checkbox" aria-label="Require minimum data" checked={!!draft.guard}
           onChange={(event) => set({ guard: event.target.checked ? { expr: cm.cmOnly ? 'cmIm' : 'im', min: 1000 } : undefined })} /> Use a minimum</label></PopRow> : null}
         {draft.guard ? <>
-          {formulaRow({ label: 'Measure', ariaLabel: 'Minimum data formula', value: draft.guard.expr,
+          {formulaRow({ label: 'Measure', ariaLabel: 'Minimum data formula', holder: draft.guard,
             scope: formulaScope, contextKind: strictContext, cm: strictCm, cmRefusal: cm.refusal, cmOnly: cm.cmOnly,
             disabled: !formulasAllowed,
-            onChange: (expr) => set({ guard: { ...draft.guard, expr } }) })}
+            onChange: (holder) => set({ guard: withHolder(draft.guard, holder) }) })}
           <PopRow label="At least"><Input label="Minimum data value" value={draft.guard.min} disabled={!formulasAllowed} numeric onChange={(min) => set({ guard: { ...draft.guard, min } })} /></PopRow>
         </> : null}
         <PopRow label="Hover note"><Input label="Highlight hover note" value={draft.note} maxLength={LIMITS.support || 240}
@@ -441,7 +473,7 @@ export function HighlightEditor({ initial, ownerType, dependencies = {}, formula
         {onRemove ? <button type="button" className="sp-pop-rm" onClick={onRemove}>Remove highlight</button> : null}
         <button type="button" className="sp-rb-btn" onClick={() => { anchorRef?.current?.focus({ preventScroll: true }); onCancel(); }}>Cancel</button>
         <button type="button" className="sp-rb-btn sp-control-create" disabled={!canApply}
-          onClick={() => { if (canApply) onApply(normHighlights([draft], '/highlights', ownerType, owner).out[0], order); }}>Apply</button>
+          onClick={() => { if (canApply) onApply(normHighlights([draft], '/highlights', ownerType, owner, DRAFT_CTX).out[0], order); }}>Apply</button>
       </div>
     </div>
   </Popover>;

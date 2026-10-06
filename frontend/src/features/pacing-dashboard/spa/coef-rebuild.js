@@ -145,11 +145,13 @@ export const MARGIN_KEYS = new Set(['mA', 'mTgt']);
 // `margin` and `marginbar` are both `cm.mA`, computed FROM net. The client plan rates and
 // the dynamic client CPM are client money printed net with no gross twin beside them. Every
 // other reading — `budget`, `pacing`, `spend`, `cpm`, the delivery and needed-per-day ones —
-// is media-side, a count or a percentage, and has no client basis to state.
+// is media-side, a count or a percentage, and has no client basis to state. The three
+// «Impressions to Hit Budget» money readings (2026-09-29) are client money, net like `budget`.
 export const READING_BASIS = new Map([
   ['margin', 'margin'], ['marginbar', 'margin'],
   ['clientPlanCpm', 'net'], ['clientPlanCpc', 'net'], ['clientPlanCpv', 'net'],
   ['dynCpm', 'net'],
+  ['hitBudgetPlan', 'net'], ['hitBudgetProjected', 'net'], ['hitBudgetGap', 'net'],
 ]);
 
 // The name a basis key goes by where the delivery-field catalogue has none. `mA` is campM's

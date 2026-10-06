@@ -120,7 +120,13 @@ export const FUNCTIONS = {
   abs: { arity: [1, 1], tsOnly: false },
   round: { arity: [1, 2], tsOnly: false },
   if: { arity: [3, 3], tsOnly: false },
+  and: { arity: [2, 2], tsOnly: false },
+  or: { arity: [2, 2], tsOnly: false },
 };
+
+// The two functions that read their arguments as conditions: each argument may be a
+// comparison, and the call itself may stand where if() wants its condition.
+const LOGIC_FNS = new Set(['and', 'or']);
 
 /** What a window function gets off a date axis. It has a name because it now has TWO
  *  speakers: `validate` below, while the author is typing, and report-render.js's CM360
@@ -135,7 +141,7 @@ const CMP_OPS = new Set(['>', '<', '>=', '<=', '==', '!=']);
 
 // ── Tokenizer ────────────────────────────────────────────────────────────────
 
-function tokenize(src) {
+export function tokenize(src) {
   const toks = [];
   let i = 0;
   while (i < src.length) {
@@ -211,15 +217,19 @@ export function parse(src) {
     if (isOp('-')) { take(); return { t: 'neg', e: parseUnary() }; }
     return parsePrimary();
   }
-  function parseCond() {
+  // An expression with an optional comparison after it: what and() / or() take as arguments.
+  function parseCompared() {
     const l = parseExpr();
     const t = peek();
-    if (!t || t.t !== 'op' || !CMP_OPS.has(t.op)) {
-      fail('if() needs a comparison as its first argument, e.g. if(im > 0, …, …)');
-    }
+    if (!t || t.t !== 'op' || !CMP_OPS.has(t.op)) return l;
     const op = take().op;
     const r = parseExpr();
     return { t: 'cmp', op, l, r };
+  }
+  function parseCond() {
+    const node = parseCompared();
+    if (node.t === 'cmp' || (node.t === 'call' && LOGIC_FNS.has(node.fn))) return node;
+    fail('if() needs a comparison, and() or or() as its first argument, e.g. if(im > 0, …, …)');
   }
   function parsePrimary() {
     const t = peek();
@@ -241,6 +251,9 @@ export function parse(src) {
           if (!isOp(',')) fail('if() expects 3 arguments');
           take();
           args.push(parseExpr());
+        } else if (LOGIC_FNS.has(fn)) {
+          args.push(parseCompared());
+          while (isOp(',')) { take(); args.push(parseCompared()); }
         } else if (!isOp(')')) {
           args.push(parseExpr());
           while (isOp(',')) { take(); args.push(parseExpr()); }
@@ -273,7 +286,7 @@ export function parse(src) {
     if (left) {
       const shown = left.t === 'num' ? left.v : (left.name ?? left.op);
       if (left.t === 'op' && CMP_OPS.has(left.op)) {
-        return { ok: false, error: 'Comparisons are only allowed inside if(cond, a, b)' };
+        return { ok: false, error: 'Comparisons are only allowed inside if(cond, a, b), and(a, b) or or(a, b)' };
       }
       return { ok: false, error: `Unexpected "${shown}" after the end of the formula` };
     }
@@ -464,6 +477,10 @@ export function evaluateOne(ast, ctx) {
             return guard(Math.round(ev(a[0]) * f) / f, state);
           }
           case 'if': return ev(a[0]) ? ev(a[1]) : ev(a[2]);
+          case 'and': case 'or': {
+            const l = ev(a[0]), r = ev(a[1]);
+            return (n.fn === 'and' ? l && r : l || r) ? 1 : 0;
+          }
           default:
             // Window functions have no meaning without a date axis; validate() blocks
             // them in 'agg' — reaching here means a stored config bypassed validation.
@@ -592,6 +609,12 @@ export function evaluateSeries(ast, ctx) {
             const c = ev(a[0]), t = ev(a[1]), e = ev(a[2]);
             const out = new Array(n);
             for (let i = 0; i < n; i++) out[i] = c[i] ? t[i] : e[i];
+            return out;
+          }
+          case 'and': case 'or': {
+            const l = ev(a[0]), r = ev(a[1]);
+            const out = new Array(n);
+            for (let i = 0; i < n; i++) out[i] = (node.fn === 'and' ? l[i] && r[i] : l[i] || r[i]) ? 1 : 0;
             return out;
           }
           default: state.warned = true; return zeros();
@@ -784,6 +807,17 @@ export function evaluateMaskedSeries(ast, ctx) {
               // The condition is read on the same day: a branch chosen from a day nobody
               // measured is not a choice, so an absent condition makes the day absent too.
               p[i] = c.present[i] && take.present[i];
+            }
+            return both(out, p);
+          }
+          case 'and': case 'or': {
+            // As min / max: a day either operand did not join is not a day the rule read.
+            const l = ev(a[0]), r = ev(a[1]);
+            const out = new Array(n);
+            const p = new Array(n);
+            for (let i = 0; i < n; i++) {
+              out[i] = (node.fn === 'and' ? l.values[i] && r.values[i] : l.values[i] || r.values[i]) ? 1 : 0;
+              p[i] = l.present[i] && r.present[i];
             }
             return both(out, p);
           }

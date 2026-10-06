@@ -1,7 +1,7 @@
 // workspace/src/lib/dashboard/metrics.js
 import PacingCore from './pacing-core.js';
 import { zeroRow, addRow } from './row-utils.js';
-import { prorate, cachedProrateRange, liActualUnits, liExpUnits, liExpClicks, unitsInWindow, budgetInWindow, budgetToDate } from './pacing-calc.js';
+import { prorate, cachedProrateRange, campaignSpan, liActualUnits, liExpUnits, liExpClicks, unitsInWindow, budgetInWindow, budgetToDate } from './pacing-calc.js';
 import { datePrev, dI } from './date-utils.js';
 import { getEffPlan } from './config.js';
 import { freezeDev } from './freeze-dev.js';
@@ -315,6 +315,42 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // neededPerDay* lines so a paused LI stops demanding daily delivery. Views
   // reuse viewsPlanPausedRem above. Additive — stays 0 when nothing is paused.
   let imprPlanPausedRem = 0, clicksPlanPausedRem = 0, installsPlanPausedRem = 0;
+  // «Needed per day», one unit at a time (2026-09-29): each running line's own remaining over
+  // its own days left, summed — `need` the sum, `left` the remaining it covers, `lines` how many
+  // lines carry some, `days` their shared days left (null once two differ). A line that has
+  // ended, is paused, has not started, or is at or above its plan asks for nothing, and its surplus no longer
+  // offsets another line's shortfall. It was the campaign's whole remaining over the lines'
+  // average days left: an ended line's unrecoverable shortfall inflated it, and when most lines
+  // had ended the average rounded to 0 days and the question stopped being asked.
+  // `installs` is the fourth bucket, which the reference has no rate type for: CPI is ours, and
+  // it mirrors the other three here the way it already does everywhere else in this file. On a
+  // pacing with no install-paced line every figure below is byte-identical to the three-unit
+  // reference, because the bucket stays empty.
+  const need = { impr: { need: 0, left: 0, lines: 0, days: undefined },
+    clicks: { need: 0, left: 0, lines: 0, days: undefined },
+    views: { need: 0, left: 0, lines: 0, days: undefined },
+    installs: { need: 0, left: 0, lines: 0, days: undefined } };
+  const addNeed = (unit, remaining, daysLeftLine) => {
+    if (!(remaining > 0) || !(daysLeftLine > 0)) return;
+    const u = need[unit];
+    u.need += remaining / daysLeftLine;
+    u.left += remaining;
+    u.lines++;
+    u.days = u.days === undefined || u.days === daysLeftLine ? daysLeftLine : null;
+  };
+  // «Impressions to Hit Budget» (2026-09-29): the lines with a delivery goal, one rate type at a
+  // time and in that type's own unit (impressions, clicks, views), against their own client
+  // budget. `lines` keeps each one's budget, client cost and own days left for the per-day split.
+  // Budget and plan are the whole flight's (the period's under period scope) while `units` /
+  // `dc` follow `range`, so the card reads these off the range-free flCM, where both halves
+  // cover the same days.
+  const hitBucket = () => ({ budget: 0, plan: 0, units: 0, dc: 0, lines: [] });
+  // `installs` is the fourth bucket, ours: the reference has no CPI rate type, so a CPI line
+  // falls into its `impr` branch there and pays its INSTALL goal and client budget into the
+  // impressions row while its delivered IMPRESSIONS stand in for the units — the card then
+  // prints an impressions figure no one can act on. Its own bucket keeps each unit honest; on
+  // a pacing with no install-paced line every figure below is byte-identical to the reference.
+  const hit = { impr: hitBucket(), clicks: hitBucket(), views: hitBucket(), installs: hitBucket() };
 
   // ── Clicks-side accumulators ───────────────────────────────────────────
   // CPC LIs only — their plan lives in planImpr by PacingCore convention.
@@ -421,6 +457,13 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     }
 
     if (p.fe && p.fe > scopeEnd) scopeEnd = p.fe;
+    // This line's own days left for «Needed per day»: calendar, range-free, the campaign's
+    // days-left rule for one line. 0 once it has ended, while it is paused, and before it starts
+    // (it cannot deliver yet; the Slack summary's pre-flight guard reads such a line as 0 too).
+    // With no data day at all every line still counts, as before.
+    const prLine = prorate(p, asOf);
+    const lineDaysLeft = PacingCore.isLiPaused(p, asOf) || prLine.st === 'not_started'
+      ? 0 : Math.max(0, prLine.fDays - prLine.dP);
 
     const rt = p.rateType || 'CPM';
     const isCpc = rt === 'CPC';
@@ -434,6 +477,15 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     // The plan SUMS follow a narrowed window; `planUnit` keeps driving weights and rates.
     const planWin = win ? unitsInWindow(p, win) : planUnit;
     const budWin = win ? budgetInWindow(p, win) : p.budget;
+    if (planUnit > 0) {
+      const h = hit[isCpc ? 'clicks' : isCpv ? 'views' : isCpi ? 'installs' : 'impr'];
+      const units = (isCpc ? m.cl : isCpv ? m.co : isCpi ? m.cv : m.im) || 0;
+      h.budget += p.budget || 0;
+      h.plan += planUnit;
+      h.units += units;
+      h.dc += m.clientPr || 0;
+      h.lines.push({ budget: p.budget || 0, dc: m.clientPr || 0, days: lineDaysLeft });
+    }
 
     // General (always)
     clientPr += m.clientPr;
@@ -514,6 +566,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
         imprPlan += planWin;
         imprPlanFlight += planUnit;
         if (PacingCore.isLiPaused(p, asOf)) imprPlanPausedRem += Math.max(0, planWin - (m.im || 0));
+        addNeed('impr', planWin - (m.im || 0), lineDaysLeft);
         imprDailyRateAvg += planUnit / liFDays;
         if (asOf && asOf >= p.fs) {
           if (asOf > p.fe) imprEndedCount++;
@@ -561,6 +614,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
         if (dayRow) latestDayClicks += dayRow.cl || 0;
       }
       if (PacingCore.isLiPaused(p, asOf)) clicksPlanPausedRem += Math.max(0, liClicksPlanWin - (m.cl || 0));
+      if (liClicksPlan > 0) addNeed('clicks', liClicksPlanWin - (m.cl || 0), lineDaysLeft);
       clicksExpected += m.eCl || 0;
       // Daily rate for clicks side: liExpUnits already prorates planImpr
       // (which IS plan-clicks for CPC).
@@ -602,6 +656,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
         viewsPlan += planWin;
         viewsPlanFlight += planUnit;
         if (PacingCore.isLiPaused(p, asOf)) viewsPlanPausedRem += Math.max(0, planWin - (m.co || 0));
+        addNeed('views', planWin - (m.co || 0), lineDaysLeft);
         cpvViewsPlan += planWin;
         cpvViewsPlanFlight += planUnit;
         viewsDailyRateAvg += planUnit / liFDays;
@@ -631,6 +686,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
         installsPlan += planWin;
         installsPlanFlight += planUnit;
         if (PacingCore.isLiPaused(p, asOf)) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
+        addNeed('installs', planWin - (m.cv || 0), lineDaysLeft);
         installsDailyRateAvg += planUnit / liFDays;
         if (asOf && asOf >= p.fs) {
           if (asOf > p.fe) installsEndedCount++;
@@ -726,12 +782,15 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // Delivery reading prints there, not a 0 that reads «on plan». Flight keeps its 0.
   const pac = pacWt > 0 ? pacW / pacWt : (win ? null : 0);
 
-  const daysLeft = effLIs.length > 0
-    ? Math.max(0, Math.round(effLIs.reduce((s, id) => {
-        const pr = prorate(getEffPlan(liPlan, id, splitScopedMode, splitScopedPlans), asOf);
-        return s + (pr.fDays - pr.dP);
-      }, 0) / effLIs.length))
-    : 0;
+  // The campaign's own flight, earliest start to latest end of the lines in view (2026-09-29):
+  // days left run to the LAST line's end, so «Flight ended» waits for the last line, as the
+  // Overview's days remaining always has. It was the average of the lines' own days left.
+  // `flightSpanDay` / `flightSpanDays` are «Day X of Y» on that same flight (inside `range`
+  // for the day, like one line's prorateRange); `daysLeft` stays range-free.
+  const span = campaignSpan(effLIs.map((id) => getEffPlan(liPlan, id, splitScopedMode, splitScopedPlans)), asOf, range);
+  const daysLeft = span.left;
+  const flightSpanDay = span.passed;
+  const flightSpanDays = span.days;
 
   const tgtCpm = cpmImprSum > 0 ? (cpmBudSum / cpmImprSum * 1000) : null;
   // Bid Plan (cost side) + Plan rate (client side) per type, each from ITS OWN
@@ -746,17 +805,40 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   const clientPlanCpm = imprPlanFlight > 0 ? imprClientBud / imprPlanFlight * 1000 : 0;
   const clientPlanCpc = cpcPlanClicks > 0 ? cpcClientBud / cpcPlanClicks : 0;
   const clientPlanCpv = cpvViewsPlanFlight > 0 ? cpvClientBud / cpvViewsPlanFlight : 0;
-  // Subtract paused-LI remaining only (no Math.max clamp) so a non-paused
-  // campaign stays byte-identical — including the legacy negative value when
-  // over-delivered. *PausedRem is 0 when nothing is paused.
-  const neededPerDayImpr = daysLeft > 0 && imprPlan > 0
-    ? Math.round(((imprPlan - imprActual) - imprPlanPausedRem) / daysLeft) : 0;
-  const neededPerDayClicks = daysLeft > 0 && clicksPlan > 0
-    ? Math.round(((clicksPlan - clicksActual) - clicksPlanPausedRem) / daysLeft) : 0;
-  const neededPerDayInstalls = daysLeft > 0 && installsPlan > 0
-    ? Math.round(((installsPlan - installsActual) - installsPlanPausedRem) / daysLeft) : 0;
-  const neededPerDayViews = daysLeft > 0 && viewsPlan > 0
-    ? Math.round(((viewsPlan - viewsActual) - viewsPlanPausedRem) / daysLeft) : 0;
+  // The sums built line by line above (`need`). Never negative: a line ahead of plan asks for 0.
+  const neededPerDayImpr = Math.round(need.impr.need);
+  const neededPerDayClicks = Math.round(need.clicks.need);
+  const neededPerDayInstalls = Math.round(need.installs.need);
+  const neededPerDayViews = Math.round(need.views.need);
+  // What the «Needed per day» notes explain it with (brick-data.js): the remaining it covers,
+  // over how many lines, and their shared days left (null when the lines' days differ).
+  const neededBasis = (u) => ({ left: u.left, lines: u.lines, days: u.days === undefined ? null : u.days });
+
+  // «Impressions to Hit Budget» (2026-09-29), per unit: at the unit's own average Dyn rate
+  // (dc / units, the rate Dyn CPM / CPC / CPV print), the budget buys `budget × units / dc`.
+  // To add = that − plan: negative when the budget runs out before the plan. Per day = line by
+  // line, as «Needed per day» asks it: the money the line has left, in units at the unit's rate,
+  // over its own days left. Money, not units: the unit's rate is an average, and a line bought
+  // three times dearer than it would be asked for a third of the units it can buy. Summed
+  // over the lines, the money left is the unit's own (budget − dc), so the rows agree with the
+  // total. A line that has ended, is paused or has not started asks for nothing today, and
+  // one already past its budget asks for 0 rather than offset another line's shortfall. A unit
+  // with no client cost yet has no rate: its numbers are null (an em dash) and its budget
+  // stands in for its projection.
+  const hitRated = (h) => h.units > 0 && h.dc > 0;
+  const hitAdd = (h) => (hitRated(h) ? Math.round(h.budget * h.units / h.dc - h.plan) : null);
+  const hitPerDay = (h) => {
+    if (!hitRated(h)) return null;
+    const perDollar = h.units / h.dc;
+    let sum = 0;
+    for (const l of h.lines) if (l.days > 0) sum += Math.max(0, l.budget - l.dc) * perDollar / l.days;
+    return Math.round(sum);
+  };
+  const hitUnits = [hit.impr, hit.clicks, hit.views, hit.installs].filter((h) => h.plan > 0);
+  const hitBudgetPlan = hitUnits.reduce((s, h) => s + h.budget, 0);
+  const hitBudgetProjected = hitUnits.some(hitRated)
+    ? hitUnits.reduce((s, h) => s + (hitRated(h) ? h.plan * h.dc / h.units : h.budget), 0) : null;
+  const hitBudgetGap = hitBudgetProjected == null ? null : hitBudgetPlan - hitBudgetProjected;
 
   // Block-library canon (spec 2026-07-16 §3): per-unit to-date pacing —
   // actual vs expected-to-date, each inside its rate-type-gated bucket.
@@ -831,15 +913,24 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     mA, mT, pac, ctr, ctrT, vcr: vcr2, vcrT, cvr: cvr2, cpm, cpv, dynCpm, dynCpc, dynCpv, dynCpa, tgtCpm,
     // Net cost mode: GROSS twins, shown beside their net originals.
     clientPrGross, budGross, dynCpmGross, dynCpcGross, dynCpvGross, dynCpaGross,
-    avgTP, totalDP, totalFD, daysLeft,
+    avgTP, totalDP, totalFD, daysLeft, flightSpanDay, flightSpanDays,
     scopeEnd: scopeEnd || null,
     bidPlanCpm, bidPlanCpc, bidPlanCpv,
     bidFact2dCpm, bidFact2dCpc, bidFact2dCpv,
     forecastDspSpend, clientPlanCpm, clientPlanCpc, clientPlanCpv,
+    // «Impressions to Hit Budget» (read off flCM).
+    hitBudgetAddImpr: hitAdd(hit.impr), hitBudgetAddClicks: hitAdd(hit.clicks), hitBudgetAddViews: hitAdd(hit.views),
+    hitBudgetPerDayImpr: hitPerDay(hit.impr), hitBudgetPerDayClicks: hitPerDay(hit.clicks),
+    hitBudgetPerDayViews: hitPerDay(hit.views),
+    hitBudgetAddInstalls: hitAdd(hit.installs), hitBudgetPerDayInstalls: hitPerDay(hit.installs),
+    hitBudgetPlan, hitBudgetProjected, hitBudgetGap,
 
     // Explicit impressions / clicks split
     imprPlan, imprActual, imprExpected, imprSpend,
     imprPlanDailyRate, imprPlanDailyEnded, neededPerDayImpr,
+    // The basis of the neededPerDay* (the notes under «Needed per day»).
+    neededImprBasis: neededBasis(need.impr), neededClicksBasis: neededBasis(need.clicks),
+    neededViewsBasis: neededBasis(need.views), neededInstallsBasis: neededBasis(need.installs),
     // All-lines impressions plan (any rate type) — the total expIm reaches.
     // Drives the dailyImpr reforecast so it paces to the SAME total as Plan.
     allPlanImpr, allPlanImprDailyRate,

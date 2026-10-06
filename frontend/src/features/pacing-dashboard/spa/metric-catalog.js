@@ -22,7 +22,7 @@
 //                          (percent→percent, currency→money, kilo→count, number→number)
 //   their per-dim subset   widget-data.js DIM_FIELDS_SET — a dim bucket has no expected
 //                          curve and no plan, and those fields read as a silent 0 there
-//   the 29 canonical keys  @shared/widget-metrics (12 KPI presets + 17 campM keys)
+//   the 46 canonical keys  @shared/widget-metrics (12 KPI presets + 34 campM keys)
 //   their names            FIELD_LABELS (below, this file's own since P3 Task 0),
 //                          report-render's V2_CANON_LABELS and canonical metric readings
 //
@@ -118,7 +118,7 @@ export const FIELD_LABELS = Object.freeze({
 });
 
 /**
- * The canonical half's names. The 16 campM keys need explicit authoring labels;
+ * The canonical half's names. The 18 campM keys need explicit authoring labels;
  * `tests/report-render-test.mjs` pins them to the renderer. This file reads the remaining
  * names from widget-metric-readings.
  *
@@ -138,6 +138,12 @@ const CANON_ONLY_LABELS = Object.freeze({
   costRemaining: 'Cost remaining', clientPlanCpm: 'Client plan CPM',
   clientPlanCpc: 'Client plan CPC', clientPlanCpv: 'Client plan CPV',
   bidPlanCpm: 'Bid plan CPM', dynCpm: 'Dynamic CPM', paceDeltaImpr: 'Impressions pace delta',
+  hitBudgetAddImpr: 'Impressions to hit budget', hitBudgetAddViews: 'Views to hit budget',
+  hitBudgetAddClicks: 'Clicks to hit budget', hitBudgetPerDayImpr: 'Impressions / day to hit budget',
+  hitBudgetPerDayViews: 'Views / day to hit budget', hitBudgetPerDayClicks: 'Clicks / day to hit budget',
+  hitBudgetAddInstalls: 'Installs to hit budget', hitBudgetPerDayInstalls: 'Installs / day to hit budget',
+  hitBudgetPlan: 'Client budget (lines with a goal)', hitBudgetProjected: 'Projected client spend',
+  hitBudgetGap: 'Budget gap at current rates',
   // The seven above, on the unit this pacing is BOUGHT on (2026-10-05) — impressions on a
   // CPM pacing, clicks on a CPC one, views on a CPV one, resolved at render by `primaryUnit`.
   // Labelled «buy unit» rather than naming a unit, because which one it is is the pacing's
@@ -149,7 +155,7 @@ const CANON_ONLY_LABELS = Object.freeze({
 });
 
 /**
- * The format each of those 16 prints in — brick-data.js's own `CANON` table, which is
+ * The format each of those 18 prints in — brick-data.js's own `CANON` table, which is
  * private to that module (it also carries the reading side: `cm` vs `flCM` vs derived).
  * Restated rather than exported from there, and `tests/metric-catalog-test.mjs` pins every
  * entry against what `brickValue` actually answers, so a change over there fails a test
@@ -163,6 +169,10 @@ const CANON_ONLY_FORMAT = Object.freeze({
   costBudTotal: 'money', costRemaining: 'money', clientPlanCpm: 'money',
   clientPlanCpc: 'money', clientPlanCpv: 'money4', bidPlanCpm: 'money',
   dynCpm: 'money', paceDeltaImpr: 'pp',
+  hitBudgetAddImpr: 'int', hitBudgetAddViews: 'int', hitBudgetAddClicks: 'int',
+  hitBudgetPerDayImpr: 'int', hitBudgetPerDayViews: 'int', hitBudgetPerDayClicks: 'int',
+  hitBudgetAddInstalls: 'int', hitBudgetPerDayInstalls: 'int',
+  hitBudgetPlan: 'money', hitBudgetProjected: 'money', hitBudgetGap: 'money',
   unitToDatePct: 'percent', unitActual: 'int', unitExpected: 'int', unitPlan: 'int',
   unitDeviation: 'int', neededPerDayUnit: 'int', paceDeltaUnit: 'pp',
 });
@@ -279,11 +289,21 @@ const TIP_CANON_DEFAULT = 'Full flight; the period switch does not change it.';
 // §4's warning, in the words the map prints: this is the CURRENT needed-per-day for the
 // whole flight, and «Needed per day to hit goal (by date)» is a different number.
 const NEEDED_NOW = 'Current needed per day, full flight. The by-date calculation is a separate series.';
+// «Impressions to Hit Budget» (2026-09-29): one rate for all three tips, each rate type's own.
+const HIT_BUDGET_RATE = 'At each rate type’s average Dyn rate over the flight, or the selected period under period scope.';
+const HIT_BUDGET_ADD = 'Units to add to the plan so its lines land on their client budget. '
+  + 'Negative: the budget runs out first. ' + HIT_BUDGET_RATE;
+const HIT_BUDGET_DAY = 'Units per day from now to the end, plan remainder included, to land on the client budget. '
+  + HIT_BUDGET_RATE;
 const TIP_BY_CANON = {
   __proto__: null,
   neededSpendPerDay: NEEDED_NOW, neededPerDayImpr: NEEDED_NOW,
   neededPerDayClicks: NEEDED_NOW, neededPerDayViews: NEEDED_NOW,
   costBudTotal: 'The whole flight’s cost budget. The range-prorated figure is the Cost budget field.',
+  hitBudgetAddImpr: HIT_BUDGET_ADD, hitBudgetAddViews: HIT_BUDGET_ADD, hitBudgetAddClicks: HIT_BUDGET_ADD,
+  hitBudgetPerDayImpr: HIT_BUDGET_DAY, hitBudgetPerDayViews: HIT_BUDGET_DAY, hitBudgetPerDayClicks: HIT_BUDGET_DAY,
+  hitBudgetAddInstalls: HIT_BUDGET_ADD, hitBudgetPerDayInstalls: HIT_BUDGET_DAY,
+  hitBudgetProjected: HIT_BUDGET_RATE, hitBudgetGap: HIT_BUDGET_RATE,
 };
 
 /**
@@ -536,7 +556,7 @@ function canonEntry(key) {
 
 /**
  * Every value a picker may offer, in the order the grouped map prints them: the 31 delivery
- * fields by group, then the 29 canonical metrics in WIDGET_METRICS' own order.
+ * fields by group, then the 46 canonical metrics in WIDGET_METRICS' own order.
  *
  * FROZEN, entries included — it is read on every keystroke of a Spotlight query and handed
  * straight to renderers, and a caller that could push onto it would be a second catalog.

@@ -169,6 +169,34 @@ export function collectSplitKeys(liPlan) {
 }
 
 /**
+ * The same walk as collectSplitKeys, keeping WHICH line items declare each split:
+ * '<dim_key>:<dim_value>' → Set of line item ids. The filter pop-up's count for a Scope
+ * dim value (spec 2026-10-01) reads it; collectSplitKeys and its Set stay as they are.
+ * @param {Object} liPlan  map id → LI plan
+ * @returns {Map<string, Set<string>>}
+ */
+export function splitLinesByKey(liPlan) {
+  const lines = new Map();
+  if (!liPlan) return lines;
+  for (const id of Object.keys(liPlan)) {
+    const li = liPlan[id];
+    if (!li) continue;
+    const containers = Array.isArray(li.containers) ? li.containers : [];
+    for (const container of containers) {
+      const children = Array.isArray(container.dim_children) ? container.dim_children : [];
+      for (const child of children) {
+        if (!child || child.dim_key == null || child.dim_value == null) continue;
+        if (!(dimAbs(child, container) > 0)) continue;
+        const key = child.dim_key + ':' + child.dim_value;
+        if (!lines.has(key)) lines.set(key, new Set());
+        lines.get(key).add(String(id));
+      }
+    }
+  }
+  return lines;
+}
+
+/**
  * The dates a dimension Scope chip judges each line item in (primary conversions, spec
  * 2026-09-13 §4; owner decision 2026-09-16): for a line item with containers declaring one of the
  * chip's values (a dim child with a positive target, as matchDimSplits counts it), the dates of

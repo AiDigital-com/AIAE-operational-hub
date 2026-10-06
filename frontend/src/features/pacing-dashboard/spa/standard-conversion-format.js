@@ -92,6 +92,32 @@ const isOldDailyTable = (node) => ownValue(node, 'kind') === 'table' && Array.is
 const withExpectedClicksTarget = (view) => ({ ...view, columns: view.columns.map(column => (column.target?.value?.metric === 'planClicks'
   ? { ...column, target: { ...column.target, value: { ...column.target.value, metric: 'clExpected' } } } : column)) });
 
+/* ── «Impressions to Hit Budget» (2026-09-29) ─────────────────────────────────
+ * The card first shipped CPM-only: one Layout panel of three formulas over `im` and `dc`,
+ * which count every line, so a pacing with a CPV or CPC line printed a gap ten times too
+ * large. It is now a composed card over the engine's per-rate-type hitBudget* metrics. A
+ * stored view that is exactly the first version (keys in any order) reads as today's card,
+ * under its own id; one the author changed in any way is theirs and stays.
+ *
+ * Ported with the card (2026-10-06). The first version shipped in the reference for seven
+ * hours on 2026-09-29 and never shipped here, so nothing in this service's data can match
+ * this shape — the guard is carried for fidelity with the reference, not because it fires. */
+const OLD_BUDGET_GAP_VIEW = stable({ id: 'layout', kind: 'layout', title: '', rows: [{ cols: [{ span: 12, frame: 'card', bricks: [
+  { type: 'bigStat', label: 'Impressions to add to plan (negative: to cut)', bind: { expr: 'if(dc > 0, budgetTotal * im / dc - planImprTotal, 0)' }, format: 'int' },
+  { type: 'statRow', cells: [
+    { label: 'Budget', bind: { expr: 'budgetTotal' }, format: 'money' },
+    { label: 'Projected', bind: { expr: 'if(im > 0, planImprTotal * dc / im, 0)' }, format: 'money' },
+    { label: 'Gap', bind: { expr: 'budgetTotal - if(im > 0, planImprTotal * dc / im, 0)' }, format: 'money' },
+  ], layout: 'flex' },
+  { type: 'kvRow', label: 'Deliver per day', bind: { expr: 'if(dc > 0, (if(dc > 0, budgetTotal * im / dc, 0) - im) / daysLeft, 0)' }, format: 'int', emphasis: 'strong', sub: 'to land on budget at the current Dyn CPM' },
+] }] }] });
+// Stored data only, as the walk below: an accessor is nobody's stored text, and reading one runs code.
+const dataOnly = (v) => (Array.isArray(v) ? v.every(dataOnly) : !v || typeof v !== 'object'
+  || Object.values(Object.getOwnPropertyDescriptors(v)).every((d) => 'value' in d && dataOnly(d.value)));
+const isOldBudgetGapView = (node) => ownValue(node, 'kind') === 'layout' && Array.isArray(ownValue(node, 'rows'))
+  && dataOnly(node) && stable({ ...node, id: 'layout' }) === OLD_BUDGET_GAP_VIEW;
+const budgetGapView = (id) => ({ ...structuredClone(stdEntry('std:v2:card:budgetgap').definition.spec.views[0]), id });
+
 const squash = (text) => text.replace(/\s+/g, '');
 const bindsExpr = (bind, field) => !!bind && typeof bind.expr === 'string' && squash(bind.expr) === field
   && Object.keys(bind).length === 1;
@@ -191,6 +217,7 @@ function upgradeTargetsNode(node) {
     return changed ? out : node;
   }
   if (!node || typeof node !== 'object') return node;
+  if (isOldBudgetGapView(node)) return budgetGapView(node.id);
   let out = node;
   const set = (key, value) => {
     if (out === node) out = { ...node };
