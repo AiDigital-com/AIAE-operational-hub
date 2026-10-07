@@ -1604,7 +1604,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null);
+				"40539", "2026_Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
@@ -1654,13 +1654,13 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem first = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null, null, null, null);
 		PacingCreateLineItem second = new PacingCreateLineItem(
 				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-282075", null, 200000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", "TM-282075", null, 200000.0, 15.5, null, null, null, null, null, null);
 		PacingCreateLineItem repeat = new PacingCreateLineItem(
 				"333", "DOOH", "2026-03-01", "2026-03-31", "CPM", null, 3000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", null, 300000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", "TM-271064", null, 300000.0, 15.5, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				// Raw-body assertions, not object ones: the wire keys are snake_case and the pair's
@@ -1692,10 +1692,10 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem noNumber = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", null, null, 100000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", null, null, 100000.0, 15.5, null, null, null, null, null, null);
 		PacingCreateLineItem blankNumber = new PacingCreateLineItem(
 				"222", "Video", "2026-03-01", "2026-03-31", "CPV", null, 2000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "  ", null, 200000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", "  ", null, 200000.0, 15.5, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(jsonPath("$.insertion_order_id").doesNotExist())
@@ -1723,7 +1723,7 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "Bretts RV", "SY-Bretts RV-0426", null, 100000.0, 15.5, null, null, null);
+				"40539", "Bretts RV", "SY-Bretts RV-0426", null, 100000.0, 15.5, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(jsonPath("$.insertion_order_id").value("SY-Bretts RV-0426"))
@@ -1839,10 +1839,10 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "CAD", 0.73,
-				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, true);
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, true, 0.85, true, 0.8);
 		PacingCreateOptions options = new PacingCreateOptions(
 				List.of("40539", "40540"), "Acme", "MediaCo",
-				new PacingCreateData("platform_mart", true, false, true),
+				new PacingCreateData("platform_mart", true, false, true, true),
 				0.7345, true,
 				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/1/2/3")),
 				"launches mid-flight");
@@ -1852,11 +1852,16 @@ class PacingClientImplTest {
 						"{\"pacing_name\":\"2026_Campaign\",\"client\":\"Acme\",\"agency\":\"MediaCo\","
 								+ "\"campaigns\":[\"40539\",\"40540\"],"
 								+ "\"data\":{\"source\":\"platform_mart\",\"fetch_creatives\":true,"
-								+ "\"fetch_conversions\":false,\"coef_enabled\":true},"
+								+ "\"fetch_conversions\":false,\"coef_enabled\":true,\"net_enabled\":true},"
 								+ "\"rate\":0.7345,\"rate_locked\":true,"
 								+ "\"campaign_links\":[{\"name\":\"Asana\",\"url\":\"https://app.asana.com/1/2/3\"}],"
 								+ "\"campaign_notes\":\"launches mid-flight\"}"))
 				.andExpect(jsonPath("$.line_items[0].cost_coef").value(true))
+				// Net cost mode (Pacing spec 2026-09-07): the hand-confirmed ratio, its lock, and
+				// NetSuite's own baseline all ride the create wire under dash-gate's snake_case keys.
+				.andExpect(jsonPath("$.line_items[0].net_ratio").value(0.85))
+				.andExpect(jsonPath("$.line_items[0].net_ratio_locked").value(true))
+				.andExpect(jsonPath("$.line_items[0].ns_net_ratio").value(0.8))
 				.andRespond(withStatus(HttpStatus.CREATED)
 						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")
 						.contentType(MediaType.APPLICATION_JSON));
@@ -1880,7 +1885,7 @@ class PacingClientImplTest {
 				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"111", "Display", "2026-03-01", "2026-03-31", "CPM", null, 1000.0, "USD", 1.0,
-				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null);
+				"40539", "2026_Campaign", "TM-271064", null, 100000.0, 15.5, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(jsonPath("$.client").doesNotExist())
@@ -1993,13 +1998,16 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", List.of(Map.of("id", "c1", "target_impressions", 100000)));
+				"2026-01-01", "2026-01-31", 0.85, false, List.of(Map.of("id", "c1", "target_impressions", 100000)));
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(method(POST))
 				.andExpect(content().json(
 						"{\"line_items\":[{\"line_item_id\":\"599852\",\"rate_type\":\"CPM\","
 								+ "\"native_budget\":1000.0,\"target_impressions\":500000.0,"
-								+ "\"margin_percent\":20.0,\"flight_start\":\"2026-01-01\","
+								// Net cost mode: the ratio and its lock ride together, the lock as an
+								// explicit boolean (false must defeat dash-gate's preserve back-fill).
+								+ "\"margin_percent\":20.0,\"net_ratio\":0.85,\"net_ratio_locked\":false,"
+								+ "\"flight_start\":\"2026-01-01\","
 								+ "\"flight_end\":\"2026-01-31\"}]}"))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
@@ -2022,7 +2030,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", List.of());
+				"2026-01-01", "2026-01-31", null, null, List.of());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2052,13 +2060,14 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
 					assertThat(body).contains("\"source\":\"platform_mart_adjustments_view\"");
 					assertThat(body).doesNotContain("\"fetch_creatives\"");
 					assertThat(body).doesNotContain("\"fetch_conversions\"");
+					assertThat(body).doesNotContain("\"net_enabled\"");
 					assertThat(body).doesNotContain("\"dim_sources\"");
 					// Never the plan or the display: a data save touches one fragment of the endpoint.
 					assertThat(body).doesNotContain("\"line_items\"");
@@ -2082,7 +2091,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
-				null, false, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
+				null, false, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"data\":{\"fetch_creatives\":false,"
@@ -2179,7 +2188,7 @@ class PacingClientImplTest {
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\",\"detail\":\"devices: unknown catalog\"}")
 						.contentType(MediaType.APPLICATION_JSON));
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, List.of(Map.of("id", "devices")));
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, List.of(Map.of("id", "devices")));
 
 		// When-Then:
 		assertThatThrownBy(() -> client.saveDataSettings(assertion, "nike-ss26", settings))
@@ -2449,7 +2458,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"7", "Display", "New line item", "40539", "2026_Campaign", "TM-1", "CPM", 1000.0,
-				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", List.of());
+				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", null, null, List.of());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"line_items\":[{\"line_item_id\":\"7\",\"channel\":\"Display\","
@@ -2479,7 +2488,7 @@ class PacingClientImplTest {
 								+ "\"value\":150}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2505,7 +2514,7 @@ class PacingClientImplTest {
 								+ "\"a\":\"container:Jan\",\"b\":\"container:Feb\"}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2529,7 +2538,7 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":[]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2553,7 +2562,7 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\"}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))

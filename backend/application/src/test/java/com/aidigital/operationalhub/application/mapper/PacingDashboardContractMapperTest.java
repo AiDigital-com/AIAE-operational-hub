@@ -65,7 +65,7 @@ class PacingDashboardContractMapperTest {
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
 				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
 				"https://docs.google.com/spreadsheets/d/abc",
-				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456")));
+				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456")), true);
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", List.of("VIP", "renewal"), "Nike SS26 - Display", "CPM", 5000.0,
 				1_000_000.0, 20.0, null, null,
@@ -74,7 +74,8 @@ class PacingDashboardContractMapperTest {
 				List.of(Map.of("target_impressions", 200_000)),
 				// Value groups: two delivered Audience values read as one named value on this line.
 				List.of(Map.of("dim_key", "audience", "name", "Brand", "values", List.of("PMax_Brand", "Search_Brand"))),
-				null, false, false, null);
+				// Net cost mode: operative ratio, stored ratio, lock, NetSuite baseline.
+				null, false, false, null, 0.85, 0.85, true, 0.8);
 		PacingJournalEntry journal =
 				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
@@ -113,6 +114,14 @@ class PacingDashboardContractMapperTest {
 				.isEqualTo(LocalDate.of(2026, 8, 10));
 		assertThat(result.getPlanByLineItem().get("111").getLabels()).containsExactly("VIP", "renewal");
 		assertThat(result.getPlanByLineItem().get("111").getDescription()).isEqualTo("Nike SS26 - Display");
+		// Net cost mode (Pacing spec 2026-09-07): the four net fields pass through verbatim - the
+		// browser-side engine multiplies each cost row by netRatio, so dropping it here would
+		// silently read a net pacing as gross. netMode is the campaign-wide switch echo.
+		assertThat(result.getCampaign().getNetMode()).isTrue();
+		assertThat(result.getPlanByLineItem().get("111").getNetRatio()).isEqualTo(0.85);
+		assertThat(result.getPlanByLineItem().get("111").getStoredNetRatio()).isEqualTo(0.85);
+		assertThat(result.getPlanByLineItem().get("111").getNetRatioLocked()).isTrue();
+		assertThat(result.getPlanByLineItem().get("111").getNsNetRatio()).isEqualTo(0.8);
 		assertThat(result.getFactsDaily()).hasSize(1);
 		assertThat(result.getAsOf()).isEqualTo("2026-08-05");
 		// The two Breakdown aux feeds ride through byte-for-byte, and an ABSENT one stays absent:
@@ -140,10 +149,10 @@ class PacingDashboardContractMapperTest {
 		// (matching the existing `containers` default two lines above it in the mapper).
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
 				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
-				"", List.of());
+				"", List.of(), null);
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
-				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null);
+				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null, null, null, null, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(), "2026-08-05",
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
@@ -332,7 +341,7 @@ class PacingDashboardContractMapperTest {
 		// Given: a defensive rule shared with PacingContractMapper's own date parsing
 		PacingDashboardCampaign campaign =
 				new PacingDashboardCampaign(
-						"slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null, null, null);
+						"slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null, null, null, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of(), List.of(), null,
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
@@ -394,7 +403,7 @@ class PacingDashboardContractMapperTest {
 		// are the same answer to a reader, so null flattens - unlike the payload's measurement
 		// fields, whose absence carries meaning.
 		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"slug", "p1", "Name", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", null, "", null);
+				"slug", "p1", "Name", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", null, "", null, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of(), List.of(), null,
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved

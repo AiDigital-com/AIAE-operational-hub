@@ -112,6 +112,17 @@ export function PacingSettingsDrawer({
     []
   );
 
+  // Net cost mode: how many line items carry a STORED ratio right now. Steers only the hint under
+  // the Data tab's switch ("re-validate to pull ratios") - storedNetRatio is the ungated value, so
+  // the count is right even while the switch itself is still off.
+  const netRatioCount = useMemo(
+    () =>
+      Object.values(planByLineItem).filter(
+        (p) => typeof p?.storedNetRatio === "number" && p.storedNetRatio > 0 && p.storedNetRatio < 1
+      ).length,
+    [planByLineItem]
+  );
+
   if (open && !openedRef.current) {
     openedRef.current = true;
     // During render rather than in an effect: the sections read `seedKey` on their first render of
@@ -248,13 +259,21 @@ export function PacingSettingsDrawer({
             ref={plan}
             slug={slug}
             currency={currency}
+            netFeatureOn={data?.net_enabled === true}
             planByLineItem={planByLineItem}
             seedKey={seedKey}
             onDirtyChange={markPlan}
           />
         </div>
         <div className={cn("psettings__panel", tab !== "data" && "psettings__panel--hidden")}>
-          <PacingDataSection ref={dataSection} slug={slug} data={data} seedKey={seedKey} onDirtyChange={markData} />
+          <PacingDataSection
+            ref={dataSection}
+            slug={slug}
+            data={data}
+            netRatioCount={netRatioCount}
+            seedKey={seedKey}
+            onDirtyChange={markData}
+          />
         </div>
         <div className={cn("psettings__panel", tab !== "widgets" && "psettings__panel--hidden")}>
           <PacingWidgetsSection

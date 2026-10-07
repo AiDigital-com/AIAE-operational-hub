@@ -135,6 +135,7 @@ public class PacingDashboardContractMapper {
 				body.getSource() == null ? null : body.getSource().getValue(),
 				body.getFetchCreatives(),
 				body.getFetchConversions(),
+				body.getNetEnabled(),
 				// The wrapper, not its contents, is what says "the caller touched this". An absent
 				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as
 				// an empty list rather than collapsing back into "absent".
@@ -325,6 +326,7 @@ public class PacingDashboardContractMapper {
 				.status(campaign.status())
 				.orderNumber(campaign.orderNumber())
 				.sourceUrl(campaign.sourceUrl())
+				.netMode(Boolean.TRUE.equals(campaign.netMode()))
 				.links(toLinksV1(campaign.links()));
 	}
 
@@ -389,6 +391,10 @@ public class PacingDashboardContractMapper {
 				.dimGroups(plan.dimGroups() == null ? List.of() : plan.dimGroups())
 				.nativeBudget(plan.nativeBudget())
 				.costCoef(plan.costCoef())
+				.netRatio(plan.netRatio())
+				.storedNetRatio(plan.storedNetRatio())
+				.netRatioLocked(Boolean.TRUE.equals(plan.netRatioLocked()))
+				.nsNetRatio(plan.nsNetRatio())
 				.converted(plan.converted())
 				.currency(plan.currency());
 		if (plan.pauseIntervals() != null) {

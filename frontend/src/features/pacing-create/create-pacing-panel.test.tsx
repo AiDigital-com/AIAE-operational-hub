@@ -354,6 +354,7 @@ describe("CreatePacingPanel", () => {
     expect(body.data).toEqual({
       source: "platform_mart",
       fetchCreatives: false,
+      netEnabled: false,
       fetchConversions: false,
       coefEnabled: false,
     });

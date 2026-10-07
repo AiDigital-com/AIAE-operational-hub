@@ -31,6 +31,9 @@ import java.util.Map;
  *                         puts Creative (asset) in the breakdowns
  * @param fetchConversions whether conversions are fetched, which is what puts Conversion Action in the
  *                         breakdowns. Read from the conversions table paired with {@code source}
+ * @param netEnabled       net cost mode's pacing-level switch (Pacing spec 2026-09-07): while on,
+ *                         client cost reads net = gross × each line item's ratio everywhere. Null
+ *                         leaves the stored switch untouched
  * @param dimSources       the WHOLE dimension-source list to store, opaque - forwarded byte-for-byte
  *                         and validated by Pacing, which refuses a malformed entry rather than
  *                         dropping it. Whole-array replace: a caller that rebuilds this from its own
@@ -42,5 +45,6 @@ public record PacingDataSettings(
 		String source,
 		Boolean fetchCreatives,
 		Boolean fetchConversions,
+		Boolean netEnabled,
 		List<Map<String, Object>> dimSources) {
 }

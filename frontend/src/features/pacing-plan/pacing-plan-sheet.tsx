@@ -24,7 +24,14 @@ import { AddLineItemPanel } from "./add-line-item-panel";
 import { ContainerCard } from "./container-editor";
 import { buildDefaultContainer, containerSumExceedsPlan, type PacingContainer } from "./containers";
 import { useSavePacingPlan } from "./hooks";
-import { seedFromCandidate, seedFromPlan, toPlanUpdateLineItem, type EditableLineItem } from "./line-item-fields";
+import {
+  netPctToRatio,
+  netRatioToPct,
+  seedFromCandidate,
+  seedFromPlan,
+  toPlanUpdateLineItem,
+  type EditableLineItem,
+} from "./line-item-fields";
 import type { PacingDraftLineItemV1, PacingLineItemPlanV1 } from "./types";
 import "./pacing-plan.css";
 
@@ -39,6 +46,9 @@ function seedAll(planByLineItem: Record<string, PacingLineItemPlanV1>): Record<s
 interface LineItemCardProps {
   li: EditableLineItem;
   currency: string;
+  /** Net cost mode's pacing switch (`data.net_enabled`): the Net % field renders only while it is
+   *  on, matching the retired SPA's Settings · Pacing tab. */
+  netFeatureOn: boolean;
   isLast: boolean;
   open: boolean;
   onToggleOpen: () => void;
@@ -46,7 +56,7 @@ interface LineItemCardProps {
   onRemove: () => void;
 }
 
-function LineItemCard({ li, currency, isLast, open, onToggleOpen, onChange, onRemove }: LineItemCardProps) {
+function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, onChange, onRemove }: LineItemCardProps) {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [lastAddedContainerId, setLastAddedContainerId] = useState<string | null>(null);
 
@@ -79,6 +89,10 @@ function LineItemCard({ li, currency, isLast, open, onToggleOpen, onChange, onRe
 
   const planImpr = parseEditableNumber(li.targetImpressions) ?? null;
   const overPlan = containerSumExceedsPlan(planImpr, li.containers);
+  // Net cost mode: there is something to reset to only when NetSuite reports a ratio, and only
+  // once the cell has moved off it (or was locked by hand). Compared on the RATIOS, not on the
+  // displayed percents - two different ratios can round to the same 2-decimal cell.
+  const canResetNet = li.nsNetRatio != null && (li.netLocked || li.netRatio !== li.nsNetRatio);
 
   return (
     <div className="pplan__li-card" data-li-id={li.lineItemId}>
@@ -176,6 +190,65 @@ function LineItemCard({ li, currency, isLast, open, onToggleOpen, onChange, onRe
                 onChange={(e) => field("targetVcr", e.target.value)}
               />
             </label>
+            {netFeatureOn && (
+              <div className="pplan__field">
+                <span className="pplan__field-label">Net %</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  className="pplan__input pplan__input--num"
+                  value={li.netPct}
+                  placeholder="100 (gross)"
+                  aria-label={`Net percent for line item ${li.lineItemId}`}
+                  // A manual edit ALWAYS locks - including a typed 100 or a cleared cell, which say
+                  // "this line item is invoiced at gross" and must survive a revalidate. The typed
+                  // string drives BOTH the display and the ratio: only a keystroke may move the
+                  // ratio off what Pacing stored (see EditableLineItem.netRatio).
+                  onChange={(e) =>
+                    onChange({
+                      ...li,
+                      netPct: e.target.value,
+                      netRatio: netPctToRatio(e.target.value),
+                      netLocked: true,
+                    })
+                  }
+                />
+                {/* Both actions stay mounted and hide with `visibility` - an action that unmounts
+                    would re-flow the fields beside it the moment a cell is typed in or reset. */}
+                <div className="pplan__net-actions">
+                  <button
+                    type="button"
+                    className="pplan__reset-net"
+                    style={{ visibility: canResetNet ? "visible" : "hidden" }}
+                    tabIndex={canResetNet ? 0 : -1}
+                    aria-hidden={!canResetNet}
+                    onClick={() =>
+                      onChange({
+                        ...li,
+                        netPct: netRatioToPct(li.nsNetRatio),
+                        netRatio: li.nsNetRatio,
+                        netLocked: false,
+                      })
+                    }
+                    title={
+                      canResetNet ? "Restore NetSuite's own net/gross ratio and let revalidate keep it fresh" : undefined
+                    }
+                  >
+                    {li.nsNetRatio != null ? `Reset to NS (${netRatioToPct(li.nsNetRatio)}%)` : "Reset to NS"}
+                  </button>
+                  <span
+                    className="pplan__net-lock"
+                    style={{ visibility: li.netLocked ? "visible" : "hidden" }}
+                    aria-hidden={!li.netLocked}
+                    title={li.netLocked ? "Set manually — re-validate won't overwrite it until you reset" : undefined}
+                  >
+                    Locked
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pplan__subsection">
@@ -240,13 +313,16 @@ function LineItemCard({ li, currency, isLast, open, onToggleOpen, onChange, onRe
 export interface PacingPlanSectionProps extends SettingsSectionProps {
   slug: string;
   currency: string;
+  /** Net cost mode's pacing switch (`data.net_enabled`, as stored). Gates the Net % field AND the
+   *  wire: while off, a plan save carries no net keys at all, leaving stored ratios inert. */
+  netFeatureOn: boolean;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
   /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
   seedKey: number;
 }
 
 export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
-  function PacingPlanSection({ slug, currency, planByLineItem, seedKey, onDirtyChange }, ref) {
+  function PacingPlanSection({ slug, currency, netFeatureOn, planByLineItem, seedKey, onDirtyChange }, ref) {
     const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
     const [base, setBase] = useState<Record<string, EditableLineItem>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -273,21 +349,21 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     // Compared as the payload that would be SENT, not as the editor's own state: seeding builds
     // fresh objects, so an identity check would call an untouched plan dirty the moment it loads.
     const dirty = useMemo(
-      () => JSON.stringify(ids.map((id) => toPlanUpdateLineItem(lineItems[id])))
-        !== JSON.stringify(Object.keys(base).sort().map((id) => toPlanUpdateLineItem(base[id]))),
-      [ids, lineItems, base]
+      () => JSON.stringify(ids.map((id) => toPlanUpdateLineItem(lineItems[id], netFeatureOn)))
+        !== JSON.stringify(Object.keys(base).sort().map((id) => toPlanUpdateLineItem(base[id], netFeatureOn))),
+      [ids, lineItems, base, netFeatureOn]
     );
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
-    const stateRef = useRef({ ids, lineItems, dirty });
-    stateRef.current = { ids, lineItems, dirty };
+    const stateRef = useRef({ ids, lineItems, dirty, netFeatureOn });
+    stateRef.current = { ids, lineItems, dirty, netFeatureOn };
 
     useImperativeHandle(ref, () => ({
       async save() {
-        const { ids: currentIds, lineItems: current, dirty: isDirty } = stateRef.current;
+        const { ids: currentIds, lineItems: current, dirty: isDirty, netFeatureOn: netOn } = stateRef.current;
         if (!isDirty) return { ok: true as const };
         try {
-          await savePlan.mutateAsync(currentIds.map((id) => toPlanUpdateLineItem(current[id])));
+          await savePlan.mutateAsync(currentIds.map((id) => toPlanUpdateLineItem(current[id], netOn)));
           setBase(current);
           return { ok: true as const };
         } catch (error) {
@@ -321,6 +397,20 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
       });
     }
 
+    /** Seed every line item's Net % from its own NetSuite ratio and clear the lock. A line item
+     *  NetSuite reports no ratio for is SKIPPED, not rewritten - it keeps whatever it holds. */
+    function seedNetFromNsOnAll() {
+      setLineItems((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          const li = next[id];
+          if (li.nsNetRatio == null) continue;
+          next[id] = { ...li, netRatio: li.nsNetRatio, netPct: netRatioToPct(li.nsNetRatio), netLocked: false };
+        }
+        return next;
+      });
+    }
+
     function addCandidates(candidates: PacingDraftLineItemV1[]) {
       setLineItems((prev) => {
         const next = { ...prev };
@@ -334,6 +424,16 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     return (
       <>
         <div className="pplan__section-actions">
+          {netFeatureOn && ids.length > 1 && (
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={seedNetFromNsOnAll}
+              title="Copy the NetSuite net/gross ratio onto every line item and clear the locks"
+            >
+              Net % from NS → all LIs
+            </button>
+          )}
           <button type="button" className="button button--ghost button--sm" onClick={() => setAddingLi((v) => !v)}>
             + Add line item
           </button>
@@ -350,6 +450,7 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
             key={id}
             li={lineItems[id]}
             currency={currency}
+            netFeatureOn={netFeatureOn}
             isLast={ids.length === 1}
             open={expanded.has(id)}
             onToggleOpen={() => toggleExpanded(id)}

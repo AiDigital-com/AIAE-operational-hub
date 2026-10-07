@@ -31,6 +31,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *                            explicit {@code null} ({@code coef_not_boolean}) while an absent key is
  *                            fine, so null here means "omit the key", keeping every pre-coef payload
  *                            byte-identical
+ * @param net_ratio           net cost mode (Pacing spec 2026-09-07): the ratio k = net/gross, in
+ *                            (0,1). NON_NULL at the field for {@code cost_coef}'s reason - an absent
+ *                            key means "no ratio" (Pacing's canon), an explicit null never rides
+ * @param net_ratio_locked    whether the caller hand-edited the ratio; NON_NULL at the field, same
+ *                            rule
+ * @param ns_net_ratio        NetSuite's own k = net/gross (the Reset-to-NS baseline); NON_NULL at
+ *                            the field, same rule
  */
 record LineItemCreateRequest(
 		String line_item_id,
@@ -50,5 +57,8 @@ record LineItemCreateRequest(
 		Double margin_percent,
 		Double target_ctr,
 		Double target_vcr,
-		@JsonInclude(JsonInclude.Include.NON_NULL) Boolean cost_coef) {
+		@JsonInclude(JsonInclude.Include.NON_NULL) Boolean cost_coef,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Double net_ratio,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Boolean net_ratio_locked,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Double ns_net_ratio) {
 }

@@ -36,6 +36,9 @@ import java.util.List;
  *                    connected (never null on its side, but treated as optional here anyway)
  * @param links       the campaign's reference links (§16), verbatim from
  *                    {@code config_json.campaign_links} minus the source-URL duplicate
+ * @param netMode     net cost mode's pacing-level switch (Pacing spec 2026-09-07), read through
+ *                    Pacing's own {@code safeNetEnabled}: while true, each client-cost figure the
+ *                    engine computes is already net (gross × the line item's {@code netRatio})
  */
 public record PacingDashboardCampaign(
 		String id,
@@ -48,5 +51,6 @@ public record PacingDashboardCampaign(
 		String status,
 		String orderNumber,
 		String sourceUrl,
-		List<PacingCampaignLink> links) {
+		List<PacingCampaignLink> links,
+		Boolean netMode) {
 }
