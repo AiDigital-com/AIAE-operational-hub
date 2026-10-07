@@ -34,6 +34,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *                      null value - see {@link PacingMrgSource})
  * @param kpiSource     serialized as {@code kpi_source}; the target CTR/VCR reference hint (may carry
  *                      null values - see {@link PacingKpiSource})
+ * @param nsNetRatio    serialized as {@code ns_net_ratio}; NetSuite's own k = net/gross for this
+ *                      line item (net cost mode, Pacing spec 2026-09-07) - the Net % column's seed.
+ *                      Null when NetSuite reports no usable gross
  */
 public record PacingValidateLineItem(
 		@JsonProperty("line_item_id") String lineItemId,
@@ -53,5 +56,6 @@ public record PacingValidateLineItem(
 		@JsonProperty("order_number") String orderNumber,
 		@JsonProperty("mpo_team_lead") String mpoTeamLead,
 		@JsonProperty("mrg_source") PacingMrgSource mrgSource,
-		@JsonProperty("kpi_source") PacingKpiSource kpiSource) {
+		@JsonProperty("kpi_source") PacingKpiSource kpiSource,
+		@JsonProperty("ns_net_ratio") Double nsNetRatio) {
 }

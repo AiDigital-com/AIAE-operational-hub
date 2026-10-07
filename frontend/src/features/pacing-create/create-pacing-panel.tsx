@@ -32,6 +32,7 @@ import {
   type BulkViewRow,
 } from "./bulk";
 import { fmtDate, fmtInt, fmtMoneyIn, parseEditableNumber } from "./format";
+import { netPctToRatio, netRatioToPct } from "../pacing-plan/line-item-fields";
 import { useCreatePacing, usePacingDraft } from "./hooks";
 import { NumericField } from "./numeric-field";
 import type {
@@ -234,6 +235,16 @@ function rowReady(row: RowValues): boolean {
 
 function hasFlightDates(row: RowValues): boolean {
   return isFilled(row.flightStart) && isFilled(row.flightEnd);
+}
+
+/** Net % cell validation, the one copy: blank is legal (= invoiced at gross); anything else must be
+ *  a percentage in (0, 100]. Both the submit gate and the row's own invalid styling read this, so
+ *  the button and the explanation can never disagree. */
+function netPctOk(value: string): boolean {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return true;
+  const n = parseFloat(raw.replace(/,/g, ""));
+  return Number.isFinite(n) && n > 0 && n <= 100;
 }
 
 function dirtyKey(lineItemId: string, field: FieldKey): string {
@@ -453,6 +464,12 @@ function CreatePacingForm({
   // hid rides the payload ("visible is saved" - the retired SPA's exact behavior).
   const [coefMode, setCoefMode] = useState(false);
   const [coefFlags, setCoefFlags] = useState<Set<string>>(() => new Set());
+  // Net cost mode (Pacing spec 2026-09-07): the coef toggle's twin. The Net % cells hold PERCENT
+  // strings ("85" for k = 0.85); the wire carries ratios. `netDirty` marks cells the user typed in -
+  // they keep their value across a toggle and ride with the lock.
+  const [netMode, setNetMode] = useState(false);
+  const [netPcts, setNetPcts] = useState<Record<string, string>>({});
+  const [netDirty, setNetDirty] = useState<Set<string>>(() => new Set());
   // Campaign links / notes, stored on the new pacing's config verbatim.
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [notes, setNotes] = useState("");
@@ -479,6 +496,35 @@ function CreatePacingForm({
       else next.add(id);
       return next;
     });
+  }
+
+  /** Flip the net master toggle - the coef toggle's twin (Pacing spec 2026-09-07 §5). ON reveals the
+   *  per-row Net % column and seeds every cell from NetSuite's own ratio, keeping a cell the user
+   *  already typed in; OFF hides the column, blanks the cells and clears their dirty marks, so
+   *  nothing typed and then hidden rides the create body ("visible is saved"). */
+  function toggleNetMode(on: boolean) {
+    setNetMode(on);
+    if (on) {
+      setNetPcts((cur) => {
+        const next: Record<string, string> = {};
+        for (const li of lineItems) {
+          next[li.lineItemId] = netDirty.has(li.lineItemId)
+            ? (cur[li.lineItemId] ?? "")
+            : netRatioToPct(li.nsNetRatio);
+        }
+        return next;
+      });
+    } else {
+      setNetPcts({});
+      setNetDirty(new Set());
+    }
+  }
+
+  /** A manual Net % edit marks the cell dirty - the create body sends the lock for exactly these,
+   *  so a revalidate keeps the hand-entered ratio instead of re-seeding NetSuite's. */
+  function setNetPct(id: string, value: string) {
+    setNetPcts((cur) => ({ ...cur, [id]: value }));
+    setNetDirty((cur) => new Set(cur).add(id));
   }
 
   function updateLink(index: number, patch: Partial<LinkRow>) {
@@ -545,10 +591,18 @@ function CreatePacingForm({
     return [primary, ...derivedCampaigns.filter((c) => c.id !== primary.id)];
   }, [derivedCampaigns, primaryPin]);
 
+  // Net % validity: blank is legal (= invoiced at gross); a non-blank cell must be a percentage in
+  // (0, 100]. Only rows actually being created gate the submit.
+  const invalidNetIds = useMemo(() => {
+    if (!netMode) return [];
+    return [...submittableIds].filter((id) => !netPctOk(netPcts[id] ?? ""));
+  }, [netMode, netPcts, submittableIds]);
+
   const canSubmit =
     submittableIds.size > 0 &&
     derivedCampaigns.length > 0 &&
     pacingName.trim().length > 0 &&
+    invalidNetIds.length === 0 &&
     !createMutation.isPending;
 
   // Every visible row's current on-screen values, for the gap filter and its counts - live edits,
@@ -692,6 +746,17 @@ function CreatePacingForm({
           // Always a boolean, exactly as the retired SPA sent it: master ON forwards the row's
           // checkbox, master OFF forwards false - never whatever a hidden checkbox last held.
           costCoef: coefMode ? coefFlags.has(li.lineItemId) : false,
+          // Net cost mode: the ratio rides only while the master toggle is on and the cell holds a
+          // real net percentage (blank/100 sends nothing - Pacing's canon never persists the
+          // identity). The lock rides on the cell being DIRTY, not on a ratio being sent: typing 100
+          // or clearing a seeded cell is a deliberate "invoiced at gross" that must survive a
+          // revalidate. NetSuite's own ratio rides WHATEVER the toggle says - it only seeds the
+          // Reset-to-NS baseline, and changes no number by itself.
+          ...(netMode && netPctToRatio(netPcts[li.lineItemId] ?? "") != null
+            ? { netRatio: netPctToRatio(netPcts[li.lineItemId] ?? "") as number }
+            : {}),
+          ...(netMode && netDirty.has(li.lineItemId) ? { netRatioLocked: true } : {}),
+          ...(li.nsNetRatio != null ? { nsNetRatio: li.nsNetRatio } : {}),
         };
       });
 
@@ -712,7 +777,7 @@ function CreatePacingForm({
       // The pinned ORDER of the derived set - first entry is the campaign the Hub navigates to when
       // this pacing is opened. Pacing re-derives the set itself; this can only reorder it.
       ...(orderedCampaigns.length > 0 ? { campaigns: orderedCampaigns.map((c) => c.id) } : {}),
-      data: { source: dataSource, fetchCreatives, fetchConversions, coefEnabled: coefMode },
+      data: { source: dataSource, fetchCreatives, fetchConversions, coefEnabled: coefMode, netEnabled: netMode },
       ...(nonUsdLineItem && effectiveRate != null ? { rate: effectiveRate, rateLocked: rateEdited } : {}),
       ...(cleanLinks.length > 0 ? { campaignLinks: cleanLinks } : {}),
       ...(notes.trim() ? { campaignNotes: notes.trim() } : {}),
@@ -930,6 +995,7 @@ function CreatePacingForm({
                 <col className="pcreate__col-rate" />
                 <col className="pcreate__col-pct" />
                 {coefMode && <col className="pcreate__col-coef" />}
+                {netMode && <col className="pcreate__col-net" />}
                 <col className="pcreate__col-pct" />
                 <col className="pcreate__col-pct" />
                 <col className="pcreate__col-status" />
@@ -974,6 +1040,7 @@ function CreatePacingForm({
                       (and its flags clear) when the toggle goes off, so what is visible is exactly
                       what the create body carries. */}
                   {coefMode && <th className="pcreate__th-coef">Coef</th>}
+                  {netMode && <th className="pcreate__th-net">Net %</th>}
                   <SortableHeader label="CTR" sortKey="targetCtr" sort={sort} onSort={toggleSort} />
                   <SortableHeader label="VCR" sortKey="targetVcr" sort={sort} onSort={toggleSort} />
                   <th>Status</th>
@@ -998,6 +1065,10 @@ function CreatePacingForm({
                     coefMode={coefMode}
                     coefFlags={coefFlags}
                     onToggleCoef={toggleCoefFlag}
+                    netMode={netMode}
+                    netPcts={netPcts}
+                    netDirty={netDirty}
+                    onSetNetPct={setNetPct}
                   />
                 ))}
               </tbody>
@@ -1106,6 +1177,28 @@ function CreatePacingForm({
               <input type="checkbox" checked={coefMode} onChange={(e) => toggleCoefMode(e.target.checked)} />
               <span>Coefficient cost mode (adds a per-row Coef column above; each line item starts on)</span>
             </label>
+            <label className="pcreate__setting-check">
+              <input type="checkbox" checked={netMode} onChange={(e) => toggleNetMode(e.target.checked)} />
+              <span>Net cost mode (adds a per-row Net % column above, seeded from NetSuite)</span>
+            </label>
+            {/* What NetSuite already knows, offered as the action it implies rather than buried in
+                the toggle's own label - where it read as part of the setting instead of as a reason
+                to switch it on. Only while the toggle is OFF: once it is on, the column says it. */}
+            {!netMode && (draft.netHint?.count ?? 0) > 0 && (
+              <p className="pcreate__field-hint">
+                NetSuite reports gross ≠ net on {draft.netHint?.count} line item
+                {draft.netHint?.count === 1 ? "" : "s"} —{" "}
+                <button type="button" className="pcreate__link-btn" onClick={() => toggleNetMode(true)}>
+                  enable Net cost mode?
+                </button>
+              </p>
+            )}
+            {netMode && (draft.netHint?.count ?? 0) === 0 && (
+              <p className="pcreate__field-hint">
+                NetSuite reports no net ≠ gross ratio on these line items - enter Net % by hand where
+                a line item is invoiced at net, or every figure stays gross.
+              </p>
+            )}
             {nonUsdLineItem && (
               <div className="pcreate__setting">
                 <span className="pcreate__setting-label">
@@ -1230,6 +1323,10 @@ function GroupRows({
   coefMode,
   coefFlags,
   onToggleCoef,
+  netMode,
+  netPcts,
+  netDirty,
+  onSetNetPct,
 }: {
   group: LineItemGroup;
   expanded: boolean;
@@ -1246,6 +1343,10 @@ function GroupRows({
   coefMode: boolean;
   coefFlags: Set<string>;
   onToggleCoef: (id: string) => void;
+  netMode: boolean;
+  netPcts: Record<string, string>;
+  netDirty: Set<string>;
+  onSetNetPct: (id: string, value: string) => void;
 }) {
   const order = group.order;
   const label = order ? `IO ${order.orderNumber ?? group.key}` : "No insertion order";
@@ -1258,7 +1359,7 @@ function GroupRows({
   return (
     <>
       <tr className="pcreate__group-row">
-        <td colSpan={coefMode ? 13 : 12}>
+        <td colSpan={12 + (coefMode ? 1 : 0) + (netMode ? 1 : 0)}>
           <button type="button" className="pcreate__group-toggle" onClick={onToggle} aria-expanded={expanded}>
             <ChevronDownIcon className={cn("pcreate__chevron", expanded && "pcreate__chevron--open")} />
             <span className="pcreate__group-label">{label}</span>
@@ -1302,6 +1403,10 @@ function GroupRows({
             coefMode={coefMode}
             coefChecked={coefFlags.has(li.lineItemId)}
             onToggleCoef={() => onToggleCoef(li.lineItemId)}
+            netMode={netMode}
+            netPct={netPcts[li.lineItemId] ?? ""}
+            netSeeded={li.nsNetRatio != null && !netDirty.has(li.lineItemId)}
+            onSetNetPct={(value) => onSetNetPct(li.lineItemId, value)}
           />
         ))}
     </>
@@ -1322,6 +1427,10 @@ function LineItemRow({
   coefMode,
   coefChecked,
   onToggleCoef,
+  netMode,
+  netPct,
+  netSeeded,
+  onSetNetPct,
 }: {
   li: PacingDraftLineItemV1;
   includedChecked: boolean;
@@ -1336,9 +1445,18 @@ function LineItemRow({
   coefMode: boolean;
   coefChecked: boolean;
   onToggleCoef: () => void;
+  netMode: boolean;
+  /** The row's Net % cell value (a percent string; blank = invoiced at gross). */
+  netPct: string;
+  /** Whether the cell still holds NetSuite's own seed (drives the "Auto" badge). */
+  netSeeded: boolean;
+  onSetNetPct: (value: string) => void;
 }) {
   const id = li.lineItemId;
   const missingFlight = !hasFlightDates(values);
+  // Exactly the rows `invalidNetIds` gates the submit on (included + flighted = submittable), so a
+  // row only ever reads "invalid" when it is in fact what is holding Create back.
+  const netInvalid = netMode && includedChecked && !missingFlight && !netPctOk(netPct);
 
   return (
     <tr className={cn("pcreate__row", !includedChecked && "pcreate__row--excluded")}>
@@ -1480,6 +1598,23 @@ function LineItemRow({
           />
         </td>
       )}
+      {/* Net % - seeded from NetSuite, only rendered while the master net toggle is on. Blank is a
+          legal value (= invoiced at gross), so no "missing" state; an out-of-range entry blocks the
+          Create button, and tints the cell plus carries a row badge so the disabled button is
+          explained where the bad value is. */}
+      {netMode && (
+        <td className="pcreate__cell-pct">
+          <div className="pcreate__field">
+            <NumericField
+              value={netPct}
+              onChange={onSetNetPct}
+              ariaLabel={`Net percent for line item ${id}`}
+              className={cn("pcreate__input", "pcreate__input--pct", netInvalid && "pcreate__input--invalid")}
+            />
+            {netSeeded && netPct !== "" && <span className="pcreate__badge">Auto</span>}
+          </div>
+        </td>
+      )}
       <td className="pcreate__cell-pct">
         <div className="pcreate__field">
           <NumericField
@@ -1508,9 +1643,12 @@ function LineItemRow({
               next action (fill in a date vs. decide about the other pacing vs. wait for delivery), and
               a row can carry more than one at once (§8). */}
           {missingFlight && <StatusBadge label="Missing flight dates" color="var(--bad)" />}
+          {netInvalid && <StatusBadge label="Invalid net %" color="var(--bad)" />}
           {notFound && <StatusBadge label="Not delivered yet" color="var(--attention)" />}
           {inUseEntry && <StatusBadge label={`In "${inUseEntry.pacingName}"`} color="var(--attention)" />}
-          {!missingFlight && !notFound && !inUseEntry && <StatusBadge label="Available" color="var(--good)" />}
+          {!missingFlight && !netInvalid && !notFound && !inUseEntry && (
+            <StatusBadge label="Available" color="var(--good)" />
+          )}
         </div>
       </td>
     </tr>

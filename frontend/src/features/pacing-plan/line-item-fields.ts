@@ -20,6 +20,23 @@ export interface EditableLineItem {
   flightStart: string;
   flightEnd: string;
   containers: PacingContainer[];
+  /** Net cost mode (Pacing spec 2026-09-07): the Net % cell as the user reads and types it - a
+   *  PERCENT string ("85" for k = 0.85). Blank ≡ 100% ≡ invoiced at gross; the wire carries the
+   *  ratio (see `toPlanUpdateLineItem`). Seeded from the STORED ratio, not the operative one, so a
+   *  ratio stored while the pacing switch was off still shows and survives a save. */
+  netPct: string;
+  /** The ratio the wire actually carries - k = net/gross, or null for "invoiced at gross". This is
+   *  the source of truth, NOT `netPct`: the cell displays the ratio rounded to 2 decimals, so
+   *  re-parsing that string on save would silently round a stored full-precision ratio (NetSuite
+   *  seeds net/gross at full precision on every revalidate) on ANY plan save - a budget edit alone
+   *  would rewrite 0.800089 as 0.8001. Only a real keystroke in the cell moves this. */
+  netRatio: number | null;
+  /** Whether the ratio is locked against NetSuite refreshes. A manual Net % edit locks - including
+   *  typing 100 or clearing the cell, which say "this line item is invoiced at gross" and must
+   *  survive a revalidate; Reset-to-NS unlocks. */
+  netLocked: boolean;
+  /** NetSuite's own k = net/gross (the Reset-to-NS baseline); null when NetSuite reports none. */
+  nsNetRatio: number | null;
   /** True for a line item added in this editing session (US-126) - not yet on the pacing, so its
    *  identity fields have nothing stored to fall back to and must be carried explicitly on save. */
   isNew: boolean;
@@ -31,6 +48,24 @@ export interface EditableLineItem {
 
 function numToStr(n: number | null | undefined): string {
   return n == null ? "" : String(n);
+}
+
+/** Is this a real net ratio - i.e. a NET line item, not the identity? */
+function realRatio(k: number | null | undefined): k is number {
+  return typeof k === "number" && Number.isFinite(k) && k > 0 && k < 1;
+}
+
+/** Ratio -> the Net % cell. Only a real (0,1) ratio shows; 1 / null / junk read as blank. Two
+ *  decimals, trailing zeros dropped - the retired SPA's own display rule (`ratioToPct`). */
+export function netRatioToPct(k: number | null | undefined): string {
+  return realRatio(k) ? String(parseFloat((k * 100).toFixed(2))) : "";
+}
+
+/** The Net % cell -> ratio. Null for anything that is not a real net percentage (blank, 100,
+ *  junk) - which the wire expresses as 1, "invoiced at gross" (`toPlanUpdateLineItem`). */
+export function netPctToRatio(value: string): number | null {
+  const n = parseFloat(String(value ?? "").trim().replace(/,/g, ""));
+  return Number.isFinite(n) && n > 0 && n < 100 ? n / 100 : null;
 }
 
 /**
@@ -52,6 +87,10 @@ export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
     flightStart: plan.flightStart ?? "",
     flightEnd: plan.flightEnd ?? "",
     containers: (plan.containers ?? []) as unknown as PacingContainer[],
+    netPct: netRatioToPct(plan.storedNetRatio),
+    netRatio: realRatio(plan.storedNetRatio) ? plan.storedNetRatio : null,
+    netLocked: plan.netRatioLocked === true,
+    nsNetRatio: realRatio(plan.nsNetRatio) ? plan.nsNetRatio : null,
     isNew: false,
     campaignId: null,
     campaignName: null,
@@ -83,6 +122,12 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     flightStart: candidate.flightStart ?? "",
     flightEnd: candidate.flightEnd ?? "",
     containers: [],
+    // A newly added line item starts on NetSuite's own ratio, unlocked - the create form's seed
+    // rule, verbatim: the seeded value IS the NetSuite reading, so revalidate may keep it fresh.
+    netPct: netRatioToPct(candidate.nsNetRatio),
+    netRatio: realRatio(candidate.nsNetRatio) ? (candidate.nsNetRatio as number) : null,
+    netLocked: false,
+    nsNetRatio: realRatio(candidate.nsNetRatio) ? (candidate.nsNetRatio as number) : null,
     isNew: true,
     campaignId: candidate.campaignId ?? null,
     campaignName: candidate.campaignName ?? null,
@@ -98,7 +143,7 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
  * so there is nothing honest to send. For a newly added line item they ride along, since Pacing has
  * nothing stored yet to fall back to.
  */
-export function toPlanUpdateLineItem(li: EditableLineItem): PacingLineItemPlanUpdateV1 {
+export function toPlanUpdateLineItem(li: EditableLineItem, netFeatureOn: boolean): PacingLineItemPlanUpdateV1 {
   const base: PacingLineItemPlanUpdateV1 = {
     lineItemId: li.lineItemId,
     rateType: li.rateType,
@@ -111,6 +156,17 @@ export function toPlanUpdateLineItem(li: EditableLineItem): PacingLineItemPlanUp
     flightEnd: li.flightEnd || undefined,
     containers: li.containers as unknown as Record<string, unknown>[],
   };
+  // Net cost mode: while the pacing switch is OFF nothing is sent - stored ratios stay inert and a
+  // save from a pacing that never used the feature is byte-identical to what it always sent. With
+  // the switch on BOTH keys always ride, because Pacing preserves an omitted key from storage: a
+  // blank/100 cell sends netRatio 1 (the explicit clear - Pacing's canon never persists 1), and an
+  // unlock must be an explicit false or the stored true would silently come back.
+  // The ratio comes off `netRatio`, never off the displayed percent: a line item nobody touched
+  // must send back the EXACT stored ratio, not the 2-decimal rounding the cell shows.
+  if (netFeatureOn) {
+    base.netRatio = li.netRatio ?? 1;
+    base.netRatioLocked = li.netLocked;
+  }
   if (!li.isNew) return base;
   return {
     ...base,

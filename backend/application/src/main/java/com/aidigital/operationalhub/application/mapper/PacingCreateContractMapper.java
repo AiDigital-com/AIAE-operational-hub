@@ -68,6 +68,9 @@ public class PacingCreateContractMapper {
 				.insertionOrders(insertionOrders)
 				.notFoundIds(result.notFoundIds())
 				.warnings(result.warnings())
+				.netHint(result.netHint() == null ? null
+						: new com.aidigital.operationalhub.application.api.v1.generated.model.PacingNetHintV1()
+								.count(result.netHint().count()))
 				.inUse(toInUseV1(result.inUse()));
 	}
 
@@ -125,7 +128,8 @@ public class PacingCreateContractMapper {
 				.campaignId(li.campaignId())
 				.campaignName(li.campaignName())
 				.orderNumber(li.orderNumber())
-				.mpoTeamLead(li.mpoTeamLead());
+				.mpoTeamLead(li.mpoTeamLead())
+				.nsNetRatio(li.nsNetRatio());
 	}
 
 	private Map<String, PacingInUseV1> toInUseV1(Map<String, PacingInUseEntry> inUse) {
@@ -170,7 +174,10 @@ public class PacingCreateContractMapper {
 				li.getMarginPercent(),
 				li.getTargetCtr(),
 				li.getTargetVcr(),
-				li.getCostCoef());
+				li.getCostCoef(),
+				li.getNetRatio(),
+				li.getNetRatioLocked(),
+				li.getNsNetRatio());
 	}
 
 	/**
@@ -222,7 +229,8 @@ public class PacingCreateContractMapper {
 				data.getSource() == null ? null : data.getSource().getValue(),
 				data.getFetchCreatives(),
 				data.getFetchConversions(),
-				data.getCoefEnabled());
+				data.getCoefEnabled(),
+				data.getNetEnabled());
 	}
 
 	/**

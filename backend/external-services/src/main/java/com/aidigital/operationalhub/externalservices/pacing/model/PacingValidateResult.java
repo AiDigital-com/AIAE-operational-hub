@@ -35,6 +35,9 @@ import java.util.Map;
  * @param inUse           serialized as {@code inUse}; which line items a live pacing already covers
  *                        (US-123), keyed by line item id - null when the in-use lookup was skipped or
  *                        failed (degrades to "no marks", never fails the whole validate)
+ * @param netHint         net cost mode's create-form hint (Pacing spec 2026-09-07): how many of
+ *                        {@code lineItems} NetSuite reports a gross ≠ net for - the create screen
+ *                        offers the Net toggle only when this says it would do something
  */
 public record PacingValidateResult(
 		boolean ok,
@@ -48,5 +51,6 @@ public record PacingValidateResult(
 		@JsonProperty("order_numbers") List<String> orderNumbers,
 		List<String> notFoundIds,
 		List<String> warnings,
+		PacingNetHint netHint,
 		Map<String, PacingInUseEntry> inUse) {
 }

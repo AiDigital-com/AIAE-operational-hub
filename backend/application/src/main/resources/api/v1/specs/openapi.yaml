@@ -8535,6 +8535,14 @@ components:
             the new pacing shows the owner-vs-NetSuite comparison immediately, instead of blank until
             the nightly refresh or a manual revalidate fills it in. Read-only, and never a decision:
             the pacing's owner is whoever created it until a person reassigns it.
+        nsNetRatio:
+          type: number
+          format: double
+          description: >
+            Net cost mode (Pacing spec 2026-09-07): NetSuite's own reading of k = net/gross for this
+            line item (net budget over gross budget, unit rates as the fallback), the value the
+            create screen's Net % column is seeded from. Absent when NetSuite reports no usable
+            gross - including a gross BELOW net, which `warnings` names instead.
       required:
         - lineItemId
     PacingInsertionOrderV1:
@@ -8632,6 +8640,8 @@ components:
             campaign's own line items).
           items:
             type: string
+        netHint:
+          $ref: '#/components/schemas/PacingNetHintV1'
         inUse:
           type: object
           description: >
@@ -8642,6 +8652,18 @@ components:
       required:
         - ok
         - lineItems
+    PacingNetHintV1:
+      type: object
+      description: >
+        Net cost mode's create-form hint (Pacing spec 2026-09-07): how many of the draft's line
+        items NetSuite reports a gross ≠ net for. The create screen offers the Net toggle (and
+        pre-fills the Net % column) only when this says the feature would do something.
+      properties:
+        count:
+          type: integer
+          description: Number of line items whose NetSuite budgets yield a usable ratio in (0,1).
+      required:
+        - count
     PacingCreateLineItemV1:
       type: object
       description: >
@@ -8697,6 +8719,29 @@ components:
             when the create screen's coefficient master toggle is on ("visible is saved"); Pacing
             validates the flag against the line item's margins server-side (`bad_coef_config`).
             Omitted (never null) when the caller does not use the feature.
+        netRatio:
+          type: number
+          format: double
+          description: >
+            Net cost mode (Pacing spec 2026-09-07): the ratio k = net/gross to store on this line
+            item - what the create screen's Net % column holds, as a ratio (85% -> 0.85), seeded
+            from the draft's `nsNetRatio` and editable. Omitted (never null or 1) for a blank or
+            100% cell: Pacing's canon never persists the identity. Values outside (0,1] are refused
+            (`bad_net_ratio`).
+        netRatioLocked:
+          type: boolean
+          description: >
+            True when the caller edited this line item's Net % away from what NetSuite seeded, so a
+            later revalidate keeps the hand-entered ratio instead of re-seeding NetSuite's. Omitted
+            when the cell still holds the NetSuite value.
+        nsNetRatio:
+          type: number
+          format: double
+          description: >
+            NetSuite's own k = net/gross, carried back verbatim from the draft
+            (`PacingDraftLineItemV1.nsNetRatio`) WHATEVER the Net toggle says, so the new pacing
+            stores the Reset-to-NS baseline from its first minute instead of blank until the first
+            revalidate. Omitted when the draft carried none.
       required:
         - lineItemId
         - flightStart
@@ -8723,6 +8768,13 @@ components:
             UI-visibility gate for the coefficient-cost feature: mirrors the create screen's master
             toggle so a coef pacing's Settings shows its coef controls from day one. The maths is
             driven by each line item's `costCoef` flag regardless.
+        netEnabled:
+          type: boolean
+          description: >
+            Net cost mode's pacing-level switch (Pacing spec 2026-09-07), mirroring the create
+            screen's Net toggle. NOT a pure UI flag: while on, client cost is computed as net =
+            gross × each line item's `netRatio` everywhere - so a create that sends per-line
+            `netRatio` values without this switch stores them inert.
     PacingCreateV1:
       type: object
       description: >
@@ -8944,6 +8996,39 @@ components:
             (`buildPlanByLineItem`: `li.cost_coef === true`). A MATH input for the browser-side engine
             (`dashboard-metrics.js` switches its per-row cost computation on this flag) - missing here
             silently falls back to flat-margin math on a coefficient-cost line item.
+        netRatio:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            Net cost mode (Pacing spec 2026-09-07): the OPERATIVE ratio k = net/gross for this line
+            item - already gated by the pacing switch and by what counts as a usable value, so it is
+            a real ratio in (0,1) or null, never 1 (`buildPlanByLineItem` publishes `netRatioOf`'s
+            answer, null for "no net reduction here"). A MATH input for the browser-side engine: each
+            delivery cost row of this line item is multiplied by it (currency first, then net) -
+            missing here silently reads a net pacing as gross.
+        storedNetRatio:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            The STORED ratio, ungated - what sits in Pacing's config regardless of the pacing switch.
+            The Settings editor binds to this one, so flipping the switch on and saving in the same
+            session cannot blank a ratio stored while it was off. Nothing on the dashboard computes
+            from it.
+        netRatioLocked:
+          type: boolean
+          description: >
+            Whether the user locked this line item's ratio against NetSuite refreshes (a manual edit
+            locks; Reset-to-NS unlocks). Display/editor state only.
+        nsNetRatio:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            NetSuite's own reading of k = net/gross for this line item (the Reset-to-NS baseline),
+            null when NetSuite reports no usable gross. Refreshed on every revalidate regardless of
+            the pacing switch.
         converted:
           type: boolean
           description: >
@@ -9008,6 +9093,26 @@ components:
         targetVcr:
           type: number
           format: double
+        netRatio:
+          type: number
+          format: double
+          description: >
+            Net cost mode (Pacing spec 2026-09-07): the ratio k = net/gross to store on this line
+            item. Send a real ratio in (0,1) to set it; send exactly 1 to CLEAR a stored ratio
+            (Pacing's canon never persists 1, so 1 means "invoiced at gross" - the explicit-clear
+            form this NON_NULL wire can carry, where Pacing's own SPA sent null). Omit the field to
+            leave the stored value alone - which is what a caller MUST do while the pacing's net
+            switch is off, so stored ratios stay inert exactly as Pacing's contract says. Values
+            outside (0,1] are refused (`bad_net_ratio`). When this field is sent,
+            `netRatioLocked` must be sent too - Pacing preserves an omitted key from storage, so an
+            omitted lock would silently restore a stored `true`.
+        netRatioLocked:
+          type: boolean
+          description: >
+            Whether this line item's ratio is locked against NetSuite refreshes. Sent together with
+            `netRatio` (both keys or neither): `true` after a manual ratio edit, `false` after
+            Reset-to-NS - an explicit `false` is what unlocks a stored lock, since an omitted key is
+            preserved from storage.
         flightStart:
           type: string
           format: date
@@ -9268,6 +9373,16 @@ components:
           description: >
             Fetch conversions, which adds Conversion Action to the breakdowns. Read from the
             conversions table paired with `source`, so the two stay consistent.
+        netEnabled:
+          type: boolean
+          description: >
+            Net cost mode (Pacing spec 2026-09-07): the pacing-level switch saying client cost is
+            invoiced at net. While on, every client-cost figure - margin, budget pacing, alerts -
+            is computed as net = gross × each line item's own `netRatio`, server-side and in the
+            browser engine alike. Turning it off restores gross math and leaves the stored per-line
+            ratios inert, exactly as Pacing's own gate (`netRatioOf`) reads them. Unlike the fetch
+            toggles this one changes numbers already on screen: the engine recomputes on the next
+            payload read, no refresh needed.
         dimSources:
           $ref: '#/components/schemas/PacingDimSourcesV1'
     PacingDimSourcesV1:
@@ -9737,6 +9852,14 @@ components:
             both `currency` and `rate` to `'USD'`/`1` when `config.currency` is unset). A MATH input
             for the browser-side engine (`Currency.currencyToUsd` converts delivery cost with it) -
             not display-only.
+        netMode:
+          type: boolean
+          description: >
+            Net cost mode's pacing-level switch (`config.data.net_enabled`, read through Pacing's own
+            `safeNetEnabled`), echoed beside the currency because it is the other campaign-wide
+            statement about what every money figure on this dashboard means: while true, each `dc`
+            the engine computes is already net (gross × the line item's `netRatio`). Display reads
+            it to caption the gross/net pair; the math itself is driven per line item.
         status:
           type: string
         orderNumber:

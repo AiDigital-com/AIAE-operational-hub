@@ -175,7 +175,7 @@ class PacingControllerMvcTest {
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingCreateLineItem lineItem = new PacingCreateLineItem(
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "desc", 20633.4, "USD", 1.0,
-				"40539", "Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null);
+				"40539", "Campaign", "TM-271064", "Daria Feofanova", 1432875.0, 15.5, 0.85, null, null, null, null, null);
 		doReturn(user).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
@@ -316,7 +316,7 @@ class PacingControllerMvcTest {
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingValidateResult result = new PacingValidateResult(
-				true, null, List.of(), List.of(), null, null, null, null, null, null, null, null);
+				true, null, List.of(), List.of(), null, null, null, null, null, null, null, null, null);
 		doReturn(user).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
@@ -362,7 +362,7 @@ class PacingControllerMvcTest {
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
 		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingValidateResult result = new PacingValidateResult(
-				true, null, List.of(), List.of(), null, null, null, null, null, null, null, null);
+				true, null, List.of(), List.of(), null, null, null, null, null, null, null, null, null);
 		doReturn(user).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(assertion).when(mapper).toAssertion(user, entitlement);

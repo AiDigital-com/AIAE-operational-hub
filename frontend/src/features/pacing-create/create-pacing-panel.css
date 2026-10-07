@@ -473,11 +473,34 @@
   text-align: right;
 }
 
+/* An out-of-range Net % - the cell that is holding Create back. A red border plus a background
+   tint on the input itself, never an edge stripe on the row. */
+.pcreate__input--invalid {
+  border-color: var(--bad) !important;
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  color: var(--bad);
+}
+
 .pcreate__field-hint {
   display: block;
   margin-top: 3px;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* An action offered inside a sentence (the "enable Net cost mode?" hint). It has to sit on the
+   text's own baseline, so it keeps the surrounding font and carries no box of its own. */
+.pcreate__link-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--primary);
+  cursor: pointer;
+}
+.pcreate__link-btn:hover {
+  text-decoration: underline;
 }
 
 /* "Auto" badge: a background tint pill, never a side stripe or colored border. */
@@ -626,6 +649,8 @@
 
 /* ── coefficient-cost column (rendered only while the master toggle is on) ── */
 .pcreate__col-coef { width: 56px; }
+/* Net cost mode: the Net % column, same width family as the other percent cells. */
+.pcreate__col-net { width: 86px; }
 .pcreate__th-coef {
   text-align: center;
 }

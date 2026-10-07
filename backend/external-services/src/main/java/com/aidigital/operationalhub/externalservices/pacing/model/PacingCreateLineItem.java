@@ -35,6 +35,14 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * @param costCoef          coefficient cost mode for this line item (Pacing's per-LI {@code cost_coef}
  *                          flag). Null means "not sent" - the wire key is omitted, never null'd,
  *                          because Pacing's {@code validateCoefLi} rejects a non-boolean value
+ * @param netRatio          net cost mode (Pacing spec 2026-09-07): the ratio k = net/gross to store,
+ *                          in (0,1). Null means "not sent" (a blank or 100% Net cell) - the wire
+ *                          key is omitted, matching Pacing's canon which never persists the identity
+ * @param netRatioLocked    true when the caller edited the Net cell away from NetSuite's seed, so a
+ *                          revalidate keeps the hand-entered ratio. Null means "not sent"
+ * @param nsNetRatio        NetSuite's own k = net/gross, carried back verbatim from the draft
+ *                          whatever the Net toggle says - the new pacing's Reset-to-NS baseline.
+ *                          Null means "not sent"
  */
 public record PacingCreateLineItem(
 		String lineItemId,
@@ -54,5 +62,8 @@ public record PacingCreateLineItem(
 		Double marginPercent,
 		Double targetCtr,
 		Double targetVcr,
-		Boolean costCoef) {
+		Boolean costCoef,
+		Double netRatio,
+		Boolean netRatioLocked,
+		Double nsNetRatio) {
 }

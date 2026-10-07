@@ -322,7 +322,7 @@ class CampaignControllerTest {
 		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
 		HubAssertion assertion = new HubAssertion(currentUser.email(), PacingScope.KIND_ALL, List.of(), true);
 		PacingValidateResult validateResult = new PacingValidateResult(
-				true, null, List.of(), List.of(), "Acme", "MediaCo", "Campaign", null, List.of(), List.of(), List.of(), Map.of());
+				true, null, List.of(), List.of(), "Acme", "MediaCo", "Campaign", null, List.of(), List.of(), List.of(), null, Map.of());
 		PacingDraftV1 body = new PacingDraftV1().ok(true).lineItems(List.of());
 		doReturn(currentUser).when(currentUserService).resolveCurrentUser();
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(currentUser);

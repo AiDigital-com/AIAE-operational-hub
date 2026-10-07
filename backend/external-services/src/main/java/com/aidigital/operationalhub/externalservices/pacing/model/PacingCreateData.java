@@ -14,10 +14,13 @@ package com.aidigital.operationalhub.externalservices.pacing.model;
  * @param coefEnabled      UI-visibility gate for the coefficient-cost feature - mirrors the create
  *                         screen's master toggle; the maths stays driven by each line item's
  *                         {@code costCoef} flag regardless
+ * @param netEnabled       net cost mode's pacing-level switch (Pacing spec 2026-09-07) - NOT a pure
+ *                         UI flag: while on, client cost reads net = gross × each line item's ratio
  */
 public record PacingCreateData(
 		String source,
 		Boolean fetchCreatives,
 		Boolean fetchConversions,
-		Boolean coefEnabled) {
+		Boolean coefEnabled,
+		Boolean netEnabled) {
 }

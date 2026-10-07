@@ -61,6 +61,17 @@ import java.util.Map;
  *                           always present, never null; display-only
  * @param currency           the campaign's currency code when {@code converted} is true, else null;
  *                           display-only
+ * @param netRatio           net cost mode (Pacing spec 2026-09-07): the OPERATIVE ratio k =
+ *                           net/gross - already gated by the pacing switch, a real ratio in (0,1)
+ *                           or null, never 1. A MATH input for the browser-side engine (each
+ *                           delivery cost row is multiplied by it, currency first then net) -
+ *                           dropping it here silently reads a net pacing as gross
+ * @param storedNetRatio     the STORED ratio, ungated by the switch - what the Settings editor
+ *                           binds to; nothing on the dashboard computes from it
+ * @param netRatioLocked     whether the user locked the ratio against NetSuite refreshes;
+ *                           editor state only
+ * @param nsNetRatio         NetSuite's own k = net/gross (the Reset-to-NS baseline), null when
+ *                           NetSuite reports no usable gross
  */
 public record PacingLineItemPlan(
 		String lineItemId,
@@ -82,5 +93,9 @@ public record PacingLineItemPlan(
 		@JsonProperty("native_budget") Double nativeBudget,
 		@JsonProperty("cost_coef") Boolean costCoef,
 		Boolean converted,
-		String currency) {
+		String currency,
+		Double netRatio,
+		Double storedNetRatio,
+		Boolean netRatioLocked,
+		Double nsNetRatio) {
 }

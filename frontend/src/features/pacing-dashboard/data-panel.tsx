@@ -70,6 +70,7 @@ interface DataDraft {
   source: string;
   fetchCreatives: boolean;
   fetchConversions: boolean;
+  netEnabled: boolean;
   devices: boolean;
 }
 
@@ -89,6 +90,7 @@ function seed(data: PacingDataShape | undefined): DataDraft {
     source: known ? (stored as string) : "platform_mart",
     fetchCreatives: data?.fetch_creatives === true,
     fetchConversions: data?.fetch_conversions === true,
+    netEnabled: data?.net_enabled === true,
     devices: devicesOn(dimSources),
   };
 }
@@ -101,6 +103,7 @@ function diff(draft: DataDraft, base: DataDraft, existing: PacingDimSource[]): P
   }
   if (draft.fetchCreatives !== base.fetchCreatives) body.fetchCreatives = draft.fetchCreatives;
   if (draft.fetchConversions !== base.fetchConversions) body.fetchConversions = draft.fetchConversions;
+  if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
   if (draft.devices !== base.devices) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
     // is built only when this checkbox actually moved. An unwrapped array could not say that - see the
@@ -116,13 +119,17 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   slug: string;
   /** This pacing's stored `data` namespace, straight off the dashboard payload. */
   data: PacingDataShape | undefined;
+  /** How many line items currently carry a stored net ratio (from `planByLineItem`'s
+   *  `storedNetRatio`). Read-only - it only steers the hint under the Net cost mode switch,
+   *  and is never sent. */
+  netRatioCount: number;
   /** Re-seeded whenever this changes - the drawer bumps it on open, so a reopened panel never
    *  shows an edit abandoned in a previous session. */
   seedKey: number;
 }
 
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
-  function PacingDataSection({ slug, data, seedKey, onDirtyChange }, ref) {
+  function PacingDataSection({ slug, data, netRatioCount, seedKey, onDirtyChange }, ref) {
     const [draft, setDraft] = useState<DataDraft>(() => seed(data));
     const [base, setBase] = useState<DataDraft>(() => seed(data));
     const [extrasOpen, setExtrasOpen] = useState(false);
@@ -205,6 +212,33 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             Applies on the next refresh. The figures on screen were built from the table this pacing
             read last time, and they stay that way until the delivery query runs again.
           </p>
+        </section>
+
+        <section className="pdata__section">
+          <h3 className="pdata__heading">Client cost</h3>
+          <div className="pdata__options">
+            <label className="pdata__check">
+              <input
+                type="checkbox"
+                checked={draft.netEnabled}
+                onChange={(event) => set({ netEnabled: event.target.checked })}
+              />
+              <span className="pdata__option-text">
+                <span className="pdata__option-name">Net cost mode</span>
+                <span className="pdata__hint">
+                  Client cost is invoiced at net. Margin, budget pacing and alerts use net = gross ×
+                  each line item&apos;s ratio. The dashboard shows gross and net. Turning this off
+                  restores gross and keeps the ratios.
+                </span>
+              </span>
+            </label>
+            {draft.netEnabled && netRatioCount === 0 && (
+              <p className="pdata__hint pdata__hint--block">
+                No line item carries a net ratio yet. Re-validate to pull net ratios from NetSuite,
+                or enter them per line item on the plan screen - until then every figure stays gross.
+              </p>
+            )}
+          </div>
         </section>
 
         <section className="pdata__section">

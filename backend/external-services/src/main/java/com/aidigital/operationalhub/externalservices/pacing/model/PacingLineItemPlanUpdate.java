@@ -32,6 +32,11 @@ import java.util.Map;
  * @param targetVcr         the plan's target VCR percentage
  * @param flightStart       flight start date (YYYY-MM-DD); required when adding a new id
  * @param flightEnd         flight end date (YYYY-MM-DD); required when adding a new id
+ * @param netRatio          net cost mode (Pacing spec 2026-09-07): a real ratio in (0,1) to set,
+ *                          exactly 1 to clear a stored ratio, null to leave it alone (the key is
+ *                          omitted from the wire)
+ * @param netRatioLocked    whether the ratio is locked against NetSuite refreshes; carried together
+ *                          with {@code netRatio} (both or neither)
  * @param containers        date-based plan overrides (§9), opaque - forwarded byte-for-byte; Pacing is
  *                          the only party that parses or validates their shape (container existence,
  *                          the target-impressions bound against this line item's own plan)
@@ -51,5 +56,7 @@ public record PacingLineItemPlanUpdate(
 		Double targetVcr,
 		String flightStart,
 		String flightEnd,
+		Double netRatio,
+		Boolean netRatioLocked,
 		List<Map<String, Object>> containers) {
 }

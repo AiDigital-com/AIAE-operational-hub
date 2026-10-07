@@ -38,6 +38,7 @@ export interface PacingDataShape {
   source?: string;
   fetch_creatives?: boolean;
   fetch_conversions?: boolean;
+  net_enabled?: boolean;
   dim_sources?: PacingDimSource[];
   [key: string]: unknown;
 }

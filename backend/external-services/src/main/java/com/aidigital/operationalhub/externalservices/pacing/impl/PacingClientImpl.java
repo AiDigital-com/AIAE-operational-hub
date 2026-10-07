@@ -663,7 +663,8 @@ public class PacingClientImpl implements PacingClient {
 			return null;
 		}
 		return new DataCreateRequest(
-				data.source(), data.fetchCreatives(), data.fetchConversions(), data.coefEnabled());
+				data.source(), data.fetchCreatives(), data.fetchConversions(), data.coefEnabled(),
+				data.netEnabled());
 	}
 
 	@Override
@@ -718,7 +719,8 @@ public class PacingClientImpl implements PacingClient {
 		return new LineItemPlanUpdateRequest(
 				li.lineItemId(), li.channel(), li.description(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.rateType(), li.nativeBudget(), li.targetImpressions(), li.marginPercent(),
-				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.containers());
+				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.netRatio(),
+				li.netRatioLocked(), li.containers());
 	}
 
 	@Override
@@ -751,7 +753,7 @@ public class PacingClientImpl implements PacingClient {
 	private DataNamespaceRequest toWireDataNamespace(PacingDataSettings settings) {
 		return new DataNamespaceRequest(
 				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
-				settings.dimSources());
+				settings.netEnabled(), settings.dimSources());
 	}
 
 	@Override
@@ -1342,7 +1344,7 @@ public class PacingClientImpl implements PacingClient {
 				li.lineItemId(), li.channel(), li.flightStart(), li.flightEnd(), li.rateType(), li.nativeBudget(),
 				li.description(), li.currency(), li.exchangeRate(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.mpoTeamLead(), li.targetImpressions(), li.marginPercent(), li.targetCtr(),
-				li.targetVcr(), li.costCoef());
+				li.targetVcr(), li.costCoef(), li.netRatio(), li.netRatioLocked(), li.nsNetRatio());
 	}
 
 	/**

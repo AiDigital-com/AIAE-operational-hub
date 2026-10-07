@@ -43,7 +43,7 @@ class PacingCreateContractMapperTest {
 				"599852", "DOOH", "2026-03-01", "2026-03-31", "CPM", "Northeast | DOOH TM271064#13",
 				20633.4, 20633.4, 1432875.0, "USD", 1.0, false,
 				"40539", "2026_Service-Experts_Q1-Media_Southwest", "TM-271064", "Daria Feofanova",
-				new PacingMrgSource(15.5), new PacingKpiSource(0.85, null, "tactic"));
+				new PacingMrgSource(15.5), new PacingKpiSource(0.85, null, "tactic"), null);
 	}
 
 	@Test
@@ -53,7 +53,7 @@ class PacingCreateContractMapperTest {
 		// other, not computing anything.
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "2026_Service-Experts_Q1-Media_Southwest",
-				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftV1 draft = mapper.toDraftV1(result);
@@ -69,7 +69,7 @@ class PacingCreateContractMapperTest {
 		// Given:
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign",
-				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftLineItemV1 li = mapper.toDraftV1(result).getLineItems().get(0);
@@ -86,9 +86,9 @@ class PacingCreateContractMapperTest {
 		// a null value rather than being absent - and can also legitimately be absent entirely.
 		PacingValidateLineItem li = new PacingValidateLineItem(
 				"1", "Display", "2026-01-01", "2026-01-31", "CPM", "desc", 100.0, 100.0, 1000.0,
-				"USD", 1.0, false, "1", "Campaign", "TM-1", null, new PacingMrgSource(null), null);
+				"USD", 1.0, false, "1", "Campaign", "TM-1", null, new PacingMrgSource(null), null, null);
 		PacingValidateResult result = new PacingValidateResult(
-				true, null, List.of(li), List.of(), null, null, null, null, List.of(), List.of(), List.of(), Map.of());
+				true, null, List.of(li), List.of(), null, null, null, null, List.of(), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftLineItemV1 v1 = mapper.toDraftV1(result).getLineItems().get(0);
@@ -104,7 +104,7 @@ class PacingCreateContractMapperTest {
 		// Given:
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign",
-				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftLineItemV1 li = mapper.toDraftV1(result).getLineItems().get(0);
@@ -128,7 +128,7 @@ class PacingCreateContractMapperTest {
 		// Given: NetSuite's own answer to who runs this campaign, on the validated line item.
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign",
-				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), null, Map.of());
 
 		// When: it goes out to the create form and comes straight back in the create request.
 		PacingDraftLineItemV1 draftLineItem = mapper.toDraftV1(result).getLineItems().get(0);
@@ -147,7 +147,7 @@ class PacingCreateContractMapperTest {
 		// Given:
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(), List.of(), "Acme", "MediaCo", "2026_Campaign",
-				"TM-1", List.of("TM-1", "TM-2"), List.of("904"), List.of("Client mismatch across LIs"),
+				"TM-1", List.of("TM-1", "TM-2"), List.of("904"), List.of("Client mismatch across LIs"), null,
 				Map.of());
 
 		// When:
@@ -169,7 +169,7 @@ class PacingCreateContractMapperTest {
 		// Given: a normal 200 outcome (not thrown) for a campaign Pacing will not let be paced as-is.
 		PacingValidateResult result = new PacingValidateResult(
 				false, "Mixed currencies across line items (CAD, EUR). A pacing must have one currency.",
-				List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign", null, List.of(), List.of(), List.of(), Map.of());
+				List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign", null, List.of(), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftV1 draft = mapper.toDraftV1(result);
@@ -187,7 +187,7 @@ class PacingCreateContractMapperTest {
 				Map.of("599852", new PacingInUseEntry("p1", "Existing Pacing", "existing-pacing", "Live"));
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(), "Acme", "MediaCo", "Campaign", "TM-1", List.of(),
-				List.of(), List.of(), inUse);
+				List.of(), List.of(), null, inUse);
 
 		// When:
 		PacingDraftV1 draft = mapper.toDraftV1(result);
@@ -205,7 +205,7 @@ class PacingCreateContractMapperTest {
 	void shouldDegradeNullInUseToEmptyMapTest() {
 		// Given: the in-use lookup was skipped or failed on the Pacing side.
 		PacingValidateResult result = new PacingValidateResult(
-				true, null, List.of(), List.of(), null, null, null, null, List.of(), List.of(), List.of(), null);
+				true, null, List.of(), List.of(), null, null, null, null, List.of(), List.of(), List.of(), null, null);
 
 		// When / Then:
 		assertThat(mapper.toDraftV1(result).getInUse()).isEmpty();
@@ -256,7 +256,7 @@ class PacingCreateContractMapperTest {
 				"48000", "TM-271064", null, 250000.0, "2026-01-01", "2026-03-31", "Active");
 		PacingValidateResult result = new PacingValidateResult(
 				true, null, List.of(aLineItem()), List.of(order), "Acme", "MediaCo", "Campaign",
-				"TM-271064", List.of("TM-271064"), List.of(), List.of(), Map.of());
+				"TM-271064", List.of("TM-271064"), List.of(), List.of(), null, Map.of());
 
 		// When:
 		PacingDraftV1 draft = mapper.toDraftV1(result);
@@ -277,7 +277,7 @@ class PacingCreateContractMapperTest {
 	void shouldDegradeNullInsertionOrdersToEmptyListTest() {
 		// Given:
 		PacingValidateResult result = new PacingValidateResult(
-				true, null, List.of(), null, null, null, null, null, List.of(), List.of(), List.of(), Map.of());
+				true, null, List.of(), null, null, null, null, null, List.of(), List.of(), List.of(), null, Map.of());
 
 		// When / Then:
 		assertThat(mapper.toDraftV1(result).getInsertionOrders()).isEmpty();

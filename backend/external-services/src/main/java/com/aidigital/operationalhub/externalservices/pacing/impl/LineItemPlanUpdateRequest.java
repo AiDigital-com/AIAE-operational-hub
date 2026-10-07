@@ -25,6 +25,13 @@ import java.util.Map;
  * @param target_vcr          the plan's target VCR percentage
  * @param flight_start        flight start date (YYYY-MM-DD); required when adding a new id
  * @param flight_end          flight end date (YYYY-MM-DD); required when adding a new id
+ * @param net_ratio           net cost mode (Pacing spec 2026-09-07): a real ratio in (0,1) to set,
+ *                            exactly {@code 1} to clear (dash-gate's canon never persists 1 - the
+ *                            explicit-clear form this NON_NULL wire can carry where Pacing's own SPA
+ *                            sent null); null = omit the key, leaving the stored value alone
+ * @param net_ratio_locked    whether the ratio is locked against NetSuite refreshes; sent together
+ *                            with {@code net_ratio} (an omitted key is preserved from storage, so
+ *                            only an explicit {@code false} unlocks)
  * @param containers          date-based plan overrides (§9), opaque - forwarded byte-for-byte
  */
 // NON_NULL (not the class-wide default of always-include): dash-gate's own merge checks
@@ -51,5 +58,7 @@ record LineItemPlanUpdateRequest(
 		Double target_vcr,
 		String flight_start,
 		String flight_end,
+		Double net_ratio,
+		Boolean net_ratio_locked,
 		List<Map<String, Object>> containers) {
 }
