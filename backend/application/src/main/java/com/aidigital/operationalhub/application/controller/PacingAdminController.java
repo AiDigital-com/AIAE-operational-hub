@@ -2,6 +2,10 @@ package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.PacingAdminApi;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingOrderNumberBackfillResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingReferenceSyncErrorV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingReferenceSyncMarginKpiV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingReferenceSyncNsmappingV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingReferenceSyncResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRevalidateResultV1;
@@ -9,6 +13,7 @@ import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -86,6 +91,31 @@ public class PacingAdminController implements PacingAdminApi {
 				.filled(result.filled())
 				.alreadyHad(result.alreadyHad())
 				.skippedNoNumbers(result.skippedNoNumbers()));
+	}
+
+	@Override
+	public ResponseEntity<PacingReferenceSyncResultV1> syncReferenceData() {
+		HubAssertion assertion = signCurrentUserAsAdmin();
+		PacingReferenceSyncResult result = pacingClient.syncReferenceData(assertion);
+		// A 200 with ok=false is a real outcome here, not an error to translate: one half may have
+		// written while the other failed, and the screen has to be able to say which. Mapping a
+		// partial run onto a 5xx would throw away the half that worked.
+		PacingReferenceSyncResultV1 body = new PacingReferenceSyncResultV1().ok(result.ok());
+		if (result.nsmapping() != null) {
+			body.nsmapping(new PacingReferenceSyncNsmappingV1()
+					.agencies(result.nsmapping().agencies())
+					.industries(result.nsmapping().industries())
+					.dropdowns(result.nsmapping().dropdowns())
+					.overrides(result.nsmapping().overrides()));
+		}
+		if (result.marginKpi() != null) {
+			body.marginKpi(new PacingReferenceSyncMarginKpiV1()
+					.margin(result.marginKpi().margin())
+					.kpi(result.marginKpi().kpi()));
+		}
+		result.errors().forEach(e -> body.addErrorsItem(
+				new PacingReferenceSyncErrorV1().part(e.part()).detail(e.detail())));
+		return ResponseEntity.ok(body);
 	}
 
 	@Override

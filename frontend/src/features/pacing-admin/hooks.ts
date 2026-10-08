@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { backfillOrderNumbers, deletePacing, refreshAllDashboards, revalidatePacing } from "./api";
+import { backfillOrderNumbers, syncReferenceData, deletePacing, refreshAllDashboards, revalidatePacing } from "./api";
 
 /**
  * Deletes a pacing. On success invalidates every "pacing"-prefixed query - the admin table itself
@@ -36,6 +36,17 @@ export function useBackfillOrderNumbers() {
       void queryClient.invalidateQueries({ queryKey: ["pacing"] });
     },
   });
+}
+
+/**
+ * Pulls the reference workbook into Pacing's lookup tables now.
+ *
+ * Invalidates nothing: these tables feed the CREATE screen's pre-fill and Namebuilder's reference
+ * lists, never a figure on a pacing that already exists. Nothing currently on screen changes, and
+ * saying otherwise by refetching dashboards would suggest it did.
+ */
+export function useSyncReferenceData() {
+  return useMutation({ mutationFn: syncReferenceData });
 }
 
 /**

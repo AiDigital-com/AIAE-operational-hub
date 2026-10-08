@@ -23,6 +23,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResu
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -672,6 +673,21 @@ public interface PacingClient {
 	 *         on a non-2xx response or network failure (unchecked)
 	 */
 	PacingOrderNumberBackfillResult backfillOrderNumbers(HubAssertion assertion);
+
+	/**
+	 * Pulls the reference workbook into Pacing's lookup tables now - the two syncs Pacing otherwise
+	 * runs on a schedule (NSMapping; Margin+KPI).
+	 *
+	 * <p>Note the unusual contract: this one answers normally when a half fails. Pacing returns 200
+	 * with {@code ok: false} because the other half still wrote, so the caller must read the result
+	 * rather than treat the absence of an exception as success.
+	 *
+	 * @param assertion the acting admin
+	 * @return what each half wrote, and which failed
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked)
+	 */
+	PacingReferenceSyncResult syncReferenceData(HubAssertion assertion);
 
 	/**
 	 * Re-pulls a pacing's configuration from the NetSuite master and patches it into the pacing

@@ -16,6 +16,7 @@ vi.mock("./api", () => ({
   deletePacing: vi.fn(),
   refreshAllDashboards: vi.fn(),
   backfillOrderNumbers: vi.fn(),
+  syncReferenceData: vi.fn(),
 }));
 
 // StatusControl (pacing-plan) is reused as-is and has its own test coverage - stubbed here to keep
@@ -265,5 +266,61 @@ describe("PacingAdmin", () => {
 
     // Then:
     expect(await screen.findByText("Could not sync IO numbers.")).toBeInTheDocument();
+  });
+
+  it("reports what a reference sync wrote, leading with the margin and KPI counts", async () => {
+    // Those two are what decide whether the NEXT pacing is created correctly; the Namebuilder
+    // counts are secondary. A bare "synced" would not let an admin tell a healthy run apart from
+    // one that read an empty workbook.
+    vi.mocked(adminApi.syncReferenceData).mockResolvedValue({
+      ok: true,
+      marginKpi: { margin: 26, kpi: 49 },
+      nsmapping: { agencies: 730, industries: 45, dropdowns: 41, overrides: 5999 },
+      errors: [],
+    });
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync reference data" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Sync reference data" }));
+
+    await waitFor(() => expect(adminApi.syncReferenceData).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/26 margin, 49 KPI/)).toBeInTheDocument();
+  });
+
+  it("calls out a run that wrote zero margin rows instead of reporting success", async () => {
+    // The failure this screen exists to make visible: a workbook that is unshared or empty answers
+    // 200 with nothing written, and every pacing created afterwards silently takes the create
+    // screen's 25% fallback.
+    vi.mocked(adminApi.syncReferenceData).mockResolvedValue({
+      ok: true,
+      marginKpi: { margin: 0, kpi: 0 },
+      nsmapping: { agencies: 0, industries: 0, dropdowns: 0, overrides: 0 },
+      errors: [],
+    });
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync reference data" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Sync reference data" }));
+
+    expect(await screen.findByText(/wrote no margin or KPI rows/)).toBeInTheDocument();
+  });
+
+  it("names the half that failed when only one did", async () => {
+    // Pacing answers 200 with ok=false in that case - the other half really did write, so this
+    // must not be swallowed as a plain error.
+    vi.mocked(adminApi.syncReferenceData).mockResolvedValue({
+      ok: false,
+      marginKpi: { margin: 26, kpi: 49 },
+      errors: [{ part: "nsmapping", detail: "HTTP 403" }],
+    });
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    renderAdmin();
+    await screen.findByRole("button", { name: "Sync reference data" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Sync reference data" }));
+
+    expect(await screen.findByText(/failed for: nsmapping/)).toBeInTheDocument();
   });
 });

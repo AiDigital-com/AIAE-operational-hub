@@ -29,6 +29,10 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLikeResu
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncError;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncMarginKpi;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncNsmapping;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -77,6 +81,7 @@ public class PacingClientImpl implements PacingClient {
 	private static final String LIBRARY_PATH = "/api/library";
 	private static final String ADMIN_REFRESH_ALL_PATH = "/api/admin/refresh-all-dashboards";
 	private static final String ADMIN_BACKFILL_ORDER_NUMBERS_PATH = "/api/admin/backfill-order-numbers";
+	private static final String ADMIN_SYNC_REFERENCE_DATA_PATH = "/api/admin/sync-reference-data";
 	private static final String ME_PATH = "/api/me";
 
 	private final RestClient restClient;
@@ -1243,6 +1248,67 @@ public class PacingClientImpl implements PacingClient {
 					PacingFailureReason.UNREACHABLE,
 					"Pacing request failed: POST " + ADMIN_BACKFILL_ORDER_NUMBERS_PATH, ex);
 		}
+	}
+
+	@Override
+	public PacingReferenceSyncResult syncReferenceData(HubAssertion assertion) {
+		String header = assertionSigner.sign(assertion);
+		try {
+			ReferenceSyncResponse response = restClient.post()
+					.uri(ADMIN_SYNC_REFERENCE_DATA_PATH)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(ReferenceSyncResponse.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER,
+						"Pacing request failed: POST " + ADMIN_SYNC_REFERENCE_DATA_PATH
+								+ " returned an empty body");
+			}
+			return toReferenceSyncResult(response);
+		} catch (RestClientResponseException ex) {
+			throw adminActionFailure("POST", ADMIN_SYNC_REFERENCE_DATA_PATH, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE,
+					"Pacing request failed: POST " + ADMIN_SYNC_REFERENCE_DATA_PATH, ex);
+		}
+	}
+
+	/**
+	 * Reads the sync response into the external-services model.
+	 *
+	 * <p>A null half stays null rather than becoming a zero-filled object: "this half did not run"
+	 * and "this half wrote nothing" are different facts, and the second is the one worth alarming
+	 * about on screen.
+	 *
+	 * @param response the wire body
+	 * @return the mapped result
+	 */
+	PacingReferenceSyncResult toReferenceSyncResult(ReferenceSyncResponse response) {
+		ReferenceSyncNsmappingCounts ns = response.nsmapping();
+		ReferenceSyncMarginKpiCounts mk = response.marginKpi();
+		List<PacingReferenceSyncError> errors = response.errors() == null
+				? List.of()
+				: response.errors().stream()
+						.map(e -> new PacingReferenceSyncError(e.part(), e.detail()))
+						.toList();
+		return new PacingReferenceSyncResult(
+				Boolean.TRUE.equals(response.ok()),
+				ns == null ? null : new PacingReferenceSyncNsmapping(
+						zero(ns.agencies()), zero(ns.industries()), zero(ns.dropdowns()), zero(ns.overrides())),
+				mk == null ? null : new PacingReferenceSyncMarginKpi(zero(mk.margin()), zero(mk.kpi())),
+				errors);
+	}
+
+	/**
+	 * Null-safe count read.
+	 *
+	 * @param v a count from the wire, possibly absent
+	 * @return the count, or 0
+	 */
+	int zero(Integer v) {
+		return v == null ? 0 : v;
 	}
 
 	@Override

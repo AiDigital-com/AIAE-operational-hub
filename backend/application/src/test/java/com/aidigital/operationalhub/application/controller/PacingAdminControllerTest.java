@@ -8,6 +8,10 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncError;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncMarginKpi;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncNsmapping;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -162,6 +166,79 @@ class PacingAdminControllerTest {
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("OPH_015"));
 		verify(pacingClient, never()).backfillOrderNumbers(any());
+	}
+
+	@Test
+	void shouldReturnReferenceSyncCountsTest() throws Exception {
+		// Given: a healthy run. The counts are the point - they are the only way to tell this apart
+		// from a run that read an empty workbook, which also answers 200.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(new PacingReferenceSyncResult(
+				true,
+				new PacingReferenceSyncNsmapping(730, 45, 41, 5999),
+				new PacingReferenceSyncMarginKpi(26, 49),
+				List.of()))
+				.when(pacingClient).syncReferenceData(assertion);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/admin/sync-reference-data"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.ok").value(true))
+				.andExpect(jsonPath("$.marginKpi.margin").value(26))
+				.andExpect(jsonPath("$.marginKpi.kpi").value(49))
+				.andExpect(jsonPath("$.nsmapping.agencies").value(730));
+		verify(rbacAuthorizationService).requireAdmin(user);
+	}
+
+	@Test
+	void shouldReportAPartlyFailedReferenceSyncAsOkFalseNotAnErrorTest() throws Exception {
+		// The unusual contract this controller has to preserve: one half wrote, the other did not.
+		// Mapping that onto a 5xx would discard the half that worked and tell the admin nothing about
+		// which one to fix.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(new PacingReferenceSyncResult(
+				false,
+				null,
+				new PacingReferenceSyncMarginKpi(26, 49),
+				List.of(new PacingReferenceSyncError("nsmapping", "HTTP 403"))))
+				.when(pacingClient).syncReferenceData(assertion);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/admin/sync-reference-data"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.ok").value(false))
+				.andExpect(jsonPath("$.nsmapping").doesNotExist())
+				.andExpect(jsonPath("$.marginKpi.margin").value(26))
+				.andExpect(jsonPath("$.errors[0].part").value("nsmapping"));
+	}
+
+	@Test
+	void shouldRefuseReferenceSyncForNonAdminWithoutCallingPacingTest() throws Exception {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doThrow(new AccessDeniedException("User is not an administrator."))
+				.when(rbacAuthorizationService).requireAdmin(user);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/admin/sync-reference-data"))
+				.andExpect(status().isForbidden());
+		verify(pacingClient, never()).syncReferenceData(any());
 	}
 
 	@Test
