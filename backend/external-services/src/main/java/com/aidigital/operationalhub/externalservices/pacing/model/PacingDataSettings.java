@@ -31,6 +31,11 @@ import java.util.Map;
  *                         puts Creative (asset) in the breakdowns
  * @param fetchConversions whether conversions are fetched, which is what puts Conversion Action in the
  *                         breakdowns. Read from the conversions table paired with {@code source}
+ * @param coefEnabled      coefficient margin mode's pacing-level switch. Unlike {@code netEnabled}
+ *                         it changes NO figure: it only reveals the per-line-item coefficient
+ *                         controls on the plan screen. A line item already carrying {@code
+ *                         cost_coef} keeps computing client cost as spend / (1 - margin) while this
+ *                         is off. Null leaves the stored switch untouched
  * @param netEnabled       net cost mode's pacing-level switch (Pacing spec 2026-09-07): while on,
  *                         client cost reads net = gross × each line item's ratio everywhere. Null
  *                         leaves the stored switch untouched
@@ -45,6 +50,7 @@ public record PacingDataSettings(
 		String source,
 		Boolean fetchCreatives,
 		Boolean fetchConversions,
+		Boolean coefEnabled,
 		Boolean netEnabled,
 		List<Map<String, Object>> dimSources) {
 }

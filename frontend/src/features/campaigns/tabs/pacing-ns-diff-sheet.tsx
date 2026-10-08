@@ -99,7 +99,7 @@ function MissingInNetsuiteSection({ entries }: { entries: PacingNsDiffMissingInN
                 <dd>{entry.targetSpend != null ? fmtMoney(entry.targetSpend) : "—"}</dd>
               </div>
               <div className="pacing-ns-diff__field">
-                <dt>Target impressions</dt>
+                <dt>Units</dt>
                 <dd>{entry.targetImpressions != null ? fmtInt(entry.targetImpressions) : "—"}</dd>
               </div>
             </dl>

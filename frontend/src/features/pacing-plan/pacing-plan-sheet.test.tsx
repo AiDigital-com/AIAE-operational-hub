@@ -24,7 +24,14 @@ vi.mock("./api", () => ({
  * component's and are tested there. Here the button is a plain trigger, so these cases stay about
  * what the plan editor does rather than about the chrome around it.
  */
-function renderSheet(planByLineItem: Record<string, PacingLineItemPlanV1>, onClose = vi.fn()) {
+function renderSheet(
+  planByLineItem: Record<string, PacingLineItemPlanV1>,
+  onClose = vi.fn(),
+  // Coefficient margin mode's pacing switch (`data.coef_enabled`). Off by default, which is what
+  // every case that predates the feature is asserting against - note that off does NOT mean the
+  // controls are hidden: a line item already carrying the flag shows them on its own.
+  coefEnabled = false
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
     const ref = useRef<SettingsSectionHandle>(null);
@@ -35,6 +42,8 @@ function renderSheet(planByLineItem: Record<string, PacingLineItemPlanV1>, onClo
           ref={ref}
           slug="nike-ss26"
           currency="USD"
+          netFeatureOn={false}
+          coefEnabled={coefEnabled}
           planByLineItem={planByLineItem}
           seedKey={1}
           onDirtyChange={() => {}}
@@ -120,7 +129,7 @@ describe("PacingPlanSection", () => {
     // ceremony - a section with nothing to save does not call the endpoint at all, which is what
     // lets the drawer press one Save over three sections without three pointless requests.
     await screen.findByText("LI 111");
-    const impressions = screen.getByLabelText("Target impressions for line item 111");
+    const impressions = screen.getByLabelText("Units for line item 111");
     await user.clear(impressions);
     await user.type(impressions, "900000");
     await user.click(screen.getByRole("button", { name: "Save plan" }));
@@ -298,5 +307,215 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
 
     expect(screen.queryByRole("textbox", { name: /sub-breakdown value/i })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /Date split name/i })).toBeInTheDocument();
+  });
+});
+
+// Coefficient margin mode (Pacing's per-LI `cost_coef`): client cost becomes spend / (1 - margin),
+// with the margin resolved per fact row. The pacing-level switch is a pure VISIBILITY gate - it
+// decides whether these controls are on screen and whether the key rides the wire at all, never
+// whether a stored flag still computes.
+describe("PacingPlanSection - coefficient margin mode", () => {
+  beforeEach(() => {
+    vi.mocked(savePacingPlan).mockReset().mockResolvedValue({ saved: true });
+    vi.mocked(getAddablePacingLineItems).mockReset().mockResolvedValue(emptyAddable);
+  });
+
+  /** A container Pacing's own `validateCoefLi` refuses: a margin outside [0,100). */
+  function aBadMarginContainer(targetImpressions = 500_000) {
+    return {
+      id: "c1",
+      name: "March 2026",
+      fs: "2026-03-01",
+      fe: "2026-03-31",
+      target_impressions: targetImpressions,
+      target_spend: 1000,
+      margin_percent: 150,
+      date_children: [],
+      dim_children: [],
+    };
+  }
+
+  it("shows the control for a line item carrying the flag even while the pacing switch is off", async () => {
+    // Given: a line item ALREADY on coefficient cost, on a pacing whose switch is off. Pacing
+    // supports exactly this state - the Data tab's own hint says existing coefficient line items
+    // keep working while the switch is off - and a pacing created with the mode on reaches it the
+    // moment someone unticks the switch.
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true }) });
+    await screen.findByText("LI 111");
+
+    // Then: the checkbox is there anyway. Gating it on the switch alone would leave this line item
+    // computing client cost from a coefficient with no control anywhere to turn it off, while its
+    // Margin field still reads as the formula's divisor - visible effects, unreachable cause.
+    expect(screen.getByRole("checkbox", { name: /Coefficient cost for line item 111/ })).toBeChecked();
+    expect(screen.getByText("Margin % (client cost)")).toBeInTheDocument();
+
+    // When: the user clears it and saves
+    await user.click(screen.getByRole("checkbox", { name: /Coefficient cost for line item 111/ }));
+    await user.click(screen.getByRole("button", { name: "Save plan" }));
+
+    // Then: the clear reaches Pacing. The key rides UNCONDITIONALLY for this reason - a wire gated
+    // on "is anything still ticked" would go false on this very tick and drop the edit.
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalledTimes(1));
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    expect(lineItems[0].costCoef).toBe(false);
+  });
+
+  it("round-trips a stored flag unchanged through an edit that has nothing to do with it", async () => {
+    // Given: the switch off and a line item carrying the flag - the same stranded state as above.
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true }) });
+    await screen.findByText("LI 111");
+
+    // When: only the budget is edited
+    const budget = screen.getByLabelText("Budget for line item 111");
+    await user.clear(budget);
+    await user.type(budget, "7500");
+    await user.click(screen.getByRole("button", { name: "Save plan" }));
+
+    // Then: the flag goes back as it came. This is what makes sending it always safe - the value is
+    // seeded from storage, so an untouched line item's round-trip is the identity, and `cost_coef`
+    // is not a NetSuite field, so no revalidate can be clobbered by it.
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalledTimes(1));
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    expect(lineItems[0].costCoef).toBe(true);
+  });
+
+  it("keeps the control away from a pacing that uses neither the switch nor the flag", async () => {
+    // The other half of the OR: nothing on, nothing stored, nothing shown. Without this the two
+    // cases above would pass just as well on a component that always renders the checkbox.
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: false }) });
+    await screen.findByText("LI 111");
+
+    expect(screen.queryByRole("checkbox", { name: /Coefficient cost for line item 111/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Target margin %")).toBeInTheDocument();
+  });
+
+  it("relabels the margin field and sends an explicit false when the box is cleared", async () => {
+    // Given: the switch on, and a line item carrying the flag.
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true }) }, vi.fn(), true);
+    await screen.findByText("LI 111");
+
+    // Then: the Margin cell says what it now does - it is the formula's divisor, not a target.
+    expect(screen.getByText("Margin % (client cost)")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Coefficient cost for line item 111/ })).toBeChecked();
+
+    // When:
+    await user.click(screen.getByRole("checkbox", { name: /Coefficient cost for line item 111/ }));
+    await user.click(screen.getByRole("button", { name: "Save plan" }));
+
+    // Then: false is the instruction to clear - an omitted key would be preserved from storage, so
+    // the box could never be unticked.
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalledTimes(1));
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    expect(lineItems[0].costCoef).toBe(false);
+    expect(screen.getByText("Target margin %")).toBeInTheDocument();
+  });
+
+  it("turns coefficient cost on for every line item from one action", async () => {
+    // Given: three line items, none on coefficient cost.
+    const user = userEvent.setup();
+    renderSheet(
+      {
+        "111": aPacingLineItemPlanV1({ lineItemId: "111" }),
+        "222": aPacingLineItemPlanV1({ lineItemId: "222" }),
+        "333": aPacingLineItemPlanV1({ lineItemId: "333" }),
+      },
+      vi.fn(),
+      true
+    );
+    await screen.findByText("LI 111");
+
+    // When:
+    await user.click(screen.getByRole("button", { name: /Coef → all LIs/ }));
+    await user.click(screen.getByRole("button", { name: "Save plan" }));
+
+    // Then: every line item, including the two whose cards are collapsed.
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalledTimes(1));
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    expect(lineItems.map((li) => li.costCoef)).toEqual([true, true, true]);
+  });
+
+  it("does not offer the bulk action on a pacing with one line item", async () => {
+    // Given: nothing to apply "to all" that the single card does not already offer.
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111" }) }, vi.fn(), true);
+    await screen.findByText("LI 111");
+
+    // Then:
+    expect(screen.queryByRole("button", { name: /Coef → all LIs/ })).not.toBeInTheDocument();
+  });
+
+  it("warns before Save when the coefficient margins are the ones Pacing will refuse", async () => {
+    // Given: a coefficient line item whose container margin is out of range. Pacing answers the whole
+    // settings save with `bad_coef_config` on this, so without the warning the only way to find out
+    // is to press Save.
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true, containers: [aBadMarginContainer()] }) },
+      vi.fn(),
+      true
+    );
+    await screen.findByText("LI 111");
+
+    // Then: the coefficient sentence, naming both ways this can fail.
+    expect(
+      screen.getByText(/Coefficient margins block saving - overlapping containers both set a margin/)
+    ).toBeInTheDocument();
+  });
+
+  it("names both axes when the containers also outrun the line item's own plan", async () => {
+    // Given: one container that is both over the plan AND carrying an out-of-range margin.
+    renderSheet(
+      {
+        "111": aPacingLineItemPlanV1({
+          lineItemId: "111",
+          costCoef: true,
+          plannedImpressions: 100_000,
+          containers: [aBadMarginContainer(500_000)],
+        }),
+      },
+      vi.fn(),
+      true
+    );
+    await screen.findByText("LI 111");
+
+    // Then: one sentence covering both - the container-sum line on its own would name the lesser of
+    // the two reasons the save is about to fail.
+    expect(
+      screen.getByText(/Containers exceed the LI plan, and the coefficient margins block saving/)
+    ).toBeInTheDocument();
+  });
+
+  it("stays silent about a margin on a line item that is not on coefficient cost", async () => {
+    // Given: the SAME container, on a flat-margin line item. `validateCoefLi` returns early there, so
+    // a margin nothing reads is not a problem to report.
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111", containers: [aBadMarginContainer(50_000)] }) },
+      vi.fn(),
+      true
+    );
+    await screen.findByText("LI 111");
+
+    // Then:
+    expect(screen.queryByText(/Coefficient margins block saving/)).not.toBeInTheDocument();
+  });
+
+  it("tints the margin cell when a coefficient line item's own margin is out of range", async () => {
+    // Given: 150% as the divisor of spend / (1 - margin) - a meaningless client cost.
+    const user = userEvent.setup();
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true, marginTargetPct: 150 }) }, vi.fn(), true);
+    await screen.findByText("LI 111");
+
+    // Then: the cell itself says so - a full-cell tint, never an edge accent.
+    const margin = screen.getByRole("spinbutton", { name: "Margin % (client cost)" });
+    expect(margin).toHaveAttribute("aria-invalid", "true");
+    expect(margin.className).toContain("pplan__input--invalid");
+
+    // When: corrected
+    await user.clear(margin);
+    await user.type(margin, "30");
+
+    // Then: the tint clears as it is typed, not on save.
+    expect(screen.getByRole("spinbutton", { name: "Margin % (client cost)" })).not.toHaveAttribute("aria-invalid");
   });
 });

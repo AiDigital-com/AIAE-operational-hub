@@ -32,6 +32,12 @@ import java.util.Map;
  * @param targetVcr         the plan's target VCR percentage
  * @param flightStart       flight start date (YYYY-MM-DD); required when adding a new id
  * @param flightEnd         flight end date (YYYY-MM-DD); required when adding a new id
+ * @param costCoef          coefficient margin mode for this line item (Pacing's per-LI {@code
+ *                          cost_coef}): client cost becomes spend / (1 - margin), resolved per fact
+ *                          row. {@code true} sets it, {@code false} clears it, null leaves the
+ *                          stored flag alone - {@code cost_coef} is outside Pacing's
+ *                          {@code PLAN_OWNED} set, so its merge keeps any key the wire omits. Sent
+ *                          only while the pacing's coefficient switch is on
  * @param netRatio          net cost mode (Pacing spec 2026-09-07): a real ratio in (0,1) to set,
  *                          exactly 1 to clear a stored ratio, null to leave it alone (the key is
  *                          omitted from the wire)
@@ -56,6 +62,7 @@ public record PacingLineItemPlanUpdate(
 		Double targetVcr,
 		String flightStart,
 		String flightEnd,
+		Boolean costCoef,
 		Double netRatio,
 		Boolean netRatioLocked,
 		List<Map<String, Object>> containers) {

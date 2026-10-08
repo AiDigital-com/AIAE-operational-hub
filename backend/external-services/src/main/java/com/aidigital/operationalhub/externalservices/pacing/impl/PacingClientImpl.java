@@ -719,8 +719,8 @@ public class PacingClientImpl implements PacingClient {
 		return new LineItemPlanUpdateRequest(
 				li.lineItemId(), li.channel(), li.description(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.rateType(), li.nativeBudget(), li.targetImpressions(), li.marginPercent(),
-				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.netRatio(),
-				li.netRatioLocked(), li.containers());
+				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.costCoef(),
+				li.netRatio(), li.netRatioLocked(), li.containers());
 	}
 
 	@Override
@@ -753,7 +753,7 @@ public class PacingClientImpl implements PacingClient {
 	private DataNamespaceRequest toWireDataNamespace(PacingDataSettings settings) {
 		return new DataNamespaceRequest(
 				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
-				settings.netEnabled(), settings.dimSources());
+				settings.coefEnabled(), settings.netEnabled(), settings.dimSources());
 	}
 
 	@Override

@@ -250,19 +250,31 @@ export function Campaigns() {
 
       {campaignsQuery.isSuccess && campaigns.length > 0 && (
         <>
-          <div className="overview__owner" aria-busy={refreshing}>
+          <div className="campaigns__table-wrap" aria-busy={refreshing}>
             {visibleCampaigns.length === 0 && (
               <p className="overview__empty">No campaigns match the current filters.</p>
             )}
             {visibleCampaigns.length > 0 && (
-              <table className="overview__camp-table">
+              <table className="campaigns__table">
+                {/* Explicit column widths, read with `table-layout: fixed` in campaigns.css.
+                    Without them the browser sizes every column from its content, so expanding a
+                    campaign - which adds sub-rows carrying different text - re-measured the whole
+                    table and made the headers jump sideways under the user's cursor. */}
+                <colgroup>
+                  <col />
+                  <col className="campaigns__col--status" />
+                  <col className="campaigns__col--budget" />
+                  <col className="campaigns__col--flight" />
+                  <col className="campaigns__col--count" />
+                  <col className="campaigns__col--actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Campaign</th>
                     <th>Status</th>
-                    <th className="overview__camp-table-num">Budget</th>
+                    <th className="campaigns__table-num">Budget</th>
                     <th>Flight</th>
-                    <th className="overview__camp-table-num">LINE ITEMS</th>
+                    <th className="campaigns__table-num">LINE ITEMS</th>
                     <th />
                   </tr>
                 </thead>
@@ -335,9 +347,9 @@ function CampaignRows({
 
   return (
     <>
-      <tr className="overview__camp" onClick={onOpen}>
+      <tr className="campaigns__camp" onClick={onOpen}>
         <td>
-          <div className="overview__camp-name">
+          <div className="campaigns__camp-name">
             <button
               type="button"
               className={cn("overview__exp", open && "overview__exp--open")}
@@ -351,17 +363,17 @@ function CampaignRows({
               <ChevronRightIcon />
             </button>
             <div>
-              <div className="overview__camp-title">{name}</div>
-              <div className="overview__camp-sub">{agencyName ?? "—"} · {clientName}</div>
+              <div className="campaigns__camp-title">{name}</div>
+              <div className="campaigns__camp-sub">{agencyName ?? "—"} · {clientName}</div>
             </div>
           </div>
         </td>
         <td><StatusBadge label={displayStatusLabel(campaign.status)} color={statusStyle.color} glow={statusStyle.glow} /></td>
-        <td className="overview__camp-table-num overview__camp-budget">{fmtBudget(pacing?.budget ?? 0)}</td>
+        <td className="campaigns__table-num campaigns__camp-budget">{fmtBudget(pacing?.budget ?? 0)}</td>
         <td className="overview__flight">
           {pacing?.flight}<span className="overview__days">{pacing?.days}</span>
         </td>
-        <td className="overview__camp-table-num overview__camp-budget">{campaign.line_item_count ?? 0}</td>
+        <td className="campaigns__table-num campaigns__camp-budget">{campaign.line_item_count ?? 0}</td>
         <td>
           <div className="overview__actions">
             <button
@@ -393,8 +405,8 @@ function ExpandedLineItems({ campaign }: { campaign: CampaignV1 }) {
 
   if (setup.isPending) {
     return (
-      <tr className="overview__li">
-        <td colSpan={6} className="overview__li-loading">
+      <tr className="campaigns__li">
+        <td colSpan={6} className="campaigns__li-loading">
           <LoadingSpinner label="Loading line items" size="sm" />
         </td>
       </tr>
@@ -402,7 +414,7 @@ function ExpandedLineItems({ campaign }: { campaign: CampaignV1 }) {
   }
   if (setup.isError) {
     return (
-      <tr className="overview__li">
+      <tr className="campaigns__li">
         <td colSpan={6} className="form-error">{formatError(setup.error)}</td>
       </tr>
     );
@@ -413,18 +425,18 @@ function ExpandedLineItems({ campaign }: { campaign: CampaignV1 }) {
 
 function LineItemRow({ li }: { li: LineItem }) {
   return (
-    <tr className="overview__li">
-      <td className="overview__li-name">
-        <BranchIcon className="overview__li-branch" />
+    <tr className="campaigns__li">
+      <td className="campaigns__li-name">
+        <BranchIcon className="campaigns__li-branch" />
         <div>
-          <div className="overview__li-title">LI {li.id}</div>
-          <div className="overview__camp-sub">
+          <div className="campaigns__li-title">LI {li.id}</div>
+          <div className="campaigns__camp-sub">
             {li.channel}{li.rateType ? ` · ${li.rateType}` : ""} · {fmtDate(li.start)} – {fmtDate(li.end)}
           </div>
         </div>
       </td>
       <td />
-      <td className="overview__camp-table-num overview__camp-budget">{fmtBudget(li.budget)}</td>
+      <td className="campaigns__table-num campaigns__camp-budget">{fmtBudget(li.budget)}</td>
       <td />
       <td />
       <td />

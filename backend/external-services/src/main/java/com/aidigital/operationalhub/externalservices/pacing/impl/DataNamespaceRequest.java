@@ -16,6 +16,8 @@ import java.util.Map;
  * @param source            the BigQuery table delivery is read from
  * @param fetch_creatives   whether DSP creative assets are fetched with it
  * @param fetch_conversions whether conversions are fetched with it
+ * @param coef_enabled      coefficient margin mode's pacing-level switch - a pure UI gate, no figure
+ *                          depends on it
  * @param net_enabled       net cost mode's pacing-level switch (Pacing spec 2026-09-07)
  * @param dim_sources       the whole dimension-source list, opaque - forwarded byte-for-byte
  */
@@ -24,6 +26,7 @@ record DataNamespaceRequest(
 		String source,
 		Boolean fetch_creatives,
 		Boolean fetch_conversions,
+		Boolean coef_enabled,
 		Boolean net_enabled,
 		List<Map<String, Object>> dim_sources) {
 }

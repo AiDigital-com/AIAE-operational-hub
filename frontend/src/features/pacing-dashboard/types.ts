@@ -31,13 +31,18 @@ export interface PacingDimSource {
 }
 
 /** The part of the opaque `data` namespace the Data panel reads and writes. Every other key it may
- *  carry (`delivery_tab`, `coef_enabled`, `sheet`, and whatever Pacing adds next) is preserved by not
- *  being sent: the save is a per-key merge on Pacing's side, so a key this type does not name is a key
- *  this screen cannot disturb. */
+ *  carry (`delivery_tab`, `sheet`, and whatever Pacing adds next) is preserved by not being sent: the
+ *  save is a per-key merge on Pacing's side, so a key this type does not name is a key this screen
+ *  cannot disturb. */
 export interface PacingDataShape {
   source?: string;
   fetch_creatives?: boolean;
   fetch_conversions?: boolean;
+  /** Coefficient margin mode's pacing-level switch - a pure VISIBILITY gate, unlike `net_enabled`
+   *  beside it: it reveals the per-line-item coefficient controls on the plan screen and changes no
+   *  figure. A line item already carrying `costCoef` keeps computing client cost as
+   *  spend / (1 - margin) while this is off. */
+  coef_enabled?: boolean;
   net_enabled?: boolean;
   dim_sources?: PacingDimSource[];
   [key: string]: unknown;

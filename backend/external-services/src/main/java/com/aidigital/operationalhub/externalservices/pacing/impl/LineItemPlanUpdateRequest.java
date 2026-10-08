@@ -25,6 +25,12 @@ import java.util.Map;
  * @param target_vcr          the plan's target VCR percentage
  * @param flight_start        flight start date (YYYY-MM-DD); required when adding a new id
  * @param flight_end          flight end date (YYYY-MM-DD); required when adding a new id
+ * @param cost_coef           coefficient margin mode for this line item: {@code true} sets it,
+ *                            {@code false} clears it, null = omit the key. The omission is the
+ *                            point and is what this record's NON_NULL makes expressible - dash-gate's
+ *                            {@code mergeLineItemForSave} keeps {@code cost_coef} out of its
+ *                            {@code PLAN_OWNED} set, so an absent key is preserved from storage
+ *                            while a present one (true OR false) overwrites it
  * @param net_ratio           net cost mode (Pacing spec 2026-09-07): a real ratio in (0,1) to set,
  *                            exactly {@code 1} to clear (dash-gate's canon never persists 1 - the
  *                            explicit-clear form this NON_NULL wire can carry where Pacing's own SPA
@@ -58,6 +64,7 @@ record LineItemPlanUpdateRequest(
 		Double target_vcr,
 		String flight_start,
 		String flight_end,
+		Boolean cost_coef,
 		Double net_ratio,
 		Boolean net_ratio_locked,
 		List<Map<String, Object>> containers) {

@@ -58,6 +58,7 @@ public class PacingPlanContractMapper {
 				li.getTargetVcr(),
 				formatDate(li.getFlightStart()),
 				formatDate(li.getFlightEnd()),
+				li.getCostCoef(),
 				li.getNetRatio(),
 				li.getNetRatioLocked(),
 				li.getContainers());

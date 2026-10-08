@@ -1031,10 +1031,10 @@ function CreatePacingForm({
                       not answerable by looking at it. */}
                   <SortableHeader label="Line item" sortKey="lineItemId" sort={sort} onSort={toggleSort} />
                   <SortableHeader label="Channel" sortKey="channel" sort={sort} onSort={toggleSort} />
-                  <SortableHeader label="Flight" sortKey="flightStart" sort={sort} onSort={toggleSort} required />
-                  <SortableHeader label="Budget" sortKey="nativeBudget" sort={sort} onSort={toggleSort} required />
-                  <SortableHeader label="Impressions" sortKey="targetImpressions" sort={sort} onSort={toggleSort} required />
                   <SortableHeader label="Rate" sortKey="rateType" sort={sort} onSort={toggleSort} />
+                  <SortableHeader label="Flight" sortKey="flightStart" sort={sort} onSort={toggleSort} required />
+                  <SortableHeader label="MP Budget" sortKey="nativeBudget" sort={sort} onSort={toggleSort} required />
+                  <SortableHeader label="MP Units" sortKey="targetImpressions" sort={sort} onSort={toggleSort} required />
                   <SortableHeader label="Margin" sortKey="marginPercent" sort={sort} onSort={toggleSort} required />
                   {/* Only rendered while the coefficient master toggle is on - the column disappears
                       (and its flags clear) when the toggle goes off, so what is visible is exactly
@@ -1502,6 +1502,27 @@ function LineItemRow({
         <span className="pcreate__li-desc">{li.description || "—"}</span>
       </td>
       <td className="pcreate__cell-channel">{li.channel || "—"}</td>
+      <td className="pcreate__cell-rate">
+        <div className="pcreate__field">
+          <select
+            className="pcreate__select"
+            value={values.rateType}
+            aria-label={`Rate type for line item ${id}`}
+            onChange={(e) => onUpdateField(id, "rateType", e.target.value)}
+          >
+            <option value="">—</option>
+            {RATE_TYPES.map((rt) => (
+              <option key={rt} value={rt}>
+                {rt}
+              </option>
+            ))}
+            {values.rateType && !RATE_TYPES.includes(values.rateType) && (
+              <option value={values.rateType}>{values.rateType}</option>
+            )}
+          </select>
+          {isAutoFilled(li.rateType, id, "rateType", dirty) && <span className="pcreate__badge">Auto</span>}
+        </div>
+      </td>
       <td className="pcreate__cell-flight">
         <div className="pcreate__flight-field">
           <input
@@ -1541,7 +1562,7 @@ function LineItemRow({
           <NumericField
             value={values.targetImpressions}
             onChange={(v) => onUpdateField(id, "targetImpressions", v)}
-            ariaLabel={`Target impressions for line item ${id}`}
+            ariaLabel={`Units for line item ${id}`}
             className="pcreate__input"
           />
           {isAutoFilled(li.targetImpressions, id, "targetImpressions", dirty) && (
@@ -1554,27 +1575,6 @@ function LineItemRow({
         {li.plannedUnits != null && parseEditableNumber(values.targetImpressions) !== li.plannedUnits && (
           <span className="pcreate__field-hint">NetSuite MP units: {fmtInt(li.plannedUnits)}</span>
         )}
-      </td>
-      <td className="pcreate__cell-rate">
-        <div className="pcreate__field">
-          <select
-            className="pcreate__select"
-            value={values.rateType}
-            aria-label={`Rate type for line item ${id}`}
-            onChange={(e) => onUpdateField(id, "rateType", e.target.value)}
-          >
-            <option value="">—</option>
-            {RATE_TYPES.map((rt) => (
-              <option key={rt} value={rt}>
-                {rt}
-              </option>
-            ))}
-            {values.rateType && !RATE_TYPES.includes(values.rateType) && (
-              <option value={values.rateType}>{values.rateType}</option>
-            )}
-          </select>
-          {isAutoFilled(li.rateType, id, "rateType", dirty) && <span className="pcreate__badge">Auto</span>}
-        </div>
       </td>
       <td className="pcreate__cell-pct">
         <div className="pcreate__field">

@@ -119,3 +119,133 @@
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ── The campaigns table ──────────────────────────────────────────────────────
+   Owned here, not borrowed. This page used to dress its table in Overview's
+   `.overview__camp-*` and `.overview__li-*` classes; PDI_154 (17b91c2) reworked
+   Overview, deleted that block as unused on its own page - which it was - and
+   left this page rendering a bare, unstyled table. Nothing connected the two, so
+   nothing complained.
+
+   Copied from the deleted rules rather than pointed at Overview's current
+   `.overview__table`, because the two are not the same table: that one is
+   `table-layout: fixed` over its own columns, and this one has five columns of
+   its own plus expandable line-item sub-rows. Sharing a class would have made the
+   next change to either of them a change to both. */
+
+.campaigns__table-wrap {
+  position: relative;
+  margin-bottom: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.campaigns__table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Columns are sized by the colgroup in campaigns.tsx, not by what happens to be in them.
+     Auto layout re-measured the table whenever a campaign was expanded - the sub-rows carry
+     different text - and every header shifted sideways mid-click. */
+  table-layout: fixed;
+}
+.campaigns__col--status { width: 132px; }
+.campaigns__col--budget { width: 116px; }
+.campaigns__col--flight { width: 176px; }
+.campaigns__col--count { width: 112px; }
+.campaigns__col--actions { width: 72px; }
+.campaigns__table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.campaigns__table td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+.campaigns__table tr:last-child td {
+  border-bottom: none;
+}
+/* Budget and the line-item count are figures: right-aligned so their digits line up - and the
+   HEADER has to come with them. Written against `th`/`td` on purpose: `.campaigns__table th` sets
+   `text-align: left` and carries one element more of specificity, so a bare `.campaigns__table-num`
+   lost to it. The symptom was a column whose numbers sat right and whose label sat left. */
+.campaigns__table th.campaigns__table-num,
+.campaigns__table td.campaigns__table-num {
+  text-align: right;
+}
+
+/* ── campaign rows ── */
+
+.campaigns__camp {
+  cursor: pointer;
+  transition: background 0.14s;
+}
+.campaigns__camp:hover {
+  background: var(--primary-soft);
+}
+.campaigns__camp-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.campaigns__camp-budget {
+  font-weight: 700;
+}
+/* Fixed columns cannot grow for a long name, so the two text lines clip instead of pushing the
+   figures out of their column. */
+.campaigns__camp-title {
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaigns__camp-sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The flex child holding both lines needs this or it refuses to shrink below its text width. */
+.campaigns__camp-name > div,
+.campaigns__li-name > div {
+  min-width: 0;
+}
+
+/* ── line-item sub-rows ── */
+
+.campaigns__li td {
+  background: var(--n-100);
+  font-size: 13px;
+}
+/* The `!important` pair is carried over verbatim: both override the cell padding
+   set on `.campaigns__table td` above, which wins on specificity otherwise. */
+.campaigns__li-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 8px !important;
+}
+.campaigns__li-branch {
+  width: 16px;
+  height: 16px;
+  color: var(--border-strong);
+  flex: 0 0 16px;
+}
+.campaigns__li-title {
+  font-weight: 700;
+}
+.campaigns__li-loading {
+  text-align: center;
+  padding: 14px !important;
+}

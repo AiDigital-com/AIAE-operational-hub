@@ -9093,6 +9093,32 @@ components:
         targetVcr:
           type: number
           format: double
+        costCoef:
+          type: boolean
+          description: >
+            Coefficient margin mode for this line item (Pacing's per-LI `cost_coef` flag): client
+            cost becomes spend / (1 − margin) instead of BigQuery's `dynamic_cost`, with the margin
+            resolved per fact row (dim child → date child → container → line item).
+
+            Three states, and they are the whole contract: `true` sets the flag, `false` CLEARS it,
+            and OMITTING the field leaves whatever Pacing has stored alone - `cost_coef` is not in
+            its `mergeLineItemForSave` `PLAN_OWNED` set, so the merge is `{...stored, ...sent}` and
+            any key present on the wire wins while an absent one is preserved.
+
+            Unlike `netRatio` below, the Hub sends this one UNCONDITIONALLY rather than only while
+            the pacing's `coefEnabled` switch is on - Pacing's own retired SPA did the same. The
+            controls are reachable whenever that switch is on OR a line item already carries the
+            flag (a real state, not a corner: a flag outlives the switch being turned off, and
+            Pacing's own hint says existing coefficient line items keep working). So a user can
+            untick the last one - and a sender gated on "is anything still ticked" would go false on
+            that very tick and never send the clear. Sending it always costs nothing instead: the
+            caller seeds the value from what Pacing reported, so an untouched line item round-trips
+            its own stored flag, and `cost_coef` is not a NetSuite field, so no concurrent
+            revalidate can be clobbered by the round-trip.
+
+            Pacing validates the flag against this line item's own margins server-side and refuses
+            the whole save with `bad_coef_config` when they are out of range or two overlapping
+            periods both set one.
         netRatio:
           type: number
           format: double
@@ -9373,6 +9399,17 @@ components:
           description: >
             Fetch conversions, which adds Conversion Action to the breakdowns. Read from the
             conversions table paired with `source`, so the two stay consistent.
+        coefEnabled:
+          type: boolean
+          description: >
+            Coefficient margin mode's pacing-level switch (`config.data.coef_enabled`). Unlike
+            `netEnabled` below, this one changes NO figure anywhere: it is purely a visibility gate
+            that reveals the per-line-item coefficient controls on the plan screen (the `costCoef`
+            checkbox, the bulk "Coef → all LIs" action, and the "Margin % (client cost)" relabel).
+            The maths is driven by each line item's own `costCoef` flag alone, so a line item
+            already on coefficient cost keeps computing client cost as spend / (1 − margin) while
+            this switch is off - turning it off hides the controls, it does not restore flat-margin
+            math. Omit the field to leave the stored switch alone.
         netEnabled:
           type: boolean
           description: >

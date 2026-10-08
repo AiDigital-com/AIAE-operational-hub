@@ -150,7 +150,7 @@ function DateChildRow({
         value={child.target_impressions == null ? "" : String(child.target_impressions)}
         onChange={(v) => onChange({ ...child, target_impressions: parseEditableNumber(v) ?? null })}
         placeholder="Units"
-        ariaLabel="Date split target impressions"
+        ariaLabel="Date split units"
         className="pplan__input pplan__input--num"
       />
       <button type="button" className="pplan__icon-btn" onClick={onRemove} aria-label="Remove date split" title="Remove date split">
@@ -336,11 +336,11 @@ export function ContainerCard({
           </div>
           <div className="pplan__field-row">
             <label className="pplan__field">
-              <span className="pplan__field-label">Target impressions</span>
+              <span className="pplan__field-label">Units</span>
               <NumericField
                 value={container.target_impressions == null ? "" : String(container.target_impressions)}
                 onChange={(v) => setField("target_impressions", parseEditableNumber(v) ?? null)}
-                ariaLabel="Container target impressions"
+                ariaLabel="Container units"
                 className="pplan__input pplan__input--num"
               />
             </label>
