@@ -4622,6 +4622,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/sync-reference-data:
+    post:
+      tags:
+        - pacingAdmin
+      operationId: syncReferenceData
+      description: >
+        Pulls the reference workbook into Pacing's lookup tables now (admin only) -
+        POST /api/admin/sync-reference-data on the Pacing side. The same two syncs Pacing runs on a
+        schedule: NSMapping (Namebuilder's agency, industry and dropdown lists) and Margin+KPI (the
+        per-tactic target margin and target CTR/VCR a new pacing is pre-filled from).
+
+        Exists because the schedule's timing is wrong for the moment it matters most. NSMapping runs
+        when Pacing boots, but Margin+KPI waits for its daily hour - so after a deploy the margin and
+        KPI targets stay stale until then, and every pacing created in that window is born with the
+        create screen's fallback (25% margin, zero targets) baked into its stored plan. That is not
+        something a later sync repairs: the tables feed the pre-fill, never an existing pacing.
+
+        Synchronous: three sheet reads and three statements. The 200 carries the row counts actually
+        written, so a workbook that answered empty is visible rather than reported as success.
+
+        Safe to press twice - each half replaces its tables' contents outright.
+      responses:
+        '200':
+          description: >
+            The run finished. `ok` is false when either half failed; `errors` names which and why,
+            and the half that succeeded still wrote. A failure here is a stale table, never a
+            partly-written one - each loader swaps its contents in one statement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingReferenceSyncResultV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/admin/backfill-order-numbers:
     post:
       tags:
@@ -10274,6 +10320,66 @@ components:
         - filled
         - alreadyHad
         - skippedNoNumbers
+    PacingReferenceSyncResultV1:
+      type: object
+      description: >
+        What a manual reference-data sync wrote. The counts are rows actually stored, which is the
+        only way to tell a healthy run from one that read an empty or wrongly-shared workbook - both
+        answer 200 otherwise.
+      properties:
+        ok:
+          type: boolean
+          description: True when both halves succeeded. False means `errors` is non-empty.
+        nsmapping:
+          $ref: '#/components/schemas/PacingReferenceSyncNsmappingV1'
+        marginKpi:
+          $ref: '#/components/schemas/PacingReferenceSyncMarginKpiV1'
+        errors:
+          type: array
+          description: One entry per half that failed; absent halves are null above.
+          items:
+            $ref: '#/components/schemas/PacingReferenceSyncErrorV1'
+      required:
+        - ok
+    PacingReferenceSyncNsmappingV1:
+      type: object
+      description: Rows written to the four Namebuilder lookup tables.
+      properties:
+        agencies:
+          type: integer
+          format: int32
+        industries:
+          type: integer
+          format: int32
+        dropdowns:
+          type: integer
+          format: int32
+        overrides:
+          type: integer
+          format: int32
+    PacingReferenceSyncMarginKpiV1:
+      type: object
+      description: >
+        Rows written to the two tables the create screen pre-fills from. A zero here is the
+        failure that matters: it means every new pacing will fall back to 25% margin.
+      properties:
+        margin:
+          type: integer
+          format: int32
+        kpi:
+          type: integer
+          format: int32
+    PacingReferenceSyncErrorV1:
+      type: object
+      description: Which half failed and what Pacing said about it.
+      properties:
+        part:
+          type: string
+          description: '`nsmapping` or `margin_kpi`.'
+        detail:
+          type: string
+      required:
+        - part
     PacingRetryAfterV1:
       type: object
       description: >

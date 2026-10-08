@@ -38,6 +38,10 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncError;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncMarginKpi;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncNsmapping;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
@@ -1780,6 +1784,81 @@ class PacingClientImplTest {
 
 		// When-Then:
 		assertThatThrownBy(() -> client.backfillOrderNumbers(assertion))
+				.isInstanceOf(PacingExternalException.class);
+	}
+
+	@Test
+	void shouldReadBothHalvesOfAReferenceSyncTest() {
+		// Given: a healthy run - both halves wrote
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/admin/sync-reference-data"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,"
+								+ "\"nsmapping\":{\"agencies\":730,\"industries\":45,\"dropdowns\":41,\"overrides\":5999},"
+								+ "\"marginKpi\":{\"margin\":26,\"kpi\":49},\"errors\":[]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingReferenceSyncResult result = client.syncReferenceData(assertion);
+
+		// Then:
+		assertThat(result.ok()).isTrue();
+		assertThat(result.marginKpi()).isEqualTo(new PacingReferenceSyncMarginKpi(26, 49));
+		assertThat(result.nsmapping()).isEqualTo(new PacingReferenceSyncNsmapping(730, 45, 41, 5999));
+		assertThat(result.errors()).isEmpty();
+		server.verify();
+	}
+
+	@Test
+	void shouldKeepAFailedReferenceSyncHalfNullRatherThanZeroTest() {
+		// A 200 with ok=false is Pacing's real answer when one half wrote and the other did not, so
+		// this must come back as a result, never an exception. The failed half stays NULL: "did not
+		// run" and "wrote nothing" are different facts, and only the second should alarm a reader.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/admin/sync-reference-data"))
+				.andRespond(withSuccess(
+						"{\"ok\":false,\"nsmapping\":null,\"marginKpi\":{\"margin\":26,\"kpi\":49},"
+								+ "\"errors\":[{\"part\":\"nsmapping\",\"detail\":\"HTTP 403\"}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingReferenceSyncResult result = client.syncReferenceData(assertion);
+
+		// Then:
+		assertThat(result.ok()).isFalse();
+		assertThat(result.nsmapping()).isNull();
+		assertThat(result.marginKpi()).isEqualTo(new PacingReferenceSyncMarginKpi(26, 49));
+		assertThat(result.errors()).singleElement()
+				.isEqualTo(new PacingReferenceSyncError("nsmapping", "HTTP 403"));
+	}
+
+	@Test
+	void shouldTranslateAnUnreachableReferenceSyncTest() {
+		// Given: dash-gate 500s outright
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(
+				builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/admin/sync-reference-data"))
+				.andRespond(withServerError().body("{\"error\":\"boom\"}").contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.syncReferenceData(assertion))
 				.isInstanceOf(PacingExternalException.class);
 	}
 

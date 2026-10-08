@@ -11,6 +11,7 @@ import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
   PacingOrderNumberBackfillResultV1,
+  PacingReferenceSyncResultV1,
   PacingRetryAfterV1,
   PacingRevalidateResultV1,
   RefreshAllOutcome,
@@ -57,6 +58,25 @@ export async function refreshAllDashboards(): Promise<RefreshAllOutcome> {
  */
 export async function backfillOrderNumbers(): Promise<PacingOrderNumberBackfillResultV1> {
   const result = await apiClient.POST("/api/v1/pacing/admin/backfill-order-numbers", {});
+  if (result.error || !result.response.ok || !result.data) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Pulls the reference workbook into Pacing's lookup tables now - the per-tactic target margin and
+ * CTR/VCR a new pacing is pre-filled from, plus Namebuilder's agency/industry/dropdown lists.
+ *
+ * Exists for the window a deploy opens: Pacing re-reads NSMapping when it boots but waits for a
+ * daily hour to re-read Margin+KPI, and a pacing created in between is born with the create
+ * screen's fallback margin baked into its stored plan - which no later sync repairs.
+ *
+ * Note the contract: a 200 can carry `ok: false`. One half may fail while the other writes, so the
+ * caller must read the body rather than treat "no error thrown" as success.
+ */
+export async function syncReferenceData(): Promise<PacingReferenceSyncResultV1> {
+  const result = await apiClient.POST("/api/v1/pacing/admin/sync-reference-data", {});
   if (result.error || !result.response.ok || !result.data) {
     throw new ApiError(formatError(result.error), result.response.status);
   }

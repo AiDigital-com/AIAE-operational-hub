@@ -23,8 +23,8 @@ import { usePacingOverview } from "../pacing-overview/hooks";
 import type { PacingRowV1 } from "../pacing-overview/types";
 import { StatusControl } from "../pacing-plan/status-control";
 import { useToast } from "../../shared/ui/toast/toast";
-import { useBackfillOrderNumbers, useRefreshAllDashboards } from "./hooks";
-import type { PacingOrderNumberBackfillResultV1 } from "./types";
+import { useBackfillOrderNumbers, useRefreshAllDashboards, useSyncReferenceData } from "./hooks";
+import type { PacingOrderNumberBackfillResultV1, PacingReferenceSyncResultV1 } from "./types";
 import { BulkDeletePacingModal, DeletePacingModal } from "./pacing-admin-delete-modals";
 import "./pacing-admin.css";
 
@@ -37,6 +37,27 @@ function describeIoSync(summary: PacingOrderNumberBackfillResultV1): string {
     parts.push(`${summary.skippedNoNumbers} have no order numbers on their line items`);
   }
   return `IO numbers: ${parts.join(", ")} (${summary.scanned} pacings checked).`;
+}
+
+/**
+ * What a reference-data sync wrote, in one line.
+ *
+ * Leads with the margin/KPI counts because those are the ones that decide whether the next pacing
+ * is created correctly, and names a zero outright: a run that reads an empty or wrongly-shared
+ * workbook finishes without an error, and "synced" over zero rows would read as success.
+ */
+function describeReferenceSync(result: PacingReferenceSyncResultV1): string {
+  const failed = (result.errors ?? []).map((e) => e.part).join(", ");
+  if (!result.ok) return `Reference sync failed for: ${failed || "unknown"}.`;
+  const mk = result.marginKpi;
+  const ns = result.nsmapping;
+  if (mk && mk.margin === 0 && mk.kpi === 0) {
+    return "Reference sync ran but wrote no margin or KPI rows - check the workbook is shared and not empty.";
+  }
+  const parts: string[] = [];
+  if (mk) parts.push(`${mk.margin} margin, ${mk.kpi} KPI`);
+  if (ns) parts.push(`${ns.agencies} agencies, ${ns.industries} industries, ${ns.dropdowns} dropdowns`);
+  return `Reference data synced: ${parts.join(" · ")}.`;
 }
 
 function matchesSearch(row: PacingRowV1, term: string): boolean {
@@ -60,6 +81,7 @@ export function PacingAdmin() {
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const refreshAll = useRefreshAllDashboards();
   const syncIo = useBackfillOrderNumbers();
+  const syncReferenceData = useSyncReferenceData();
   const toast = useToast();
 
   // Same tick-based countdown as pacing-dashboard's single-pacing refresh (US-119) - a live number,
@@ -127,6 +149,18 @@ export function PacingAdmin() {
     }
   }
 
+  async function handleSyncReferenceData() {
+    try {
+      const result = await syncReferenceData.mutateAsync();
+      // ok=false still arrives here, not in catch: Pacing answers 200 when one half wrote and the
+      // other did not. The toast has to carry which, so the verdict is read off the body.
+      if (result.ok) toast.showSuccess(describeReferenceSync(result));
+      else toast.showError(describeReferenceSync(result));
+    } catch (error) {
+      toast.showError(error instanceof ApiError ? formatError(error) : "Could not sync reference data.");
+    }
+  }
+
   const inCooldown = cooldownUntil != null && cooldownSeconds > 0;
 
   return (
@@ -174,6 +208,18 @@ export function PacingAdmin() {
                 disabled={syncIo.isPending}
               >
                 {syncIo.isPending ? "Syncing…" : "Sync IO numbers"}
+              </button>
+              {/* Pulls the reference workbook into Pacing's lookup tables now. Needed after a
+                  deploy: Pacing re-reads NSMapping on boot but waits for a daily hour to re-read
+                  Margin+KPI, and a pacing created in between keeps the create screen's fallback
+                  margin for good. Replaces each table outright, so pressing twice is safe. */}
+              <button
+                type="button"
+                className="button button--ghost button--sm"
+                onClick={() => void handleSyncReferenceData()}
+                disabled={syncReferenceData.isPending}
+              >
+                {syncReferenceData.isPending ? "Syncing…" : "Sync reference data"}
               </button>
             </div>
           </div>
