@@ -249,6 +249,17 @@ interface PacingCoreModule {
    *  (the data-freshness date), matching the retired SPA's own `AlertsBlock.jsx` comment: "so the
    *  badge, the frozen expected, and the alert suppression all resolve pause as-of the same date." */
   isLiPaused(plan: NormalizedLiPlan, asOf: string | null): boolean;
+  /** The coefficient-cost config check, and the ONE implementation of it: this is the same function
+   *  dash-gate runs on every settings save (`db.mjs` -> 400 `bad_coef_config`), so a pre-save warning
+   *  built on it cannot drift from what the server will actually refuse. Takes the WIRE line-item
+   *  shape - `cost_coef` strictly boolean, `margin_percent` as stored (null/'' mean "inherit"), and
+   *  the raw `containers` array - and returns one entry per problem, empty when there is none. See
+   *  `pacing-plan/coef-precheck.ts` for the adapter that builds that shape from the editor's state. */
+  validateCoefLi(li: {
+    cost_coef: boolean;
+    margin_percent: unknown;
+    containers: Record<string, unknown>[];
+  }): Array<{ code: string; where?: string; value?: unknown; a?: string; b?: string }>;
   [key: string]: unknown;
 }
 

@@ -135,6 +135,7 @@ public class PacingDashboardContractMapper {
 				body.getSource() == null ? null : body.getSource().getValue(),
 				body.getFetchCreatives(),
 				body.getFetchConversions(),
+				body.getCoefEnabled(),
 				body.getNetEnabled(),
 				// The wrapper, not its contents, is what says "the caller touched this". An absent
 				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as

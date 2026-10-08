@@ -20,9 +20,9 @@ import "./data-panel.css";
  * for a list. The diff below is what keeps `dim_sources` out of a save that only moved the radio, and
  * it is also this section's dirty flag: an empty patch is a section with nothing to save.
  *
- * The namespace carries more than this panel shows (a sheet binding, a delivery-tab flag, a
- * coefficient-cost flag). Those keys are safe precisely because they are never sent: a key absent from
- * the request is a key Pacing leaves alone.
+ * The namespace carries more than this panel shows (a sheet binding, a delivery-tab flag). Those keys
+ * are safe precisely because they are never sent: a key absent from the request is a key Pacing
+ * leaves alone.
  */
 
 /** The catalogue dimension source this panel offers as a checkbox. Mirrors Pacing's own
@@ -70,6 +70,7 @@ interface DataDraft {
   source: string;
   fetchCreatives: boolean;
   fetchConversions: boolean;
+  coefEnabled: boolean;
   netEnabled: boolean;
   devices: boolean;
 }
@@ -90,6 +91,7 @@ function seed(data: PacingDataShape | undefined): DataDraft {
     source: known ? (stored as string) : "platform_mart",
     fetchCreatives: data?.fetch_creatives === true,
     fetchConversions: data?.fetch_conversions === true,
+    coefEnabled: data?.coef_enabled === true,
     netEnabled: data?.net_enabled === true,
     devices: devicesOn(dimSources),
   };
@@ -103,6 +105,7 @@ function diff(draft: DataDraft, base: DataDraft, existing: PacingDimSource[]): P
   }
   if (draft.fetchCreatives !== base.fetchCreatives) body.fetchCreatives = draft.fetchCreatives;
   if (draft.fetchConversions !== base.fetchConversions) body.fetchConversions = draft.fetchConversions;
+  if (draft.coefEnabled !== base.coefEnabled) body.coefEnabled = draft.coefEnabled;
   if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
   if (draft.devices !== base.devices) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
@@ -126,10 +129,23 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   /** Re-seeded whenever this changes - the drawer bumps it on open, so a reopened panel never
    *  shows an edit abandoned in a previous session. */
   seedKey: number;
+  /** Reports the two mode switches as this panel's DRAFT currently has them, not as they are
+   *  stored. The Plan section gates its Net % field and its coefficient checkbox on them, and the
+   *  drawer commits every section in one Save - so reading the stored value there would mean
+   *  turning a mode on, saving, watching the drawer close, and reopening it before the controls
+   *  the switch exists to reveal could be touched. The retired SPA held both halves in one
+   *  component and read the draft directly; this is the same answer across the Hub's section seam. */
+  onSwitchesChange: (switches: PacingModeSwitches) => void;
+}
+
+/** The two pacing-level mode switches the Plan section's controls hang off. */
+export interface PacingModeSwitches {
+  coefEnabled: boolean;
+  netEnabled: boolean;
 }
 
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
-  function PacingDataSection({ slug, data, netRatioCount, seedKey, onDirtyChange }, ref) {
+  function PacingDataSection({ slug, data, netRatioCount, seedKey, onDirtyChange, onSwitchesChange }, ref) {
     const [draft, setDraft] = useState<DataDraft>(() => seed(data));
     const [base, setBase] = useState<DataDraft>(() => seed(data));
     const [extrasOpen, setExtrasOpen] = useState(false);
@@ -156,7 +172,41 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     const body = useMemo(() => diff(draft, base, existingDimSources), [draft, base, existingDimSources]);
     const dirty = Object.keys(body).length > 0;
 
+    // …and follow the server whenever a NEW namespace arrives and there is nothing to lose.
+    //
+    // The re-seed above is not enough on its own, and the gap is what made a saved setting read as
+    // unsaved. `base` is what "unchanged" is measured against, and it was only ever re-read when the
+    // drawer re-opened. A save answers before its own refetch lands, so the sequence is: patch
+    // accepted -> `base` set to the draft -> payload refetches a moment later. If anything re-seeded
+    // the section between those two points it read the OLD namespace, and `base` went back to the
+    // value the user had just changed away from - the save was on the server, and the screen called
+    // it a pending edit for as long as the page stayed loaded.
+    //
+    // Gated three ways, because this is the effect that must never eat an edit:
+    //   - only when the namespace's own bytes changed (`dataKey`), never on an unrelated re-render;
+    //   - only while the section is clean, so a draft in progress survives a background refetch -
+    //     the same promise the comment above makes;
+    //   - and `lastDataKey` is NOT advanced while dirty, so the arrival is picked up later, as soon
+    //     as the edit is saved or reset, rather than being skipped.
+    const dataKey = useMemo(() => JSON.stringify(data ?? null), [data]);
+    const lastDataKey = useRef(dataKey);
+    useEffect(() => {
+      if (lastDataKey.current === dataKey || dirty) return;
+      lastDataKey.current = dataKey;
+      const seeded = seed(data);
+      setDraft(seeded);
+      setBase(seeded);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dataKey, dirty]);
+
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+
+    // Reported from the draft, so a flip reaches the Plan section without a Save. Keyed on the two
+    // booleans rather than on `draft`, so moving the source radio does not re-render the drawer.
+    useEffect(
+      () => { onSwitchesChange({ coefEnabled: draft.coefEnabled, netEnabled: draft.netEnabled }); },
+      [draft.coefEnabled, draft.netEnabled, onSwitchesChange]
+    );
 
     // The freshest patch, without re-rendering the drawer on every click: the handle below closes
     // over this ref rather than over a render's `body`.
@@ -217,6 +267,24 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
         <section className="pdata__section">
           <h3 className="pdata__heading">Client cost</h3>
           <div className="pdata__options">
+            <label className="pdata__check">
+              <input
+                type="checkbox"
+                checked={draft.coefEnabled}
+                onChange={(event) => set({ coefEnabled: event.target.checked })}
+              />
+              <span className="pdata__option-text">
+                <span className="pdata__option-name">Coefficient margin mode</span>
+                {/* Deliberately does NOT name the switch below it. An option's hint joins its
+                    checkbox's accessible name, so borrowing the neighbour's label here gave two
+                    checkboxes on this panel the same name to anyone reading it aloud. */}
+                <span className="pdata__hint">
+                  Adds the coefficient controls on the plan screen: client cost = spend / (1 &minus;
+                  margin). It reveals controls and moves no figure on its own - line items already on
+                  coefficient cost keep working while it is off.
+                </span>
+              </span>
+            </label>
             <label className="pdata__check">
               <input
                 type="checkbox"

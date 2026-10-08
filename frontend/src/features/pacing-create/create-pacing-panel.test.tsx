@@ -260,7 +260,7 @@ describe("CreatePacingPanel", () => {
     renderPanel();
     await screen.findByText("1");
 
-    const impressionsInput = screen.getByLabelText("Target impressions for line item 1");
+    const impressionsInput = screen.getByLabelText("Units for line item 1");
     const marginInput = screen.getByLabelText("Target margin for line item 1");
 
     // Then: both pre-filled fields carry the Auto badge. The NetSuite reference figure is NOT

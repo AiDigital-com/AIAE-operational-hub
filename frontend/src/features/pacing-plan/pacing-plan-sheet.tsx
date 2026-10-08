@@ -12,7 +12,9 @@
  * plain bookkeeping over user-entered targets, not delivery data - see containers.ts's own doc for the
  * line between the two. The one real validation this screen dispatches to (coefficient-cost margin
  * ranges, and - not yet enforced by Pacing today - the container-sum-vs-plan rule) is Pacing's;
- * this only renders whatever it says back.
+ * this only renders whatever it says back. The coefficient warning shown BEFORE Save is no exception:
+ * `coef-precheck.ts` hands the line item to the engine's own `validateCoefLi` - the same function
+ * dash-gate runs on save - rather than restating the rule here, so the two cannot drift apart.
  */
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { formatError } from "../../shared/format/error";
@@ -21,6 +23,7 @@ import type { SettingsSectionHandle, SettingsSectionProps } from "../pacing-dash
 import { NumericField } from "../pacing-create/numeric-field";
 import { parseEditableNumber } from "../pacing-create/format";
 import { AddLineItemPanel } from "./add-line-item-panel";
+import { coefConfigBlocksSave, planWarningSentence } from "./coef-precheck";
 import { ContainerCard } from "./container-editor";
 import { buildDefaultContainer, containerSumExceedsPlan, type PacingContainer } from "./containers";
 import { useSavePacingPlan } from "./hooks";
@@ -49,6 +52,11 @@ interface LineItemCardProps {
   /** Net cost mode's pacing switch (`data.net_enabled`): the Net % field renders only while it is
    *  on, matching the retired SPA's Settings · Pacing tab. */
   netFeatureOn: boolean;
+  /** Whether the coefficient controls are on screen at all: the pacing switch, or any line item
+   *  already carrying the flag (the section computes it - see its `coefFeatureOn`). A pure
+   *  visibility gate; a line item whose flag is set goes on computing client cost from it either
+   *  way, which is why the Margin relabel below reads the line item's own flag, not this. */
+  coefFeatureOn: boolean;
   isLast: boolean;
   open: boolean;
   onToggleOpen: () => void;
@@ -56,7 +64,17 @@ interface LineItemCardProps {
   onRemove: () => void;
 }
 
-function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, onChange, onRemove }: LineItemCardProps) {
+function LineItemCard({
+  li,
+  currency,
+  netFeatureOn,
+  coefFeatureOn,
+  isLast,
+  open,
+  onToggleOpen,
+  onChange,
+  onRemove,
+}: LineItemCardProps) {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [lastAddedContainerId, setLastAddedContainerId] = useState<string | null>(null);
 
@@ -89,6 +107,20 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
 
   const planImpr = parseEditableNumber(li.targetImpressions) ?? null;
   const overPlan = containerSumExceedsPlan(planImpr, li.containers);
+  // Coefficient margin mode, pre-save. Pacing refuses the WHOLE settings save with `bad_coef_config`
+  // on a bad coefficient config, so without this the only way to find out is to press Save. The rule
+  // is not restated here - `coefConfigBlocksSave` calls the engine's own `validateCoefLi`, the same
+  // function dash-gate runs on save, so the warning and the refusal cannot disagree.
+  const coefBlocked = useMemo(
+    () => coefConfigBlocksSave({ costCoef: li.costCoef, marginTargetPct: li.marginTargetPct, containers: li.containers }),
+    [li.costCoef, li.marginTargetPct, li.containers]
+  );
+  const planWarning = planWarningSentence(overPlan, coefBlocked);
+  // On a coefficient line item the Margin % cell is no longer a target to be judged against - it IS
+  // the client-cost formula's divisor, and a value outside [0,100) makes that formula meaningless.
+  // Blank reads as 0 here exactly as it does in the reference, and 0 is a valid margin.
+  const marginInvalid =
+    li.costCoef && !(Number.isFinite(Number(li.marginTargetPct)) && Number(li.marginTargetPct) >= 0 && Number(li.marginTargetPct) < 100);
   // Net cost mode: there is something to reset to only when NetSuite reports a ratio, and only
   // once the cell has moved off it (or was locked by hand). Compared on the RATIOS, not on the
   // displayed percents - two different ratios can round to the same 2-decimal cell.
@@ -102,6 +134,13 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
         <span className="pplan__badge">{li.channel || "Unknown"}</span>
         <span className="pplan__badge">{li.rateType}</span>
         {li.isNew && <span className="pplan__badge pplan__badge--new">New</span>}
+        {/* A collapsed card must still say that it is the one holding the save back. A top-row badge,
+            never an edge accent; its title carries the same sentence the body spells out. */}
+        {planWarning && (
+          <span className="pplan__badge pplan__badge--warn" role="img" title={planWarning} aria-label={`Warning: ${planWarning}`}>
+            ⚠
+          </span>
+        )}
       </button>
       <button
         type="button"
@@ -115,6 +154,7 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
 
       {open && (
         <div className="pplan__li-body">
+          {planWarning && <p className="pplan__hint pplan__hint--warn">⚠ {planWarning}</p>}
           <div className="pplan__field-row">
             <label className="pplan__field">
               <span className="pplan__field-label">Flight start</span>
@@ -139,11 +179,11 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
           </div>
           <div className="pplan__field-row">
             <label className="pplan__field">
-              <span className="pplan__field-label">Target impressions</span>
+              <span className="pplan__field-label">Units</span>
               <NumericField
                 value={li.targetImpressions}
                 onChange={(v) => field("targetImpressions", v)}
-                ariaLabel={`Target impressions for line item ${li.lineItemId}`}
+                ariaLabel={`Units for line item ${li.lineItemId}`}
                 className="pplan__input pplan__input--num"
               />
             </label>
@@ -157,11 +197,19 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
               />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">Target margin %</span>
+              {/* The label is the statement of what this cell DOES, and on a coefficient line item
+                  that changes: it stops being a target and becomes the client-cost divisor. */}
+              <span
+                className="pplan__field-label"
+                title={li.costCoef ? "Margin % - sets client cost" : undefined}
+              >
+                {li.costCoef ? "Margin % (client cost)" : "Target margin %"}
+              </span>
               <input
                 type="number"
                 step="0.01"
-                className="pplan__input pplan__input--num"
+                className={`pplan__input pplan__input--num${marginInvalid ? " pplan__input--invalid" : ""}`}
+                aria-invalid={marginInvalid || undefined}
                 value={li.marginTargetPct}
                 onChange={(e) => field("marginTargetPct", e.target.value)}
               />
@@ -251,13 +299,28 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
             )}
           </div>
 
+          {/* Its own full-width row, never sharing one with the stacked-label fields above: a bare
+              checkbox dropped beside them would sit on a different baseline from every neighbour,
+              because theirs starts below a label and it has none. The Margin relabel above is the
+              other half of this control - the two are read together. */}
+          {coefFeatureOn && (
+            <div className="pplan__field-row">
+              <label className="pplan__switch">
+                <input
+                  type="checkbox"
+                  checked={li.costCoef}
+                  aria-label={`Coefficient cost for line item ${li.lineItemId}`}
+                  onChange={(e) => field("costCoef", e.target.checked)}
+                />
+                <span className="pplan__switch-label">
+                  Coefficient cost &mdash; client cost = spend / (1 &minus; margin)
+                </span>
+              </label>
+            </div>
+          )}
+
           <div className="pplan__subsection">
             <div className="pplan__subsection-head">Containers ({li.containers.length})</div>
-            {overPlan && (
-              <p className="pplan__hint pplan__hint--warn">
-                ⚠ Containers' combined target exceeds this line item's own target impressions. Pacing may reject this on save.
-              </p>
-            )}
             {li.containers.map((container, idx) => (
               <ContainerCard
                 key={container.id}
@@ -313,16 +376,21 @@ function LineItemCard({ li, currency, netFeatureOn, isLast, open, onToggleOpen, 
 export interface PacingPlanSectionProps extends SettingsSectionProps {
   slug: string;
   currency: string;
-  /** Net cost mode's pacing switch (`data.net_enabled`, as stored). Gates the Net % field AND the
-   *  wire: while off, a plan save carries no net keys at all, leaving stored ratios inert. */
+  /** Net cost mode's pacing switch (`data.net_enabled`) as the Data section currently has it -
+   *  the LIVE draft, not what is stored, so flipping it there reveals the Net % field here in the
+   *  same unsaved sitting. Gates the field AND the wire: while off, a plan save carries no net keys
+   *  at all, leaving stored ratios inert. */
   netFeatureOn: boolean;
+  /** Coefficient margin mode's pacing switch (`data.coef_enabled`), live from the Data section the
+   *  same way. It is only HALF the question this screen asks - see `coefFeatureOn` below. */
+  coefEnabled: boolean;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
   /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
   seedKey: number;
 }
 
 export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
-  function PacingPlanSection({ slug, currency, netFeatureOn, planByLineItem, seedKey, onDirtyChange }, ref) {
+  function PacingPlanSection({ slug, currency, netFeatureOn, coefEnabled, planByLineItem, seedKey, onDirtyChange }, ref) {
     const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
     const [base, setBase] = useState<Record<string, EditableLineItem>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -345,6 +413,22 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
 
     const ids = useMemo(() => Object.keys(lineItems).sort(), [lineItems]);
     const existingIds = useMemo(() => new Set(ids), [ids]);
+
+    // Whether the coefficient controls are on screen - the pacing switch OR a line item that already
+    // carries the flag, which is the retired SPA's rule (`SettingsDrawer.jsx`: `localCoefEnabled ||
+    // Object.values(localPlans).some((p) => p?.coef === true)`).
+    //
+    // The OR is the whole point, not a nicety. A line item may carry `cost_coef` while the pacing
+    // switch is off - Pacing supports that state and says so in the Data tab's own hint ("Existing
+    // coefficient line items keep working when this is off"), and a pacing created with the mode on
+    // reaches it the moment someone unticks the switch. Without this clause that line item goes on
+    // computing client cost from a coefficient with no control anywhere to turn it off, while its
+    // Margin field still reads "Margin % (client cost)" - a setting the user can see the effects of
+    // and cannot reach.
+    const coefFeatureOn = useMemo(
+      () => coefEnabled || ids.some((id) => lineItems[id]?.costCoef === true),
+      [coefEnabled, ids, lineItems]
+    );
 
     // Compared as the payload that would be SENT, not as the editor's own state: seeding builds
     // fresh objects, so an identity check would call an untouched plan dirty the moment it loads.
@@ -411,6 +495,17 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
       });
     }
 
+    /** Turn coefficient cost ON for every line item in this pacing. One direction only, like the Net
+     *  seed beside it: the bulk gesture people actually make is "this whole pacing is coefficient",
+     *  and a bulk OFF would be an undo for a flag each card can already clear on its own. */
+    function setCoefOnAll() {
+      setLineItems((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) next[id] = { ...next[id], costCoef: true };
+        return next;
+      });
+    }
+
     function addCandidates(candidates: PacingDraftLineItemV1[]) {
       setLineItems((prev) => {
         const next = { ...prev };
@@ -424,6 +519,16 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     return (
       <>
         <div className="pplan__section-actions">
+          {coefFeatureOn && ids.length > 1 && (
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={setCoefOnAll}
+              title="Turn on coefficient cost for every line item in this pacing"
+            >
+              Coef → all LIs
+            </button>
+          )}
           {netFeatureOn && ids.length > 1 && (
             <button
               type="button"
@@ -451,6 +556,7 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
             li={lineItems[id]}
             currency={currency}
             netFeatureOn={netFeatureOn}
+            coefFeatureOn={coefFeatureOn}
             isLast={ids.length === 1}
             open={expanded.has(id)}
             onToggleOpen={() => toggleExpanded(id)}

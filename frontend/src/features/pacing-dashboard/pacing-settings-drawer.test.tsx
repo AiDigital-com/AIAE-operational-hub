@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aPacingLineItemPlanV1, aPacingNotifySettingsV1 } from "@/test/factories";
 import * as dashApi from "./api";
@@ -245,6 +246,95 @@ describe("PacingSettingsDrawer", () => {
       await screen.findByText(/Documents: The Asana link must point at an Asana project/)
     ).toBeInTheDocument();
     expect(dashApi.savePacingCampaignLinks).not.toHaveBeenCalled();
+  });
+
+  it("should reveal the Plan tab's coefficient control the moment the Data tab's switch is flipped", async () => {
+    // Given: a pacing with the coefficient mode off everywhere, and the Plan tab showing no control
+    renderDrawer();
+    await screen.findByText("LI 111");
+    expect(screen.queryByRole("checkbox", { name: /Coefficient cost for line item 111/ })).not.toBeInTheDocument();
+
+    // When: the switch is flipped on the Data tab - and NOTHING is saved
+    await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+
+    // Then: the control is there. The switch and the controls it governs live in two sections that
+    // one Save commits together, so reading the STORED value here would mean save, watch the drawer
+    // close, reopen - three steps before the thing the switch exists to reveal can be touched.
+    expect(await screen.findByRole("checkbox", { name: /Coefficient cost for line item 111/ })).toBeInTheDocument();
+    expect(dashApi.savePacingDataSettings).not.toHaveBeenCalled();
+  });
+
+  it("should take the Net % field with it when the net switch is flipped, on the same rule", async () => {
+    // The coefficient switch's twin: both are read live from the Data section's draft, so fixing one
+    // and leaving the other would split two controls that have always behaved alike.
+    renderDrawer();
+    await screen.findByText("LI 111");
+    expect(screen.queryByLabelText(/Net percent for line item 111/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+
+    expect(await screen.findByLabelText(/Net percent for line item 111/)).toBeInTheDocument();
+  });
+
+  it("should forget the previous session's unsaved flag when the SAME drawer re-opens", async () => {
+    // The defect this covers, and it had nothing to do with the panels. Everything that has to
+    // happen once per opening - re-seed the sections, clear the dirty map - used to run in the
+    // render body behind a ref the same render mutated. React's development double-invoke made that
+    // guard defeat itself: the first invocation set the ref and queued the resets, the second saw
+    // the ref already set and skipped them, so neither reset ever survived. A drawer closed with an
+    // edit pending re-opened still flagged - the tab wore its dot and Save was lit - over sections
+    // that had been re-mounted with nothing to save.
+    //
+    // The drawer must be the SAME instance across the close, which is the whole point: a test that
+    // unmounts and renders again gets fresh state either way and would pass against the bug.
+    function Toggle() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen((v) => !v)}>
+            toggle-drawer
+          </button>
+          <PacingSettingsDrawer
+            open={open}
+            onClose={() => setOpen(false)}
+            onSaved={vi.fn()}
+            slug="nike-ss26"
+            currency="USD"
+            planByLineItem={{ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000 }) }}
+            data={{ source: "platform_mart" }}
+            display={{ rev: 3, widgets: [], groups: [] }}
+            capabilities={{ contextWidgetSpec: 2 }}
+            isAdmin={false}
+          />
+        </>
+      );
+    }
+    // StrictMode on purpose: the guard that broke was a ref written during render, and only the
+    // development double-invoke exposes it. Without this wrapper the old code passes and the test
+    // guards nothing.
+    render(
+      <StrictMode>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <Toggle />
+        </QueryClientProvider>
+      </StrictMode>
+    );
+
+    // Given: an edit in flight
+    await editDataSource();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    // When: closed and re-opened, without the component ever unmounting
+    await userEvent.click(screen.getByRole("button", { name: "toggle-drawer" }));
+    await userEvent.click(screen.getByRole("button", { name: "toggle-drawer" }));
+
+    // Then: a fresh sitting, with nothing pending
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
   });
 
   it("should open on the Documents tab when the opener asks for it", () => {

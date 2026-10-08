@@ -1998,7 +1998,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", 0.85, false, List.of(Map.of("id", "c1", "target_impressions", 100000)));
+				"2026-01-01", "2026-01-31", null, 0.85, false, List.of(Map.of("id", "c1", "target_impressions", 100000)));
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(method(POST))
 				.andExpect(content().json(
@@ -2030,7 +2030,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", null, null, List.of());
+				"2026-01-01", "2026-01-31", null, null, null, List.of());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2038,12 +2038,70 @@ class PacingClientImplTest {
 					assertThat(body).doesNotContain("\"description\"");
 					assertThat(body).doesNotContain("\"campaign_id\"");
 					assertThat(body).doesNotContain("\"campaign_name\"");
+					// Coefficient margin mode: the pacing's switch is off, so the editor expresses "no
+					// intent" by leaving costCoef null. `cost_coef` is outside dash-gate's PLAN_OWNED
+					// set, so a key present as false would CLEAR the flag on every line item using the
+					// feature - it has to be absent, not falsy.
+					assertThat(body).doesNotContain("\"cost_coef\"");
 					assertThat(body).contains("\"line_item_id\":\"599852\"");
 				})
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
 		// When:
 		client.savePlan(assertion, "nike-ss26", List.of(li));
+		server.verify();
+	}
+
+	@Test
+	void shouldSendAFalseCostCoefRatherThanOmitItWhenSavingPlanTest() {
+		// Given: the pacing's coefficient switch is ON and the user cleared one line item's checkbox.
+		// `false` is the instruction to CLEAR the stored flag - dropping it because it is falsy would
+		// make the per-line-item toggle one-way, since dash-gate preserves any key the wire omits.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate off = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", false, null, null, List.of());
+		PacingLineItemPlanUpdate on = new PacingLineItemPlanUpdate(
+				"599853", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", true, null, null, List.of());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json(
+						"{\"line_items\":[{\"line_item_id\":\"599852\",\"cost_coef\":false},"
+								+ "{\"line_item_id\":\"599853\",\"cost_coef\":true}]}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then: no exception - void on success.
+		client.savePlan(assertion, "nike-ss26", List.of(off, on));
+		server.verify();
+	}
+
+	@Test
+	void shouldSendCoefEnabledUnderItsSnakeCaseKeyWhenSavingDataSettingsTest() {
+		// Given: the Data panel flipping the coefficient switch alone. It is a pure UI gate, but it is
+		// still a stored key - so it rides the wire on its own, with no sibling setting dragged along.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, true, null, null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).contains("\"coef_enabled\":true");
+					assertThat(body).doesNotContain("\"net_enabled\"");
+					assertThat(body).doesNotContain("\"source\"");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.saveDataSettings(assertion, "nike-ss26", settings);
 		server.verify();
 	}
 
@@ -2060,13 +2118,14 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
 					assertThat(body).contains("\"source\":\"platform_mart_adjustments_view\"");
 					assertThat(body).doesNotContain("\"fetch_creatives\"");
 					assertThat(body).doesNotContain("\"fetch_conversions\"");
+					assertThat(body).doesNotContain("\"coef_enabled\"");
 					assertThat(body).doesNotContain("\"net_enabled\"");
 					assertThat(body).doesNotContain("\"dim_sources\"");
 					// Never the plan or the display: a data save touches one fragment of the endpoint.
@@ -2091,7 +2150,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
-				null, false, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
+				null, false, null, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"data\":{\"fetch_creatives\":false,"
@@ -2188,7 +2247,7 @@ class PacingClientImplTest {
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\",\"detail\":\"devices: unknown catalog\"}")
 						.contentType(MediaType.APPLICATION_JSON));
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, List.of(Map.of("id", "devices")));
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, null, List.of(Map.of("id", "devices")));
 
 		// When-Then:
 		assertThatThrownBy(() -> client.saveDataSettings(assertion, "nike-ss26", settings))
@@ -2458,7 +2517,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"7", "Display", "New line item", "40539", "2026_Campaign", "TM-1", "CPM", 1000.0,
-				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", null, null, List.of());
+				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, List.of());
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"line_items\":[{\"line_item_id\":\"7\",\"channel\":\"Display\","
@@ -2488,7 +2547,7 @@ class PacingClientImplTest {
 								+ "\"value\":150}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2514,7 +2573,7 @@ class PacingClientImplTest {
 								+ "\"a\":\"container:Jan\",\"b\":\"container:Feb\"}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2538,7 +2597,7 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":[]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
@@ -2562,7 +2621,7 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\"}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))

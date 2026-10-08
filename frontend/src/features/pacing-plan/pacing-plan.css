@@ -11,7 +11,11 @@
   color: var(--muted-strong);
 }
 .pplan__hint--warn {
-  color: var(--attention);
+  /* --attention-text, not --attention: the fill colour is #ffc53d in the light theme and is
+     unreadable as body text on a 10% wash of itself. This line now carries the "your save will be
+     refused" sentence, so it has to be legible; the same correction is already written down on
+     .pplan__net-lock below. */
+  color: var(--attention-text);
   background: color-mix(in srgb, var(--attention) 10%, transparent);
   padding: 6px 10px;
   border-radius: var(--radius);
@@ -452,4 +456,51 @@
   text-transform: uppercase;
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+/* Coefficient margin mode ───────────────────────────────────────────────────
+   On a coefficient line item the Margin % cell is the client-cost divisor, not a target, so a value
+   outside [0,100) makes the formula meaningless and Pacing refuses the whole save. A full-cell tint
+   says so - never an edge accent. Both tokens are declared in each theme block of app/tokens.css,
+   so this reads correctly in light and dark alike. */
+.pplan__input--invalid {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+/* The per-line-item coefficient switch. It takes a whole row to itself (`flex-basis: 100%` inside
+   .pplan__field-row) because it is a BARE control: every field beside it starts below a stacked
+   label, so sharing their row would put this one's box on a baseline none of them uses. */
+.pplan__switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 100%;
+  cursor: pointer;
+}
+/* The global `input` rule sizes form fields (100% wide, 42px tall); a checkbox is neither. Without
+   this it renders as a 42px blue slab that eats the row and shoves its own label into the next
+   column, where it reads as a caption for whatever happens to sit there. The same reset is on
+   `.pdata__check input` in data-panel.css, for the same reason. */
+.pplan__switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  flex: 0 0 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.pplan__switch-label {
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+
+/* "This line item is what the save will fail on", on the collapsed head row beside the channel and
+   rate-type badges. A tinted pill, matching .pplan__hint--warn's wash; --attention is a fill colour
+   and too light to read as text, which is what --attention-text exists for. */
+.pplan__badge--warn {
+  background: color-mix(in srgb, var(--attention) 22%, transparent);
+  color: var(--attention-text);
 }

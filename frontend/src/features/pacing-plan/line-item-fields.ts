@@ -20,6 +20,11 @@ export interface EditableLineItem {
   flightStart: string;
   flightEnd: string;
   containers: PacingContainer[];
+  /** Coefficient margin mode: this line item's client cost is `spend / (1 - margin)`, resolved per
+   *  fact row (dim child -> date child -> container -> line item), instead of BigQuery's
+   *  `dynamic_cost`. Seeded from the STORED flag whatever the pacing's switch says, so a line item
+   *  already on coefficient cost keeps its flag through a save made while the switch is off. */
+  costCoef: boolean;
   /** Net cost mode (Pacing spec 2026-09-07): the Net % cell as the user reads and types it - a
    *  PERCENT string ("85" for k = 0.85). Blank ≡ 100% ≡ invoiced at gross; the wire carries the
    *  ratio (see `toPlanUpdateLineItem`). Seeded from the STORED ratio, not the operative one, so a
@@ -87,6 +92,7 @@ export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
     flightStart: plan.flightStart ?? "",
     flightEnd: plan.flightEnd ?? "",
     containers: (plan.containers ?? []) as unknown as PacingContainer[],
+    costCoef: plan.costCoef === true,
     netPct: netRatioToPct(plan.storedNetRatio),
     netRatio: realRatio(plan.storedNetRatio) ? plan.storedNetRatio : null,
     netLocked: plan.netRatioLocked === true,
@@ -122,6 +128,9 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     flightStart: candidate.flightStart ?? "",
     flightEnd: candidate.flightEnd ?? "",
     containers: [],
+    // A newly added line item is NOT on coefficient cost: nothing about the candidate says it should
+    // be, and the flag is one tick away on the card that just appeared.
+    costCoef: false,
     // A newly added line item starts on NetSuite's own ratio, unlocked - the create form's seed
     // rule, verbatim: the seeded value IS the NetSuite reading, so revalidate may keep it fresh.
     netPct: netRatioToPct(candidate.nsNetRatio),
@@ -146,6 +155,17 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
 export function toPlanUpdateLineItem(li: EditableLineItem, netFeatureOn: boolean): PacingLineItemPlanUpdateV1 {
   const base: PacingLineItemPlanUpdateV1 = {
     lineItemId: li.lineItemId,
+    // Coefficient margin mode rides UNCONDITIONALLY, unlike the net keys below - the retired SPA's
+    // rule, verbatim (`SettingsDrawer.jsx`: `cost_coef: p.coef === true`, outside every gate).
+    //
+    // Gating it on the pacing switch, the way net is gated, looks symmetrical and is a trap. The
+    // controls are visible whenever a line item already CARRIES the flag, switch or no switch
+    // (see `coefFeatureOn` in `pacing-plan-sheet.tsx`), so a user can untick the last one - and a
+    // gate reading "is anything still ticked" would go false on that very tick and drop the edit
+    // on the floor. Sending it always costs nothing instead: `costCoef` is seeded from the STORED
+    // flag, so for a line item nobody touched this is the stored value going back unchanged, and
+    // `cost_coef` is not a NetSuite field, so no revalidate can be clobbered by the round-trip.
+    costCoef: li.costCoef,
     rateType: li.rateType,
     targetImpressions: parseEditableNumber(li.targetImpressions) ?? 0,
     nativeBudget: parseEditableNumber(li.nativeBudget) ?? 0,

@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../shared/style/cn";
 import { CloseIcon } from "../../shared/ui/icons/icons";
 import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
 import { PacingAlertsSection } from "./alerts-panel";
-import { PacingDataSection } from "./data-panel";
+import { PacingDataSection, type PacingModeSwitches } from "./data-panel";
 import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
@@ -100,7 +100,25 @@ export function PacingSettingsDrawer({
   const [confirmClose, setConfirmClose] = useState(false);
   // Bumped on every open: the sections re-seed on it, so a draft abandoned last time is gone.
   const [seedKey, setSeedKey] = useState(0);
-  const openedRef = useRef(false);
+  // The two pacing-level mode switches, LIVE from the Data section's draft rather than from the
+  // stored payload. They sit here because two sections need one answer: the Data tab owns them and
+  // the Plan tab's controls hang off them, and a single Save commits both.
+  //
+  // `null` until that section speaks, NOT a copy of the payload seeded here. A second seed of its
+  // own is how this went wrong once already: the drawer read `data` at ITS first render, which can
+  // be a render before the payload has arrived, and nothing afterwards corrected it - the Data
+  // section only reports when its own value CHANGES, and a value that was right from the start
+  // never changes. The Plan tab then drew no coefficient control on a pacing whose switch was
+  // plainly ticked one tab over. Falling back to the payload per render instead of latching it once
+  // means the worst case is a render that agrees with storage, which is also the right answer.
+  const [switches, setSwitches] = useState<PacingModeSwitches | null>(null);
+  const liveSwitches: PacingModeSwitches = switches ?? {
+    coefEnabled: data?.coef_enabled === true,
+    netEnabled: data?.net_enabled === true,
+  };
+  // Read by the open effect below without being a dependency of it - see its comment.
+  const initialTabRef = useRef(initialTab);
+  initialTabRef.current = initialTab;
 
   const plan = useRef<SettingsSectionHandle>(null);
   const dataSection = useRef<SettingsSectionHandle>(null);
@@ -123,24 +141,43 @@ export function PacingSettingsDrawer({
     [planByLineItem]
   );
 
-  if (open && !openedRef.current) {
-    openedRef.current = true;
-    // During render rather than in an effect: the sections read `seedKey` on their first render of
-    // this opening, so bumping it afterwards would seed them twice and flash the previous draft.
+  // Everything that has to happen once per opening: re-seed the sections, and forget what the last
+  // session left behind.
+  //
+  // In an EFFECT, not during render. It used to run in the render body, guarded by a ref the same
+  // render mutated - and under React's development double-invoke that guard defeated itself: the
+  // first invocation set `openedRef.current = true` and queued the two resets, the second saw the
+  // ref already true and skipped the whole block, so neither reset survived. The symptom was not
+  // subtle. `seedKey` never left 0, so no section ever re-seeded on open; and `dirty` kept whatever
+  // the previous session put there, so a pacing whose setting had just been saved re-opened with the
+  // tab still flagged and Save still lit, over a panel that agreed it had nothing to save.
+  //
+  // A ref written during render is the bug, not the double-invoke that exposed it: render must stay
+  // free of side effects for exactly this reason. `open` as the only dependency is what makes this
+  // once-per-opening; `initialTab` is read, never depended on, so a changing prop cannot yank the
+  // user off the tab they are on mid-session.
+  useEffect(() => {
+    if (!open) return;
     setSeedKey((n) => n + 1);
     setDirty(NOTHING_DIRTY);
     setErrors([]);
     // Only when the opener promised a tab: the gear keeps the last-shown tab, the way it always
     // has, while "+ Add documents" must land on Documents rather than wherever the user left off.
-    if (initialTab) setTab(initialTab);
-  } else if (!open && openedRef.current) {
-    openedRef.current = false;
-  }
+    if (initialTabRef.current) setTab(initialTabRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // One stable callback per section: an inline arrow would be a new function on every render, and
   // the sections report their dirty state from an effect keyed on it.
   const markPlan = useCallback((v: boolean) => setDirty((d) => (d.plan === v ? d : { ...d, plan: v })), []);
   const markData = useCallback((v: boolean) => setDirty((d) => (d.data === v ? d : { ...d, data: v })), []);
+  // Same shape and the same reason: stable identity, and a no-op when nothing moved, so the Data
+  // section's report cannot loop against its own effect.
+  const markSwitches = useCallback(
+    (v: PacingModeSwitches) =>
+      setSwitches((s) => (s && s.coefEnabled === v.coefEnabled && s.netEnabled === v.netEnabled ? s : v)),
+    []
+  );
   const markWidgets = useCallback((v: boolean) => setDirty((d) => (d.widgets === v ? d : { ...d, widgets: v })), []);
   const markAlerts = useCallback((v: boolean) => setDirty((d) => (d.alerts === v ? d : { ...d, alerts: v })), []);
   const markDocuments = useCallback(
@@ -259,7 +296,8 @@ export function PacingSettingsDrawer({
             ref={plan}
             slug={slug}
             currency={currency}
-            netFeatureOn={data?.net_enabled === true}
+            netFeatureOn={liveSwitches.netEnabled}
+            coefEnabled={liveSwitches.coefEnabled}
             planByLineItem={planByLineItem}
             seedKey={seedKey}
             onDirtyChange={markPlan}
@@ -273,6 +311,7 @@ export function PacingSettingsDrawer({
             netRatioCount={netRatioCount}
             seedKey={seedKey}
             onDirtyChange={markData}
+            onSwitchesChange={markSwitches}
           />
         </div>
         <div className={cn("psettings__panel", tab !== "widgets" && "psettings__panel--hidden")}>
