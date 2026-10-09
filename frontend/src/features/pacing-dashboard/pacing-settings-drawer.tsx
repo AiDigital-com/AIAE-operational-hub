@@ -39,6 +39,9 @@ export interface PacingSettingsDrawerProps {
   slug: string;
   currency: string;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
+  /** The pacing's conversion-mart rows, straight off the dashboard payload. The plan editor needs
+   *  them to offer a line item the actions it actually has - there is no other list of them. */
+  conversions: Array<Record<string, unknown>> | undefined;
   data: PacingDataShape | undefined;
   display: PacingDisplayShape;
   capabilities: Record<string, unknown> | undefined;
@@ -79,6 +82,7 @@ export function PacingSettingsDrawer({
   slug,
   currency,
   planByLineItem,
+  conversions,
   data,
   display,
   capabilities,
@@ -115,6 +119,7 @@ export function PacingSettingsDrawer({
   const liveSwitches: PacingModeSwitches = switches ?? {
     coefEnabled: data?.coef_enabled === true,
     netEnabled: data?.net_enabled === true,
+    primaryCvEnabled: data?.primary_cv_enabled === true,
   };
   // Read by the open effect below without being a dependency of it - see its comment.
   const initialTabRef = useRef(initialTab);
@@ -175,7 +180,10 @@ export function PacingSettingsDrawer({
   // section's report cannot loop against its own effect.
   const markSwitches = useCallback(
     (v: PacingModeSwitches) =>
-      setSwitches((s) => (s && s.coefEnabled === v.coefEnabled && s.netEnabled === v.netEnabled ? s : v)),
+      setSwitches((s) => (s
+        && s.coefEnabled === v.coefEnabled
+        && s.netEnabled === v.netEnabled
+        && s.primaryCvEnabled === v.primaryCvEnabled ? s : v)),
     []
   );
   const markWidgets = useCallback((v: boolean) => setDirty((d) => (d.widgets === v ? d : { ...d, widgets: v })), []);
@@ -298,6 +306,8 @@ export function PacingSettingsDrawer({
             currency={currency}
             netFeatureOn={liveSwitches.netEnabled}
             coefEnabled={liveSwitches.coefEnabled}
+            primaryCvEnabled={liveSwitches.primaryCvEnabled}
+            conversions={conversions}
             planByLineItem={planByLineItem}
             seedKey={seedKey}
             onDirtyChange={markPlan}

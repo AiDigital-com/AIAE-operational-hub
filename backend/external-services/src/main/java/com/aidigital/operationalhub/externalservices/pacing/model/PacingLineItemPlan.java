@@ -72,6 +72,16 @@ import java.util.Map;
  *                           editor state only
  * @param nsNetRatio         NetSuite's own k = net/gross (the Reset-to-NS baseline), null when
  *                           NetSuite reports no usable gross
+ * @param primaryConversions primary conversions (spec 2026-09-13): the conversion actions this line
+ *                           item counts as ITS conversions. A MATH input - the browser-side engine
+ *                           overlays the line's cv/pc/pv with only these rows. Published by Pacing
+ *                           only while the pacing's switch is on and only for a line with a stored
+ *                           choice, so null is the ordinary case and means "count everything"
+ * @param storedPrimaryConversions the same list as config_json holds, published whatever the switch -
+ *                           the storedNetRatio precedent. The Settings editor binds to this one;
+ *                           nothing computes from it
+ * @param conversionData     whether this line item's own data source fetches conversion rows at all;
+ *                           the editor needs it to say why a line offers no choice
  */
 public record PacingLineItemPlan(
 		String lineItemId,
@@ -97,5 +107,8 @@ public record PacingLineItemPlan(
 		Double netRatio,
 		Double storedNetRatio,
 		Boolean netRatioLocked,
-		Double nsNetRatio) {
+		Double nsNetRatio,
+		@JsonProperty("primaryConversions") List<String> primaryConversions,
+		@JsonProperty("storedPrimaryConversions") List<String> storedPrimaryConversions,
+		@JsonProperty("conversionData") Boolean conversionData) {
 }

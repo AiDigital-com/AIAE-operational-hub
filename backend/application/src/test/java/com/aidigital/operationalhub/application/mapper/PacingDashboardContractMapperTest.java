@@ -75,7 +75,10 @@ class PacingDashboardContractMapperTest {
 				// Value groups: two delivered Audience values read as one named value on this line.
 				List.of(Map.of("dim_key", "audience", "name", "Brand", "values", List.of("PMax_Brand", "Search_Brand"))),
 				// Net cost mode: operative ratio, stored ratio, lock, NetSuite baseline.
-				null, false, false, null, 0.85, 0.85, true, 0.8);
+				null, false, false, null, 0.85, 0.85, true, 0.8,
+				// Primary conversions: the operative choice, the stored one, and whether this line's
+				// own source brings conversion rows at all.
+				List.of("Purchase"), List.of("Purchase"), true);
 		PacingJournalEntry journal =
 				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
 		PacingDashboardData data = new PacingDashboardData(
@@ -109,6 +112,14 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.getCampaign().getStartDate()).isEqualTo(LocalDate.of(2026, 8, 1));
 		assertThat(result.getPlanByLineItem()).containsKey("111");
 		assertThat(result.getPlanByLineItem().get("111").getPlannedImpressions()).isEqualTo(1_000_000.0);
+		// Primary conversions (spec 2026-09-13). Asserted rather than merely compiled: the operative
+		// list is a MATH input the browser-side engine reads, and a mapper that quietly stopped
+		// forwarding it would leave every line counting every conversion action the platform
+		// reported - a wrong number with nothing failing anywhere. The same class of silent loss this
+		// contract already suffered on `cost_coef` and the net family.
+		assertThat(result.getPlanByLineItem().get("111").getPrimaryConversions()).containsExactly("Purchase");
+		assertThat(result.getPlanByLineItem().get("111").getStoredPrimaryConversions()).containsExactly("Purchase");
+		assertThat(result.getPlanByLineItem().get("111").getConversionData()).isTrue();
 		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals()).hasSize(1);
 		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals().get(0).getFrom())
 				.isEqualTo(LocalDate.of(2026, 8, 10));
@@ -152,7 +163,9 @@ class PacingDashboardContractMapperTest {
 				"", List.of(), null);
 		PacingLineItemPlan plan = new PacingLineItemPlan(
 				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
-				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null, null, null, null, null);
+				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null, null, null, null, null,
+				// Primary conversions unset: this case is about the fields above.
+				null, null, null);
 		PacingDashboardData data = new PacingDashboardData(
 				campaign, Map.of("111", plan), List.of(), "2026-08-05",
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved

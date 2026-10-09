@@ -105,6 +105,38 @@ function currentApi() {
 }
 
 /**
+ * The Hub's contract is camelCase everywhere; `normalize()` is Pacing's own and reads two plan
+ * fields in SNAKE case, because on Pacing's side they arrive straight off `config_json` rather than
+ * through `merge.mjs`'s renaming: `cost_coef` and `native_budget`. Every other field it reads
+ * (`clientBudget`, `plannedImpressions`, `marginTargetPct`, …) is already camel on both sides, which
+ * is why only these two need a bridge and why their absence was silent - nothing throws on a missing
+ * key, the line item just reads as "not on coefficient cost" and "no contract-currency total".
+ *
+ * `build-metrics.ts`'s `toEngineRaw` bridges exactly this pair for the OTHER engine on this page.
+ * This one is the moved renderer's feed and was missing it, so a coefficient line item drew its
+ * widgets off BigQuery's `dynamic_cost` while the pacing list and Overview - which resolve the
+ * coefficient server-side in `health.mjs` - drew the same pacing's margin off `spend / (1 - margin)`.
+ * Two numbers for one figure on one screen.
+ *
+ * Copies: the payload is react-query's cached object and must not be mutated. Only the plan entries
+ * that actually carry a value are rewritten, so a pacing using neither feature allocates one object.
+ *
+ * @param {object} payload the Hub's dashboard payload
+ * @returns {object} the payload with both keys present in the shape `normalize()` reads
+ */
+function bridgePlanKeys(payload) {
+  const plan = payload && payload.planByLineItem;
+  if (!plan || typeof plan !== 'object') return payload;
+  const next = {};
+  for (const [id, p] of Object.entries(plan)) {
+    next[id] = (p && (p.costCoef !== undefined || p.nativeBudget !== undefined))
+      ? { ...p, cost_coef: p.costCoef === true, native_budget: p.nativeBudget ?? null }
+      : p;
+  }
+  return { ...payload, planByLineItem: next };
+}
+
+/**
  * Assembles the state the moved renderer selects out of, from the Hub's dashboard payload.
  *
  * The payload is NOT that state: `planByLineItem` is `merge.mjs`'s camelCase wire shape
@@ -136,7 +168,7 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight }) 
     // The dictionary rides each line's plan as `dimGroups` (dash-gate's merge.mjs); with no
     // groups anywhere `groupedView` hands the payload straight back, so nothing is copied.
     const rawData = fetched;
-    const raw = fetched ? groupedView(fetched, groupIndexOf(fetched.planByLineItem)) : null;
+    const raw = fetched ? groupedView(bridgePlanKeys(fetched), groupIndexOf(fetched.planByLineItem)) : null;
     let LP = {};
     let facts = { factsDaily: [], liDaily: {}, liSplitDaily: {}, asOf: null, rate: 1, cvCtx: null };
     if (raw && raw.campaign && Array.isArray(raw.factsDaily)) {
@@ -149,9 +181,18 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight }) 
       } catch {
         LP = {};
       }
-      const { LD, LSD, asOf } = buildFactsAggregates(raw.factsDaily, rate, LP);
+      // Primary conversions (spec 2026-09-13 §3). `cvCtx` was hardcoded null here, which reads as
+      // "the feature is off" and made every line count every conversion action the platform
+      // reported, however the pacing was configured. `operative` is the server's own published
+      // flag (`merge.mjs`'s publicDataConfig), never recomputed on this side. Two passes because
+      // the context needs `asOf`, which the first aggregate is what computes - the same order
+      // Pacing's own store used.
+      const { asOf: firstAsOf } = buildFactsAggregates(raw.factsDaily, rate, LP,
+        makeCvCtx(raw.data, raw.conversions, null));
+      const cvCtx = makeCvCtx(raw.data, raw.conversions, raw.asOf ?? firstAsOf);
+      const { LD, LSD, asOf } = buildFactsAggregates(raw.factsDaily, rate, LP, cvCtx);
       facts = { factsDaily: raw.factsDaily, liDaily: LD, liSplitDaily: LSD,
-                asOf: raw.asOf ?? asOf, rate, cvCtx: null };
+                asOf: raw.asOf ?? asOf, rate, cvCtx };
     }
     return {
       campaign: raw?.campaign ?? null,
@@ -200,6 +241,7 @@ import {
   makeCardLIsSelector, selectEffRange, selectDeliveryFacts,
 } from './selectors.js';
 import { normalize, buildFactsAggregates } from './normalize.js';
+import { makeCvCtx } from './primary-cv.js';
 import { groupIndexOf, groupedView } from './dim-value-groups.js';
 
 export const useCampaign = () => useDashboardStore(selectCampaign);

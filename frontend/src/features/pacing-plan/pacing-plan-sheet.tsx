@@ -21,8 +21,9 @@ import { formatError } from "../../shared/format/error";
 import { Modal } from "../../shared/ui/modal/modal";
 import type { SettingsSectionHandle, SettingsSectionProps } from "../pacing-dashboard/settings-section";
 import { NumericField } from "../pacing-create/numeric-field";
-import { parseEditableNumber } from "../pacing-create/format";
+import { fmtInt, parseEditableNumber } from "../pacing-create/format";
 import { AddLineItemPanel } from "./add-line-item-panel";
+import { actionsByLi, unmatched, type CvAction } from "./cv-actions";
 import { coefConfigBlocksSave, planWarningSentence } from "./coef-precheck";
 import { ContainerCard } from "./container-editor";
 import { buildDefaultContainer, containerSumExceedsPlan, type PacingContainer } from "./containers";
@@ -39,6 +40,10 @@ import type { PacingDraftLineItemV1, PacingLineItemPlanV1 } from "./types";
 import "./pacing-plan.css";
 
 const RATE_TYPES = ["CPM", "CPC", "CPV", "CPI", "Flat"];
+
+/** One frozen empty list, so a line item with no conversion rows does not get a fresh array - and a
+ *  fresh prop identity - on every render of the sheet. */
+const EMPTY_ACTIONS: CvAction[] = [];
 
 function seedAll(planByLineItem: Record<string, PacingLineItemPlanV1>): Record<string, EditableLineItem> {
   const out: Record<string, EditableLineItem> = {};
@@ -57,6 +62,10 @@ interface LineItemCardProps {
    *  visibility gate; a line item whose flag is set goes on computing client cost from it either
    *  way, which is why the Margin relabel below reads the line item's own flag, not this. */
   coefFeatureOn: boolean;
+  /** Whether to draw the conversion chooser at all - see the section's `primaryCvFeatureOn`. */
+  primaryCvFeatureOn: boolean;
+  /** The actions this line item actually has in the delivered conversion rows, biggest first. */
+  cvActions: CvAction[];
   isLast: boolean;
   open: boolean;
   onToggleOpen: () => void;
@@ -69,6 +78,8 @@ function LineItemCard({
   currency,
   netFeatureOn,
   coefFeatureOn,
+  primaryCvFeatureOn,
+  cvActions,
   isLast,
   open,
   onToggleOpen,
@@ -319,6 +330,69 @@ function LineItemCard({
             </div>
           )}
 
+          {/* Primary conversions (Pacing spec 2026-09-13 §2). A checkbox per action rather than a
+              multi-select: the list is short, the counts matter for choosing, and a multi-select hides
+              both. Its own full-width block for the same reason the coefficient switch above has one -
+              these are not label-stacked fields and must not share a row with them. */}
+          {primaryCvFeatureOn && (
+            <div className="pplan__cv">
+              <div className="pplan__cv-head">
+                Primary conversions
+                <span className="pplan__cv-count">
+                  {li.primaryCv.length === 0
+                    ? "counting every action"
+                    : `${li.primaryCv.length} of ${cvActions.length} chosen`}
+                </span>
+              </div>
+              {cvActions.length === 0 ? (
+                <p className="pplan__hint">
+                  No conversion rows for this line item yet. Turn on Fetch conversions in Data and
+                  refresh; a choice made here before then would match nothing.
+                </p>
+              ) : (
+                <>
+                  <div className="pplan__cv-list">
+                    {cvActions.map((action) => {
+                      const chosen = li.primaryCv.includes(action.name);
+                      return (
+                        <label key={action.name} className="pplan__cv-item">
+                          <input
+                            type="checkbox"
+                            checked={chosen}
+                            aria-label={`Count ${action.name} for line item ${li.lineItemId}`}
+                            onChange={() =>
+                              field(
+                                "primaryCv",
+                                chosen
+                                  ? li.primaryCv.filter((name) => name !== action.name)
+                                  : [...li.primaryCv, action.name]
+                              )
+                            }
+                          />
+                          <span className="pplan__cv-name">{action.name}</span>
+                          <span className="pplan__cv-sum">{fmtInt(Math.round(action.conversions))}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {/* A stored name the delivered rows no longer have counts nothing, so the line reads
+                      zero and looks broken. Says which name, because the fix is to re-pick it. */}
+                  {unmatched(li.primaryCv, cvActions).length > 0 && (
+                    <p className="pplan__hint pplan__hint--warn">
+                      ⚠ Not in the delivered data: {unmatched(li.primaryCv, cvActions).join(", ")} - these
+                      count nothing until the action reappears or you choose another.
+                    </p>
+                  )}
+                  <p className="pplan__hint">
+                    {li.primaryCv.length === 0
+                      ? "No choice: this line counts every conversion action above."
+                      : "Conversions, CPA and CVR count only the ticked actions."}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="pplan__subsection">
             <div className="pplan__subsection-head">Containers ({li.containers.length})</div>
             {li.containers.map((container, idx) => (
@@ -326,6 +400,7 @@ function LineItemCard({
                 key={container.id}
                 container={container}
                 currency={currency}
+                liCoef={li.costCoef}
                 defaultOpen={container.id === lastAddedContainerId}
                 onChange={(next) => setContainerAt(idx, next)}
                 onRemove={() => removeContainerAt(idx)}
@@ -384,13 +459,19 @@ export interface PacingPlanSectionProps extends SettingsSectionProps {
   /** Coefficient margin mode's pacing switch (`data.coef_enabled`), live from the Data section the
    *  same way. It is only HALF the question this screen asks - see `coefFeatureOn` below. */
   coefEnabled: boolean;
+  /** Primary conversions' pacing switch (`data.primary_cv_enabled`), live from the Data section the
+   *  same way `coefEnabled` is. A pure visibility gate here: a stored choice keeps counting while it
+   *  is off, exactly as a stored coefficient flag does. */
+  primaryCvEnabled: boolean;
+  /** The pacing's conversion-mart rows - the only place the choosable actions exist. */
+  conversions: Array<Record<string, unknown>> | undefined;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
   /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
   seedKey: number;
 }
 
 export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
-  function PacingPlanSection({ slug, currency, netFeatureOn, coefEnabled, planByLineItem, seedKey, onDirtyChange }, ref) {
+  function PacingPlanSection({ slug, currency, netFeatureOn, coefEnabled, primaryCvEnabled, conversions, planByLineItem, seedKey, onDirtyChange }, ref) {
     const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
     const [base, setBase] = useState<Record<string, EditableLineItem>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -425,6 +506,14 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     // computing client cost from a coefficient with no control anywhere to turn it off, while its
     // Margin field still reads "Margin % (client cost)" - a setting the user can see the effects of
     // and cannot reach.
+    // Same OR as the coefficient gate beside it, and for the same reason: a line item that already
+    // carries a choice must stay editable after someone turns the pacing switch off, or the only way
+    // to clear it would be to turn the switch back on first.
+    const cvActions = useMemo(() => actionsByLi(conversions), [conversions]);
+    const primaryCvFeatureOn = useMemo(
+      () => primaryCvEnabled || ids.some((id) => (lineItems[id]?.primaryCv?.length ?? 0) > 0),
+      [primaryCvEnabled, ids, lineItems]
+    );
     const coefFeatureOn = useMemo(
       () => coefEnabled || ids.some((id) => lineItems[id]?.costCoef === true),
       [coefEnabled, ids, lineItems]
@@ -557,6 +646,8 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
             currency={currency}
             netFeatureOn={netFeatureOn}
             coefFeatureOn={coefFeatureOn}
+            primaryCvFeatureOn={primaryCvFeatureOn}
+            cvActions={cvActions.get(id) ?? EMPTY_ACTIONS}
             isLast={ids.length === 1}
             open={expanded.has(id)}
             onToggleOpen={() => toggleExpanded(id)}

@@ -74,6 +74,26 @@ export function toEngineRaw(data: PacingDashboardV1): EngineRawPayload {
       // PacingLineItemPlanV1.costCoef's javadoc); converted/currency are display-only, bridged for
       // the same reason native_budget already was.
       cost_coef: p.costCoef,
+      // Net cost mode (Pacing spec 2026-09-07): `netRatio` is a MATH input the same way cost_coef
+      // is - on a net pacing the client is invoiced at net, so `PacingCore.netDc` scales the
+      // delivered client cost by k. These four were missing while every other field above was
+      // forwarded, and the loss was silent: `netDc` treats a non-finite ratio as the identity, so
+      // the engine simply returned the GROSS cost - overstating it by 1/k, ~18% on a k of 0.85.
+      // The other three are not math: `storedNetRatio`/`nsNetRatio`/`netRatioLocked` are what the
+      // Settings drawer binds to, and they ride together so a reader of this plan sees the same
+      // net state the drawer does. Covered by `net-seam.test.ts`.
+      netRatio: p.netRatio,
+      storedNetRatio: p.storedNetRatio,
+      netRatioLocked: p.netRatioLocked,
+      nsNetRatio: p.nsNetRatio,
+      // Primary conversions (spec 2026-09-13): a MATH input - `normalize` reads `primaryConversions`
+      // into the plan's `primaryCv`, and `overlayLiDaily` then rewrites the line's cv/pc/pv with
+      // only those actions. `storedPrimaryConversions`/`conversionData` are editor state, carried
+      // for the same reason the stored net ratio beside them is. All three are already camelCase on
+      // both sides, so unlike `cost_coef` they need no renaming - only forwarding.
+      primaryConversions: p.primaryConversions,
+      storedPrimaryConversions: p.storedPrimaryConversions,
+      conversionData: p.conversionData,
       converted: p.converted,
       currency: p.currency,
     };

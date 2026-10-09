@@ -19,6 +19,7 @@ import java.util.Map;
  * @param coef_enabled      coefficient margin mode's pacing-level switch - a pure UI gate, no figure
  *                          depends on it
  * @param net_enabled       net cost mode's pacing-level switch (Pacing spec 2026-09-07)
+ * @param primary_cv_enabled primary conversions' pacing-level switch (Pacing spec 2026-09-13 §1)
  * @param dim_sources       the whole dimension-source list, opaque - forwarded byte-for-byte
  */
 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
@@ -28,5 +29,6 @@ record DataNamespaceRequest(
 		Boolean fetch_conversions,
 		Boolean coef_enabled,
 		Boolean net_enabled,
+		Boolean primary_cv_enabled,
 		List<Map<String, Object>> dim_sources) {
 }

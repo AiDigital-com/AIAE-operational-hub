@@ -26,6 +26,29 @@ server's unfiltered `PacingRowV1.alerts` (2026-09-25 filters follow-up, item 3).
   checkout - the read-only reference repo for that day's task; the file is byte-identical between
   both checkouts at copy time, `diff -q` confirmed, so the two sources agree on content even though
   their commit SHAs differ)
+- Re-copied 2026-10-08 (`dashboard-metrics.js`): the `paicing-azat` working tree on branch
+  `1.0.0`, on top of `ba5856e`, where `scripts/build-dashboard-metrics.mjs` was repaired and the
+  engine regenerated. Named as a working tree rather than a commit because the fix was not committed
+  when the copy was taken.
+
+  WHY. That generator carries a hand-written transcription of
+  `workspace/src/lib/dashboard/row-utils.js`, and three of its functions had fallen behind their
+  original without anything noticing: `addFact` kept the pre-net signature (no `k`, a bare
+  `currencyToUsd` where the original wraps `PacingCore.netDc`), and `zeroRow`/`addRow` kept the
+  pre-2026-09-08 key set. The parity suite (`tests/dashboard-metrics-test.mjs`) compares
+  `normalize`/`pacing-calc`/`metrics` line by line against their originals and does not cover the
+  inlined `row-utils` parts, which is how it stayed silent.
+
+  WHAT IT COST HERE. This engine draws the Daily performance table. On a pacing in net cost mode it
+  could not apply the net ratio at all however correctly it was handed one, so it read client cost
+  GROSS - overstated by 1/k, about 18% at k = 0.85 - while the pacing list and Overview, which
+  resolve net server-side, read it net. It also dropped the six mart metrics (`st`/`q1`/`q2`/`q3`/
+  `rc`/`lc`) from every aggregated row. Found 2026-10-08 while tracing the coefficient-cost twin of
+  the same class of bug; covered from this side by `engine/net-seam.test.ts`.
+
+  The diff against the previous copy is exactly those three functions and their comments. Nothing
+  else in the engine moved.
+
 - Re-copied 2026-10-01 (`metric-registry.js`): the `paicing-azat` working tree on branch `1.0.0`,
   which had just taken this file from `ogan-team` at `823a42d` as part of the `shared/` sync. The
   registry went from 8 mart metrics to 15 - the video and engagement keys `st` (starts), `q1`/`q2`/

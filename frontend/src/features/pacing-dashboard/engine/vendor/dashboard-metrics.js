@@ -45,10 +45,18 @@ function createDashboardMetrics(deps) {
   const rangeOverlap = PacingCore.rangeOverlap;
   const datePrev = PacingCore.datePrev;
 
-  /* ── row-utils.js — the parts metrics.js and normalize.js use. addFact and
-     groupLineItemsByChannel are not ported: the first belongs to fact ingestion,
-     the second is list UI. ── */
-  const zeroRow = () => ({ im: 0, cl: 0, sp: 0, co: 0, cv: 0, pc: 0, pv: 0, dc: 0 });
+  /* ── row-utils.js — the parts metrics.js and normalize.js use. groupLineItemsByChannel
+     is not ported: it is list UI. zeroRow, addRow and addFact below are transcriptions
+     and MUST stay line-for-line with workspace/src/lib/dashboard/row-utils.js — the
+     parity suite (tests/dashboard-metrics-test.mjs) checks normalize/pacing-calc/metrics
+     that way but not these, which is how all three silently fell behind: addFact kept the
+     pre-net signature (no k, bare currencyToUsd), so the generated engine could not apply
+     a net ratio at all and read client cost GROSS; and zeroRow/addRow kept the
+     pre-2026-09-08 key set, dropping the six mart metrics on every row. ── */
+  const zeroRow = () => ({
+    im: 0, cl: 0, sp: 0, co: 0, cv: 0, pc: 0, pv: 0, dc: 0,
+    st: 0, q1: 0, q2: 0, q3: 0, rc: 0, lc: 0,
+  });
 
   function addRow(t, v) {
     t.im += Number(v.im) || 0;
@@ -59,9 +67,16 @@ function createDashboardMetrics(deps) {
     t.pc += Number(v.pc) || 0;
     t.pv += Number(v.pv) || 0;
     t.dc += Number(v.dc) || 0;
+    // …and the same six here.
+    t.st += Number(v.st) || 0;
+    t.q1 += Number(v.q1) || 0;
+    t.q2 += Number(v.q2) || 0;
+    t.q3 += Number(v.q3) || 0;
+    t.rc += Number(v.rc) || 0;
+    t.lc += Number(v.lc) || 0;
   }
 
-  function addFact(r, f, rate, coefIdx) {
+  function addFact(r, f, rate, coefIdx, k) {
     r.im += Number(f.impressions) || 0;
     r.cl += Number(f.clicks) || 0;
     r.sp += Number(f.spend) || 0;
@@ -71,7 +86,14 @@ function createDashboardMetrics(deps) {
     r.pv += Number(f.post_view_conversions) || 0;
     r.dc += coefIdx
       ? PacingCore.coefDcForRow(coefIdx, f)
-      : Currency.currencyToUsd(Number(f.dynamic_cost) || 0, rate);
+      : PacingCore.netDc(Currency.currencyToUsd(Number(f.dynamic_cost) || 0, rate), k);
+    // The six mart metrics added 2026-09-08 (registry ADDED_DELIVERY_KEYS), sparse on the fact row.
+    r.st += Number(f.starts) || 0;
+    r.q1 += Number(f.first_quartiles) || 0;
+    r.q2 += Number(f.midpoints) || 0;
+    r.q3 += Number(f.third_quartiles) || 0;
+    r.rc += Number(f.reach) || 0;
+    r.lc += Number(f.link_clicks) || 0;
   }
 
   /* ── freeze-dev.js — froze results under Vite's DEV flag to catch accidental

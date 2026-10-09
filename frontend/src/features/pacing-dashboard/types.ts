@@ -44,6 +44,13 @@ export interface PacingDataShape {
    *  spend / (1 - margin) while this is off. */
   coef_enabled?: boolean;
   net_enabled?: boolean;
+  /** Primary conversions' pacing-level switch (Pacing spec 2026-09-13 §1). Stores a flag only - which
+   *  conversion rows a line counts is driven by that line's own stored choice. */
+  primary_cv_enabled?: boolean;
+  /** Pacing's own answer to "is the switch actually doing anything": the switch is on AND at least
+   *  one line item has conversion data. COMPUTED on every read by `merge.mjs`'s `publicDataConfig`
+   *  and never stored, so it is read-only here. */
+  primary_cv_operative?: boolean;
   dim_sources?: PacingDimSource[];
   [key: string]: unknown;
 }

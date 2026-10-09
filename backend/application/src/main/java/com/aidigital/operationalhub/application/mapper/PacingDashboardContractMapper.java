@@ -137,6 +137,7 @@ public class PacingDashboardContractMapper {
 				body.getFetchConversions(),
 				body.getCoefEnabled(),
 				body.getNetEnabled(),
+				body.getPrimaryCvEnabled(),
 				// The wrapper, not its contents, is what says "the caller touched this". An absent
 				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as
 				// an empty list rather than collapsing back into "absent".
@@ -397,7 +398,13 @@ public class PacingDashboardContractMapper {
 				.netRatioLocked(Boolean.TRUE.equals(plan.netRatioLocked()))
 				.nsNetRatio(plan.nsNetRatio())
 				.converted(plan.converted())
-				.currency(plan.currency());
+				.currency(plan.currency())
+				// Primary conversions (spec 2026-09-13). Null stays null rather than becoming an empty
+				// list: absent means "this line counts every conversion action", which is a different
+				// statement from "it counts none", and the browser-side engine reads the two apart.
+				.primaryConversions(plan.primaryConversions())
+				.storedPrimaryConversions(plan.storedPrimaryConversions())
+				.conversionData(plan.conversionData());
 		if (plan.pauseIntervals() != null) {
 			for (PacingPauseInterval interval : plan.pauseIntervals()) {
 				v1.addPauseIntervalsItem(new PacingPauseIntervalV1()
