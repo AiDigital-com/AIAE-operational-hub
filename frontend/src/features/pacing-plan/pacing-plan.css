@@ -241,10 +241,36 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Six controls plus the remove button once Budget and Margin % joined the row. Same reason the
+     sub-breakdown row wraps: at full width the fixed columns leave the name field a sliver, and a
+     narrow sheet would otherwise force a horizontal scrollbar. */
+  flex-wrap: wrap;
 }
 .pplan__date-child .pplan__input {
   flex: 1;
   min-width: 0;
+}
+/* The two date pickers need room for `dd.mm.yyyy` plus the calendar button; left to `flex: 1` they
+   shrink with the rest and clip the year. Fixed, so the row's give is all in the name field. */
+.pplan__date-child input[type="date"] {
+  flex: 0 0 148px;
+}
+/* The one field with give. Everything else in the row is a fixed column, so when the sheet narrows
+   this is what absorbs it - overriding the shared 140px floor, which is wide enough to push the
+   remove button onto a line of its own. */
+.pplan__date-child .pplan__input--name {
+  flex: 1 1 120px;
+  min-width: 100px;
+}
+.pplan__date-child .pplan__input--num {
+  width: 92px;
+  flex: none;
+}
+/* Wider than the other numeric columns: these rows carry no labels, so the placeholder IS the
+   field's name, and "Margin %" clips at the 92px the units/budget columns use. */
+.pplan__date-child .pplan__input--dc-margin {
+  width: 104px;
+  flex: none;
 }
 
 /* ── Add line item panel ── */
@@ -400,7 +426,9 @@
 .pplan__input--dim-mode { width: 74px; flex: none; }
 .pplan__input--dim-value { flex: 1 1 150px; min-width: 150px; }
 .pplan__dim-child .pplan__input--num { width: 92px; flex: none; }
-.pplan__dim-child .pplan__input--dim-margin { width: 88px; flex: none; }
+/* Same width as the date split's margin column, and for the same reason: no labels here, so the
+   placeholder is the field's name and "Margin %" clips at the numeric columns' 92px. */
+.pplan__dim-child .pplan__input--dim-margin { width: 104px; flex: none; }
 
 /* The resolved figure appears only for a percent target. Fixed width and a reserved
    slot so switching units ⇄ % does not shuffle the margin field and the remove button
@@ -503,4 +531,74 @@
 .pplan__badge--warn {
   background: color-mix(in srgb, var(--attention) 22%, transparent);
   color: var(--attention-text);
+}
+
+/* ── Primary conversions chooser (Pacing spec 2026-09-13 §2) ──────────────────
+   Its own block, never sharing a row with the stacked-label fields above it: those start below a
+   label and this starts at its own heading, so side by side they would sit on two different
+   baselines. Same reason the coefficient switch takes a whole row. */
+
+.pplan__cv {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pplan__cv-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Reads as a caption beside the heading, not as a second heading. */
+.pplan__cv-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* One action per row. A grid rather than a flex wrap so every count lands in the same column: the
+   point of showing them is comparing, and a ragged right edge defeats that. */
+.pplan__cv-list {
+  display: grid;
+  gap: 4px;
+}
+
+.pplan__cv-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.pplan__cv-item:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+}
+
+/* The global `input` rule sizes form controls to the full field width; a bare checkbox in a row has
+   to be reset to its own size or it becomes a slab. Same reset the coefficient switch needs. */
+.pplan__cv-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.pplan__cv-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Tabular so the counts compare down the column rather than drifting with digit widths. */
+.pplan__cv-sum {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
 }

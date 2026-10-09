@@ -42,16 +42,21 @@ import {
 function DimChildRow({
   child,
   container,
+  currency,
+  liCoef,
   onChange,
   onRemove,
 }: {
   child: PacingDimChild;
   container: PacingContainer;
+  currency: string;
+  liCoef: boolean;
   onChange: (next: PacingDimChild) => void;
   onRemove: () => void;
 }) {
   const resolved = resolveDimAbs(child, container);
   const showResolved = child.target_mode === "percent" && (Number(child.target_value) || 0) > 0;
+  const marginInvalid = coefMarginInvalid(liCoef, child.margin_percent);
   return (
     <div className="pplan__dim-child">
       <select
@@ -91,10 +96,19 @@ function DimChildRow({
       <span className="pplan__dim-resolved" aria-hidden={!showResolved}>
         {showResolved ? `= ${fmtInt(Math.round(resolved))}` : ""}
       </span>
+      {/* `native_budget` only - see the note on the date split's Budget field. */}
+      <NumericField
+        value={child.native_budget == null ? "" : String(child.native_budget)}
+        onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
+        placeholder="Budget"
+        ariaLabel={`Sub-breakdown budget (${currency})`}
+        className="pplan__input pplan__input--num"
+      />
       <input
         type="number"
         step="0.01"
-        className="pplan__input pplan__input--num pplan__input--dim-margin"
+        className={`pplan__input pplan__input--num pplan__input--dim-margin${marginInvalid ? " pplan__input--invalid" : ""}`}
+        aria-invalid={marginInvalid || undefined}
         value={child.margin_percent ?? ""}
         placeholder="Margin %"
         onChange={(e) => onChange({ ...child, margin_percent: e.target.value === "" ? null : Number(e.target.value) })}
@@ -113,15 +127,34 @@ function DimChildRow({
   );
 }
 
+/**
+ * Is an ENTERED margin outside the coefficient contract's range?
+ *
+ * Only on a coefficient line item, and only once something is typed: blank means "inherit from the
+ * level above", which is always legal and is how most splits are written. `validateCoefLi` (server,
+ * and `coef-precheck.ts` before the save) is the real gate; this is the in-place red border on the
+ * offending cell, ported from the retired SPA's own `marginInvalid` in `PacingTab.jsx`.
+ */
+function coefMarginInvalid(liCoef: boolean, margin: number | null | undefined): boolean {
+  if (!liCoef || margin == null) return false;
+  const n = Number(margin);
+  return !(Number.isFinite(n) && n >= 0 && n < 100);
+}
+
 function DateChildRow({
   child,
+  currency,
+  liCoef,
   onChange,
   onRemove,
 }: {
   child: PacingDateChild;
+  currency: string;
+  liCoef: boolean;
   onChange: (next: PacingDateChild) => void;
   onRemove: () => void;
 }) {
+  const marginInvalid = coefMarginInvalid(liCoef, child.margin_percent);
   return (
     <div className="pplan__date-child">
       <input
@@ -152,6 +185,30 @@ function DateChildRow({
         placeholder="Units"
         ariaLabel="Date split units"
         className="pplan__input pplan__input--num"
+      />
+      {/* Only `native_budget` is set, never `target_spend`: the contract amount is the money truth
+          and dash-gate re-materializes the USD cache from it at the CURRENT campaign rate on every
+          save (`currency-detect.mjs`'s nested `remat`). Writing a USD figure here as well would go
+          stale the first time the rate is edited. Same rule the container's own Budget field uses. */}
+      <NumericField
+        value={child.native_budget == null ? "" : String(child.native_budget)}
+        onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
+        placeholder="Budget"
+        ariaLabel={`Date split budget (${currency})`}
+        className="pplan__input pplan__input--num"
+      />
+      {/* The middle level of the coefficient's margin chain (dim child → DATE CHILD → container →
+          line item, `PacingCore.buildMarginIndex`). Without this input the engine could resolve a
+          date child's own margin but nobody could write one. */}
+      <input
+        type="number"
+        step="0.01"
+        className={`pplan__input pplan__input--num pplan__input--dc-margin${marginInvalid ? " pplan__input--invalid" : ""}`}
+        aria-invalid={marginInvalid || undefined}
+        value={child.margin_percent ?? ""}
+        placeholder="Margin %"
+        aria-label="Date split margin percent"
+        onChange={(e) => onChange({ ...child, margin_percent: e.target.value === "" ? null : Number(e.target.value) })}
       />
       <button type="button" className="pplan__icon-btn" onClick={onRemove} aria-label="Remove date split" title="Remove date split">
         ×
@@ -236,6 +293,7 @@ function DuplicateContainerDialog({
 export function ContainerCard({
   container,
   currency,
+  liCoef,
   onChange,
   onRemove,
   onDuplicate,
@@ -243,6 +301,9 @@ export function ContainerCard({
 }: {
   container: PacingContainer;
   currency: string;
+  /** Whether the OWNING line item is on coefficient cost. Only used to flag an out-of-range margin
+   *  on a split before the save - the figures themselves are the same either way. */
+  liCoef: boolean;
   onChange: (next: PacingContainer) => void;
   onRemove: () => void;
   onDuplicate: (dup: PacingContainer) => void;
@@ -368,7 +429,14 @@ export function ContainerCard({
           <div className="pplan__subsection">
             <div className="pplan__subsection-head">Date splits ({splitCount})</div>
             {container.date_children.map((dc, idx) => (
-              <DateChildRow key={dc.id} child={dc} onChange={(next) => setDateChild(idx, next)} onRemove={() => removeDateChild(idx)} />
+              <DateChildRow
+                key={dc.id}
+                child={dc}
+                currency={currency}
+                liCoef={liCoef}
+                onChange={(next) => setDateChild(idx, next)}
+                onRemove={() => removeDateChild(idx)}
+              />
             ))}
             {dateChildOver && (
               <p className="pplan__hint pplan__hint--warn">
@@ -391,6 +459,8 @@ export function ContainerCard({
                 key={dx.id}
                 child={dx}
                 container={container}
+                currency={currency}
+                liCoef={liCoef}
                 onChange={(next) => setDimChild(idx, next)}
                 onRemove={() => removeDimChild(idx)}
               />

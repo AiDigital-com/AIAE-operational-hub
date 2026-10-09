@@ -42,6 +42,14 @@ export interface EditableLineItem {
   netLocked: boolean;
   /** NetSuite's own k = net/gross (the Reset-to-NS baseline); null when NetSuite reports none. */
   nsNetRatio: number | null;
+  /** Primary conversions (Pacing spec 2026-09-13 §2): the conversion actions this line item counts
+   *  as ITS conversions, as the user is editing them. Seeded from the STORED list, not the operative
+   *  one, so a choice made while the pacing switch was off is still there when it comes back on -
+   *  the same split `netPct` uses. Empty means "no choice": the line keeps counting everything. */
+  primaryCv: string[];
+  /** What Pacing reported as stored. The wire compares against THIS, not against the operative list,
+   *  so an untouched line sends no key and the server's back-fill keeps its choice. */
+  primaryCvStored: string[];
   /** True for a line item added in this editing session (US-126) - not yet on the pacing, so its
    *  identity fields have nothing stored to fall back to and must be carried explicitly on save. */
   isNew: boolean;
@@ -53,6 +61,26 @@ export interface EditableLineItem {
 
 function numToStr(n: number | null | undefined): string {
   return n == null ? "" : String(n);
+}
+
+/** A plan's conversion-action list as the editor holds it: strings only, trimmed, blanks dropped. */
+function cvList(list: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const name of list) {
+    if (typeof name !== "string") continue;
+    const trimmed = name.trim();
+    if (trimmed) out.push(trimmed);
+  }
+  return out;
+}
+
+/** Two choices as the wire compares them: as SETS, never by order. */
+export function sameCvChoice(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((name, i) => name === right[i]);
 }
 
 /** Is this a real net ratio - i.e. a NET line item, not the identity? */
@@ -97,6 +125,8 @@ export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
     netRatio: realRatio(plan.storedNetRatio) ? plan.storedNetRatio : null,
     netLocked: plan.netRatioLocked === true,
     nsNetRatio: realRatio(plan.nsNetRatio) ? plan.nsNetRatio : null,
+    primaryCv: cvList(plan.storedPrimaryConversions),
+    primaryCvStored: cvList(plan.storedPrimaryConversions),
     isNew: false,
     campaignId: null,
     campaignName: null,
@@ -137,6 +167,10 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     netRatio: realRatio(candidate.nsNetRatio) ? (candidate.nsNetRatio as number) : null,
     netLocked: false,
     nsNetRatio: realRatio(candidate.nsNetRatio) ? (candidate.nsNetRatio as number) : null,
+    // A newly added line item has chosen nothing yet - it counts every conversion until someone says
+    // otherwise, which is the same default a line that predates the feature has.
+    primaryCv: [],
+    primaryCvStored: [],
     isNew: true,
     campaignId: candidate.campaignId ?? null,
     campaignName: candidate.campaignName ?? null,
@@ -186,6 +220,13 @@ export function toPlanUpdateLineItem(li: EditableLineItem, netFeatureOn: boolean
   if (netFeatureOn) {
     base.netRatio = li.netRatio ?? 1;
     base.netRatioLocked = li.netLocked;
+  }
+  // Primary conversions (Pacing spec 2026-09-13 §2): the key rides ONLY when the list actually moved
+  // as a set, whatever the pacing switch says. An untouched line item sends nothing and Pacing's own
+  // key-presence back-fill keeps its stored choice - which is what protects a tab opened before the
+  // feature existed. An explicit [] is the deliberate clear, and reaches the server as a present key.
+  if (!sameCvChoice(li.primaryCv, li.primaryCvStored)) {
+    base.primaryConversions = [...li.primaryCv];
   }
   if (!li.isNew) return base;
   return {

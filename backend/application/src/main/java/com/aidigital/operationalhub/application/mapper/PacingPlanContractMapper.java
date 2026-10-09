@@ -61,6 +61,7 @@ public class PacingPlanContractMapper {
 				li.getCostCoef(),
 				li.getNetRatio(),
 				li.getNetRatioLocked(),
+				li.getPrimaryConversions(),
 				li.getContainers());
 	}
 

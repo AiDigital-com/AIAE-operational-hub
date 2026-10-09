@@ -43,6 +43,11 @@ import java.util.Map;
  *                          omitted from the wire)
  * @param netRatioLocked    whether the ratio is locked against NetSuite refreshes; carried together
  *                          with {@code netRatio} (both or neither)
+ * @param primaryConversions primary conversions (Pacing spec 2026-09-13 §2): the conversion actions
+ *                            this line item counts as ITS conversions. Sent only when the list
+ *                            actually changed as a set against what Pacing reported; an untouched
+ *                            line item omits it and Pacing's key-presence back-fill preserves the
+ *                            stored choice. An explicit empty list is the deliberate clear
  * @param containers        date-based plan overrides (§9), opaque - forwarded byte-for-byte; Pacing is
  *                          the only party that parses or validates their shape (container existence,
  *                          the target-impressions bound against this line item's own plan)
@@ -65,5 +70,6 @@ public record PacingLineItemPlanUpdate(
 		Boolean costCoef,
 		Double netRatio,
 		Boolean netRatioLocked,
+		List<String> primaryConversions,
 		List<Map<String, Object>> containers) {
 }

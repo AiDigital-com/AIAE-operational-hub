@@ -45,6 +45,9 @@ import java.util.Map;
  *                         built-in toggles alone deletes every sheet-backed source the pacing has, so
  *                         it must carry through the entries it does not own. Null leaves the stored
  *                         list untouched
+ * @param primaryCvEnabled primary conversions' pacing-level switch (Pacing spec 2026-09-13 §1). A
+ *                         flag only: which rows each line item counts is driven by that line's own
+ *                         stored choice. Null leaves the stored switch untouched
  */
 public record PacingDataSettings(
 		String source,
@@ -52,5 +55,6 @@ public record PacingDataSettings(
 		Boolean fetchConversions,
 		Boolean coefEnabled,
 		Boolean netEnabled,
+		Boolean primaryCvEnabled,
 		List<Map<String, Object>> dimSources) {
 }

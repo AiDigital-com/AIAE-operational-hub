@@ -38,6 +38,8 @@ import java.util.Map;
  * @param net_ratio_locked    whether the ratio is locked against NetSuite refreshes; sent together
  *                            with {@code net_ratio} (an omitted key is preserved from storage, so
  *                            only an explicit {@code false} unlocks)
+ * @param primary_conversions primary conversions (Pacing spec 2026-09-13 §2) - the conversion
+ *                             actions this line item counts as its own; absent when unchanged
  * @param containers          date-based plan overrides (§9), opaque - forwarded byte-for-byte
  */
 // NON_NULL (not the class-wide default of always-include): dash-gate's own merge checks
@@ -67,5 +69,6 @@ record LineItemPlanUpdateRequest(
 		Boolean cost_coef,
 		Double net_ratio,
 		Boolean net_ratio_locked,
+		List<String> primary_conversions,
 		List<Map<String, Object>> containers) {
 }

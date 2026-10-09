@@ -72,6 +72,7 @@ interface DataDraft {
   fetchConversions: boolean;
   coefEnabled: boolean;
   netEnabled: boolean;
+  primaryCvEnabled: boolean;
   devices: boolean;
 }
 
@@ -93,6 +94,7 @@ function seed(data: PacingDataShape | undefined): DataDraft {
     fetchConversions: data?.fetch_conversions === true,
     coefEnabled: data?.coef_enabled === true,
     netEnabled: data?.net_enabled === true,
+    primaryCvEnabled: data?.primary_cv_enabled === true,
     devices: devicesOn(dimSources),
   };
 }
@@ -107,6 +109,7 @@ function diff(draft: DataDraft, base: DataDraft, existing: PacingDimSource[]): P
   if (draft.fetchConversions !== base.fetchConversions) body.fetchConversions = draft.fetchConversions;
   if (draft.coefEnabled !== base.coefEnabled) body.coefEnabled = draft.coefEnabled;
   if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
+  if (draft.primaryCvEnabled !== base.primaryCvEnabled) body.primaryCvEnabled = draft.primaryCvEnabled;
   if (draft.devices !== base.devices) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
     // is built only when this checkbox actually moved. An unwrapped array could not say that - see the
@@ -138,10 +141,11 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   onSwitchesChange: (switches: PacingModeSwitches) => void;
 }
 
-/** The two pacing-level mode switches the Plan section's controls hang off. */
+/** The pacing-level mode switches the Plan section's controls hang off. */
 export interface PacingModeSwitches {
   coefEnabled: boolean;
   netEnabled: boolean;
+  primaryCvEnabled: boolean;
 }
 
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
@@ -204,8 +208,14 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     // Reported from the draft, so a flip reaches the Plan section without a Save. Keyed on the two
     // booleans rather than on `draft`, so moving the source radio does not re-render the drawer.
     useEffect(
-      () => { onSwitchesChange({ coefEnabled: draft.coefEnabled, netEnabled: draft.netEnabled }); },
-      [draft.coefEnabled, draft.netEnabled, onSwitchesChange]
+      () => {
+        onSwitchesChange({
+          coefEnabled: draft.coefEnabled,
+          netEnabled: draft.netEnabled,
+          primaryCvEnabled: draft.primaryCvEnabled,
+        });
+      },
+      [draft.coefEnabled, draft.netEnabled, draft.primaryCvEnabled, onSwitchesChange]
     );
 
     // The freshest patch, without re-rendering the drawer on every click: the handle below closes
@@ -306,6 +316,31 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
                 or enter them per line item on the plan screen - until then every figure stays gross.
               </p>
             )}
+            {/* Primary conversions (Pacing spec 2026-09-13 §1). Disabled with no conversion data to
+                count, because Pacing would refuse to call it operative anyway and the switch would
+                read as broken. Once ON it stays switchable OFF whatever the fetches say - the same
+                rule the retired SPA's Delivery gate used, so turning conversions off never traps the
+                pacing with a switch it cannot clear. The reference also accepts a sheet tab that maps
+                conversion actions; that lane still runs through an n8n that is not deployed here, so
+                `Fetch conversions` is the only source this gate can see. */}
+            <label className="pdata__check">
+              <input
+                type="checkbox"
+                checked={draft.primaryCvEnabled}
+                disabled={!draft.primaryCvEnabled && !draft.fetchConversions}
+                onChange={(event) => set({ primaryCvEnabled: event.target.checked })}
+              />
+              <span className="pdata__option-text">
+                <span className="pdata__option-name">Primary conversions</span>
+                <span className="pdata__hint">
+                  {!draft.primaryCvEnabled && !draft.fetchConversions
+                    ? "Needs conversion data: turn on Fetch conversions first."
+                    : draft.primaryCvEnabled && !draft.fetchConversions
+                      ? "Off until conversion data is fetched. Choices are kept."
+                      : "Choose conversions per line item on the plan screen. Conversions, CPA and CVR then count only the chosen ones; a line item with no choice keeps counting every conversion the platform reported."}
+                </span>
+              </span>
+            </label>
           </div>
         </section>
 

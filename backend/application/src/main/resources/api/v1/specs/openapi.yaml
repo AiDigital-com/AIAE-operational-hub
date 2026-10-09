@@ -9024,6 +9024,30 @@ components:
           items:
             type: object
             additionalProperties: true
+        primaryConversions:
+          type: array
+          description: >
+            Primary conversions (spec 2026-09-13 §1, §2): the conversion actions this line item counts
+            as ITS conversions. A MATH input for the browser-side engine, which overlays the line's
+            cv/pc/pv with only these rows - absent and the dashboard counts every conversion action the
+            platform reported. Published only while the pacing's primary-conversions switch is on, and
+            only for a line that has a stored choice; Pacing omits the key otherwise.
+          items:
+            type: string
+        storedPrimaryConversions:
+          type: array
+          description: >
+            The same list as `config_json` holds, published whatever the switch - the `storedNetRatio`
+            precedent. The Settings editor binds to this one, so a choice made while the switch was off
+            is still there when it comes back on. Never a math input.
+          items:
+            type: string
+        conversionData:
+          type: boolean
+          description: >
+            Whether this line item's own data source fetches conversion rows at all (spec 2026-09-13
+            §2). The editor needs it to say why a line offers no choice. Published only while the
+            pacing's primary-conversions switch is on.
         nativeBudget:
           type: number
           format: double
@@ -9185,6 +9209,16 @@ components:
             `netRatio` (both keys or neither): `true` after a manual ratio edit, `false` after
             Reset-to-NS - an explicit `false` is what unlocks a stored lock, since an omitted key is
             preserved from storage.
+        primaryConversions:
+          type: array
+          description: >
+            Primary conversions (Pacing spec 2026-09-13 §2): the conversion actions this line item
+            counts as ITS conversions. Sent only when the list actually CHANGED as a set against what
+            Pacing reported - an untouched line item omits the key, and Pacing's own key-presence
+            back-fill then preserves the stored choice, which is what protects a tab opened before the
+            feature existed. An explicit empty list is the deliberate clear.
+          items:
+            type: string
         flightStart:
           type: string
           format: date
@@ -9466,6 +9500,15 @@ components:
             ratios inert, exactly as Pacing's own gate (`netRatioOf`) reads them. Unlike the fetch
             toggles this one changes numbers already on screen: the engine recomputes on the next
             payload read, no refresh needed.
+        primaryCvEnabled:
+          type: boolean
+          description: >
+            Primary conversions (Pacing spec 2026-09-13 §1): the pacing-level switch. Like
+            `coefEnabled` it stores a flag and nothing else - what it changes is which conversion rows
+            each line item counts, and that is driven per line item by its own stored choice. Pacing
+            refuses to call it operative unless at least one line item actually has conversion data,
+            and publishes that answer back as `primary_cv_operative`. Omit to leave the stored switch
+            alone.
         dimSources:
           $ref: '#/components/schemas/PacingDimSourcesV1'
     PacingDimSourcesV1:

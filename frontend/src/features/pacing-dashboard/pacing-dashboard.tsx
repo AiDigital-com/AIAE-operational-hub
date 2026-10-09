@@ -428,6 +428,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             slug={slug ?? ""}
             currency={data.campaign?.currency ?? "USD"}
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
+            conversions={data.conversions as Array<Record<string, unknown>> | undefined}
             data={data.data as PacingDataShape | undefined}
             display={display}
             capabilities={(data.capabilities ?? undefined) as Record<string, unknown> | undefined}
