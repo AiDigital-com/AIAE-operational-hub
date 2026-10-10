@@ -40,6 +40,10 @@ import java.util.Map;
  *                       presence rule as {@code creatives} (gated on {@code data.fetch_conversions})
  *                       and feeding the "Conversion Action" cut the same way
  * @param dimSources     the per-pacing dimension sources that were actually loaded, keyed by source
+ * @param thirdParty  the configured CM360 blocks, serialized as {@code third_party}; empty means
+ *                    nothing is set up, which is the normal state
+ * @param mappingsV3  the v3 mapping entities, serialized as {@code mappings_v3}; NULL means the
+ *                    pacing predates the model, which is not the same as an empty list
  *                       id - Devices and any sheet-backed source, each carrying its rows and the
  *                       bookkeeping of the read that produced them. Kept opaque for
  *                       {@code display}'s reason: the shape belongs to Pacing's own loader, and the
@@ -101,6 +105,8 @@ public record PacingDashboardData(
 		List<Map<String, Object>> creatives,
 		List<Map<String, Object>> conversions,
 		Map<String, Object> dimSources,
+		@JsonProperty("third_party") List<Map<String, Object>> thirdParty,
+		@JsonProperty("mappings_v3") List<Map<String, Object>> mappingsV3,
 		Map<String, Object> display,
 		Map<String, Object> aggregate,
 		Map<String, Object> capabilities,

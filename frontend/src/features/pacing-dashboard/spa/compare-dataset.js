@@ -125,6 +125,10 @@ export function buildCm360ComparisonDataset({
   // Display names (spec docs/2026-09-24-display-names.md): raw creative → shown name, for the
   // comparison's delivery member lines only. Classification never reads it.
   creativeLabel = null,
+  // Value groups (spec 2026-10-02): the lines' dictionaries as an index (the dashboard door's
+  // `groupIndexOf`), carried for the widget join only. Classification never reads it: the
+  // mapping works on the values as delivered.
+  dimGroupIndex = null,
 } = {}) {
   const entity = usableMapping(mapping);
   const level = comparisonLevelOf(entity);
@@ -170,5 +174,7 @@ export function buildCm360ComparisonDataset({
     // Creative rows can only thin the delivery side, so coverage is a
     // creative-level concern; at placement level there is nothing to under-cover.
     creativeCoverage: level === 'creative' ? creativeCoverage(creatives, factsDaily) : null,
+    // Sparse: a comparison built without groups carries no such key.
+    ...(dimGroupIndex ? { dimGroupIndex } : null),
   };
 }

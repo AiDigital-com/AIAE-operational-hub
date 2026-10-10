@@ -17,13 +17,13 @@
 // report-render.js: every money value the engine produces is already USD, and labelling
 // a USD scalar «CAD» would be a wrong number rather than a formatting choice. It stays in
 // the signature so the five view renderers take one shape.
-import { useEffect, useRef } from 'react';
+import { Fragment, cloneElement, useEffect, useRef } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Area, Bar, Line, LabelList,
   XAxis, YAxis, Tooltip, Legend, ReferenceLine, CartesianGrid, Cell, Customized,
 } from 'recharts';
 import { formatYTick, formatTooltipValue } from '../chart-format.js';
-import { chartCannotDraw } from '../report-render.js';
+import { chartCannotDraw, CM_ROW_REASON } from '../report-render.js';
 import { chartPaint } from '../chart-paint.js';
 import { highlightFill, highlightTextStyle, highlightTitle } from '../ui/highlight-style.js';
 import ChartHighlightPaths from './ChartHighlightPaths.jsx';
@@ -117,22 +117,69 @@ const seriesErrorOf = (model, id) => (
   Object.prototype.hasOwnProperty.call(model.errors, id) ? model.errors[id] : null
 );
 
-function ReportTooltip({ active, payload, label, isDate, formatOf, baseColorOf }) {
+/** A fixed guide's tooltip row. The guide is one number with no data key, so recharts'
+ *  payload never carries it: the chart hands the rows over, already named and formatted. */
+const guideTooltipRow = (g) => (
+  <div key={`guide:${g.ownerKey}`} className="recharts-tooltip-row" style={{ color: g.color }}>
+    <span className="recharts-tooltip-name">{g.name}:</span>
+    <span className="recharts-tooltip-value">{g.value}</span>
+  </div>
+);
+
+/**
+ * The series' value labels as a layer of their own, for a chart that also draws a fixed guide.
+ *
+ * recharts nests a series' labels inside the series, so a guide painted above the bars would be
+ * painted above their numbers too, and a target sitting where the bars end struck the digits
+ * through. Drawn here, after the guide, the numbers stay on top. `LabelList` is recharts' own
+ * and is handed the same rectangles or points the series would have handed it, so every label
+ * lands where it did. The nested labels wait for the series' animation; `entranceMs` is that
+ * wait on the first draw, so the numbers do not hang over bars that have not grown yet.
+ */
+function ChartValueLabels({ formattedGraphicalItems, labelOf, entranceMs }) {
+  return (
+    <g
+      className="rpt-value-labels" pointerEvents="none"
+      style={entranceMs ? { animation: `rpt-value-labels-in 150ms ease-out ${entranceMs}ms both` } : undefined}
+    >
+      {(formattedGraphicalItems || []).map((entry) => {
+        const key = entry.item?.props?.dataKey;
+        const label = labelOf(key);
+        // The halo is the plot's own surface: invisible on the background the numbers stand on,
+        // and it parts the guide's dashes behind a number the line runs through.
+        return label ? cloneElement(label, { key, data: entry.props?.data || entry.props?.points || [],
+          stroke: 'var(--surface)', strokeWidth: 3, strokeLinejoin: 'round', paintOrder: 'stroke' }) : null;
+      })}
+    </g>
+  );
+}
+/** recharts' own entrance: 0.4 s a bar, 1.5 s a line or an area (`ENTRANCE_ANIM` below). */
+const ENTRANCE_MS = { bar: 400, line: 1500, area: 1500 };
+
+function ReportTooltip({ active, payload, label, isDate, formatOf, baseColorOf, guideRows = [] }) {
   if (!active || !payload || !payload.length) return null;
   return (
     <div className="recharts-tooltip-custom">
       <div className="recharts-tooltip-label">{isDate ? fmtDate(label) : label}</div>
+      {/* A fixed guide reads right under the series it is measured against, the place a
+          calculated guide already takes by being drawn after its owner. */}
       {payload.map((entry) => (
-        <div key={entry.dataKey} className="recharts-tooltip-row" style={{ color: baseColorOf(entry.dataKey) ?? entry.color, ...highlightTextStyle(entry.payload?.highlights?.[entry.dataKey]) }} title={highlightTitle(entry.payload?.highlights?.[entry.dataKey])}>
-          <span className="recharts-tooltip-name">{entry.name}:</span>
-          <span className="recharts-tooltip-value">
-            {entry.value == null
-              ? '—'
-              : formatTooltipValue(formatOf(entry.dataKey), entry.value)}
-          </span>
-        </div>
+        <Fragment key={entry.dataKey}>
+          <div className="recharts-tooltip-row" style={{ color: baseColorOf(entry.dataKey) ?? entry.color, ...highlightTextStyle(entry.payload?.highlights?.[entry.dataKey]) }} title={highlightTitle(entry.payload?.highlights?.[entry.dataKey])}>
+            <span className="recharts-tooltip-name">{entry.name}:</span>
+            <span className="recharts-tooltip-value">
+              {entry.value == null
+                ? '—'
+                : formatTooltipValue(formatOf(entry.dataKey), entry.value)}
+            </span>
+          </div>
+          {guideRows.filter((g) => g.ownerKey === entry.dataKey).map(guideTooltipRow)}
+        </Fragment>
       ))}
+      {guideRows.filter((g) => !payload.some((entry) => entry.dataKey === g.ownerKey)).map(guideTooltipRow)}
       {[...new Set(payload.flatMap((entry) => entry.payload?.highlights?.[entry.dataKey]?.notes || []))].map((note, index) => <div key={index} className="text-10">{note}</div>)}
+      {/* Why a line draws no CM360 bar (docs/2026-09-29-cm360-by-line.md): the table's sentence. */}
+      {payload[0]?.payload?.[CM_ROW_REASON] && <div className="recharts-tooltip-note">{payload[0].payload[CM_ROW_REASON]}</div>}
     </div>
   );
 }
@@ -256,12 +303,24 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
   const fixedGuideDash = (guide) => guide.dashed === undefined ? DASH_PATTERN : dashOf(guide.dashed);
   const fixedGuideWidth = (guide) => typeof guide.style?.width === 'number' ? guide.style.width
     : STROKE_WIDTH[guide.style?.width] || 1.5;
+  const fixedGuideOwner = (guide) => series.find((s) => s.id === guide.seriesId);
+  const fixedGuideValue = (guide) => formatTooltipValue(formatOf(fixedGuideOwner(guide)?.key), guide.value);
   const fixedGuideLabel = (guide) => {
     const value = [guide.labelPlacement === 'plotTopRight' ? guide.label : null,
-      guide.valuesOnChart ? formatTooltipValue(formatOf(series.find((s) => s.id === guide.seriesId)?.key), guide.value) : null]
+      guide.valuesOnChart ? fixedGuideValue(guide) : null]
       .filter(Boolean).join(' · ');
-    return value ? { value, position: 'insideTopRight', fill: 'var(--chart-tick)', fontSize: 'var(--text-10)' } : undefined;
+    // The line is painted above the series now, and its label with it: the halo keeps the
+    // words legible where they land on a bar instead of on the plot's own background.
+    return value ? { value, position: 'insideTopRight', fill: 'var(--chart-tick)', fontSize: 'var(--text-10)',
+      stroke: 'var(--surface)', strokeWidth: 3, strokeLinejoin: 'round', paintOrder: 'stroke' } : undefined;
   };
+  // The tooltip names a fixed guide the way the legend does, wherever its label is placed.
+  const tooltipGuideRows = drawnGuides.map((g) => ({
+    ownerKey: fixedGuideOwner(g)?.key ?? g.seriesId,
+    name: g.label || guideName(fixedGuideOwner(g)),
+    value: fixedGuideValue(g),
+    color: fixedGuideColor(g),
+  }));
   const legendPayload = [
     ...series.flatMap((s, i) => {
       const guide = dynamicGuideOf(s);
@@ -274,7 +333,7 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
     }),
     ...legendGuides.map((g) => ({
       id: `guide:${g.seriesId}`,
-      value: g.label || guideName(series.find((s) => s.id === g.seriesId)),
+      value: g.label || guideName(fixedGuideOwner(g)),
       type: 'plainline',
       color: fixedGuideColor(g),
       payload: { strokeDasharray: fixedGuideDash(g) },
@@ -293,14 +352,9 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
     return s.valuesOnChart ? s.key : null;
   };
 
-  const seriesElement = (s, i) => {
-    const color = colorOf(s, i);
-    const fill = chartPaint(s.fill == null ? s.color : s.fill, i);
-    const border = chartPaint(s.border == null ? s.color : s.border, i);
-    const style = s.style || { type: 'line', width: 'normal', curve: 'smooth', points: false };
-    const common = { dataKey: s.key, name: seriesName(s), ...axisIdOf(s.axisSide) };
+  const valueLabelOf = (s) => {
     const labelKey = labelKeyOf(s);
-    const labels = labelKey ? (
+    return labelKey ? (
       <LabelList
         dataKey={labelKey}
         position={horizontal ? 'right' : 'top'}
@@ -309,6 +363,24 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
         fontSize="var(--text-10)"
       />
     ) : null;
+  };
+  // A fixed guide is painted above the series; the numbers are then lifted above the guide
+  // (ChartValueLabels). A chart with no fixed guide keeps them nested, byte for byte.
+  const liftLabels = drawnGuides.length > 0 && series.some((s) => labelKeyOf(s));
+  const liftedLabelOf = (key) => {
+    const owner = series.find((s) => s.key === key);
+    return owner ? valueLabelOf(owner) : null;
+  };
+  const labelEntranceMs = anim === ENTRANCE_ANIM
+    ? Math.max(...series.filter((s) => labelKeyOf(s)).map((s) => ENTRANCE_MS[s.style?.type] || ENTRANCE_MS.line), 0) : 0;
+
+  const seriesElement = (s, i) => {
+    const color = colorOf(s, i);
+    const fill = chartPaint(s.fill == null ? s.color : s.fill, i);
+    const border = chartPaint(s.border == null ? s.color : s.border, i);
+    const style = s.style || { type: 'line', width: 'normal', curve: 'smooth', points: false };
+    const common = { dataKey: s.key, name: seriesName(s), ...axisIdOf(s.axisSide) };
+    const labels = liftLabels ? null : valueLabelOf(s);
     const guideLabel = s.dynamic && s.labelPlacement === 'plotTopRight' ? (
       <LabelList dataKey={s.key} content={({ index, viewBox }) => (
         index === rows.findLastIndex((row) => Number.isFinite(row[s.key])) && viewBox ? (
@@ -417,6 +489,7 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
               <Tooltip content={(
                 <ReportTooltip
                   isDate={isDate} formatOf={formatOf} baseColorOf={tooltipBaseColorOf}
+                  guideRows={tooltipGuideRows}
                 />
               )} />
               {/* The legend NAME is untouched (the tooltip reads the same string); the
@@ -444,10 +517,18 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
                   label={{ value: 'Journal', position: 'insideTopLeft', fill: 'var(--status-amber)', fontSize: 'var(--text-9)' }}
                 />
               ))}
+              {series.flatMap((s, index) => {
+                const guide = dynamicGuideOf(s);
+                return [seriesElement(s, index), ...(guide ? [seriesElement(guide, index)] : [])];
+              })}
+              {series.some((s) => s.highlightStroke) && <Customized component={<ChartHighlightPaths series={series} horizontal={horizontal} />} />}
               {/* A guide with no value is CM-fed and the adapter has not answered yet: the
                   model keeps the slot so the number has somewhere to land, and there is no
-                  line to draw until it does. The line carries NO label — it is named in the
-                  legend above, where nothing it could strike sits. */}
+                  line to draw until it does. It is named in the legend unless the author
+                  placed its label or value on the plot.
+                  LAST among the chart's children: recharts paints in child order, so a guide
+                  emitted before the series lay under every bar it was meant to be read
+                  against (`isFront` is not read by this recharts version). */}
               {drawnGuides.map((g) => (horizontal ? (
                 <ReferenceLine
                   key={g.seriesId} xAxisId={g.axisSide} x={g.value} ifOverflow="extendDomain"
@@ -461,11 +542,7 @@ export default function ReportChart({ view, model, heightPx = 220, currency = nu
                   label={fixedGuideLabel(g)}
                 />
               )))}
-              {series.flatMap((s, index) => {
-                const guide = dynamicGuideOf(s);
-                return [seriesElement(s, index), ...(guide ? [seriesElement(guide, index)] : [])];
-              })}
-              {series.some((s) => s.highlightStroke) && <Customized component={<ChartHighlightPaths series={series} horizontal={horizontal} />} />}
+              {liftLabels && <Customized component={<ChartValueLabels labelOf={liftedLabelOf} entranceMs={labelEntranceMs} />} />}
             </ComposedChart>
           </ResponsiveContainer>
         )}

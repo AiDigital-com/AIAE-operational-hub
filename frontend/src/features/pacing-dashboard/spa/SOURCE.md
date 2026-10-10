@@ -123,12 +123,12 @@ Two files beside them are this app's own seam and were edited by hand, not moved
 and keeps the fetched slices on `rawData`) and `report/useWidgetData.js` (hands the renderer the
 rewrite index as `dimGroupIndex`).
 
-NOT brought over, and deliberately: the CM360 half of the change (`report-render.js`'s join,
-`mapping/group-label-join.js`, `mapping/line-join.js`). It hangs off `third_party`/`mappings_v3`,
-which this app's dashboard payload does not carry at all - see `../types.ts`'s
-`PacingDashboardV1`. Also not brought over: Pacing's Settings → Pacing editor for authoring a
-dictionary, which is JSX against the SPA's own drawer. Until that exists here, a group can be
-read on this screen but not created on it.
+The CM360 half of the change was NOT brought over at the time, because `third_party` and
+`mappings_v3` were absent from this app's dashboard payload. **Both are on the payload now, and
+the CM360 half landed 2026-10-09** - see "The CM360 joins" below.
+
+Still not brought over: Pacing's Settings → Pacing editor for authoring a value-group dictionary,
+which is JSX against the SPA's own drawer. A group is read on this screen but not created on it.
 
 ## Updated 2026-10-05 — the buy unit
 
@@ -206,3 +206,27 @@ impression-paced — in `chips/line-facts.js` twice and in `chips/resolve.js`, w
 an install goal into plan CPM. `impressionPaced` is the first entry of the rate-chip option list,
 so that wrong answer arrived by default. Guarded by
 `AIAE-paicing/tests/rate-type-units-test.mjs`.
+
+
+## Updated 2026-10-09 — the CM360 joins
+
+`line-join.js` and `group-label-join.js` moved in beside the others, and `report-render.js` was
+rebased on the reference's copy to pick up the wiring that hangs off them. Two things this app
+could not do before:
+
+- **CM360 per line item** (`docs/2026-09-29-cm360-by-line.md`): the reader gained `atLine`,
+  `atDateLine` and the «Other CM360» remainder, and `cmRowJoin` now emits the `line` / `dateLine` /
+  `lineOther` grains. Before this, a widget whose rows were line items produced no join at all and
+  the CM360 column was blank.
+- **CM360 beside a grouped dimension** (value groups, spec 2026-10-02): `atLabel` takes the row's
+  dimension, and where any line groups values on it the pivot is read again through each line's own
+  dictionary. Before this, a line that reads TX and FL as South got its CM360 attributed to the row
+  TX, leaving South empty.
+
+`compare-dataset.js` is byte-identical to the reference again: it carries `dimGroupIndex`, which
+`report/ReportWidget.jsx` fills with `groupIndexOf(liPlan)`.
+
+NOT taken from the reference's `report-render.js`, deliberately: this app's CPI/installs labels and
+the buy-unit seven in `V2_CANON_LABELS`. CPI does not exist on the reference side at all (see the
+root `CLAUDE.md`), so a wholesale copy would have deleted it. Those seven lines are the only place
+this file diverges; everything else is the reference's, verbatim.

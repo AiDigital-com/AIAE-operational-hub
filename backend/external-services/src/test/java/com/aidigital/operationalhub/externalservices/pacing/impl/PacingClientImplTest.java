@@ -44,6 +44,11 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenc
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirrorEntry;
@@ -3857,6 +3862,449 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.OTHER);
+		server.verify();
+	}
+
+	@Test
+	void shouldReadThirdPartyStatusOffTheFileHeadTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/status"))
+				.andExpect(method(GET))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"state\":\"ready\",\"fetched_at\":\"2026-10-09T12:00:00.000Z\","
+								+ "\"row_count\":1200,\"campaigns\":[\"Spring Sale\"]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyStatus result = client.getThirdPartyStatus(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.state()).isEqualTo("ready");
+		assertThat(result.fetchedAt()).isEqualTo("2026-10-09T12:00:00.000Z");
+		assertThat(result.rowCount()).isEqualTo(1200);
+		assertThat(result.campaigns()).containsExactly("Spring Sale");
+		server.verify();
+	}
+
+	@Test
+	void shouldReadAnEmptyThirdPartyStatusBodyAsNoneTest() {
+		// An absent body is not "nothing configured" - that answer has its own state. `none` is the
+		// only reading that cannot make a widget poll forever.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/status"))
+				.andExpect(method(GET))
+				.andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyStatus result = client.getThirdPartyStatus(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.state()).isEqualTo("none");
+		server.verify();
+	}
+
+	@Test
+	void shouldPassThirdPartyRowsThroughUntouchedTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/data"))
+				.andExpect(method(GET))
+				.andRespond(withSuccess(
+						"{\"row_count\":1,\"campaigns\":[\"Spring Sale\"],\"rows\":[{\"campaign\":\"Spring Sale\"}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyData result = client.getThirdPartyData(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.rowCount()).isEqualTo(1);
+		assertThat(result.campaigns()).containsExactly("Spring Sale");
+		assertThat(result.rows()).singleElement()
+				.satisfies(row -> assertThat(row).containsEntry("campaign", "Spring Sale"));
+		server.verify();
+	}
+
+	@Test
+	void shouldRaiseAMissingThirdPartyFileAsNotFoundTest() {
+		// A pacing whose fetch has never run has no file. Pacing answers 404 and that travels: the
+		// Hub answers 404 too, and the widget's own `if (error || !data)` draws the same empty box it
+		// draws for zero rows - which is what the reference does, its apiFetch throwing on any
+		// non-2xx. Translating the 404 into an empty success here would be a third opinion.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/data"))
+				.andExpect(method(GET))
+				.andRespond(withStatus(HttpStatus.NOT_FOUND)
+						.contentType(MediaType.APPLICATION_JSON)
+						.body("{\"ok\":false,\"error\":\"no_data\"}"));
+
+		// When / Then:
+		assertThatThrownBy(() -> client.getThirdPartyData(assertion, "nike-ss26"))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(e -> ((PacingExternalException) e).getReason())
+				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
+		server.verify();
+	}
+
+	@Test
+	void shouldListThirdPartyCampaignsForThePickerTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/campaigns"))
+				.andExpect(method(GET))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"campaigns\":[{\"name\":\"  Spring Sale  \",\"report\":\"Weekly\","
+								+ "\"last_seen\":\"2026-07-01\",\"imp\":13695782}],\"stale\":true}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyCampaigns result = client.getThirdPartyCampaigns(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.stale()).isTrue();
+		assertThat(result.campaigns()).singleElement().satisfies(c -> {
+			// Untouched: a saved source stores this exact string, so trimming it here would store a
+			// name the export does not have and the fetch would match nothing.
+			assertThat(c.name()).isEqualTo("  Spring Sale  ");
+			assertThat(c.report()).isEqualTo("Weekly");
+			assertThat(c.lastSeen()).isEqualTo("2026-07-01");
+			assertThat(c.imp()).isEqualTo(13_695_782L);
+		});
+		server.verify();
+	}
+
+	@Test
+	void shouldReadAnEmptyCampaignListAsAnEmptyPickerTest() {
+		// Not a failure: the caller shows "nothing to choose", where a thrown error would put a red
+		// box on a settings tab for a quiet upstream.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/campaigns"))
+				.andExpect(method(GET))
+				.andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyCampaigns result = client.getThirdPartyCampaigns(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.campaigns()).isEmpty();
+		assertThat(result.stale()).isFalse();
+		server.verify();
+	}
+
+	@Test
+	void shouldStartAThirdPartyRefetchTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/refetch"))
+				.andExpect(method(POST))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingThirdPartyRefetchOutcome result = client.refetchThirdParty(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.started()).isTrue();
+		assertThat(result.notConfigured()).isFalse();
+		assertThat(result.rateLimited()).isFalse();
+		server.verify();
+	}
+
+	@Test
+	void shouldReadNoCm360SourceAsAnOutcomeRatherThanAFailureTest() {
+		// 409 is a statement about the pacing - there is nothing to pull - not a fault to raise.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/refetch"))
+				.andExpect(method(POST))
+				.andRespond(withStatus(HttpStatus.CONFLICT));
+
+		// When:
+		PacingThirdPartyRefetchOutcome result = client.refetchThirdParty(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.started()).isFalse();
+		assertThat(result.notConfigured()).isTrue();
+		server.verify();
+	}
+
+	@Test
+	void shouldReadASpentRefreshBudgetAsAnOutcomeTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/refetch"))
+				.andExpect(method(POST))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+		// When:
+		PacingThirdPartyRefetchOutcome result = client.refetchThirdParty(assertion, "nike-ss26");
+
+		// Then:
+		assertThat(result.rateLimited()).isTrue();
+		assertThat(result.started()).isFalse();
+		server.verify();
+	}
+
+	@Test
+	void shouldStillRaiseARealRefetchFailureTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/third-party/refetch"))
+				.andExpect(method(POST))
+				.andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+		// When / Then:
+		assertThatThrownBy(() -> client.refetchThirdParty(assertion, "nike-ss26"))
+				.isInstanceOf(PacingExternalException.class);
+		server.verify();
+	}
+
+	@Test
+	void shouldReadAnEmptySuggestionWithItsNoticeAsASuccessTest() {
+		// The whole point of the mock: no model is connected yet, so Pacing answers 200 with nothing
+		// proposed and a sentence saying why. Reading that as a failure would put a red box on a tab
+		// whose wiring is in fact complete.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/mapping/suggest-library"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.mapping_id").value("mp_1"))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"dimensions\":[],\"notice\":\"we need to add ai connection\"}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingMappingSuggestions result = client.suggestMappingLibrary(assertion, "nike-ss26", "mp_1");
+
+		// Then:
+		assertThat(result.dimensions()).isEmpty();
+		assertThat(result.notice()).isEqualTo("we need to add ai connection");
+		server.verify();
+	}
+
+	@Test
+	void shouldReadAProposedLibraryWithItsValuesAndAliasesTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/mapping/suggest-library"))
+				.andExpect(method(POST))
+				.andRespond(withSuccess(
+						"{\"ok\":true,\"dimensions\":[{\"name\":\"Format\",\"values\":"
+								+ "[{\"value\":\"CTV\",\"aliases\":[\"connected tv\"]}]}]}",
+						MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingMappingSuggestions result = client.suggestMappingLibrary(assertion, "nike-ss26", null);
+
+		// Then:
+		assertThat(result.notice()).isNull();
+		assertThat(result.dimensions()).singleElement().satisfies(d -> {
+			assertThat(d.name()).isEqualTo("Format");
+			assertThat(d.values()).singleElement().satisfies(v -> {
+				assertThat(v.value()).isEqualTo("CTV");
+				assertThat(v.aliases()).containsExactly("connected tv");
+			});
+		});
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitTheMappingIdWhenNoneIsGivenTest() {
+		// Absent means "the first dimensions-kind entity" on the Pacing side. An explicit null would
+		// be a different statement, so the request record must leave the key out entirely.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/mapping/suggest-library"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{}", true))
+				.andRespond(withSuccess("{\"ok\":true,\"dimensions\":[]}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.suggestMappingLibrary(assertion, "nike-ss26", null);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldReadAnEmptySuggestionBodyAsAnEmptyProposalTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/mapping/suggest-library"))
+				.andExpect(method(POST))
+				.andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingMappingSuggestions result = client.suggestMappingLibrary(assertion, "nike-ss26", null);
+
+		// Then:
+		assertThat(result.dimensions()).isEmpty();
+		assertThat(result.notice()).isNull();
+		server.verify();
+	}
+
+	@Test
+	void shouldMapASuggestFailureToADashboardFailureTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/mapping/suggest-library"))
+				.andExpect(method(POST))
+				.andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+		// When / Then:
+		assertThatThrownBy(() -> client.suggestMappingLibrary(assertion, "nike-ss26", null))
+				.isInstanceOf(PacingExternalException.class);
+		server.verify();
+	}
+
+	@Test
+	void shouldSaveThirdPartyCarryingThatKeyAloneTest() {
+		// The whole point of a per-fragment request record: choosing CM360 campaigns must not be able
+		// to touch the widget configuration or the plan.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.third_party[0].type").value("cm360"))
+				.andExpect(jsonPath("$.third_party[0].campaigns[0]").value("Spring Sale"))
+				.andExpect(jsonPath("$.display").doesNotExist())
+				.andExpect(jsonPath("$.data").doesNotExist())
+				.andExpect(jsonPath("$.line_items").doesNotExist())
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveThirdParty(assertion, "nike-ss26",
+				List.of(Map.of("type", "cm360", "campaigns", List.of("Spring Sale"))));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSaveMappingsCarryingThatKeyAloneTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(jsonPath("$.mappings_v3[0].id").value("mp_1"))
+				.andExpect(jsonPath("$.third_party").doesNotExist())
+				.andExpect(jsonPath("$.display").doesNotExist())
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveMappings(assertion, "nike-ss26", List.of(Map.of("id", "mp_1", "name", "Demo")));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendNullMappingsAsNullRatherThanAnEmptyListTest() {
+		// Pacing reads the two as different answers - null clears the list, an empty one means
+		// "migrated, nothing mapped" - so a caller that means to clear must be able to say it.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{\"mappings_v3\":null}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveMappings(assertion, "nike-ss26", null);
+
+		// Then:
 		server.verify();
 	}
 }

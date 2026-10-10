@@ -3159,6 +3159,389 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/third-party/campaigns:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingThirdPartyCampaigns
+      description: >
+        Every CM360 campaign the ad-server export carries, with the report it was pulled under and
+        how many impressions it holds - the list a user picks from when setting a pacing's
+        third-party source. GLOBAL, not per pacing: the slug only authorises the read. Pacing caches
+        it for ten minutes and serves a stale copy rather than an empty picker when the upstream
+        read fails.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug - used for authorisation only.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The campaign list was fetched successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingThirdPartyCampaignsV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the campaigns from the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/third-party-settings:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingThirdParty
+      description: >
+        Sets which CM360 reports and campaigns this pacing pulls. Reaches Pacing as POST
+        .../settings carrying only the `third_party` fragment - the same single write path the
+        display and data saves use, differing only in which part of the stored config it carries.
+
+        A WHOLE-ARRAY replace: the list sent becomes the list stored, so a caller must send every
+        entry it does not own rather than only the ones it changed.
+
+        Saving TRIGGERS a pull on the Pacing side. The pacing goes `pending` and
+        GET .../third-party/status is what says when it lands - this call does not wait for it.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingThirdPartyUpdateV1'
+      responses:
+        '204':
+          description: The third-party sources were saved.
+        '400':
+          description: Pacing rejected the list as structurally invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving to the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/mappings:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingMappings
+      description: >
+        Sets this pacing's mapping entities - the dimension libraries that classify CM360 rows and
+        delivery rows into the same values, which is what lets the two be compared at all. Reaches
+        Pacing as POST .../settings carrying only the `mappings_v3` fragment.
+
+        A WHOLE-ARRAY replace, like the third-party list. NULL and an empty list are different
+        answers on the Pacing side - null means "this pacing predates the model", an empty list
+        means "migrated, nothing mapped" - so a caller must mean the one it sends.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingMappingsUpdateV1'
+      responses:
+        '204':
+          description: The mappings were saved.
+        '400':
+          description: Pacing rejected the mapping list as structurally invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving to the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/third-party/refetch:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: refetchPacingThirdParty
+      description: >
+        Pulls this pacing's CM360 rows again now. Fire-and-forget: the pull runs in the background
+        and `third-party/status` is what says where it got to.
+
+        Two outcomes are answered as 200 rather than as errors, because neither is a fault: a
+        pacing with no CM360 source has nothing to pull, and a caller who has spent the shared
+        refresh budget should be shown a wait. The body says which happened.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Whether the pull started, and why not when it did not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingThirdPartyRefetchV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/mapping/suggest:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: suggestPacingMappingLibrary
+      description: >
+        Asks Pacing to propose dimensions for a mapping, from the words actually present in this
+        pacing's delivery rows and CM360 placements. Proposals are DRAFTS - nothing is stored, and
+        the caller decides what to accept.
+
+        Until a model is connected Pacing answers with an empty proposal and a `notice` saying so.
+        That is a success, not a failure: the path is wired end to end and there is simply nothing
+        to suggest yet, which a caller should show as a message rather than as an error.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingMappingSuggestRequestV1'
+      responses:
+        '200':
+          description: The proposal, possibly empty with a notice.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingMappingSuggestionsV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many suggestion requests - Pacing rate-limits this call on its own budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The suggestion request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/third-party/status:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingThirdPartyStatus
+      description: >
+        Where this pacing's CM360 third-party read stands. A cheap poll a widget runs every few
+        seconds while a fetch is in flight: it reads the HEAD of the published file, never its rows,
+        so a complete file of tens of megabytes costs the same as an empty one.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The third-party status was fetched successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingThirdPartyStatusV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with this slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the status from the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/third-party/data:
+    get:
+      tags:
+        - pacingDashboard
+      operationId: getPacingThirdPartyData
+      description: >
+        The CM360 rows themselves, as Pacing published them. Large: a complete file runs to tens of
+        megabytes, which is why the status poll above exists and why a caller asks for this only once
+        a widget is actually on screen. Returned opaquely - the Hub does not reshape the rows.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The third-party rows were fetched successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingThirdPartyDataV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: >
+            No file has been published for this pacing yet - nothing has been fetched, or the
+            configuration was cleared. The ORDINARY state for a pacing whose fetch has never run, and
+            the widget draws its own empty box for it rather than an error. Distinct from a 200
+            carrying zero rows, which means the fetch ran and found nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Fetching the rows from the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
   /api/v1/pacing/dashboards/{slug}/settings:
     post:
       tags:
@@ -9948,6 +10331,244 @@ components:
             $ref: '#/components/schemas/AssignableOwnerV1'
       required:
         - owners
+    PacingThirdPartyCampaignsV1:
+      type: object
+      description: The CM360 campaigns available to pick from.
+      properties:
+        campaigns:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingThirdPartyCampaignV1'
+        stale:
+          type: boolean
+          description: >
+            True when the upstream read failed and this is Pacing's last good copy. The picker still
+            works; it is saying the list may be behind, which is a different thing from empty.
+      required:
+        - campaigns
+
+    PacingThirdPartyCampaignV1:
+      type: object
+      description: One CM360 campaign, as the ad-server export spells it.
+      properties:
+        name:
+          type: string
+          description: The campaign name, untouched - this is what a saved source stores.
+        report:
+          type: string
+          description: >
+            The report it was pulled under. The same campaign legitimately appears under several
+            reports, which is why a source names both.
+        lastSeen:
+          type: string
+          description: The most recent date the export has a row for.
+        imp:
+          type: integer
+          format: int64
+          description: Impressions across the whole export - how the list is ranked.
+      required:
+        - name
+
+    PacingThirdPartyUpdateV1:
+      type: object
+      description: The whole third-party source list to store.
+      properties:
+        thirdParty:
+          type: array
+          description: >
+            Every source this pacing should have after the save. Each entry names `type` (`cm360`),
+            its `campaigns`, and optionally the `report_name` they belong to. Passed to Pacing
+            opaquely and validated there.
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - thirdParty
+
+    PacingThirdPartyRefetchV1:
+      type: object
+      description: What happened when a CM360 re-pull was asked for.
+      properties:
+        started:
+          type: boolean
+          description: True when the pull was started.
+        notConfigured:
+          type: boolean
+          description: True when this pacing has no CM360 source, so there is nothing to pull.
+        rateLimited:
+          type: boolean
+          description: >
+            True when the caller has spent the refresh budget this endpoint shares with the
+            dashboard refresh.
+      required:
+        - started
+        - notConfigured
+        - rateLimited
+
+    PacingMappingSuggestRequestV1:
+      type: object
+      description: Which mapping entity the proposal should be scoped to.
+      properties:
+        mappingId:
+          type: string
+          nullable: true
+          description: >
+            The entity whose existing dimensions the proposal must not duplicate. Omitted or null
+            means the pacing's first dimensions-kind entity.
+
+    PacingMappingSuggestionsV1:
+      type: object
+      description: >
+        A set of proposed dimensions. Drafts only - nothing here is stored until the caller accepts
+        it and saves the mapping.
+      properties:
+        dimensions:
+          type: array
+          description: >
+            The proposed dimensions, each with a name and its values. Empty when there is nothing to
+            propose, which `notice` then explains.
+          items:
+            $ref: '#/components/schemas/PacingMappingSuggestedDimensionV1'
+        notice:
+          type: string
+          nullable: true
+          description: >
+            Why the proposal is empty, in words meant for a person. Present when the suggestion
+            could not be produced for a reason that is not a failure - today, that no model is
+            connected yet.
+      required:
+        - dimensions
+
+    PacingMappingSuggestedDimensionV1:
+      type: object
+      description: One proposed dimension.
+      properties:
+        name:
+          type: string
+          description: What the dimension would be called.
+        values:
+          type: array
+          description: The values it would accept.
+          items:
+            $ref: '#/components/schemas/PacingMappingSuggestedValueV1'
+      required:
+        - name
+        - values
+
+    PacingMappingSuggestedValueV1:
+      type: object
+      description: One proposed value, and the spellings that should also match it.
+      properties:
+        value:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+      required:
+        - value
+
+    PacingMappingsUpdateV1:
+      type: object
+      description: The whole mapping-entity list to store.
+      properties:
+        mappings:
+          type: array
+          nullable: true
+          description: >
+            Every mapping this pacing should have after the save. Each entity carries an id, a name,
+            its comparison level, and a dimension library. Null CLEARS the list, which is not the
+            same as sending an empty one.
+          items:
+            type: object
+            additionalProperties: true
+      # NOT required, deliberately. Clearing a pacing's mappings is a real instruction, and the only
+      # way to say it is `null` - which a required field refuses before the controller sees it.
+      # Absent and null therefore mean the same thing here: clear.
+
+    PacingThirdPartyStatusV1:
+      type: object
+      description: >
+        Where a pacing's CM360 read stands, plus what the published file says about itself. Read off
+        the file's head, so this stays cheap however large the file is.
+      properties:
+        state:
+          type: string
+          description: >
+            `none` - nothing is configured, so there is nothing to fetch. `pending` - a fetch was
+            fired and has not landed yet. `ready` - a file is published. `error` - a fetch was fired,
+            its window has passed and no file arrived.
+          enum: [none, pending, ready, error]
+        fetchedAt:
+          type: string
+          nullable: true
+          description: >
+            When the run that produced this file READ the pacing's configuration - not when the file
+            was written. A settings save newer than this keeps the pacing `pending`, so a fetch that
+            read the old configuration can never clear it.
+        rowCount:
+          type: integer
+          nullable: true
+          format: int32
+          description: How many rows the published file holds; null when there is no file.
+        campaigns:
+          type: array
+          nullable: true
+          description: The campaigns this file was fetched for; null when there is no file.
+          items:
+            type: string
+      required:
+        - state
+
+    PacingThirdPartyDataV1:
+      type: object
+      description: >
+        The published CM360 file - rows, the campaigns and report groups it was fetched for, and its
+        own bookkeeping. The rows themselves stay opaque: they are ad-server columns that differ per
+        report, and the compare screens read them by name.
+      properties:
+        fetchedAt:
+          type: string
+          nullable: true
+          description: >
+            When the run that produced this file READ the pacing's configuration - not when the file
+            was written.
+        campaigns:
+          type: array
+          description: The flat union of every group's campaigns.
+          items:
+            type: string
+        groups:
+          type: array
+          description: Which report each campaign was pulled under; additive and diagnostic.
+          items:
+            type: object
+            additionalProperties: true
+        status:
+          type: string
+          nullable: true
+          description: Pacing's own marker, `ready` on a published file.
+        droppedDupes:
+          type: integer
+          format: int32
+          nullable: true
+          description: >
+            Main-table rows dropped because the audio table carried the same key - the audio row is
+            the one that holds audio completions.
+        rowCount:
+          type: integer
+          format: int32
+          nullable: true
+          description: >
+            How many rows the file holds. Written before the rows so a reader that needs only the
+            small keys does not parse them.
+        rows:
+          type: array
+          description: The ad-server rows themselves.
+          items:
+            type: object
+            additionalProperties: true
+
     PacingDashboardCampaignV1:
       type: object
       description: The pacing's own campaign summary, as Pacing's dashboard payload carries it.
@@ -10220,6 +10841,29 @@ components:
             The Breakdown panel offers a cut per dimension these carry, with its own coverage line -
             a source describes part of delivery, not a partition of it.
           additionalProperties: true
+        thirdParty:
+          type: array
+          description: >
+            The CM360 third-party blocks this pacing is configured with - Pacing's own
+            `config_json.third_party`, passed through opaquely. EMPTY is the normal state and means
+            no third-party source is set up; a CM360 widget reads this first and only then asks for
+            the rows (GET .../third-party/data), so a pacing with nothing configured makes no
+            request at all. Each entry names a report and the campaigns inside it.
+          items:
+            type: object
+            additionalProperties: true
+        mappingsV3:
+          type: array
+          nullable: true
+          description: >
+            The mapping entities that join third-party rows to this pacing's line items - Pacing's
+            own `config_json.mappings_v3`. NULL and empty are different answers: null means the
+            pacing predates the v3 mapping model and must be read as "not migrated", while an empty
+            list means "migrated, nothing mapped yet". The compare screens show a different state
+            for each, so the distinction is carried rather than normalised away.
+          items:
+            type: object
+            additionalProperties: true
         display:
           type: object
           description: >

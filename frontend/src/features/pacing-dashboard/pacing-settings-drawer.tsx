@@ -5,6 +5,7 @@ import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
 import { PacingAlertsSection } from "./alerts-panel";
+import { PacingMappingSection } from "./mapping-panel";
 import { PacingDataSection, type PacingModeSwitches } from "./data-panel";
 import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
@@ -48,6 +49,20 @@ export interface PacingSettingsDrawerProps {
   isAdmin: boolean;
   /** Handed to the widget section so its cards preview through the dashboard's own engine. */
   libraryEntries: Record<string, unknown> | undefined;
+  /** The stored `third_party` list, straight off the dashboard payload. Edited on the Data tab. */
+  thirdParty: Record<string, unknown>[] | undefined;
+  /** The stored mapping entities (§11), straight off the dashboard payload. NULL means this
+   *  pacing predates the v3 mapping model; [] means it was migrated and nothing is mapped. */
+  mappingsV3: Record<string, unknown>[] | null | undefined;
+  /** The published CM360 file, if a pull has landed. The mapping editor reads its placements so an
+   *  alias can be matched against what is actually there rather than guessed. */
+  thirdPartyFile: { rows?: Record<string, unknown>[] | null } | null | undefined;
+  /** The delivery side as the comparison engine wants it. The mapping editor builds the engine's
+   *  own rows from these, so the numbers it shows are the ones the widget will produce. */
+  factsDaily: Record<string, unknown>[] | null | undefined;
+  types: Record<string, unknown>[] | null | undefined;
+  liPlan: Record<string, unknown> | null | undefined;
+  creatives: Record<string, unknown>[] | null | undefined;
   /** This pacing's stored alert configuration (§14), straight off the dashboard payload. */
   notify: PacingNotifySettingsV1 | undefined;
   /** Whether this pacing has a video line item - gates the Alerts tab's two VCR-only rows. */
@@ -70,6 +85,7 @@ export interface PacingSettingsDrawerProps {
 type DirtyMap = Record<SettingsTabId, boolean>;
 const NOTHING_DIRTY: DirtyMap = {
   plan: false,
+  mapping: false,
   data: false,
   widgets: false,
   alerts: false,
@@ -88,6 +104,13 @@ export function PacingSettingsDrawer({
   capabilities,
   isAdmin,
   libraryEntries,
+  thirdParty,
+  mappingsV3,
+  thirdPartyFile,
+  factsDaily,
+  types,
+  liPlan,
+  creatives,
   notify,
   hasVideo,
   links,
@@ -127,11 +150,12 @@ export function PacingSettingsDrawer({
 
   const plan = useRef<SettingsSectionHandle>(null);
   const dataSection = useRef<SettingsSectionHandle>(null);
+  const mapping = useRef<SettingsSectionHandle>(null);
   const widgets = useRef<SettingsSectionHandle>(null);
   const alerts = useRef<SettingsSectionHandle>(null);
   const documents = useRef<SettingsSectionHandle>(null);
   const handles = useMemo(
-    () => ({ plan, data: dataSection, widgets, alerts, documents }) as Record<SettingsTabId, typeof plan>,
+    () => ({ plan, data: dataSection, widgets, mapping, alerts, documents }) as Record<SettingsTabId, typeof plan>,
     []
   );
 
@@ -176,6 +200,7 @@ export function PacingSettingsDrawer({
   // the sections report their dirty state from an effect keyed on it.
   const markPlan = useCallback((v: boolean) => setDirty((d) => (d.plan === v ? d : { ...d, plan: v })), []);
   const markData = useCallback((v: boolean) => setDirty((d) => (d.data === v ? d : { ...d, data: v })), []);
+  const markMapping = useCallback((v: boolean) => setDirty((d) => (d.mapping === v ? d : { ...d, mapping: v })), []);
   // Same shape and the same reason: stable identity, and a no-op when nothing moved, so the Data
   // section's report cannot loop against its own effect.
   const markSwitches = useCallback(
@@ -320,6 +345,8 @@ export function PacingSettingsDrawer({
             data={data}
             netRatioCount={netRatioCount}
             seedKey={seedKey}
+            thirdParty={thirdParty}
+            visible={tab === "data"}
             onDirtyChange={markData}
             onSwitchesChange={markSwitches}
           />
@@ -336,6 +363,20 @@ export function PacingSettingsDrawer({
             initialWidgetId={initialWidgetId}
             onWidgetEditorOpened={onWidgetEditorOpened}
             onDirtyChange={markWidgets}
+          />
+        </div>
+        <div className={cn("psettings__panel", tab !== "mapping" && "psettings__panel--hidden")}>
+          <PacingMappingSection
+            ref={mapping}
+            slug={slug}
+            mappings={mappingsV3}
+            cm360={thirdPartyFile}
+            factsDaily={factsDaily}
+            types={types}
+            liPlan={liPlan}
+            creatives={creatives}
+            seedKey={seedKey}
+            onDirtyChange={markMapping}
           />
         </div>
         <div className={cn("psettings__panel", tab !== "alerts" && "psettings__panel--hidden")}>

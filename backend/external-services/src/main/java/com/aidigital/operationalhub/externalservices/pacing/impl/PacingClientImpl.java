@@ -35,6 +35,11 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenc
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSyncStats;
@@ -353,6 +358,172 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
+		}
+	}
+
+	@Override
+	public PacingThirdPartyStatus getThirdPartyStatus(HubAssertion assertion, String slug) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/third-party/status";
+		try {
+			PacingThirdPartyStatus response = restClient.get()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(PacingThirdPartyStatus.class);
+			// An empty body is not "nothing configured": that answer has its own state. Absent means
+			// Pacing said nothing at all, and `none` is the only reading that cannot mislead a widget
+			// into polling forever.
+			return response == null
+					? new PacingThirdPartyStatus(true, "none", null, null, null)
+					: response;
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("GET", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
+		}
+	}
+
+	@Override
+	public PacingThirdPartyData getThirdPartyData(HubAssertion assertion, String slug) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/third-party/data";
+		try {
+			PacingThirdPartyData response = restClient.get()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(PacingThirdPartyData.class);
+			if (response == null) {
+				throw new PacingExternalException(
+						PacingFailureReason.OTHER, "Pacing request failed: GET " + path + " returned an empty body");
+			}
+			return response;
+		} catch (RestClientResponseException ex) {
+			// No 404 branch. A pacing with nothing published answers 404 from Pacing,
+			// dashboardFailure maps it to UPSTREAM_NOT_FOUND and the Hub answers 404 - which is what
+			// the reference does too: its apiFetch throws on any non-2xx and the widget's
+			// `if (error || !data)` draws the same empty state either way.
+			throw dashboardFailure("GET", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
+		}
+	}
+
+	@Override
+	public PacingThirdPartyCampaigns getThirdPartyCampaigns(HubAssertion assertion, String slug) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/third-party/campaigns";
+		try {
+			PacingThirdPartyCampaigns response = restClient.get()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.body(PacingThirdPartyCampaigns.class);
+			// An empty body is an empty picker, not a failure: the caller shows "nothing to choose"
+			// and a thrown error here would turn a quiet upstream into a red box on a settings tab.
+			return response == null
+					? new PacingThirdPartyCampaigns(true, List.of(), false)
+					: response;
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("GET", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
+		}
+	}
+
+	@Override
+	public void saveThirdParty(HubAssertion assertion, String slug, List<Map<String, Object>> thirdParty) {
+		saveSettingsFragment(assertion, slug, new ThirdPartySettingsRequest(thirdParty));
+	}
+
+	@Override
+	public void saveMappings(HubAssertion assertion, String slug, List<Map<String, Object>> mappingsV3) {
+		saveSettingsFragment(assertion, slug, new MappingsSettingsRequest(mappingsV3));
+	}
+
+	@Override
+	public PacingThirdPartyRefetchOutcome refetchThirdParty(HubAssertion assertion, String slug) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/third-party/refetch";
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.retrieve()
+					.toBodilessEntity();
+			return PacingThirdPartyRefetchOutcome.triggered();
+		} catch (RestClientResponseException ex) {
+			int statusCode = ex.getStatusCode().value();
+			// Neither of these is a fault. 409 says this pacing has no CM360 source - a statement
+			// about the pacing. 429 says the shared refresh budget is spent, which the UI shows as a
+			// wait, exactly as it does for a dashboard refresh.
+			if (statusCode == 409) {
+				return PacingThirdPartyRefetchOutcome.noSource();
+			}
+			if (statusCode == 429) {
+				return PacingThirdPartyRefetchOutcome.budgetSpent();
+			}
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	@Override
+	public PacingMappingSuggestions suggestMappingLibrary(HubAssertion assertion, String slug, String mappingId) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/mapping/suggest-library";
+		try {
+			PacingMappingSuggestions response = restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(new MappingSuggestRequest(mappingId))
+					.retrieve()
+					.body(PacingMappingSuggestions.class);
+			// An empty body is an empty proposal, not a failure - the same reasoning as the campaign
+			// picker: a quiet upstream should read as "nothing to suggest", not as a red box.
+			return response == null
+					? new PacingMappingSuggestions(true, List.of(), null)
+					: response;
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	/**
+	 * One settings write, carrying one fragment. Both CM360 saves differ only in which record they
+	 * hand over, and each record names exactly one config key - which is what keeps a save of one
+	 * from touching the other, or the display.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @param request   the fragment record to serialize as the whole body
+	 */
+	void saveSettingsFragment(HubAssertion assertion, String slug, Object request) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
 		}
 	}
 

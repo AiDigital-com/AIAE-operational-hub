@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
@@ -37,6 +38,16 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaign;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.exception.BusinessException;
@@ -53,12 +64,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -147,7 +160,7 @@ class PacingDashboardControllerMvcTest {
 						null, Map.of(), List.of(), null,
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 						null, List.of());
 		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
 		// Unstubbed hubUserService.findByClerkUserId(...) answers Optional.empty() (Mockito's default for
@@ -486,5 +499,189 @@ class PacingDashboardControllerMvcTest {
 		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26"))
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.code").value("OPH_051"));
+	}
+
+	@Test
+	void shouldReturnThirdPartyStatusTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingThirdPartyStatus status = new PacingThirdPartyStatus(true, "ready", "2026-10-09T12:00:00.000Z", 13884, List.of("Spring Sale"));
+		doReturn(status).when(pacingClient).getThirdPartyStatus(any(), eq("nike-ss26"));
+		doReturn(new PacingThirdPartyStatusV1().state(PacingThirdPartyStatusV1.StateEnum.READY).rowCount(13884))
+				.when(mapper).toV1(status);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}/third-party/status", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.state").value("ready"))
+				.andExpect(jsonPath("$.rowCount").value(13884));
+	}
+
+	@Test
+	void shouldReturnThirdPartyDataTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingThirdPartyData file = new PacingThirdPartyData(
+				"2026-10-09T12:00:00.000Z", List.of("Spring Sale"), List.of(), "ready", 0, 2,
+				List.of(Map.of("campaign", "Spring Sale")));
+		doReturn(file).when(pacingClient).getThirdPartyData(any(), eq("nike-ss26"));
+		doReturn(new PacingThirdPartyDataV1().rowCount(2).campaigns(List.of("Spring Sale")))
+				.when(mapper).toV1(file);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}/third-party/data", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.rowCount").value(2));
+	}
+
+	@Test
+	void shouldReturnThirdPartyCampaignsTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingThirdPartyCampaigns campaigns = new PacingThirdPartyCampaigns(
+				true, List.of(new PacingThirdPartyCampaign("Spring Sale", "Weekly", "2026-07-01", 10L)), false);
+		doReturn(campaigns).when(pacingClient).getThirdPartyCampaigns(any(), eq("nike-ss26"));
+		doReturn(new PacingThirdPartyCampaignsV1()
+				.campaigns(List.of(new PacingThirdPartyCampaignV1().name("Spring Sale"))).stale(false))
+				.when(mapper).toV1(campaigns);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}/third-party/campaigns", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.campaigns[0].name").value("Spring Sale"));
+	}
+
+	@Test
+	void shouldSaveThirdPartyAndAnswerNoContentTest() throws Exception {
+		// 204, not the list back: the save triggers a pull, so anything echoed would already be the
+		// state before it.
+		// Given:
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/third-party-settings", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"thirdParty\":[{\"type\":\"cm360\",\"campaigns\":[\"Spring Sale\"]}]}"))
+				.andExpect(status().isNoContent());
+		verify(pacingClient).saveThirdParty(any(), eq("nike-ss26"),
+				eq(List.of(Map.of("type", "cm360", "campaigns", List.of("Spring Sale")))));
+	}
+
+	@Test
+	void shouldSaveMappingsAndAnswerNoContentTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/mappings", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"mappings\":[{\"id\":\"mp_1\"}]}"))
+				.andExpect(status().isNoContent());
+		verify(pacingClient).saveMappings(any(), eq("nike-ss26"), eq(List.of(Map.of("id", "mp_1"))));
+	}
+
+	@Test
+	void shouldForwardNullMappingsAsNullTest() throws Exception {
+		// Clearing the list is a real instruction; an empty list would say something else.
+		// Given:
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/mappings", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"mappings\":null}"))
+				.andExpect(status().isNoContent());
+		verify(pacingClient).saveMappings(any(), eq("nike-ss26"), isNull());
+	}
+
+	@Test
+	void shouldAnswerARefetchThatStartedTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		doReturn(PacingThirdPartyRefetchOutcome.triggered())
+				.when(pacingClient).refetchThirdParty(any(), eq("nike-ss26"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/third-party/refetch", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.started").value(true))
+				.andExpect(jsonPath("$.notConfigured").value(false));
+	}
+
+	@Test
+	void shouldAnswerNothingToPullAsOkRatherThanAnErrorTest() throws Exception {
+		// "This pacing has no CM360 source" is something the screen says, not an error channel.
+		// Given:
+		stubCurrentUser();
+		doReturn(PacingThirdPartyRefetchOutcome.noSource())
+				.when(pacingClient).refetchThirdParty(any(), eq("nike-ss26"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/third-party/refetch", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.started").value(false))
+				.andExpect(jsonPath("$.notConfigured").value(true));
+	}
+
+	@Test
+	void shouldAnswerASpentBudgetAsOkTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		doReturn(PacingThirdPartyRefetchOutcome.budgetSpent())
+				.when(pacingClient).refetchThirdParty(any(), eq("nike-ss26"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/third-party/refetch", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.rateLimited").value(true));
+	}
+
+	@Test
+	void shouldAnswerASuggestionWithNothingProposedAsOkTest() throws Exception {
+		// No model connected yet: the whole path is real and the answer is a notice, not an error.
+		// Given:
+		stubCurrentUser();
+		PacingMappingSuggestions suggestions =
+				new PacingMappingSuggestions(true, List.of(), "we need to add ai connection");
+		doReturn(suggestions).when(pacingClient).suggestMappingLibrary(any(), eq("nike-ss26"), eq("mp_1"));
+		doReturn(new PacingMappingSuggestionsV1().dimensions(List.of()).notice("we need to add ai connection"))
+				.when(mapper).toV1(suggestions);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/mapping/suggest", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"mappingId\":\"mp_1\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.dimensions").isEmpty())
+				.andExpect(jsonPath("$.notice").value("we need to add ai connection"));
+	}
+
+	@Test
+	void shouldForwardNoMappingIdAsNullTest() throws Exception {
+		// "Suggest for this pacing" is a complete request; the id only narrows it to one entity, and
+		// its absence has to reach Pacing as absent rather than as some default entity picked here.
+		// Given:
+		stubCurrentUser();
+		PacingMappingSuggestions suggestions = new PacingMappingSuggestions(true, List.of(), null);
+		doReturn(suggestions).when(pacingClient).suggestMappingLibrary(any(), eq("nike-ss26"), isNull());
+		doReturn(new PacingMappingSuggestionsV1().dimensions(List.of())).when(mapper).toV1(suggestions);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/mapping/suggest", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{}"))
+				.andExpect(status().isOk());
+		verify(pacingClient).suggestMappingLibrary(any(), eq("nike-ss26"), isNull());
 	}
 }

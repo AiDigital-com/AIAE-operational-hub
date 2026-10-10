@@ -545,8 +545,9 @@ export default function ReportTable({ view, model, maxHeightPx = 440, pick = nul
                 >
                   <td
                     style={tdStyle(false)}
-                    // Clipped text is unreadable without this.
-                    title={r.isDate ? undefined : r.label}
+                    // Clipped text is unreadable without this. «Other CM360» says what it holds
+                    // instead (docs/2026-09-29-cm360-by-line.md §2.5).
+                    title={r.labelTitle || (r.isDate ? undefined : r.label)}
                   >
                     {r.primary ? (
                       // A Conversion Action row with a «primary» chip (spec §4): marker, name,
@@ -639,8 +640,11 @@ export default function ReportTable({ view, model, maxHeightPx = 440, pick = nul
                         // segment is working. The remainder is never a data point, so it never
                         // carries one (the model leaves it out of the comparison).
                         style={{ ...tdStyle(c.numeric), color: extremeColor(extremesOf(c), r.cells[c.id]) || tdStyle(c.numeric).color, ...(faint ? { color: 'var(--text-muted)' } : null), ...hl }}
-                        title={joinTitles(joinTitles(highlightTitle(r.highlights?.[c.id]), tip),
-                          r.cvReason && model.cvCols?.has(c.id) && shown === EM && !planCol && !colErrorOf(model, c.id) ? r.cvReason : null)}
+                        title={joinTitles(joinTitles(joinTitles(highlightTitle(r.highlights?.[c.id]), tip),
+                          r.cvReason && model.cvCols?.has(c.id) && shown === EM && !planCol && !colErrorOf(model, c.id) ? r.cvReason : null),
+                          // …and why a line's CM360 cell is «—»: it shares a day with another
+                          // line, or the mapping gives it no CM360 (docs/2026-09-29-cm360-by-line.md §2.3).
+                          r.cmReason && c.cm && shown === EM && !colErrorOf(model, c.id) ? r.cmReason : null)}
                       >
                         {content}
                       </td>

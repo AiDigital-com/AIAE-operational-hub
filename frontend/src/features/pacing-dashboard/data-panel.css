@@ -122,3 +122,74 @@
   gap: 8px;
   margin-left: auto;
 }
+
+/* Third-party (CM360) source. The campaign list is long and the names are long, so it scrolls in
+   its own box rather than stretching the drawer - and scrolls horizontally too, because an
+   ad-server campaign name routinely runs past any sensible column. */
+/* One CM360 source. A pacing can hold several - two reports scoped separately is the normal
+   case report scoping exists for - so each gets its own bordered block rather than all of them
+   running together into one list of checkboxes. */
+.pdata__cm360 {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+}
+
+.pdata__cm360-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+/* The source's own name takes the room; the count and the button sit at the end. */
+.pdata__cm360-head .pdata__field-label { flex: 1 1 auto; font-weight: 600; }
+
+.pdata__remove,
+.pdata__add {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdata__remove { color: var(--text-muted, #6b7280); }
+.pdata__add { margin-top: 12px; }
+
+.pdata__field { display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.pdata__field-label { font-size: 12px; color: var(--text-muted, #6b7280); }
+.pdata__field select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+
+.pdata__campaigns { margin: 12px 0 0; padding: 0; border: 0; }
+.pdata__campaign-list {
+  margin-top: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  padding: 8px;
+}
+.pdata__campaign-list .pdata__check { white-space: nowrap; }
+
+/* The pull's state and the control that starts another, on one line: the sentence is what the
+   button is about, so separating them would make the button read as unexplained. */
+.pdata__tpstatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}

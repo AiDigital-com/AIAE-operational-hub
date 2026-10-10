@@ -1,5 +1,9 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedDimension;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedValue;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBandV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBaseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleDaysV1;
@@ -44,6 +48,13 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPauseInterval;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaign;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -87,7 +98,7 @@ class PacingDashboardContractMapperTest {
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
 				null, null, null, null, List.of(Map.of("creative_name", "Hero 15s")), null,
-				Map.of("devices", Map.of("rows", List.of())),
+				Map.of("devices", Map.of("rows", List.of())), null, null,
 				Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
 				Map.of("campaign", Map.of("mA", 42.5)), null,
 				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
@@ -170,7 +181,7 @@ class PacingDashboardContractMapperTest {
 				campaign, Map.of("111", plan), List.of(), "2026-08-05",
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, Map.of(), Map.of(),
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
 				Map.of(), Map.of(), null, Map.of(), null, List.of());
 
 		// When:
@@ -359,7 +370,7 @@ class PacingDashboardContractMapperTest {
 				campaign, Map.of(), List.of(), null,
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 				null, List.of());
 
 		// When:
@@ -421,7 +432,7 @@ class PacingDashboardContractMapperTest {
 				campaign, Map.of(), List.of(), null,
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
 				null, List.of());
 
 		// When:
@@ -445,5 +456,182 @@ class PacingDashboardContractMapperTest {
 		assertThat(result).containsExactly(
 				new PacingCampaignLink("DV360", "https://displayvideo.google.com/#ng_nav/p/1"),
 				new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456"));
+	}
+
+	@Test
+	void thirdPartyBecomesAnEmptyListWhileMappingsV3KeepsItsNull() {
+		// The asymmetry is deliberate. A CM360 widget reads `thirdParty` to decide whether to ask for
+		// rows at all, so a length check must always be safe. `mappingsV3` answers a different
+		// question: null means the pacing predates the v3 mapping model, an empty list means it was
+		// migrated and nothing is mapped yet, and the compare screens show a different thing for each.
+		PacingDashboardData data = dashboardDataWith(null, null);
+
+		PacingDashboardV1 result = mapper.toV1(data, null, true);
+
+		assertThat(result.getThirdParty()).isEmpty();
+		assertThat(result.getMappingsV3()).isNull();
+	}
+
+	@Test
+	void thirdPartyAndMappingsV3RideThroughUntouched() {
+		List<Map<String, Object>> blocks = List.of(Map.of("type", "cm360", "campaigns", List.of("Spring Sale")));
+		List<Map<String, Object>> mappings = List.of(Map.of("id", "m1"));
+		PacingDashboardData data = dashboardDataWith(blocks, mappings);
+
+		PacingDashboardV1 result = mapper.toV1(data, null, true);
+
+		assertThat(result.getThirdParty()).isEqualTo(blocks);
+		assertThat(result.getMappingsV3()).isEqualTo(mappings);
+	}
+
+	@Test
+	void everyThirdPartyStateIsCarried() {
+		for (String state : List.of("none", "pending", "ready", "error")) {
+			PacingThirdPartyStatusV1 result =
+					mapper.toV1(new PacingThirdPartyStatus(true, state, null, null, null));
+			assertThat(result.getState().getValue()).isEqualTo(state);
+		}
+	}
+
+	@Test
+	void anUnreadableThirdPartyStateReadsAsNoneRatherThanReachingTheUi() {
+		// The enum is what a widget switches on. A value outside it would arrive as an unhandled
+		// branch, and "we cannot say" is `none` - never a state that makes the widget poll forever.
+		assertThat(mapper.stateOrNone(null)).isEqualTo(PacingThirdPartyStatusV1.StateEnum.NONE);
+		assertThat(mapper.stateOrNone("")).isEqualTo(PacingThirdPartyStatusV1.StateEnum.NONE);
+		assertThat(mapper.stateOrNone("READY")).isEqualTo(PacingThirdPartyStatusV1.StateEnum.NONE);
+		assertThat(mapper.stateOrNone("something-new")).isEqualTo(PacingThirdPartyStatusV1.StateEnum.NONE);
+	}
+
+	@Test
+	void theThirdPartyFileIsReportedAsPacingWroteIt() {
+		PacingThirdPartyStatusV1 result = mapper.toV1(new PacingThirdPartyStatus(
+				true, "ready", "2026-10-09T12:00:00.000Z", 1200, List.of("Spring Sale", "Autumn")));
+
+		assertThat(result.getFetchedAt()).isEqualTo("2026-10-09T12:00:00.000Z");
+		assertThat(result.getRowCount()).isEqualTo(1200);
+		assertThat(result.getCampaigns()).containsExactly("Spring Sale", "Autumn");
+	}
+
+	/**
+	 * A dashboard payload that differs only in its two CM360 fields - every other slot is the
+	 * minimum the mapper needs, so a failure above points at the field under test.
+	 *
+	 * @param thirdParty the configured CM360 blocks, or null
+	 * @param mappingsV3 the v3 mapping entities, or null
+	 * @return the payload to map
+	 */
+	PacingDashboardData dashboardDataWith(
+			List<Map<String, Object>> thirdParty, List<Map<String, Object>> mappingsV3) {
+		return new PacingDashboardData(
+				new PacingDashboardCampaign("nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30",
+						"USD", 1.0, "Live", null, null, List.of(), false),
+				Map.of(), List.of(), "2026-08-05",
+				null, null, null, null, null, null, null,
+				thirdParty, mappingsV3,
+				null, null, null, null, null, null, null, List.of());
+	}
+
+	@Test
+	void theCampaignPickerKeepsEverySpellingUntouched() {
+		// A saved source stores the campaign name verbatim, so trimming or case-folding it here would
+		// store a name the export does not have and the next fetch would match nothing.
+		PacingThirdPartyCampaigns src = new PacingThirdPartyCampaigns(true, List.of(
+				new PacingThirdPartyCampaign("  Spring Sale  ", "Weekly", "2026-07-01", 13_695_782L),
+				new PacingThirdPartyCampaign("autumn PUSH", null, null, null)), true);
+
+		PacingThirdPartyCampaignsV1 result = mapper.toV1(src);
+
+		assertThat(result.getStale()).isTrue();
+		assertThat(result.getCampaigns()).hasSize(2);
+		assertThat(result.getCampaigns().get(0).getName()).isEqualTo("  Spring Sale  ");
+		assertThat(result.getCampaigns().get(0).getReport()).isEqualTo("Weekly");
+		assertThat(result.getCampaigns().get(0).getLastSeen()).isEqualTo("2026-07-01");
+		assertThat(result.getCampaigns().get(0).getImp()).isEqualTo(13_695_782L);
+		// A campaign the export knows only by name still belongs in the picker.
+		assertThat(result.getCampaigns().get(1).getName()).isEqualTo("autumn PUSH");
+		assertThat(result.getCampaigns().get(1).getReport()).isNull();
+	}
+
+	@Test
+	void anAbsentCampaignListIsAnEmptyPickerRatherThanANull() {
+		PacingThirdPartyCampaignsV1 result =
+				mapper.toV1(new PacingThirdPartyCampaigns(true, null, false));
+
+		assertThat(result.getCampaigns()).isEmpty();
+		assertThat(result.getStale()).isFalse();
+	}
+
+	@Test
+	void theCm360FileRidesThroughFieldForField() {
+		PacingThirdPartyData file = new PacingThirdPartyData(
+				"2026-10-09T12:00:00.000Z", List.of("Spring Sale"),
+				List.of(Map.of("report", "Weekly", "campaigns", List.of("Spring Sale"))),
+				"ready", 4, 13884, List.of(Map.of("campaign", "Spring Sale", "impressions", 10)));
+
+		PacingThirdPartyDataV1 result = mapper.toV1(file);
+
+		assertThat(result.getFetchedAt()).isEqualTo("2026-10-09T12:00:00.000Z");
+		assertThat(result.getCampaigns()).containsExactly("Spring Sale");
+		assertThat(result.getGroups()).hasSize(1);
+		assertThat(result.getStatus()).isEqualTo("ready");
+		assertThat(result.getDroppedDupes()).isEqualTo(4);
+		assertThat(result.getRowCount()).isEqualTo(13884);
+		// Rows stay opaque: they are ad-server columns that differ per report.
+		assertThat(result.getRows()).singleElement()
+				.satisfies(row -> assertThat(row).containsEntry("campaign", "Spring Sale"));
+	}
+
+	@Test
+	void shouldReadAProposalWithNoDimensionsAsAnEmptyListTest() {
+		// The contract makes `dimensions` required, and "nothing proposed" is a real answer - a caller
+		// must be able to read it without a null check. The notice is what explains it.
+		// Given:
+		PacingMappingSuggestions suggestions =
+				new PacingMappingSuggestions(true, null, "we need to add ai connection");
+
+		// When:
+		PacingMappingSuggestionsV1 result = mapper.toV1(suggestions);
+
+		// Then:
+		assertThat(result.getDimensions()).isEmpty();
+		assertThat(result.getNotice()).isEqualTo("we need to add ai connection");
+	}
+
+	@Test
+	void shouldCarryAProposedDimensionWithItsValuesAndAliasesTest() {
+		// Given:
+		PacingMappingSuggestions suggestions = new PacingMappingSuggestions(true, List.of(
+				new PacingMappingSuggestedDimension("Format", List.of(
+						new PacingMappingSuggestedValue("CTV", List.of("connected tv")),
+						// A value with no aliases is normal, and must not come out null.
+						new PacingMappingSuggestedValue("Display", null)))), null);
+
+		// When:
+		PacingMappingSuggestionsV1 result = mapper.toV1(suggestions);
+
+		// Then:
+		assertThat(result.getNotice()).isNull();
+		assertThat(result.getDimensions()).singleElement().satisfies(d -> {
+			assertThat(d.getName()).isEqualTo("Format");
+			assertThat(d.getValues()).hasSize(2);
+			assertThat(d.getValues().get(0).getValue()).isEqualTo("CTV");
+			assertThat(d.getValues().get(0).getAliases()).containsExactly("connected tv");
+			assertThat(d.getValues().get(1).getAliases()).isEmpty();
+		});
+	}
+
+	@Test
+	void shouldReadAProposedDimensionWithNoValuesAsAnEmptyListTest() {
+		// Given:
+		PacingMappingSuggestions suggestions = new PacingMappingSuggestions(
+				true, List.of(new PacingMappingSuggestedDimension("Format", null)), null);
+
+		// When:
+		PacingMappingSuggestionsV1 result = mapper.toV1(suggestions);
+
+		// Then:
+		assertThat(result.getDimensions()).singleElement()
+				.satisfies(d -> assertThat(d.getValues()).isEmpty());
 	}
 }

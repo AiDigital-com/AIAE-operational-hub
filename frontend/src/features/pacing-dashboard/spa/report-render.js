@@ -45,6 +45,9 @@ import {
   expressionReadsConversions, primaryCvInView,
 } from './widget-data.js';
 import { dimAxisLabel, dimSourceNote } from './dim-sources-norm.js';
+import { buildLineJoin, LINE_METRICS } from './line-join.js';
+import { buildGroupLabelJoin } from './group-label-join.js';
+import PacingCore from './pacing-core.js';
 // The two halves of §5.3's KPI addition (section-widget parity, 2026-09-04): which line items
 // a cell is a reading of, and which alert corridor judges its distance from its target. Both
 // are the LEGACY Targets band's own — `kpi-basis.js` is the band's four gates, and
@@ -1372,17 +1375,25 @@ export function buildReportChartModel(view, spec, controlState, data, campCtx) {
     windowScalars = out.windowScalars;
     for (const key of Object.keys(out.errors)) errors[idByKey[key]] = out.errors[key];
     // The plan behind each CATEGORY, published for the second pass (§2.4): the same objects
-    // the bars were drawn from, keyed by the label the axis prints — which is what
-    // `chartWithCm` joins on. Only a dimension axis has one; a line item declares no
-    // dimension target and has no CM360 join either (§2.2).
+    // the bars were drawn from — keyed by the label the axis prints on a dimension axis, and
+    // by the line item id on a line item axis, where names repeat
+    // (docs/2026-09-29-cm360-by-line.md §3). That key is what `chartWithCm` joins on.
     if (xType === 'dim') {
       cmCategoryPlans = new Map(out.categories.map((cat) => [String(cat.label), cat.plan]));
       cmCategoryFieldSet = out.fieldSet || null;
+    } else if (xType === 'li') {
+      cmCategoryPlans = new Map(out.categories.filter((cat) => cat.liId != null)
+        .map((cat) => [String(cat.liId), cat.linePlan]));
+      cmCategoryFieldSet = out.fieldSet || null;
     }
+    // A line item axis carries each bar's line id beside its name, for the CM360 join — only
+    // where a CM360 series will read it, so every other chart keeps the rows it had.
+    const lineIds = xType === 'li' && series.some((s) => s.cm);
     const atKey = Object.create(null);
     engineDefs.forEach((d, i) => { atKey[d.id] = i; });
     rows = out.categories.map((cat) => {
-      const row = { [ROW_X]: cat.label, ...(cat.highlightKey ? { __highlightKey: cat.highlightKey } : null) };
+      const row = { [ROW_X]: cat.label, ...(cat.highlightKey ? { __highlightKey: cat.highlightKey } : null),
+        ...(lineIds && cat.liId != null ? { __liId: String(cat.liId) } : null) };
       if (cat.others) row[ROW_OTHERS] = true;
       series.forEach((e, si) => {
         const f = feeds[si];
@@ -1528,6 +1539,9 @@ export function buildReportChartModel(view, spec, controlState, data, campCtx) {
     // switch), over this Widget's own window.
     note: sources && xType === 'dim' ? dimSourceCoverageNote(x.key, range, sources) : null,
     emptyNote: xType === 'dim' ? sourceFilterReason(sources, x.key, range) : null,
+    // The dimension a dimension axis runs down, for the CM360 join (value groups rename a value
+    // on one dimension). Sparse: every other axis is byte-identical.
+    ...(xType === 'dim' && x && x.key ? { xDimension: x.key } : null),
     errors,
     // The same five keys the table's `cmPlan` carries, so ONE `cmRowPlanOf` serves both second
     // passes (§2.4), and every member that carries a plan is a `{ scalars, unplanned }` pair —
@@ -3055,13 +3069,39 @@ export function buildCmReader(dataset, projection) {
   for (const r of (projection.pivot && projection.pivot.rows) || []) {
     tuples.set(tupleLabel(r.key), r);
   }
+  // …unless the rows run down a dimension some line groups (value groups, spec 2026-10-02):
+  // those rows carry a group's name on one line and the delivered value on another, so the
+  // pivot is read again with each row under its own line's name (mapping/group-label-join.js).
+  // Asked per dimension, built once; null where nothing is renamed, and the plain pivot answers.
+  const groupJoins = new Map();
+  const groupJoinFor = (dimKey) => {
+    if (!dimKey) return null;
+    if (groupJoins.has(dimKey)) return groupJoins.get(dimKey);
+    const index = dataset.dimGroupIndex || null;
+    const grouped = !!index && Object.keys(index).some((li) => index[li] && index[li][dimKey]);
+    const join = grouped ? buildGroupLabelJoin(dataset, {
+      dims: projection.selectedDims || [],
+      range: want.range || null,
+      nameOf: (li, value) => PacingCore.dimGroupNameOf(index, li, dimKey, value),
+    }) : null;
+    groupJoins.set(dimKey, join);
+    return join;
+  };
+
+  // The line join (docs/2026-09-29-cm360-by-line.md): built from the DATASET alone — its
+  // groups use every join dimension, not the breakdown this projection picked, and no focus
+  // narrows it (the label join is not narrowed either) — and cut to this projection's window.
+  const lines = buildLineJoin(dataset);
+  const range = want.range || null;
 
   return {
     atDate(metric, date) {
       const hit = datesFor(metric).get(String(date));
       return hit || null;
     },
-    atLabel(metric, label) {
+    atLabel(metric, label, dimKey = null) {
+      const grouped = groupJoinFor(dimKey);
+      if (grouped) return grouped.pairAt(metric, label);
       const r = tuples.get(String(label));
       if (!r) return null;
       return { delivery: r.delivery[metric], cm360: r.cm360[metric], delta: r.delta[metric] };
@@ -3074,7 +3114,46 @@ export function buildCmReader(dataset, projection) {
       for (const d of days) { delivery += finite(d.delivery); cm360 += finite(d.cm360); }
       return { delivery, cm360, delta: deltaRatio(cm360, delivery) };
     },
+    // One line over the window, and one line on one day: the pair, or null where the line has
+    // no place in the comparison at all. A line that shares a day with another keeps its
+    // delivery half and has no CM360 half; `lineReason` / `dayLineReason` say why.
+    atLine(metric, liId) { return lines ? lines.lineAt(metric, liId, range).pair : null; },
+    atDateLine(metric, date, liId) { return lines ? lines.dayAt(metric, date, liId).pair : null; },
+    lineReason(liId) { return lines ? lines.lineAt(LINE_METRICS[0], liId, range).reason : null; },
+    dayLineReason(date, liId) { return lines ? lines.dayAt(LINE_METRICS[0], date, liId).reason : null; },
+    /** What a Line item / Date × line item table of these row keys cannot put on a row. */
+    lineRemainder(grain, rowKeys) { return lines ? lines.remainder(range, grain, rowKeys) : null; },
+    // A dimension row whose CM360 lines with different value groups delivered on one day: why
+    // it prints a dash, and what the table's «Other CM360» row holds for it.
+    labelReason(label, dimKey) { const g = groupJoinFor(dimKey); return g ? g.reasonAt(label) : null; },
+    labelRemainder(dimKey, labels) { const g = groupJoinFor(dimKey); return g ? g.remainder(labels) : null; },
+    // The calendar a per-line window function runs down: the window, or with no window the
+    // dataset's own first and last day.
+    lineCalendar() { return lineCalendarOf(dataset, range); },
   };
+}
+
+/** Every day from the window's first to its last, or across the comparison's own dates when
+ *  the tile has no window. */
+function lineCalendarOf(dataset, range) {
+  let from = range && range.from;
+  let to = range && range.to;
+  if (!from || !to) {
+    for (const d of [...(dataset.deliveryDaily || []), ...(dataset.cm360Daily || [])]) {
+      if (!d || !d.date) continue;
+      if (!from || d.date < from) from = d.date;
+      if (!to || d.date > to) to = d.date;
+    }
+  }
+  if (!from || !to) return [];
+  const out = [];
+  const day = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (day <= end) {
+    out.push(day.toISOString().slice(0, 10));
+    day.setUTCDate(day.getUTCDate() + 1);
+  }
+  return out;
 }
 
 /**
@@ -3101,16 +3180,20 @@ export function cmReaderFor(dataset, projection) {
  * cmRowJoin(model, row) → which join this ROW has, and on what key, or null (§2.2).
  *
  * The chart and the table asked the same question in two shapes, and a third caller (the
- * highlight pass, stage 6) was about to ask it in a fourth. Three rows answer null, each for
- * its own reason and all for the same one — there is nothing on the CM360 side to match:
- *   · `li` and `dateLi`, where no layer between BigQuery and the panel holds a line item;
- *   · the «Others» fold, which is a fold of the tail and not a dimension value, so no tuple
- *     names it;
- *   · the residual, which is the delivery this dimension did not tag.
+ * highlight pass, stage 6) was about to ask it in a fourth. Five joins, one per kind of row:
+ *   · `date` and `label` (a mapping dimension's tuple), as the formulas design has them;
+ *   · `line` and `dateLine`, through the mapping's groups (docs/2026-09-29-cm360-by-line.md) —
+ *     keyed by the line item id and never by the printed name, which repeats;
+ *   · `lineOther`, the «Other CM360» row `tableWithCm` adds under line rows, which carries
+ *     its own pairs because it is the table's remainder rather than a place in the dataset.
+ * Two rows answer null, each for its own reason and both for the same one — there is nothing
+ * on the CM360 side to match: the «Others» fold, which is a fold of the tail and not a value;
+ * and a dimension's residual, the delivery this dimension did not tag.
  *
- * The chart carries its grain as `xType` and its key under `ROW_X`; the table carries
- * `rowType` and `key` (`tableRowKey`'s, built from the row's own date or bucket label, never
- * from the printed one). Both are read here so neither renderer has an opinion about it.
+ * The chart carries its grain as `xType` and its key under `ROW_X` (a line item axis carries
+ * the id beside it, as `__liId`); the table carries `rowType`, `key` (`tableRowKey`'s, built
+ * from the row's own date, line or bucket label, never from the printed one) and `liId`. Both
+ * are read here so neither renderer has an opinion about it.
  *
  * WHICH of the two is decided by the GRAIN field, never by asking the row what properties it
  * has: `key` is a legal NodeId and therefore a legal series id, and `rowKeysFor` escapes only
@@ -3120,19 +3203,122 @@ export function cmReaderFor(dataset, projection) {
 export function cmRowJoin(model, row) {
   if (!model || !row) return null;
   const grain = model.rowType || model.xType || 'date';
-  if (grain !== 'date' && grain !== 'dim') return null;
+  if (row[CM_OTHER_PAIRS]) return { join: 'lineOther', pairs: row[CM_OTHER_PAIRS] };
   if (row[ROW_OTHERS] || row.residual) return null;
+  if (grain === 'li') {
+    const liId = model.rowType ? row.liId : row.__liId;
+    return liId == null ? null : { join: 'line', key: String(liId) };
+  }
+  if (grain === 'dateLi') {
+    if (row.liId == null || typeof row.key !== 'string') return null;
+    const date = row.key.slice(0, row.key.indexOf('|'));
+    return { join: 'dateLine', key: row.key, date, liId: String(row.liId) };
+  }
+  if (grain !== 'date' && grain !== 'dim') return null;
   const key = model.rowType ? row.key : row[ROW_X];
   if (key == null) return null;
-  return { join: grain === 'date' ? 'date' : 'label', key: String(key) };
+  if (grain === 'date') return { join: 'date', key: String(key) };
+  // The dimension the rows run down, where the model names it: a value group renames a row on
+  // one dimension only (sparse, so a model without it joins exactly as before).
+  const dim = model.rowType ? model.rowDimension : model.xDimension;
+  return { join: 'label', key: String(key), ...(dim ? { dim } : null) };
+}
+
+/**
+ * cmRowsMatchNoDimension(model, dataset) → true when a dimension-row table or a dimension-axis
+ * chart holds CM360 and no dimension of the comparison's mapping carries any of its row values,
+ * on either side (2026-09-30). The label join (`atLabel`) can then never match a row, whatever
+ * the breakdown: CM360 has no such dimension, and the tile says so by name instead of blaming
+ * the breakdown. False on any other grain, for a view with no rows, and with no dataset.
+ */
+export function cmRowsMatchNoDimension(model, dataset) {
+  if (!model || !dataset) return false;
+  let keys;
+  let dimKey;
+  if (model.rowType === 'dim' && Array.isArray(model.columns) && model.columns.some((c) => c && c.cm)) {
+    keys = (model.rows || []).filter((r) => r && !r.residual && r.key != null).map((r) => String(r.key));
+    dimKey = model.rowDimension;
+  } else if (model.xType === 'dim' && Array.isArray(model.series) && model.series.some((s) => s && s.cm)) {
+    keys = (model.rows || []).filter((r) => r && !r[ROW_OTHERS] && r[ROW_X] != null).map((r) => String(r[ROW_X]));
+    dimKey = model.xDimension;
+  } else {
+    return false;
+  }
+  if (!keys.length) return false;
+  const values = mappingValuesOf(dataset);
+  // A value group's name is no mapping value, but its members can be (spec 2026-10-02): a row
+  // named by a group matches when one of its values does.
+  const members = groupMembersOf(dataset.dimGroupIndex, dimKey);
+  const memberHit = (k) => {
+    const of = members && members.get(k);
+    if (!of) return false;
+    for (const v of values) if (of.has(String(v).trim().toLowerCase())) return true;
+    return false;
+  };
+  return !keys.some((k) => values.has(k) || memberHit(k));
+}
+
+/** A dimension's group names → the folded values that read as them, over every line; null
+ *  without groups on it. */
+function groupMembersOf(index, dimKey) {
+  if (!index || !dimKey) return null;
+  let out = null;
+  for (const li of Object.keys(index)) {
+    const map = index[li] && index[li][dimKey];
+    if (!map) continue;
+    for (const folded of Object.keys(map)) {
+      if (!out) out = new Map();
+      const name = map[folded];
+      if (!out.has(name)) out.set(name, new Set());
+      out.get(name).add(folded);
+    }
+  }
+  return out;
+}
+
+/** Every value any dimension of the mapping gave a row, on either side, kept with the dataset. */
+const MAPPING_VALUES = new WeakMap();
+function mappingValuesOf(dataset) {
+  let out = MAPPING_VALUES.get(dataset);
+  if (out) return out;
+  out = new Set();
+  const classified = dataset.classified || {};
+  for (const cells of [classified.deliveryCells, classified.cm360Cells]) {
+    for (const row of Object.values(cells || {})) {
+      for (const v of Object.values(row || {})) if (v != null) out.add(String(v));
+    }
+  }
+  MAPPING_VALUES.set(dataset, out);
+  return out;
+}
+
+/** Where the «Other CM360» row keeps its pairs, by metric. A key no series id can take: a
+ *  NodeId does not start with an underscore. */
+const CM_OTHER_PAIRS = '__cmOther';
+
+/**
+ * cmJoinRead(cm, join, metric) → the pair ONE join answers for one metric, or null.
+ *
+ * The one place a join kind is turned into a reader call: the table, the chart, the share and
+ * the highlight pass (report-highlights.js) all read through here, so a sixth join is one arm
+ * here and not five. A reader without the line half (a stand-in in a test, a reader built
+ * before this file knew it) answers null for a line join rather than throwing.
+ */
+export function cmJoinRead(cm, join, metric) {
+  if (!cm || !join) return null;
+  switch (join.join) {
+    case 'date': return cm.atDate(metric, join.key);
+    case 'label': return cm.atLabel(metric, join.key, join.dim);
+    case 'line': return typeof cm.atLine === 'function' ? cm.atLine(metric, join.key) : null;
+    case 'dateLine': return typeof cm.atDateLine === 'function' ? cm.atDateLine(metric, join.date, join.liId) : null;
+    case 'lineOther': return (join.pairs && join.pairs[metric]) || null;
+    default: return null;
+  }
 }
 
 /** The `read(metric)` a per-row slot is evaluated through: one row's join, asked per metric.
  *  A row with no join answers null for every metric, which `cmEvalAt` turns into the dash. */
-const cmRowRead = (cm, join) => (metric) => (
-  join === null ? null
-    : join.join === 'date' ? cm.atDate(metric, join.key) : cm.atLabel(metric, join.key)
-);
+const cmRowRead = (cm, join) => (metric) => (join === null ? null : cmJoinRead(cm, join, metric));
 
 /** The absence rule itself is `cm-formula-context.js`'s (Step 3): this file imports
  *  `brick-data.js`, and stage 7's bricks evaluate through `cmEvalAt`, so defining it here
@@ -3170,14 +3356,15 @@ function chartWithCm(model, cm) {
   const errors = { ...model.errors };
   const plan = model.cmPlan || null;
   let rows = model.rows;
-  if (fed.length && xType === 'li') {
-    for (const s of fed) errors[s.id] = NO_CM_JOIN;
-  } else if (fed.length) {
+  let lineNote = null;
+  if (fed.length) {
     // §2.4's step 1, once per series and before any pair is read.
     for (const s of fed) {
       const bad = cmFieldRefusal(s.cm, plan ? plan.fieldSet : CM_NO_PLAN_FIELDS);
       if (bad) errors[s.id] = bad;
     }
+    const live = fed.filter((s) => !hasOwn(errors, s.id));
+    const lineAxis = xType === 'li' && live.length > 0;
     // A category carries its own plan now (§2.4, this stage), so there is no one answer for
     // the whole axis any more: the row loop reads its own through `cmRowPlanOf`, which hands a
     // date point the window's plan and a bar the object that bar was drawn from.
@@ -3189,16 +3376,40 @@ function chartWithCm(model, cm) {
       // every cm series at once.
       const read = cmRowRead(cm, cmRowJoin(model, r));
       // §2.4's second gate, one plan per category whatever the series ask for: the value's own
-      // declared target on a dimension axis, the window's on a date one. `rowPlan`, not
-      // `plan` — Stage 2 holds the whole block's `plan` at the top of this function.
-      const rowPlan = cmRowPlanOf(model, String(r[ROW_X]));
+      // declared target on a dimension axis, the line's own plan on a line item axis (keyed by
+      // its id, since names repeat), the window's on a date one. `rowPlan`, not `plan` — Stage 2
+      // holds the whole block's `plan` at the top of this function.
+      const rowPlan = cmRowPlanOf(model, String(xType === 'li' ? r.__liId : r[ROW_X]));
       for (const s of fed) {
         out[s.key] = hasOwn(errors, s.id) || cmPlanBlocked(s.cm, rowPlan)
           ? null
           : cmEvalAt(s.cm, read, rowPlan.scalars);
       }
+      // Why a line draws no CM360 bar, for its tooltip: the sentence the table's dash carries.
+      if (lineAxis && r.__liId != null && typeof cm.lineReason === 'function') {
+        const why = cmLineReasonText(cm.lineReason(String(r.__liId)));
+        if (why) out[CM_ROW_REASON] = why;
+      }
+      // …and why a value draws none where value groups split it (spec 2026-10-02).
+      if (xType === 'dim' && model.xDimension && r[ROW_X] != null && typeof cm.labelReason === 'function') {
+        const why = cmLineReasonText(cm.labelReason(String(r[ROW_X]), model.xDimension));
+        if (why) out[CM_ROW_REASON] = why;
+      }
       return out;
     });
+    // A chart has no «Other CM360» bar (§3), so what a Line item table would put there is left
+    // out here, and the note under the chart says how much, after the first CM360 series.
+    if (lineAxis && typeof cm.lineRemainder === 'function') {
+      const metric = cmMetricsOf(live[0].cm).find((m) => LINE_METRICS.includes(m)) || LINE_METRICS[0];
+      const rem = cm.lineRemainder('li', model.rows.filter((r) => r.__liId != null).map((r) => String(r.__liId)));
+      lineNote = rem ? cmChartLeftOutNote(rem, metric) : null;
+    }
+    if (xType === 'dim' && model.xDimension && live.length && typeof cm.labelRemainder === 'function') {
+      const metric = cmMetricsOf(live[0].cm).find((m) => LINE_METRICS.includes(m)) || LINE_METRICS[0];
+      const rem = cm.labelRemainder(model.xDimension,
+        model.rows.filter((r) => !r[ROW_OTHERS] && r[ROW_X] != null).map((r) => String(r[ROW_X])));
+      lineNote = rem ? cmChartGroupNote(rem, metric) : null;
+    }
   }
   // The stack is summed over what is DRAWN, and on this path a segment that had no numbers
   // when the model was built has them now. A total left from the build would print one
@@ -3215,7 +3426,8 @@ function chartWithCm(model, cm) {
       : cmEvalAt(g.cm, (metric) => cm.totals(metric), plan ? plan.window.scalars : null);
     return { ...g, value };
   });
-  return { ...model, rows, guides, errors, cmPending: false };
+  return { ...model, rows, guides, errors,
+    ...(lineNote ? { note: model.note ? `${model.note} ${lineNote}` : lineNote } : null), cmPending: false };
 }
 
 /** The table's half: every cm-fed column, on the grain its rows run down — and every cm-fed
@@ -3261,13 +3473,16 @@ function tableWithCm(model, cm) {
   const colErrors = { ...model.colErrors };
   const shareOut = () => (model.shareColumnId && hasOwn(colErrors, model.shareColumnId)
     ? { shareError: colErrors[model.shareColumnId] } : null);
-  if (rowType !== 'date' && rowType !== 'dim') {
+  // Line rows join through the mapping's groups (docs/2026-09-29-cm360-by-line.md); a grain
+  // this file does not know (a stored config nobody can author) still refuses.
+  const lineGrain = rowType === 'li' || rowType === 'dateLi';
+  if (rowType !== 'date' && rowType !== 'dim' && !lineGrain) {
     for (const c of fed) colErrors[c.id] = NO_CM_JOIN;
     return { ...model, columns, colErrors, ...shareOut(),
-      // A CM-fed share has exactly the two joins a CM-fed cell has, and a line item is
-      // neither. It says so, for the reason the column beside it does: a table of blank
-      // percentages with nothing on it to explain them is the one thing worse than a refusal.
-      // It comes last, because a CM-fed share is never also a `shareColumnId` one.
+      // A CM-fed share has exactly the joins a CM-fed cell has. It says so, for the reason the
+      // column beside it does: a table of blank percentages with nothing on it to explain them
+      // is the one thing worse than a refusal. It comes last, because a CM-fed share is never
+      // also a `shareColumnId` one.
       ...(model.shareCm ? { shareError: NO_CM_JOIN } : null),
       cmPending: false };
   }
@@ -3289,19 +3504,50 @@ function tableWithCm(model, cm) {
   // date row the window's plan and a dimension row the object the plan cell beside it printed.
   const metrics = [];
   for (const c of live) for (const m of cmMetricsOf(c.cm)) if (!metrics.includes(m)) metrics.push(m);
+  // The line grains' remainder (§2.5), asked once for the whole table: the «Other CM360» row it
+  // becomes, and the sentence under the table for the CM360 no row holds. Both follow the first
+  // CM360 value the table reads, the one a reader meets first.
+  let sourceRows = model.rows;
+  let lineNote = null;
+  if (lineGrain && typeof cm.lineRemainder === 'function') {
+    const firstMarker = fed.length ? fed[0].cm : model.shareCm;
+    const metric = cmMetricsOf(firstMarker).find((m) => LINE_METRICS.includes(m)) || LINE_METRICS[0];
+    const rem = cm.lineRemainder(rowType, model.rows.filter((r) => r.liId != null).map((r) => r.key));
+    if (rem) {
+      const other = cmOtherRow(model.columns, rem, metric);
+      if (other) sourceRows = [...model.rows, other];
+      lineNote = cmLeftOutNote(rem, metric);
+    }
+  }
+  // A dimension that has value groups (spec 2026-10-02): the CM360 lines with different groups
+  // delivered on one day cannot go to either row, so it gets the same «Other CM360» row, with
+  // the CM360 of the rows that print a dash for it.
+  if (rowType === 'dim' && model.rowDimension && typeof cm.labelRemainder === 'function') {
+    const firstMarker = fed.length ? fed[0].cm : model.shareCm;
+    const metric = cmMetricsOf(firstMarker).find((m) => LINE_METRICS.includes(m)) || LINE_METRICS[0];
+    const rem = cm.labelRemainder(model.rowDimension,
+      model.rows.filter((r) => !r.residual && r.key != null).map((r) => String(r.key)));
+    const other = rem ? cmOtherRow(model.columns, rem, metric, 'group') : null;
+    if (other) sourceRows = [...model.rows, other];
+  }
   // Each row's joined pairs, by the row's key: what the Totals row and `retotal` re-sum.
   const pairs = new Map();
-  const rows = model.rows.map((r) => {
+  const rows = sourceRows.map((r) => {
     const cells = { ...r.cells };
     const own = new Map();
     pairs.set(r.key, own);
     // The row's ONE join, whatever the column asks for: `cmRowJoin` reads the row's identity
     // rather than its printed label, and answers null for the rows that name no tuple at all.
     const join = cmRowJoin(model, r);
-    for (const m of metrics) {
-      own.set(m, !join ? null
-        : join.join === 'date' ? cm.atDate(m, join.key) : cm.atLabel(m, join.key));
-    }
+    for (const m of metrics) own.set(m, !join ? null : cmJoinRead(cm, join, m));
+    // Why a line's CM360 cells print the dash, said on the cells themselves (the `cvReason`
+    // pattern): it shares a day with another line, or the mapping gives it no CM360 at all.
+    const why = !join ? null
+      : join.join === 'line' && typeof cm.lineReason === 'function' ? cm.lineReason(join.key)
+        : join.join === 'dateLine' && typeof cm.dayLineReason === 'function' ? cm.dayLineReason(join.date, join.liId)
+          : join.join === 'label' && typeof cm.labelReason === 'function' ? cm.labelReason(join.key, join.dim)
+            : null;
+    const cmReason = why ? cmLineReasonText(why) : null;
     // §2.4's second gate reads ONE plan per row, whatever the row's fed columns ask for: a
     // dimension row its own declared target, a date row the window's. A row that declared
     // NOTHING has no target to pace against, and inside arithmetic an absent one is 0 — which
@@ -3313,7 +3559,7 @@ function tableWithCm(model, cm) {
         ? null
         : cmEvalAt(c.cm, (m) => own.get(m), rowPlan.scalars);
     }
-    return { ...r, cells };
+    return { ...r, cells, ...(cmReason ? { cmReason } : null) };
   });
 
   // AGGREGATE, then compute (§2.2's `total` row) — the legacy totals rule, and the only honest
@@ -3422,7 +3668,109 @@ function tableWithCm(model, cm) {
   return { ...model, columns: withExtremes(columns, withShares), rows: sortReportRows(withShares, model.sort), totals,
     colErrors, ...shareOut(), ...(shareBad ? { shareError: shareBad } : null),
     ...planColumnsOut(model, colErrors),
+    ...(lineNote ? { note: lineNote } : null),
     ...(retotal ? { retotal } : null), cmPending: false };
+}
+
+/* ── the line grains' remainder (docs/2026-09-29-cm360-by-line.md §2.3, §2.5) ── */
+
+const CM_OTHER_KEY = '__cm_other';
+const CM_OTHER_LABEL = 'Other CM360';
+/** The key a Line item chart row carries its CM360 reason on, for the tooltip (ReportChart). */
+export const CM_ROW_REASON = '__cmReason';
+const CM_METRIC_WORDS = Object.freeze({ impressions: 'impressions', clicks: 'clicks', completions: 'completions' });
+const fmtCount = (n) => Math.round(n).toLocaleString('en-US');
+
+/** «LI 1», «LI 1 and LI 2», «LI 1, LI 2 and LI 3», «LI 1, LI 2, LI 3 and 2 more». */
+function lineIdList(ids) {
+  const names = ids.map((id) => `LI ${id}`);
+  if (names.length > 3) return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+}
+
+/** The sentence a line's CM360 dash carries (§2.3), from the line join's reason. */
+export function cmLineReasonText(reason) {
+  if (!reason) return null;
+  switch (reason.kind) {
+    case 'shared':
+      return `CM360 cannot tell this line from ${lineIdList(reason.with)} ${reason.day ? 'on this day' : 'on some days'}: `
+        + 'they fall into the same mapping group. A mapping dimension that tells them apart would split them.';
+    case 'noPlacement': return "No CM360 placement falls into this line's mapping group.";
+    case 'unmapped': return 'This line is not classified in the mapping.';
+    case 'noDelivery': return 'This line has no delivery for CM360 to be matched against.';
+    case 'groupShared': {
+      const values = reason.values.length > 1 ? `${reason.values[0]} and ${reason.values.length - 1} more` : reason.values[0];
+      return `CM360 for ${values} cannot be split on some days: ${lineIdList(reason.lines)} delivered it on the same day, `
+        + 'and value groups put it under different names on these lines.';
+    }
+    default: return null;
+  }
+}
+
+/**
+ * The «Other CM360» row (§2.5), or null while it would be 0 in every metric. It is a
+ * residual row — last whatever the sort, grey, no click, never a best or worst value — whose
+ * pairs ride on it (`cmRowJoin` reads them), with no delivery half: that delivery already
+ * stands in the line rows above it, and the Totals row adds both up once.
+ */
+export function cmOtherRow(columns, rem, metric, kind = 'line') {
+  if (!LINE_METRICS.some((m) => rem[m] && rem[m].other.cm360 > 0)) return null;
+  const pairs = {};
+  for (const m of LINE_METRICS) pairs[m] = { delivery: null, cm360: rem[m].other.cm360, delta: null };
+  const o = rem[metric].other;
+  const word = CM_METRIC_WORDS[metric] || metric;
+  const count = (n) => `${fmtCount(n)} ${n === 1 ? word.replace(/s$/, '') : word}`;
+  const parts = [];
+  // A dimension with value groups (`kind` 'group') says it in the words of its rows.
+  if (kind === 'group') {
+    if (o.shared > 0) parts.push(`${count(o.shared)} that lines reading the value differently delivered on the same day`);
+    if (o.noDay > 0) parts.push(`${count(o.noDay)} on days none of those lines delivered`);
+    if (o.dashed > 0) parts.push(`${count(o.dashed)} of the rows that show a dash for this reason`);
+  } else {
+    if (o.shared > 0) parts.push(`${count(o.shared)} shared by several lines`);
+    if (o.offRow > 0) parts.push(`${count(o.offRow)} on days a line did not deliver`);
+  }
+  const what = kind === 'group' ? 'one row' : 'one line';
+  return {
+    key: CM_OTHER_KEY, label: CM_OTHER_LABEL, residual: true, cmOther: true, isDate: false, liId: null,
+    sub: null, subId: null, subNote: null,
+    labelTitle: parts.length ? `CM360 that cannot be put on ${what}: ${parts.join(', ')}.` : CM_OTHER_LABEL,
+    [CM_OTHER_PAIRS]: pairs,
+    cells: Object.fromEntries(columns.map((c) => [c.id, null])),
+  };
+}
+
+/** A part of the period's CM360 in words: never «0%» for a little, never «100%» for nearly all. */
+export function cmShareWords(part, total) {
+  const share = part / total;
+  if (share < 0.01) return 'Less than 1%';
+  if (share > 0.99 && share < 1) return 'More than 99%';
+  return `${Math.round(share * 100)}%`;
+}
+
+/** The sentence under a line table for the CM360 no row holds (§2.5), or null for none. */
+function cmLeftOutNote(rem, metric) {
+  const lo = rem[metric] && rem[metric].leftOut;
+  if (!lo || !(lo.cm360 > 0) || !(lo.total > 0)) return null;
+  return `${cmShareWords(lo.cm360, lo.total)} of CM360 ${CM_METRIC_WORDS[metric] || metric} in this period belong to no line in this table, so it leaves them out.`;
+}
+
+/** The sentence under a Line item chart for the CM360 no bar holds, or null for none: the
+ *  table's «Other CM360» and its left-out part together, since the chart draws neither. */
+function cmChartLeftOutNote(rem, metric) {
+  const r = rem[metric];
+  if (!r || !(r.leftOut.total > 0)) return null;
+  const off = r.other.cm360 + r.leftOut.cm360;
+  if (!(off > 0)) return null;
+  return `${cmShareWords(off, r.leftOut.total)} of CM360 ${CM_METRIC_WORDS[metric] || metric} in this period cannot be put on one line of this chart, so it leaves them out.`;
+}
+
+/** The sentence under a dimension chart for the CM360 value groups split (spec 2026-10-02):
+ *  a chart has no «Other CM360» bar, so it says how much it leaves out. */
+function cmChartGroupNote(rem, metric) {
+  const r = rem[metric];
+  if (!r || !(r.leftOut.total > 0) || !(r.other.cm360 > 0)) return null;
+  return `${cmShareWords(r.other.cm360, r.leftOut.total)} of CM360 ${CM_METRIC_WORDS[metric] || metric} in this period cannot be put on one value of this chart, because value groups name it differently on its lines, so it leaves them out.`;
 }
 
 /** The KPI's half: window totals for the value, the target and the support line, and the
@@ -3488,17 +3836,21 @@ function cmWindowFnOf(marker) {
  * rides the arrays (`cmSeriesContext`) and the caller's rule is the last line: a day the mask
  * calls absent is null, never a zero.
  *
- * The plan half is the WINDOW's (§2.4: a date row reads the window's plan, never a row's).
- * Every `cmPlan.window` this file builds carries `unplanned: false` (a campaign's own plan is
- * never undeclared), so a formula naming a plan field always reads `plan.scalars` below; there
- * is no window-level twin of the engine's per-row `unplanned && planCols.has(c.id) ? null`.
+ * The plan half is the WINDOW's on date rows (§2.4: a date row reads the window's plan, never a
+ * row's) and the LINE's on Date × line item rows, where each line runs its own calendar
+ * (docs/2026-09-29-cm360-by-line.md §3). Both carry `unplanned: false`, so a formula naming a
+ * plan field always reads `plan.scalars` below; there is no window-level twin of the engine's
+ * per-row `unplanned && planCols.has(c.id) ? null`.
+ *
+ * `readAt(metric, day)` is the one join the order is read through: the date join, or one
+ * line's day join.
  */
-function cmWindowValues(marker, cm, order, plan) {
+function cmWindowValues(marker, readAt, order, plan) {
   const out = new Map();
   const pairsByMetric = new Map();
   for (const read of marker.reads) {
     if (pairsByMetric.has(read.metric)) continue;
-    pairsByMetric.set(read.metric, order.map((key) => cm.atDate(read.metric, key)));
+    pairsByMetric.set(read.metric, order.map((key) => readAt(read.metric, key)));
   }
   const got = evaluateMaskedSeries(marker.ast, cmSeriesContext(pairsByMetric, plan ? plan.scalars : null));
   order.forEach((key, i) => out.set(key, got.present[i] ? got.values[i] : null));
@@ -3549,7 +3901,7 @@ function applyCmWindowSeries(model, cm) {
   const live = windowed.filter((s) => !hasOwn(model.errors, s.id));
   if (!live.length) return model;
   const plan = (model.cmPlan && model.cmPlan.window) || null;
-  const byKey = new Map(live.map((s) => [s.key, cmWindowValues(s.cm, cm, dates, plan)]));
+  const byKey = new Map(live.map((s) => [s.key, cmWindowValues(s.cm, (m, d) => cm.atDate(m, d), dates, plan)]));
   const rows = model.rows.map((r) => {
     const out = { ...r };
     for (const s of live) {
@@ -3642,6 +3994,37 @@ function applyCmWindowColumns(model, cm) {
   // words for its own refused share, and the rows arrive here already divided.
   const unshared = (rows) => (shareBad ? rows.map((r) => ({ ...r, share: null })) : rows);
   const shareOut = shareBad ? { shareError: shareBad } : null;
+  // Date × line item (docs/2026-09-29-cm360-by-line.md §3): each line runs its own calendar,
+  // the window's, as the delivery engine runs that grain's window functions, on its own plan,
+  // and a (date, line) row prints its line's value. A shared day is an absent day to the run,
+  // exactly as a day with no join is on date rows.
+  if (model.rowType === 'dateLi' && typeof cm.atDateLine === 'function' && typeof cm.lineCalendar === 'function') {
+    if (!live.length) return model;
+    const dates = cm.lineCalendar();
+    const firstKeyOf = new Map();
+    for (const r of model.rows) if (r.liId != null && !firstKeyOf.has(String(r.liId))) firstKeyOf.set(String(r.liId), r.key);
+    const byCol = new Map(live.map((c) => [c.id, new Map()]));
+    for (const [liId, anyKey] of firstKeyOf) {
+      // Every row of one line stands on the same published plan object (widget-data.js), so
+      // any of its keys reads it.
+      const linePlan = cmRowPlanOf(model, anyKey);
+      for (const c of live) {
+        const got = cmWindowValues(c.cm, (m, d) => cm.atDateLine(m, d, liId), dates, linePlan);
+        const into = byCol.get(c.id);
+        for (const [date, v] of got) into.set(`${date}|${liId}`, v);
+      }
+    }
+    const rows = unshared(model.rows.map((r) => {
+      const cells = { ...r.cells };
+      for (const c of live) {
+        const got = byCol.get(c.id);
+        cells[c.id] = got.has(r.key) ? got.get(r.key) : null;
+      }
+      return { ...r, cells };
+    }));
+    return { ...model, columns: withExtremes(model.columns, rows),
+      rows: sortReportRows(rows, model.sort), ...cmWindowTotals(model, live), ...shareOut };
+  }
   if ((model.rowType || 'date') !== 'date') {
     const colErrors = { ...model.colErrors };
     for (const c of windowed) {
@@ -3664,7 +4047,7 @@ function applyCmWindowColumns(model, cm) {
   if (!order) return model;
   if (!live.length) return model;
   const plan = (model.cmPlan && model.cmPlan.window) || null;
-  const byCol = new Map(live.map((c) => [c.id, cmWindowValues(c.cm, cm, order, plan)]));
+  const byCol = new Map(live.map((c) => [c.id, cmWindowValues(c.cm, (m, d) => cm.atDate(m, d), order, plan)]));
   const rows = unshared(model.rows.map((r) => {
     const cells = { ...r.cells };
     for (const c of live) {

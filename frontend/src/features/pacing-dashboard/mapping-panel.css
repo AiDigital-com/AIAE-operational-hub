@@ -1,0 +1,778 @@
+/* Settings → Mapping. Follows the data panel's spacing and type scale so the two tabs of one
+   drawer do not read as two products; only the value table is new, and it is a table because the
+   two match counts beside each row are the thing a user is actually reading. */
+
+.pmap__section {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-subtle, #e6e8ec);
+}
+.pmap__section:last-child { border-bottom: 0; }
+
+.pmap__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pmap__heading {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pmap__subheading {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}
+
+.pmap__hint {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.pmap__hint--block { display: block; margin: 8px 0 0; }
+
+.pmap__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pmap__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pmap__tab--active {
+  border-color: var(--accent, #2f46ff);
+  color: var(--accent, #2f46ff);
+}
+
+.pmap__count {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+
+/* One row of controls. Every child is a labelled field or a button, and they share a baseline:
+   a bare button next to label-stacked inputs sits on the text, not on the input. */
+.pmap__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.pmap__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.pmap__label {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+
+.pmap__field input,
+.pmap__field select {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  font-size: 13px;
+  /* background-COLOR, not the shorthand: the app's global select rule paints its chevron as a
+     background-image, and `background:` here would wipe it and leave a box with no affordance. */
+  background-color: var(--surface, #fff);
+  color: inherit;
+}
+/* Room for that chevron. */
+.pmap__field select { padding-right: 28px; }
+
+.pmap__add,
+.pmap__remove {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pmap__remove { color: var(--text-muted, #6b7280); }
+
+.pmap__badge {
+  align-self: flex-end;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--surface-muted, #f3f4f6);
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+
+.pmap__dim {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+}
+
+.pmap__values {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pmap__values th {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+}
+.pmap__values td { padding: 3px 8px 3px 0; }
+.pmap__values input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.pmap__values input[readonly] { background: var(--surface-muted, #f3f4f6); }
+
+.pmap__num { text-align: right; width: 72px; font-variant-numeric: tabular-nums; }
+
+/* A value that catches both sides is the only kind that bridges. Marked with a background tint
+   and a weight change - never a left-edge stripe (project rule). */
+.pmap__vrow--bridges td { background: var(--success-subtle, #eefaf2); }
+.pmap__vrow--bridges .pmap__num { font-weight: 600; }
+
+.pmap__sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+}
+.pmap__side { flex: 1 1 260px; min-width: 220px; }
+
+.pmap__samples {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: auto;
+  color: var(--text-muted, #6b7280);
+}
+.pmap__samples li { white-space: nowrap; }
+
+@media (prefers-color-scheme: dark) {
+  .pmap__values input[readonly],
+  .pmap__badge { background: rgba(255, 255, 255, 0.06); }
+  .pmap__vrow--bridges td { background: rgba(46, 160, 97, 0.16); }
+}
+
+/* ── the token pool ──────────────────────────────────────────────────────────────────────────
+   Chips are drag sources, tinted by the side a word was mined from, reusing the same status
+   tokens the rest of this product does. Subtle background fills, never a stripe (project rule).
+   `both` deliberately gets NO tint and keeps the neutral chip surface: it is the common case for
+   a word worth taking, and colouring it too would make the pool read as three alarms. */
+
+.pmap__legend { display: inline-flex; gap: 12px; align-items: center; }
+
+.pmap__lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+  white-space: nowrap;
+}
+.pmap__lg::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.pmap__lg--delivery::before { background: var(--status-blue, #0009dc); }
+.pmap__lg--cm360::before { background: var(--status-green, #78b41d); }
+.pmap__lg--both::before { background: var(--border-hover, rgba(10, 22, 55, 0.22)); }
+
+.pmap__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-top: 10px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.pmap__tok {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid var(--border-soft, #e6e8ec);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text-primary, inherit);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+.pmap__tok:active { cursor: grabbing; }
+
+.pmap__tok--delivery { background: var(--status-blue-dim); border-color: var(--status-blue-bold); }
+.pmap__tok--cm360 { background: var(--status-green-dim); border-color: var(--status-green-bold); }
+/* `both` keeps the neutral chip surface - no rule, on purpose. */
+
+.pmap__tok-cnt { color: var(--text-muted, #6b7280); font-size: 10.5px; margin-left: 4px; }
+
+/* "CM360 not pulled yet" - the one thing in this strip that is a call to action. */
+.pmap__poolhint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--status-amber, #cf911d);
+  background: var(--status-amber-dim);
+  border: 1px solid var(--status-amber-bold);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* A dimension accepting a chip. Full-box outline, not a side bar. */
+.pmap__dim--dropover {
+  outline: 2px solid var(--accent, #2f46ff);
+  outline-offset: 1px;
+  border-color: var(--accent, #2f46ff);
+}
+
+/* ── the reach line ──────────────────────────────────────────────────────────────────────── */
+
+.pmap__fx {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+.pmap__fx-ok { color: var(--status-green, #78b41d); font-weight: 600; }
+/* Amber, not red: a short CM360 side is a thing to look at, not a failure. */
+.pmap__fx-miss { color: var(--status-amber, #cf911d); font-weight: 600; }
+.pmap__fx-auto { font-style: italic; }
+
+/* ── the row tables ──────────────────────────────────────────────────────────────────────────
+   One row per thing the comparison will see, one column per dimension. The cell colour carries
+   the whole message, so it is the only thing tinted: amber = the engine could not decide and
+   this row will land in "Unmapped"; green = it decided; neutral = a human overruled it. Fills,
+   never edge stripes (project rule). */
+
+.pmap__tabs { display: inline-flex; gap: 6px; align-self: flex-end; }
+
+.pmap__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  height: 32px;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  white-space: nowrap;
+}
+
+.pmap__rowswrap {
+  margin-top: 12px;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+}
+
+.pmap__rows {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pmap__rows th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+  background: var(--surface-muted, #f3f4f6);
+  white-space: nowrap;
+}
+.pmap__rows td {
+  padding: 4px 10px;
+  border-top: 1px solid var(--border-subtle, #e6e8ec);
+  vertical-align: middle;
+}
+
+/* Long placement strings must not stretch the table; the full text is in the title. */
+.pmap__rowname {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pmap__cell {
+  display: inline-block;
+  max-width: 160px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft, #e6e8ec);
+  border-radius: 6px;
+  background-color: var(--surface, #fff);
+  color: inherit;
+  font-size: 12px;
+}
+
+/* A cell that IS a dropdown keeps the app's own chevron (the global rule already sets
+   appearance: none), so these read as pickable rather than as read-only boxes. */
+select.pmap__cell {
+  width: 100%;
+  min-height: 26px;
+  height: 26px;
+  padding-right: 26px;
+  background-position: right 8px center;
+  cursor: pointer;
+}
+
+/* The engine decided. */
+.pmap__cell--auto { background-color: var(--status-green-dim); border-color: var(--status-green-bold); }
+/* Nobody decided - this is the work. */
+.pmap__cell--pick {
+  background-color: var(--status-amber-dim);
+  border-color: var(--status-amber);
+  color: var(--status-amber);
+  font-weight: 600;
+}
+/* A human overruled the engine; neutral, so it reads as settled rather than as a warning. */
+.pmap__cell--picked { background-color: var(--surface, #fff); border-color: var(--border-hover, rgba(10, 22, 55, 0.22)); }
+/* Nothing to pick: the structured field is the truth, or the month is per-day. */
+.pmap__cell--muted { border-color: transparent; color: var(--text-muted, #6b7280); font-style: italic; }
+.pmap__cell--dash { border-color: transparent; color: var(--text-muted, #6b7280); }
+
+/* The row-table control strip: tabs, a search box and a checkbox, all bare so they share a
+   baseline. The search box is capped - it filters a list of short labels, not prose. */
+.pmap__rowctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.pmap__search {
+  flex: 0 1 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background-color: var(--surface, #fff);
+  color: inherit;
+  font-size: 13px;
+}
+
+.pmap__rowctl .pmap__check,
+.pmap__rowctl .pmap__tabs { align-self: center; height: auto; }
+
+/* ── value chips ─────────────────────────────────────────────────────────────────────────────
+   A value is a chip, not a table row: most values carry no aliases, and a row of alias inputs
+   would make the common case look like unfinished work. Aliases live in a popover behind the
+   chip, and the badge says how many without opening it. */
+
+.pmap__vals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.pmap__val {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-soft, #e6e8ec);
+  border-radius: 999px;
+  background-color: var(--surface, #fff);
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Dropping a pool word ONTO a chip adds an alias; the whole chip outlines so the two drop
+   targets (chip = alias, card = new value) are told apart before the mouse is released. */
+.pmap__val--drop { outline: 2px solid var(--accent, #2f46ff); outline-offset: 1px; }
+
+.pmap__val-label {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pmap__val-badge {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background-color: var(--status-blue-dim);
+  color: var(--status-blue, #0009dc);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.pmap__val-x {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  color: var(--text-muted, #6b7280);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pmap__val-x:hover { color: var(--status-red, #cf4d59); }
+
+/* Free-text entry sits in the same row as the chips and shares their height, so the row does not
+   step when a value is added. */
+.pmap__valin {
+  flex: 0 1 140px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px dashed var(--border-soft, #e6e8ec);
+  border-radius: 999px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+
+/* ── the alias popover ───────────────────────────────────────────────────────────────────── */
+
+.pmap__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 220px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: var(--surface, #fff);
+  box-shadow: 0 8px 24px rgba(10, 22, 55, 0.14);
+  white-space: normal;
+}
+
+.pmap__pop-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.pmap__pop-aliases { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+
+.pmap__pop-in {
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  margin-top: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background-color: var(--surface, #fff);
+  color: inherit;
+  font-size: 12px;
+}
+
+/* ── the mapping list ────────────────────────────────────────────────────────────────────────
+   Cards, not tabs: choosing WHICH mapping to edit is its own step, and the counters are what a
+   person reads to tell them apart. */
+
+.pmap__ents { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+
+.pmap__ent {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: var(--surface, #fff);
+  cursor: pointer;
+}
+.pmap__ent:hover { border-color: var(--border-hover, rgba(10, 22, 55, 0.22)); }
+.pmap__ent:focus-visible { outline: 2px solid var(--accent, #2f46ff); outline-offset: 1px; }
+
+.pmap__ent-top { display: flex; align-items: center; gap: 8px; }
+.pmap__ent-name { font-size: 13px; font-weight: 600; flex: 1 1 auto; }
+input.pmap__ent-name {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background-color: var(--surface, #fff);
+  color: inherit;
+}
+.pmap__ent-counts { margin-top: 4px; font-size: 12px; color: var(--text-muted, #6b7280); }
+
+/* The second click of a two-click delete. Loud, because the first click was not. */
+.pmap__remove--confirm {
+  border-color: var(--status-red, #cf4d59);
+  color: var(--status-red, #cf4d59);
+  font-weight: 600;
+}
+
+.pmap__back {
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent, #2f46ff);
+  font-size: 13px;
+  cursor: pointer;
+  /* The title beside it takes the remaining width, so without this the way back wraps to two
+     lines the moment the name is long. */
+  white-space: nowrap;
+}
+
+/* ── suggestions ─────────────────────────────────────────────────────────────────────────── */
+
+.pmap__sugg {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--status-blue-bold);
+  border-radius: 8px;
+  background-color: var(--status-blue-dim);
+}
+.pmap__sugg-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+.pmap__sugg-card {
+  flex: 0 1 240px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: var(--surface, #fff);
+  cursor: grab;
+}
+.pmap__sugg-card:active { cursor: grabbing; }
+.pmap__sugg-card .pmap__add { margin-top: 8px; height: 26px; font-size: 12px; }
+
+/* ── the dimension grid ──────────────────────────────────────────────────────────────────── */
+
+/* Empty space in the grid accepts a word and turns it into a new dimension. */
+.pmap__grid { min-height: 56px; padding: 2px; border-radius: 8px; }
+.pmap__grid--drop { outline: 2px dashed var(--accent, #2f46ff); outline-offset: -2px; }
+
+.pmap__dim { cursor: grab; }
+.pmap__dim:active { cursor: grabbing; }
+/* The slot a dragged card would land in. A top edge, not a side rail. */
+.pmap__dim--slot { border-top: 2px solid var(--accent, #2f46ff); }
+
+/* ── the reference's layout ──────────────────────────────────────────────────────────────────
+   Three things make that screen read better than a stack of full-width blocks: section labels
+   are QUIET (small-caps, letterspaced) so the content is what carries weight; dimensions sit in
+   a GRID so a mapping is taken in at a glance instead of scrolled; and a fixed set of choices
+   is a segmented control, where which option is unavailable is itself information. */
+
+.pmap__label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #44506a);
+  white-space: nowrap;
+}
+/* The sentence after the label explains it and must not compete with it. */
+.pmap__label-sub {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted, #6b7280);
+}
+
+/* The editor's own title, beside the way back. */
+.pmap__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pmap__title:hover { border-color: var(--border-subtle, #e6e8ec); }
+.pmap__title:focus { border-color: var(--accent, #2f46ff); outline: none; }
+
+/* ── segmented control ───────────────────────────────────────────────────────────────────── */
+
+.pmap__seg-row { display: flex; align-items: center; gap: 14px; margin: 14px 0; }
+
+.pmap__seg {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: var(--surface-muted, #f3f4f6);
+}
+
+.pmap__seg-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #6b7280);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pmap__seg-btn--on {
+  background-color: var(--surface, #fff);
+  border-color: var(--border-subtle, #e6e8ec);
+  color: inherit;
+  font-weight: 600;
+}
+.pmap__seg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── the dimension grid ──────────────────────────────────────────────────────────────────── */
+
+.pmap__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.pmap__dim {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+/* The slot a dragged card would land in: a left edge would be a stripe, so the whole card
+   outlines instead (project rule). */
+.pmap__dim--slot { outline: 2px solid var(--accent, #2f46ff); outline-offset: -2px; border-top: 0; }
+
+/* The way in, as a slot of its own. */
+.pmap__dim--new {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  cursor: default;
+  text-align: center;
+}
+
+.pmap__dim-hd { display: flex; align-items: center; gap: 6px; }
+
+.pmap__dim-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pmap__dim-name:hover:not([readonly]) { border-color: var(--border-subtle, #e6e8ec); }
+.pmap__dim-name:focus { border-color: var(--accent, #2f46ff); outline: none; }
+.pmap__dim-name[readonly] { cursor: default; }
+
+/* What kind of thing this is - said once, quietly. */
+.pmap__tag,
+.pmap__kind {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background-color: var(--surface-muted, #f3f4f6);
+  color: var(--text-muted, #6b7280);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pmap__mini {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 6px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pmap__icon {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  color: var(--text-muted, #6b7280);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pmap__icon:hover { color: var(--status-red, #cf4d59); }
+
+/* The reach line closes the card, under the values it describes. */
+.pmap__fx { margin: auto 0 0; font-size: 11px; }
+
+/* ── the mapping cards ───────────────────────────────────────────────────────────────────── */
+
+.pmap__ent-counts {
+  display: flex;
+  gap: 14px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.pmap__chev { margin-left: 4px; color: var(--text-muted, #6b7280); font-size: 16px; }

@@ -24,6 +24,20 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNot
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPauseIntervalV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedDimension;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedValue;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaign;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestedDimensionV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestedValueV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSummaryProjectionV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
@@ -100,6 +114,15 @@ public class PacingDashboardContractMapper {
 				.creatives(data.creatives())
 				.conversions(data.conversions())
 				.dimSources(data.dimSources())
+				// Empty, not null, when nothing is configured: a CM360 widget reads this list to
+				// decide whether to ask for rows at all, and `null` would make that gate a
+				// null-check on every caller instead of a length check.
+				.thirdParty(data.thirdParty() == null ? List.of() : data.thirdParty())
+				// mappingsV3 keeps its null, unlike thirdParty right above. The two states are
+				// different answers: null means the pacing predates the v3 mapping model, an empty
+				// list means it was migrated and nothing is mapped yet. The compare screens show a
+				// different thing for each, so flattening one into the other would hide a migration.
+				.mappingsV3(data.mappingsV3())
 				.display(data.display() == null ? Map.of() : data.display())
 				.aggregate(data.aggregate() == null ? Map.of() : data.aggregate())
 				// Null is NOT flattened to an empty map, unlike display/aggregate above. Those two
@@ -468,6 +491,139 @@ public class PacingDashboardContractMapper {
 				.refreshId(status.refreshId())
 				.rowCount(status.rowCount() == null ? 0 : status.rowCount())
 				.latestDate(parseDate(status.latestDate()));
+	}
+
+	/**
+	 * Builds the body of {@code GET /api/v1/pacing/dashboards/:slug/third-party/status}.
+	 *
+	 * @param status where the CM360 read stands, as Pacing reported it
+	 * @return the generated {@link PacingThirdPartyStatusV1}
+	 */
+	public PacingThirdPartyStatusV1 toV1(PacingThirdPartyStatus status) {
+		return new PacingThirdPartyStatusV1()
+				// An unrecognised state is NOT passed through: the enum is the contract a widget
+				// switches on, and a value outside it would reach the UI as an unhandled branch. A
+				// state we cannot read means we cannot say anything, which is `none`.
+				.state(stateOrNone(status.state()))
+				.fetchedAt(status.fetchedAt())
+				.rowCount(status.rowCount())
+				.campaigns(status.campaigns());
+	}
+
+	/**
+	 * The four states a CM360 read can be in, with anything else read as {@code none}.
+	 *
+	 * @param state the raw state string from Pacing
+	 * @return the matching enum constant, or {@code NONE}
+	 */
+	PacingThirdPartyStatusV1.StateEnum stateOrNone(String state) {
+		if (state == null) {
+			return PacingThirdPartyStatusV1.StateEnum.NONE;
+		}
+		for (PacingThirdPartyStatusV1.StateEnum candidate : PacingThirdPartyStatusV1.StateEnum.values()) {
+			if (candidate.getValue().equals(state)) {
+				return candidate;
+			}
+		}
+		return PacingThirdPartyStatusV1.StateEnum.NONE;
+	}
+
+	/**
+	 * Builds the body of {@code GET /api/v1/pacing/dashboards/:slug/third-party/data}.
+	 *
+	 * <p>Field for field. The rows stay opaque maps: they are ad-server columns that differ per
+	 * report and the compare screens read them by name, so naming them here would mean this service
+	 * holding an opinion about a file it does not produce.
+	 *
+	 * @param file the published CM360 file as Pacing wrote it
+	 * @return the generated {@link PacingThirdPartyDataV1}
+	 */
+	public PacingThirdPartyDataV1 toV1(PacingThirdPartyData file) {
+		return new PacingThirdPartyDataV1()
+				.fetchedAt(file.fetchedAt())
+				.campaigns(file.campaigns())
+				.groups(file.groups())
+				.status(file.status())
+				.droppedDupes(file.droppedDupes())
+				.rowCount(file.rowCount())
+				.rows(file.rows());
+	}
+
+	/**
+	 * Builds the body of {@code GET /api/v1/pacing/dashboards/:slug/third-party/campaigns}.
+	 *
+	 * @param campaigns the picker list as Pacing returned it
+	 * @return the generated {@link PacingThirdPartyCampaignsV1}
+	 */
+	public PacingThirdPartyCampaignsV1 toV1(PacingThirdPartyCampaigns campaigns) {
+		List<PacingThirdPartyCampaign> list = campaigns.campaigns() == null
+				? List.of()
+				: campaigns.campaigns();
+		return new PacingThirdPartyCampaignsV1()
+				.campaigns(list.stream().map(this::toV1).toList())
+				.stale(campaigns.stale());
+	}
+
+	/**
+	 * A mapping suggestion set.
+	 *
+	 * <p>A null dimension list becomes an empty one: the contract makes the field required, and
+	 * "nothing proposed" is a real answer the caller must be able to read without a null check. The
+	 * notice rides through as-is - it is the only thing a caller can show when the list is empty.
+	 *
+	 * @param suggestions the proposal as Pacing returned it
+	 * @return the generated {@link PacingMappingSuggestionsV1}
+	 */
+	public PacingMappingSuggestionsV1 toV1(PacingMappingSuggestions suggestions) {
+		List<PacingMappingSuggestedDimension> dims = suggestions.dimensions() == null
+				? List.of()
+				: suggestions.dimensions();
+		return new PacingMappingSuggestionsV1()
+				.dimensions(dims.stream().map(this::toV1).toList())
+				.notice(suggestions.notice());
+	}
+
+	/**
+	 * One proposed dimension.
+	 *
+	 * @param dimension the dimension as Pacing proposed it
+	 * @return the generated {@link PacingMappingSuggestedDimensionV1}
+	 */
+	public PacingMappingSuggestedDimensionV1 toV1(PacingMappingSuggestedDimension dimension) {
+		List<PacingMappingSuggestedValue> values = dimension.values() == null
+				? List.of()
+				: dimension.values();
+		return new PacingMappingSuggestedDimensionV1()
+				.name(dimension.name())
+				.values(values.stream().map(this::toV1).toList());
+	}
+
+	/**
+	 * One proposed value.
+	 *
+	 * @param value the value as Pacing proposed it
+	 * @return the generated {@link PacingMappingSuggestedValueV1}
+	 */
+	public PacingMappingSuggestedValueV1 toV1(PacingMappingSuggestedValue value) {
+		return new PacingMappingSuggestedValueV1()
+				.value(value.value())
+				.aliases(value.aliases() == null ? List.of() : value.aliases());
+	}
+
+	/**
+	 * One campaign of the picker list.
+	 *
+	 * @param campaign the campaign as Pacing returned it
+	 * @return the generated {@link PacingThirdPartyCampaignV1}
+	 */
+	public PacingThirdPartyCampaignV1 toV1(PacingThirdPartyCampaign campaign) {
+		return new PacingThirdPartyCampaignV1()
+				// The name is NOT normalised: a saved source stores this exact string, and the picker's
+				// display transform is lossy, so what round-trips has to be the untouched spelling.
+				.name(campaign.name())
+				.report(campaign.report())
+				.lastSeen(campaign.lastSeen())
+				.imp(campaign.imp());
 	}
 
 	/**

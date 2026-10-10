@@ -1,5 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { formatError } from "../../shared/format/error";
+import { fmtDate } from "../pacing/mock/format";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  getPacingThirdPartyCampaigns, getPacingThirdPartyStatus, refetchPacingThirdParty,
+  savePacingThirdParty,
+} from "./api";
+// The reference's own fingerprint and label, moved in rather than re-derived: the fingerprint is
+// deliberately blind to campaign ORDER, and a save here TRIGGERS a pull - so a list that differed
+// only in the order boxes were ticked would re-fetch CM360 for nothing.
+import { normThirdParty, reportLabel } from "./spa/third-party-norm.js";
 import { useSavePacingDataSettings } from "./hooks";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
 import type { PacingDataSettingsUpdateV1, PacingDataShape, PacingDimSource } from "./types";
@@ -132,6 +142,13 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   /** Re-seeded whenever this changes - the drawer bumps it on open, so a reopened panel never
    *  shows an edit abandoned in a previous session. */
   seedKey: number;
+  /** This pacing's stored `third_party` list. Edited on THIS tab because that is where the compare
+   *  widget's own empty state sends you ("Add one in Settings → Data"), even though it is a
+   *  different config key with a different endpoint - see this section's save(). */
+  thirdParty: Record<string, unknown>[] | undefined;
+  /** Whether this tab is on screen. The campaign picker's list is a BigQuery read on the Pacing
+   *  side, so it is asked for only when someone is looking at it. */
+  visible: boolean;
   /** Reports the two mode switches as this panel's DRAFT currently has them, not as they are
    *  stored. The Plan section gates its Net % field and its coefficient checkbox on them, and the
    *  drawer commits every section in one Save - so reading the stored value there would mean
@@ -148,12 +165,154 @@ export interface PacingModeSwitches {
   primaryCvEnabled: boolean;
 }
 
+/** One CM360 source: a report, and the campaigns picked inside it. */
+interface Cm360Source {
+  /** Row identity for React only - the stored id, when there is one, rides in `rest`. */
+  key: string;
+  report: string;
+  campaigns: string[];
+  /** The stored entry's own fields (id, audit stamps) carried forward, so saving a campaign change
+   *  does not look like a brand new source to Pacing's own diff. */
+  rest: Record<string, unknown>;
+}
+
+/**
+ * Read the stored `third_party` list into the editor's sources.
+ *
+ * ALL of them, in stored order. The save is a whole-array replace, so an editor that showed only
+ * the first would delete the rest the moment anything else on this tab was saved - the kind of
+ * loss nobody sees happen.
+ *
+ * @param list the stored third_party array
+ * @returns one editable source per stored CM360 entry
+ */
+function seedCm360(list: Record<string, unknown>[] | undefined): Cm360Source[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((e) => e && e.type === "cm360")
+    .map((e, i) => {
+      const { report_name: reportName, campaigns, ...rest } = e as Record<string, unknown>;
+      return {
+        key: typeof rest.id === "string" && rest.id ? rest.id : `tp_${i}`,
+        report: typeof reportName === "string" ? reportName : "",
+        campaigns: Array.isArray(campaigns) ? campaigns.map(String) : [],
+        rest,
+      };
+    });
+}
+
+/**
+ * The wire shape. A source with no campaigns is dropped: Pacing refuses an empty list on an entry,
+ * and an entry nobody finished authoring is not a source.
+ *
+ * Every entry MUST carry an id. Pacing's `safeThirdPartyEntry` drops an id-less entry outright -
+ * silently, because an array that validates down to empty is a legal save - so a new source sent
+ * without one is accepted with a 204 and then simply does not exist. A stored source already has
+ * its id in `rest`; a new one gets it here, the way the reference's `newThirdPartyBlock` mints it.
+ */
+function cm360ToWire(sources: Cm360Source[]): Record<string, unknown>[] {
+  return sources
+    .filter((s) => s.campaigns.length > 0)
+    .map((s) => ({
+      // The audit stamps default to blank: the server owns them, and the client has no clock worth
+      // trusting. Pacing stamps them on first save and keeps them on every later one.
+      added_at: "",
+      added_by: "",
+      ...s.rest,
+      id: typeof s.rest.id === "string" && s.rest.id ? s.rest.id : newThirdPartyId(),
+      type: "cm360",
+      report_name: s.report || null,
+      campaigns: s.campaigns,
+    }));
+}
+
+/** A fresh source id, in Pacing's own shape so a round-trip keeps it. */
+function newThirdPartyId(): string {
+  return `tp_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
-  function PacingDataSection({ slug, data, netRatioCount, seedKey, onDirtyChange, onSwitchesChange }, ref) {
+  function PacingDataSection(
+    { slug, data, netRatioCount, seedKey, thirdParty, visible, onDirtyChange, onSwitchesChange },
+    ref,
+  ) {
     const [draft, setDraft] = useState<DataDraft>(() => seed(data));
     const [base, setBase] = useState<DataDraft>(() => seed(data));
     const [extrasOpen, setExtrasOpen] = useState(false);
     const save = useSavePacingDataSettings(slug);
+
+    // ── CM360 source ──────────────────────────────────────────────────────────────────────────
+    // A different config key with its own endpoint, edited here because that is where the compare
+    // widget sends people. Its draft is kept apart from the `data` draft so one cannot be sent
+    // under the other's shape.
+    const [tpBase, setTpBase] = useState<Cm360Source[]>(() => seedCm360(thirdParty));
+    const [tpDraft, setTpDraft] = useState<Cm360Source[]>(tpBase);
+    useEffect(() => {
+      const seeded = seedCm360(thirdParty);
+      setTpBase(seeded);
+      setTpDraft(seeded);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [seedKey]);
+
+    // Asked for only while this tab is on screen: Pacing answers it from BigQuery behind a
+    // ten-minute cache, and nothing else on the drawer needs it.
+    const campaignsQuery = useQuery({
+      queryKey: ["pacing", "third-party-campaigns", slug],
+      queryFn: () => getPacingThirdPartyCampaigns(slug),
+      enabled: !!slug && visible,
+      retry: false,
+      staleTime: 5 * 60_000,
+    });
+    const allCampaigns = campaignsQuery.data?.campaigns ?? [];
+    const reports = useMemo(() => {
+      const names = new Set<string>();
+      for (const c of allCampaigns) if (c.report) names.add(c.report);
+      return [...names].sort();
+    }, [allCampaigns]);
+    /** The campaigns one source may pick from. Per source, not per tab: two sources can be scoped
+     *  to two different reports, which is exactly what report scoping is for. */
+    const campaignsFor = useMemo(
+      () => (report: string) => allCampaigns.filter((c) => !report || c.report === report),
+      [allCampaigns],
+    );
+
+    // Where the pull stands. Polled only while this tab is on screen and only while something is
+    // actually pending: a ready file does not change by itself, and a poll that never stops is a
+    // request every few seconds for the life of the drawer.
+    const tpStatusQuery = useQuery({
+      queryKey: ["pacing", "third-party-status", slug],
+      queryFn: () => (slug ? getPacingThirdPartyStatus(slug) : Promise.resolve(null)),
+      enabled: !!slug && visible,
+      refetchInterval: (query) => (query.state.data?.state === "pending" ? 4000 : false),
+    });
+    const tpStatus = tpStatusQuery.data ?? null;
+
+    // "Pull again now". Saving a source starts a pull as a side effect, but a pull is also the
+    // thing you want when nothing about the source changed and the ad server has moved on.
+    const refetch = useMutation({
+      mutationFn: () => {
+        if (!slug) throw new Error("This pacing has no dashboard yet.");
+        return refetchPacingThirdParty(slug);
+      },
+      onSuccess: (outcome) => { if (outcome.started) tpStatusQuery.refetch(); },
+    });
+    const refetchNote = refetch.isError ? formatError(refetch.error)
+      : refetch.data?.notConfigured ? "There is no CM360 source to pull yet."
+        : refetch.data?.rateLimited ? "Too many pulls just now - try again in a minute."
+          : null;
+    const tpStatusText = useMemo(() => {
+      if (!tpStatus) return "";
+      if (tpStatus.state === "pending") return "Pulling ad-server rows\u2026";
+      if (tpStatus.state === "ready") {
+        const rows = (tpStatus.rowCount ?? 0).toLocaleString();
+        // `fetchedAt` is a full ISO stamp; the app's own date format is what a reader expects
+        // beside a count, not a machine timestamp with milliseconds in it.
+        const when = tpStatus.fetchedAt ? fmtDate(tpStatus.fetchedAt) : "";
+        return `Ad-server rows ready: ${rows}${when ? ` \u00b7 ${when}` : ""}`;
+      }
+      if (tpStatus.state === "error") return "The last ad-server pull failed.";
+      return "Nothing pulled yet. Saving a source starts the pull.";
+    }, [tpStatus]);
 
     const existingDimSources = useMemo(
       () => (Array.isArray(data?.dim_sources) ? data.dim_sources : []),
@@ -174,7 +333,18 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     }, [seedKey, slug]);
 
     const body = useMemo(() => diff(draft, base, existingDimSources), [draft, base, existingDimSources]);
-    const dirty = Object.keys(body).length > 0;
+    // The CM360 source is dirty on its own terms - it is a different key behind a different
+    // endpoint, and the tab's dot has to light up for either.
+    const tpDirty = useMemo(
+      () => normThirdParty(cm360ToWire(tpDraft)) !== normThirdParty(cm360ToWire(tpBase)),
+      [tpDraft, tpBase],
+    );
+    const tpDirtyRef = useRef(tpDirty);
+    tpDirtyRef.current = tpDirty;
+    const tpDraftRef = useRef(tpDraft);
+    tpDraftRef.current = tpDraft;
+
+    const dirty = Object.keys(body).length > 0 || tpDirty;
 
     // …and follow the server whenever a NEW namespace arrives and there is nothing to lose.
     //
@@ -228,10 +398,18 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     useImperativeHandle(ref, () => ({
       async save() {
         const patch = bodyRef.current;
-        if (!Object.keys(patch).length) return { ok: true as const };
         try {
-          await save.mutateAsync(patch);
-          setBase(draftRef.current);
+          if (Object.keys(patch).length) {
+            await save.mutateAsync(patch);
+            setBase(draftRef.current);
+          }
+          // The CM360 source is a different config key behind a different endpoint, so it is a
+          // second call - sent only when it actually moved, because saving it TRIGGERS a pull and
+          // an unchanged list would re-pull on every unrelated Data save.
+          if (tpDirtyRef.current && slug) {
+            await savePacingThirdParty(slug, cm360ToWire(tpDraftRef.current));
+            setTpBase(tpDraftRef.current);
+          }
           return { ok: true as const };
         } catch (error) {
           return { ok: false as const, message: formatError(error) };
@@ -239,6 +417,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
       },
       reset() {
         setDraft(base);
+        setTpDraft(tpBase);
       },
     }));
 
@@ -272,6 +451,140 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             Applies on the next refresh. The figures on screen were built from the table this pacing
             read last time, and they stay that way until the delivery query runs again.
           </p>
+        </section>
+
+        <section className="pdata__section">
+          <h3 className="pdata__heading">Third-party source (CM360)</h3>
+          <p className="pdata__hint pdata__hint--block">
+            Which ad-server campaigns this pacing is compared against. Saving starts a pull; the
+            rows land in the background and the compare widget says where it got to.
+          </p>
+
+          {/* Where the pull got to, beside the one control that starts another. Pacing holds ONE
+              file per pacing covering every source, so this is the section's state, not a row's. */}
+          <div className="pdata__tpstatus">
+            <span className="pdata__hint">{tpStatus ? tpStatusText : ""}</span>
+            <button
+              type="button"
+              className="pdata__remove"
+              disabled={refetch.isPending || !slug || tpDraft.length === 0}
+              title={tpDraft.length === 0 ? "Add a source first" : undefined}
+              onClick={() => refetch.mutate()}
+            >
+              {refetch.isPending ? "Pulling\u2026" : "Pull again"}
+            </button>
+          </div>
+          {refetchNote && <p className="pdata__hint pdata__hint--block">{refetchNote}</p>}
+
+          {tpDraft.length === 0 && (
+            <p className="pdata__hint pdata__hint--block">
+              No ad-server source yet. Add one to compare this pacing against CM360.
+            </p>
+          )}
+
+          {tpDraft.map((src, index) => (
+            <div key={src.key} className="pdata__cm360">
+              <div className="pdata__cm360-head">
+                <span className="pdata__field-label">{reportLabel(src.report)}</span>
+                <span className="pdata__hint">
+                  {src.campaigns.length} {src.campaigns.length === 1 ? "campaign" : "campaigns"}
+                </span>
+                <button
+                  type="button"
+                  className="pdata__remove"
+                  onClick={() => setTpDraft((prev) => prev.filter((_, i) => i !== index))}
+                >
+                  Remove source
+                </button>
+              </div>
+
+              <label className="pdata__field">
+                <span className="pdata__field-label">Report</span>
+                <select
+                  value={src.report}
+                  disabled={campaignsQuery.isLoading || !reports.length}
+                  onChange={(event) =>
+                    // Campaigns are scoped to their report, so switching report drops a selection
+                    // that no longer exists rather than silently keeping names from another export.
+                    setTpDraft((prev) => prev.map((x, i) => (
+                      i === index ? { ...x, report: event.target.value, campaigns: [] } : x
+                    )))
+                  }
+                >
+                  <option value="">
+                    {campaignsQuery.isLoading ? "Loading…" : "Select a report"}
+                  </option>
+                  {reports.map((r) => (
+                    <option key={r} value={r}>{reportLabel(r)}</option>
+                  ))}
+                </select>
+              </label>
+
+              {src.report && (
+                <fieldset className="pdata__campaigns">
+                  <legend className="pdata__field-label">
+                    Campaigns ({src.campaigns.length} of {campaignsFor(src.report).length})
+                  </legend>
+                  <div className="pdata__campaign-list">
+                    {campaignsFor(src.report).map((c) => {
+                      const name = c.name ?? "";
+                      const checked = src.campaigns.includes(name);
+                      return (
+                        <label key={name} className="pdata__check">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setTpDraft((prev) => prev.map((x, i) => (i === index ? {
+                                ...x,
+                                campaigns: checked
+                                  ? x.campaigns.filter((y) => y !== name)
+                                  : [...x.campaigns, name],
+                              } : x)))
+                            }
+                          />
+                          <span className="pdata__option-text">
+                            <span className="pdata__option-name">{name}</span>
+                            {/* Impressions are what tells a live campaign from one that never ran -
+                                the only thing on screen that does, since both carry a name. */}
+                            <span className="pdata__hint">
+                              {(c.imp ?? 0).toLocaleString()} impressions
+                              {c.lastSeen ? ` \u00b7 last seen ${c.lastSeen}` : ""}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {campaignsFor(src.report).length === 0 && (
+                      <p className="pdata__hint">This report carries no campaigns.</p>
+                    )}
+                  </div>
+                </fieldset>
+              )}
+            </div>
+          ))}
+
+          {campaignsQuery.isError && (
+            <p className="form-error pdata__hint--block">
+              Could not load the campaign list: {formatError(campaignsQuery.error)}
+            </p>
+          )}
+          {campaignsQuery.data?.stale && (
+            <p className="pdata__hint pdata__hint--block">
+              Showing the last known list - the ad-server read did not answer just now.
+            </p>
+          )}
+
+          <button
+            type="button"
+            className="pdata__add"
+            onClick={() => setTpDraft((prev) => [
+              ...prev,
+              { key: `new_${prev.length}_${Date.now()}`, report: "", campaigns: [], rest: {} },
+            ])}
+          >
+            + Add CM360 source
+          </button>
         </section>
 
         <section className="pdata__section">
