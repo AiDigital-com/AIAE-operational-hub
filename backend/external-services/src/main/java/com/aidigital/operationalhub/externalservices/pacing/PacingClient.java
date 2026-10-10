@@ -26,6 +26,11 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNum
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingUserMirrorEntry;
@@ -157,6 +162,88 @@ public interface PacingClient {
 	 * @return the refresh status
 	 */
 	PacingRefreshStatus getRefreshStatus(HubAssertion assertion, String slug);
+
+	/**
+	 * Where this pacing's CM360 read stands. Cheap enough to poll: Pacing answers it off the head of
+	 * the published file, never its rows.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @return the state plus what the file says about itself
+	 */
+	PacingThirdPartyStatus getThirdPartyStatus(HubAssertion assertion, String slug);
+
+	/**
+	 * The published CM360 file. LARGE - tens of megabytes on a real pacing - so a caller asks only
+	 * once a widget is on screen, having first seen a `ready` state.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @return the file as Pacing wrote it
+	 */
+	PacingThirdPartyData getThirdPartyData(HubAssertion assertion, String slug);
+
+	/**
+	 * Every CM360 campaign the export carries, for the source picker. Global; the slug only
+	 * authorises the read.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @return the campaigns, and whether this is a cached copy served after an upstream failure
+	 */
+	PacingThirdPartyCampaigns getThirdPartyCampaigns(HubAssertion assertion, String slug);
+
+	/**
+	 * Replaces this pacing's CM360 source list - which reports and campaigns its third-party data is
+	 * pulled for. A WHOLE-ARRAY replace: a caller must send every entry it does not own.
+	 *
+	 * <p>Saving this is what triggers a fetch on the Pacing side, so the pacing goes `pending` and
+	 * the status endpoint is what says when it lands.
+	 *
+	 * @param assertion  the signed caller identity and scope
+	 * @param slug       the pacing's dash_slug
+	 * @param thirdParty the whole list to store
+	 */
+	void saveThirdParty(HubAssertion assertion, String slug, List<Map<String, Object>> thirdParty);
+
+	/**
+	 * Replaces this pacing's mapping entities - the dimension libraries that classify CM360 rows and
+	 * delivery rows into the same values so the two can be compared.
+	 *
+	 * @param assertion  the signed caller identity and scope
+	 * @param slug       the pacing's dash_slug
+	 * @param mappingsV3 the whole list to store, or null to clear it; Pacing reads null and an empty
+	 *                   list as different answers
+	 */
+	void saveMappings(HubAssertion assertion, String slug, List<Map<String, Object>> mappingsV3);
+
+	/**
+	 * Asks Pacing to propose dimensions for a mapping, mined from the words actually present in this
+	 * pacing's delivery rows and CM360 placements.
+	 *
+	 * <p>Proposals are DRAFTS - nothing is stored by this call. An empty list carrying a notice is a
+	 * success, not a failure: it means there is no model connected to ask yet.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @param mappingId the entity whose existing dimensions must not be duplicated, or null for the
+	 *                  pacing's first dimensions-kind entity
+	 * @return the proposal, possibly empty with a notice explaining why
+	 */
+	PacingMappingSuggestions suggestMappingLibrary(HubAssertion assertion, String slug, String mappingId);
+
+	/**
+	 * Asks Pacing to pull this pacing's CM360 rows again now.
+	 *
+	 * <p>Fire-and-forget: the pull runs in the background and the status endpoint is what says where
+	 * it got to. A pacing with no CM360 source, and a caller who has spent the refresh budget, come
+	 * back as outcomes rather than as thrown failures - neither is a fault.
+	 *
+	 * @param assertion the signed caller identity and scope
+	 * @param slug      the pacing's dash_slug
+	 * @return whether the pull started, and why not when it did not
+	 */
+	PacingThirdPartyRefetchOutcome refetchThirdParty(HubAssertion assertion, String slug);
 
 	/**
 	 * Triggers an on-demand data refresh for a Live pacing (US-119). Fire-and-forget on the Pacing side.

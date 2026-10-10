@@ -8,9 +8,11 @@ import { catalogExtraMetrics, mappedExtraMetrics } from './dim-sources-norm.js';
 const NO_LABELS = Object.freeze({});
 
 /**
- * Which CM360 join a slot on this grain HAS (spec 2026-09-16 §2.5). Two joins exist and no
- * third: a date, and a mapping dimension's tuple label. A line item carries nothing to join
- * on, on either grain that names one, which is why both answer null.
+ * Which CM360 join a slot on this grain HAS (spec 2026-09-16 §2.5): a date, a mapping
+ * dimension's tuple label, and — through the mapping's groups — a line item, over the window
+ * or on one day (docs/2026-09-29-cm360-by-line.md). Whether a GIVEN line gets a number is the
+ * data's answer at render time (a dash with its reason where it shares a day or has no
+ * placement); the slot has the join either way.
  *
  * `agg` is the WINDOW total — a KPI, a guide, a column target, a brick — and `control` is a
  * dimension the viewer picks, so it joins by label like the dimension it resolves to.
@@ -19,7 +21,7 @@ const NO_LABELS = Object.freeze({});
  * would otherwise answer a function, which `validate` would read as «this slot has a join».
  */
 const CM_JOIN_BY_GRAIN = Object.freeze({
-  __proto__: null, agg: 'window', date: 'date', dim: 'label', control: 'label', li: null, dateLi: null,
+  __proto__: null, agg: 'window', date: 'date', dim: 'label', control: 'label', li: 'line', dateLi: 'dateLine',
 });
 
 const hasOwn = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);

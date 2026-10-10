@@ -17,6 +17,14 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsD
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyRefetchV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingsUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
@@ -32,6 +40,11 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplayS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
@@ -98,6 +111,73 @@ public class PacingDashboardController implements PacingDashboardApi {
 		HubAssertion assertion = signCurrentUser();
 		PacingRefreshStatus status = pacingClient.getRefreshStatus(assertion, slug);
 		return ResponseEntity.ok(mapper.toV1(status));
+	}
+
+	@Override
+	public ResponseEntity<PacingThirdPartyStatusV1> getPacingThirdPartyStatus(String slug) {
+		HubAssertion assertion = signCurrentUser();
+		PacingThirdPartyStatus status = pacingClient.getThirdPartyStatus(assertion, slug);
+		return ResponseEntity.ok(mapper.toV1(status));
+	}
+
+	@Override
+	public ResponseEntity<PacingThirdPartyDataV1> getPacingThirdPartyData(String slug) {
+		HubAssertion assertion = signCurrentUser();
+		// No null branch: a pacing with nothing published is a 404 from Pacing, which the client
+		// raises and the handler maps straight back to a 404 here.
+		PacingThirdPartyData file = pacingClient.getThirdPartyData(assertion, slug);
+		return ResponseEntity.ok(mapper.toV1(file));
+	}
+
+	@Override
+	public ResponseEntity<PacingThirdPartyCampaignsV1> getPacingThirdPartyCampaigns(String slug) {
+		HubAssertion assertion = signCurrentUser();
+		PacingThirdPartyCampaigns campaigns = pacingClient.getThirdPartyCampaigns(assertion, slug);
+		return ResponseEntity.ok(mapper.toV1(campaigns));
+	}
+
+	@Override
+	public ResponseEntity<Void> updatePacingThirdParty(String slug, PacingThirdPartyUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		pacingClient.saveThirdParty(assertion, slug, body.getThirdParty());
+		// 204, not the saved list back: the save TRIGGERS a pull, so anything echoed here would
+		// already be the state before it. The status endpoint is what says where the pull got to.
+		return ResponseEntity.noContent().build();
+	}
+
+	@Override
+	public ResponseEntity<Void> updatePacingMappings(String slug, PacingMappingsUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		// Null is forwarded as null on purpose - it CLEARS the list on the Pacing side, which is a
+		// different answer from an empty one and the only way a caller can say "no mappings here".
+		// The field is not `required` in the schema for exactly this: a required one is generated
+		// with @NotNull and the 400 would land before this method ran.
+		pacingClient.saveMappings(assertion, slug, body.getMappings());
+		return ResponseEntity.noContent().build();
+	}
+
+	@Override
+	public ResponseEntity<PacingThirdPartyRefetchV1> refetchPacingThirdParty(String slug) {
+		HubAssertion assertion = signCurrentUser();
+		PacingThirdPartyRefetchOutcome outcome = pacingClient.refetchThirdParty(assertion, slug);
+		// 200 for all three: "nothing to pull" and "budget spent" are things the screen tells the
+		// person, not failures the error channel should carry.
+		return ResponseEntity.ok(new PacingThirdPartyRefetchV1()
+				.started(outcome.started())
+				.notConfigured(outcome.notConfigured())
+				.rateLimited(outcome.rateLimited()));
+	}
+
+	@Override
+	public ResponseEntity<PacingMappingSuggestionsV1> suggestPacingMappingLibrary(
+			String slug, PacingMappingSuggestRequestV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		// The body is optional - "suggest for this pacing" is a complete request on its own.
+		String mappingId = body == null ? null : body.getMappingId();
+		PacingMappingSuggestions suggestions = pacingClient.suggestMappingLibrary(assertion, slug, mappingId);
+		// 200 even when nothing is proposed: an empty list with a notice means the path works and
+		// there is simply no model connected to ask, which the caller shows as a message.
+		return ResponseEntity.ok(mapper.toV1(suggestions));
 	}
 
 	@Override

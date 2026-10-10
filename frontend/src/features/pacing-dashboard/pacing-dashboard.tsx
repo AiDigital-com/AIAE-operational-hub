@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatError } from "../../shared/format/error";
 import { cn } from "../../shared/style/cn";
 import { ChevronLeftIcon, RefreshIcon, SettingsIcon } from "../../shared/ui/icons/icons";
@@ -8,7 +8,12 @@ import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { fmtDate } from "../pacing/mock/format";
 import { AlertsBlock } from "../pacing-overview/alerts-block";
 import type { PacingRowV1 } from "../pacing-overview/types";
-import { savePacingDisplay, triggerPacingRefresh } from "./api";
+import {
+  getPacingThirdPartyData,
+  getPacingThirdPartyStatus,
+  savePacingDisplay,
+  triggerPacingRefresh,
+} from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
 import { DailyTable } from "./daily-table";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
@@ -32,6 +37,7 @@ import { FilterBar } from "./filters/filter-bar";
 import { useUrlFilters } from "./filters/use-url-filters";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-dashboard.css";
+
 
 interface PacingDashboardProps {
   row: PacingRowV1;
@@ -174,18 +180,42 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     [slug, data, queryClient]
   );
   /**
-   * The two calls a CM360 widget makes. The Hub's contract carries no third-party endpoint - that
-   * whole lane still runs through n8n on the Pacing side and is not deployed - so these answer
-   * "nothing", which the renderer already has a state for (it draws its own "no third-party data"
-   * message). Stubbed EXPLICITLY rather than left unset, because the unset path throws by design,
-   * and a CM360 tile on a pacing is not a programming error.
+   * The two calls a CM360 widget makes. Both were stubbed to `null` until 2026-10-09, while the
+   * lane still ran through an n8n that was not deployed; it runs inside Pacing now and the Hub
+   * carries the two endpoints, so they are wired to the real thing.
+   *
+   * `thirdPartyData` answers null for a pacing with nothing published (a 404 from Pacing, which is
+   * the ordinary "no fetch has run yet" and not a failure) - the renderer already draws its own
+   * "no third-party data" state for that, which is why it is not an error path.
    */
+  // The mapping editor needs both sides it is asked to bridge. It builds the delivery side itself,
+  // through the comparison engine's own row builders, so what it wants here is the raw payload
+  // rather than anything pre-chewed - see mapping-panel.tsx for why a derived list was wrong.
+
+  const thirdPartyQuery = useQuery({
+    // Only once the drawer is open: the file runs to tens of megabytes and nothing on the dashboard
+    // itself reads it - the compare widget fetches its own copy through the SPA's cache.
+    queryKey: ["pacing", "third-party", slug],
+    queryFn: () => (slug ? getPacingThirdPartyData(slug) : Promise.resolve(null)),
+    enabled: !!slug && settingsOpen,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const thirdPartyFile = thirdPartyQuery.data ?? null;
+
   useEffect(() => {
     setPacingApi({
-      thirdPartyData: async () => null,
-      thirdPartyStatus: async () => null,
+      // The slug the moved SPA passes is IGNORED, exactly as saveSettings above ignores its
+      // own: that code reads it from `useParams()`, which answered under the retired SPA's
+      // `/:slug` route and answers nothing under the Hub's `/campaigns/:campaignId/pacing`.
+      // Trusting it put the literal string `{slug}` in the URL - a 500 on every call.
+      // No slug yet means the row has not resolved - answering null is what the renderer already
+      // draws for a pacing with nothing to show, so it needs no state of its own. Once there IS a
+      // slug these pass failures through: the widget treats an error and no rows the same way.
+      thirdPartyData: () => (slug ? getPacingThirdPartyData(slug) : Promise.resolve(null)),
+      thirdPartyStatus: () => (slug ? getPacingThirdPartyStatus(slug) : Promise.resolve(null)),
     });
-  }, []);
+  }, [slug]);
 
   /**
    * What a tile's ⋯ menu does. These SAVE AT ONCE, under the payload's own `displayRev`: the board
@@ -434,6 +464,13 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             capabilities={(data.capabilities ?? undefined) as Record<string, unknown> | undefined}
             isAdmin={isAdmin}
             libraryEntries={data.libraryEntries as Record<string, unknown> | undefined}
+            thirdParty={data.thirdParty as Record<string, unknown>[] | undefined}
+            mappingsV3={data.mappingsV3 as Record<string, unknown>[] | null | undefined}
+            thirdPartyFile={thirdPartyFile}
+            factsDaily={data.factsDaily}
+            types={data.types}
+            liPlan={data.planByLineItem}
+            creatives={data.creatives}
             notify={data.notify}
             hasVideo={computeHasVideo((data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>)}
             links={data.campaign?.links}

@@ -15,6 +15,9 @@ import type {
   PacingNotifySettingsV1,
   PacingRefreshOutcome,
   PacingRefreshStatusV1,
+  PacingThirdPartyCampaignsV1,
+  PacingThirdPartyDataV1,
+  PacingThirdPartyStatusV1,
 } from "./types";
 
 /**
@@ -106,6 +109,162 @@ export async function getPacingRefreshStatus(slug: string): Promise<PacingRefres
     throw new ApiError(formatError(result.error), result.response.status);
   }
   return result.data;
+}
+
+/**
+ * Where a pacing's CM360 read stands. Cheap enough for a widget to poll while a fetch is in flight:
+ * Pacing answers it off the head of the published file, never its rows.
+ */
+export async function getPacingThirdPartyStatus(slug: string): Promise<PacingThirdPartyStatusV1> {
+  const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}/third-party/status", {
+    params: { path: { slug } },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * The published CM360 file. LARGE - tens of megabytes on a real pacing - so this is asked for only
+ * once a widget is on screen and its status reads `ready`.
+ *
+ * Throws on a 404, like every other call here. That is not an oversight: a pacing with nothing
+ * published answers 404, and the widget's own `if (error || !data)` draws the same empty box for a
+ * failure as for no rows - the reference behaves identically, because its apiFetch throws on any
+ * non-2xx. Translating the 404 into an empty success would add a third opinion about a state the
+ * two layers already agree on.
+ */
+export async function getPacingThirdPartyData(slug: string): Promise<PacingThirdPartyDataV1> {
+  const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}/third-party/data", {
+    params: { path: { slug } },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Every CM360 campaign the ad-server export carries, for the source picker. Global - the slug only
+ * authorises the read - and served from Pacing's ten-minute cache, which answers a failed upstream
+ * with its last good copy rather than an empty list (`stale`).
+ */
+export async function getPacingThirdPartyCampaigns(slug: string): Promise<PacingThirdPartyCampaignsV1> {
+  const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}/third-party/campaigns", {
+    params: { path: { slug } },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Replaces this pacing's CM360 sources. A WHOLE-ARRAY replace: send every entry that should survive,
+ * not only the ones that changed.
+ *
+ * Saving TRIGGERS a pull, so the pacing goes `pending` and the status endpoint is what says when it
+ * lands. This resolves as soon as the save is accepted, not when the data arrives.
+ */
+export async function savePacingThirdParty(
+  slug: string,
+  thirdParty: Record<string, unknown>[],
+): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/third-party-settings", {
+    params: { path: { slug } },
+    body: { thirdParty },
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
+/**
+ * Replaces this pacing's mapping entities - the dimension libraries that classify CM360 rows and
+ * delivery rows into the same values, which is what lets the two be compared.
+ *
+ * `null` CLEARS the list and is a real instruction, distinct from an empty array.
+ */
+export async function savePacingMappings(
+  slug: string,
+  mappings: Record<string, unknown>[] | null,
+): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/mappings", {
+    params: { path: { slug } },
+    body: { mappings },
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
+/** What a CM360 re-pull request came back with. None of the three is an error. */
+export interface PacingThirdPartyRefetchOutcome {
+  started: boolean;
+  notConfigured: boolean;
+  rateLimited: boolean;
+}
+
+/**
+ * Pulls this pacing's CM360 rows again now.
+ *
+ * Fire-and-forget: the status endpoint is what says where the pull got to. "Nothing to pull" and
+ * "the refresh budget is spent" come back as outcomes, not throws - neither is a fault, and a
+ * caller should show them as a sentence rather than as a failed request.
+ */
+export async function refetchPacingThirdParty(
+  slug: string,
+): Promise<PacingThirdPartyRefetchOutcome> {
+  const result = await apiClient.POST(
+    "/api/v1/pacing/dashboards/{slug}/third-party/refetch",
+    { params: { path: { slug } } },
+  );
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return {
+    started: !!result.data.started,
+    notConfigured: !!result.data.notConfigured,
+    rateLimited: !!result.data.rateLimited,
+  };
+}
+
+/** One proposed dimension, as the suggestion endpoint returns it. Drafts - nothing is stored. */
+export interface PacingMappingSuggestion {
+  name: string;
+  values: { value: string; aliases?: string[] }[];
+}
+
+/** What a suggestion request came back with. An empty list with a `notice` is a success. */
+export interface PacingMappingSuggestionResult {
+  dimensions: PacingMappingSuggestion[];
+  notice: string | null;
+}
+
+/**
+ * Asks Pacing to propose dimensions for a mapping, from the words actually present in this pacing's
+ * delivery rows and CM360 placements.
+ *
+ * Proposals are DRAFTS: nothing is stored until the caller accepts one and saves the mapping. An
+ * empty list carrying a notice is NOT an error - today it means no model is connected yet, and the
+ * caller should show those words rather than a failure.
+ */
+export async function suggestPacingMappingLibrary(
+  slug: string,
+  mappingId: string | null,
+): Promise<PacingMappingSuggestionResult> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/mapping/suggest", {
+    params: { path: { slug } },
+    body: { mappingId },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return {
+    dimensions: (result.data.dimensions ?? []) as PacingMappingSuggestion[],
+    notice: result.data.notice ?? null,
+  };
 }
 
 /**

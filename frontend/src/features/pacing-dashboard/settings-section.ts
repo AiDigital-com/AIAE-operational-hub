@@ -35,6 +35,9 @@ export const SETTINGS_TABS = [
   { id: "plan", label: "Plan" },
   { id: "data", label: "Data" },
   { id: "widgets", label: "Widgets" },
+  // Between Widgets and Alerts on purpose: it configures what a widget can draw, and the compare
+  // widget's own empty state points here by name ("Build the library in Settings → Mapping").
+  { id: "mapping", label: "Mapping" },
   { id: "alerts", label: "Alerts" },
   { id: "documents", label: "Documents" },
 ] as const;

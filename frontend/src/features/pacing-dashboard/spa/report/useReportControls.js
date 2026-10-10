@@ -18,7 +18,6 @@
 // takes its window as `useWidgetData(widget, rangeOverride)` and reads no store for it,
 // which is also §6's normative preview plumbing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
 import { useStoreActions } from '../store.js';
 import { useDashboardStore } from '../store.js';
 import { toast } from '../ui/Toast.jsx';
@@ -71,7 +70,13 @@ const sameTuple = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * option id.
  */
 export function useReportControls(widget, spec) {
-  const { slug } = useParams();
+  // `campaign.id` IS the dash_slug (Pacing's own buildPacing sets it so). Read from the
+  // store rather than from useParams(): this code moved out of an SPA routed at `/:slug`
+  // into a Hub routed at `/campaigns/:campaignId/pacing`, where that param does not exist.
+  // An undefined slug does not only break a URL - it collapses this file's per-slug cache
+  // keys into one shared key, so two pacings opened inside the 30s TTL would see each
+  // other's rows.
+  const slug = useDashboardStore((s) => s.campaign?.id);
   // The two view-pref maps this hook reads, and nothing else. `useDisplay()` put a
   // SECOND whole-display subscription on every tile (useWidgetData had the first), so
   // any display change at all — a note, a group, a switch — re-rendered the controls

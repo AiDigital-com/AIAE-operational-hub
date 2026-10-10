@@ -2417,8 +2417,9 @@ export function buildTabularModel(request, range, sources) {
   let rowOrder = null;
   // …and the plan those rows were drawn from, published for the reader the engine cannot
   // see: a cm-bearing formula names a plan field beside the CM360 counts and must read the
-  // row's OWN target (2026-09-16 §2.4). Null on every grain but `dim`, where a row has a
-  // plan of its own.
+  // row's OWN target (2026-09-16 §2.4). Set on the grains where a row has a plan of its own:
+  // `dim`, and `li` / `dateLi`, where it is the line's (docs/2026-09-29-cm360-by-line.md §3).
+  // Null on the date grain, whose rows read the window's.
   let rowScalars = null;
 
   if (grain.type === 'date') {
@@ -2483,6 +2484,9 @@ export function buildTabularModel(request, range, sources) {
     const factByKey = new Map();
     // …and which line each row key belongs to, for a kept subset's CTR target.
     const lineByKey = new Map();
+    // …and each row's plan — its LINE's, one object per line — for the CM360 reader
+    // (docs/2026-09-29-cm360-by-line.md §3), published below as `rowScalars`.
+    const rowPlans = new Map();
     for (const id of sources.effLIs) {
       const p = sources.liPlan[id];
       if (!p) continue;
@@ -2498,6 +2502,7 @@ export function buildTabularModel(request, range, sources) {
         Object.assign(r, { acr, cpv });
       }
       const liScalars = liPlanScalars(p, sources.asOf, range, planWindowOf(sources, range));
+      const linePlan = { scalars: liScalars, unplanned: false };
       const ctx = seriesCtx(cal, liScalars, highlightSafe ? 'dateLi' : null);
       const evaluated = {};
       for (const c of cols) {
@@ -2544,6 +2549,7 @@ export function buildTabularModel(request, range, sources) {
         rows.push(row);
         factByKey.set(tableRowKey(row, 'dateLi'), r);
         lineByKey.set(tableRowKey(row, 'dateLi'), id);
+        rowPlans.set(tableRowKey(row, 'dateLi'), linePlan);
       });
     }
     totalsSums = sources.effLIs.reduce((t, id) => {
@@ -2559,7 +2565,9 @@ export function buildTabularModel(request, range, sources) {
     // exception: the CTR target. Each row here prints its own line's target, and the kept rows'
     // CTR is theirs alone, so the target over them is re-weighted by the impressions THOSE rows
     // delivered (owner decision 2026-09-23) — «C's rows» read C's target, not the mixed window's.
-    subset = (keys) => {
+    // Once per key set (`onceForKeys`): the CM360 re-total asks for the same kept plan through
+    // `rowScalars.subset` below, over the same set.
+    subset = onceForKeys((keys) => {
       const sums = { ...ZERO_FLOW };
       const keptIm = new Map();
       const keptIds = [];
@@ -2575,6 +2583,16 @@ export function buildTabularModel(request, range, sources) {
       const scalars = withCtrT(campScalars,
         () => weightedCtrT(sources.liPlan, keptIds, (id) => keptIm.get(String(id)) || 0));
       return { sums, scalars, unplanned: false, planNull: true };
+    });
+    // The publication (docs/2026-09-29-cm360-by-line.md §3): every row's plan is its LINE's,
+    // the very object that line's plan cells were printed from, so a cm-bearing formula naming
+    // `planImpr` on a Date × line item row reads the line's number, never the campaign's.
+    rowScalars = {
+      byKey: rowPlans,
+      absent: ABSENT_ROW_PLAN,
+      totals: { scalars: campScalars, unplanned: false },
+      subset: (keys) => ({ scalars: subset(keys).scalars, unplanned: false }),
+      fieldSet,
     };
   } else if (isDim) {
     const cut = dimBuckets(sources, grain.key, range, !!request.residual);
@@ -2700,6 +2718,9 @@ export function buildTabularModel(request, range, sources) {
     };
   } else {
     // rows: 'li'
+    // Each row's plan, the LINE's own, published below as `rowScalars` for the CM360 reader
+    // (docs/2026-09-29-cm360-by-line.md §3).
+    const linePlans = new Map();
     for (const id of sources.effLIs) {
       const p = sources.liPlan[id];
       if (!p) continue;
@@ -2707,6 +2728,7 @@ export function buildTabularModel(request, range, sources) {
       impr.seed(id, sums.im);
       if (highlightSafe) sums.__highlightFacts = highlightHasFacts(sources, range, [id]);
       const scalars = liPlanScalars(p, sources.asOf, range, planWindowOf(sources, range));
+      linePlans.set(String(id), { scalars, unplanned: false });
       const cvRowOff = cvOff.has(String(id));
       const row = {
         label: sources.liNames?.[id] || `LI ${id}`, liId: id, sub: p.ch || null,
@@ -2734,7 +2756,9 @@ export function buildTabularModel(request, range, sources) {
     if (cvTotalsNull && cvColsAny) cvNoteCount = cvOff.size;
     // An li row key is the line item id (tableRowKey).
     cvSubsetNull = (keys) => [...keys].some((k) => cvOff.has(String(k)));
-    subset = (keys) => {
+    // Once per key set (`onceForKeys`): the CM360 re-total asks for the same kept plan through
+    // `rowScalars.subset` below, over the same set.
+    subset = onceForKeys((keys) => {
       const ids = sources.effLIs.filter((id) => keys.has(String(id)) && sources.liPlan[id]);
       const sums = { ...ZERO_FLOW };
       for (const id of ids) addRowSums(sums, sumLiWindow(sources.liDaily, sources.liPlan[id], id, range, expBounds));
@@ -2742,6 +2766,15 @@ export function buildTabularModel(request, range, sources) {
         false, planWindowOf(sources, range), impr);
       // `ids`: the kept line ids, for a chip column's Totals over the subset (formula chips P1).
       return { sums, scalars, unplanned: false, planNull: false, silentRates: silentAggRates(sums), ids };
+    });
+    // The publication (docs/2026-09-29-cm360-by-line.md §3): a line row's plan is its own,
+    // the object its plan cells were printed from; the Totals row stands on the window's.
+    rowScalars = {
+      byKey: linePlans,
+      absent: ABSENT_ROW_PLAN,
+      totals: { scalars: campScalars, unplanned: false },
+      subset: (keys) => ({ scalars: subset(keys).scalars, unplanned: false }),
+      fieldSet,
     };
   }
 
@@ -2870,8 +2903,8 @@ export function buildTabularModel(request, range, sources) {
     // …and only a date grain has a calendar for a window function to run down (§2.9).
     ...(rowOrder ? { rowOrder } : null),
     ...(totalsPartial ? { totalsPartial } : null),
-    // Sparse, like the three above it: only a dimension table has a plan per row to publish,
-    // and a widget that names no cm identifier never reads this key (2026-09-16 §2.4).
+    // Sparse, like the three above it: only a dimension or line table has a plan per row to
+    // publish, and a widget that names no cm identifier never reads this key (2026-09-16 §2.4).
     ...(rowScalars ? { rowScalars } : null),
     ...planInfo,
     // Primary conversions (spec §3 totals rule): why the conversion Totals read «—». Sparse.
@@ -3046,9 +3079,12 @@ export function buildCategoryModel(request, range, sources) {
   // Sparse, as every other mark on this path is: only a leftover carries the key.
   let cats = entities.map((e) => ({
     label: e.label, ...(request.identities ? { highlightKey: e.highlightKey } : null), values: evalEntity(e),
-    // Sparse, and only where it exists: a dimension value has a declared plan of its own,
-    // a line item does not — and a line-item axis has no CM360 join to read one for (§2.2).
+    // Sparse, and only where it exists: a dimension value has a declared plan of its own.
     ...(e.published ? { plan: e.published } : null),
+    // …and a line item carries its id and its own plan, for the CM360 join on a line item
+    // axis (docs/2026-09-29-cm360-by-line.md §3): the axis prints names, and names repeat.
+    ...(!isDim && Array.isArray(e.ids) && e.ids.length === 1
+      ? { liId: String(e.ids[0]), linePlan: { scalars: e.scalars, unplanned: false } } : null),
     ...(e.leftover ? { leftover: true } : null), _e: e,
   }));
   const rankIndex = Object.hasOwn(request, 'rankExpression') ? (request.rankExpression == null ? -1 : request.expressions.findIndex((entry) => entry.expr === request.rankExpression)) : 0;

@@ -12,7 +12,7 @@
 // projection, so they cannot sort the same numbers differently.
 
 import MappingDims from '@shared/mapping-dims';
-import { buildComparisonDaily, buildMembership } from './third-party-range.js';
+import { buildComparisonDaily, buildMembership, resolveDimValue, tupleKeyOf } from './third-party-range.js';
 
 const { pivotCompare } = MappingDims;
 
@@ -41,7 +41,9 @@ export function tupleLabel(key) {
  * Which dimensions the breakdown runs over, ALWAYS in mapping order — never in
  * the order the user clicked the chips (§8.5).
  *
- *   selectedDimIds === null  → the first min(2, maxSelected ?? 2, availableNonAuto)
+ *   selectedDimIds === null  → the default. Handed the `dataset`, it is
+ *       `comparableDefaultDimIds` (below): dimensions the comparison can actually
+ *       compare. Without one, the first min(2, maxSelected ?? 2, availableNonAuto)
  *       NON-auto dims. Auto dims (Channel/Tactic/Month) classify the CM360 side
  *       only through user aliases, so defaulting to one would dump the whole
  *       CM360 side into Unmapped on a fresh mapping (panel :334-343).
@@ -54,11 +56,13 @@ export function tupleLabel(key) {
  * → { dims, defaultIds, repaired } — `repaired` is true only when a cap actually
  *   cut an explicit selection, so a caller can write the repair back into its state.
  */
-export function selectComparisonDims(dims, { selectedDimIds = null, maxSelected = null } = {}) {
+export function selectComparisonDims(dims, { selectedDimIds = null, maxSelected = null, dataset = null } = {}) {
   const all = Array.isArray(dims) ? dims : [];
   const nonAuto = all.filter((d) => d && !d.auto_kind);
   const cap = maxSelected == null ? DEFAULT_SELECTED_DIMS : Math.min(DEFAULT_SELECTED_DIMS, maxSelected);
-  const defaultIds = nonAuto.slice(0, Math.max(0, cap)).map((d) => d.id);
+  const defaultIds = dataset
+    ? [...comparableDefaultDimIds(dataset, cap)]
+    : nonAuto.slice(0, Math.max(0, cap)).map((d) => d.id);
 
   const wanted = new Set(selectedDimIds == null ? defaultIds : selectedDimIds);
   const ordered = all.filter((d) => d && wanted.has(d.id));
@@ -66,6 +70,101 @@ export function selectComparisonDims(dims, { selectedDimIds = null, maxSelected 
     return { dims: ordered, defaultIds, repaired: false };
   }
   return { dims: ordered.slice(0, Math.max(0, maxSelected)), defaultIds, repaired: true };
+}
+
+/**
+ * The breakdown a viewer who has picked nothing is shown: the first custom dimensions, in
+ * mapping order, that the comparison can actually compare (2026-09-30).
+ *
+ * A dimension only one side carries (a value that happens to match CM360 placement names and
+ * no line name) makes every group one-sided, and so does a pair whose values never meet on the
+ * two sides. Defaulting to either left the Compare view with nothing in its overlap and every
+ * CM360 date, KPI and total on the tile empty, because `buildComparisonDaily` reads the
+ * overlap only — on a widget with no Breakdown switch, where the viewer cannot pick another.
+ *
+ * So: the first PAIR of custom dimensions that leaves at least one group with delivery and
+ * CM360 impressions over the whole flight (`buildMembership`'s own scope rule, read the same
+ * full-flight way), else the first single one that does, else none: every row, a grand total
+ * per day, the Compare view with no breakdown. `width` is the cap: 2, or `maxSelected` below
+ * it. A default that compares anything today is the same pair or dimension here, so only a
+ * default that compared nothing moves. A mapping that bridges nothing at all (an empty CM360
+ * side, or no dimension classifying both) keeps the author's order: no pick could compare
+ * anything there, and the state ladder answers instead of the numbers.
+ *
+ * Kept with the dataset, because the projection, the focus generation and the chips each ask.
+ */
+const COMPARABLE_DEFAULTS = new WeakMap();
+
+export function comparableDefaultDimIds(dataset, width = DEFAULT_SELECTED_DIMS) {
+  if (!dataset || typeof dataset !== 'object') return [];
+  const n = Math.max(0, Math.min(DEFAULT_SELECTED_DIMS, width == null ? DEFAULT_SELECTED_DIMS : width));
+  let byWidth = COMPARABLE_DEFAULTS.get(dataset);
+  if (!byWidth) { byWidth = new Map(); COMPARABLE_DEFAULTS.set(dataset, byWidth); }
+  if (!byWidth.has(n)) byWidth.set(n, Object.freeze(comparableDefault(dataset, n)));
+  return byWidth.get(n);
+}
+
+function comparableDefault(ds, n) {
+  if (n === 0) return [];
+  const classified = ds.classified || {};
+  const deliveryCells = classified.deliveryCells || {};
+  const cm360Cells = classified.cm360Cells || {};
+  const perDimList = classified.perDim || [];
+  const bridges = typeof ds.anyBridge === 'boolean'
+    ? ds.anyBridge : perDimList.some((p) => p.dCount > 0 && p.cCount > 0);
+  if (!bridges) return (ds.dims || []).filter((d) => d && !d.auto_kind).slice(0, n).map((d) => d.id);
+  // Both sides must carry a dimension for it to compare anything; the pair test below would
+  // find that too, and this skips the rows for the common case.
+  const perDim = new Map(perDimList.map((p) => [p.dimId, p]));
+  const candidates = (ds.dims || []).filter((d) => {
+    if (!d || d.auto_kind) return false;
+    const p = perDim.get(d.id);
+    return !p || (p.dCount > 0 && p.cCount > 0);
+  });
+  if (!candidates.length) return [];
+  // Impressions per classified row over the WHOLE flight: the scope is full-flight, so the
+  // default does not move with the dashboard's window.
+  const flight = (rows) => {
+    const out = new Map();
+    for (const r of rows || []) {
+      if (!r || r.key == null) continue;
+      out.set(r.key, (out.get(r.key) || 0) + (Number(r.impressions) || 0));
+    }
+    return out;
+  };
+  const delivery = flight(ds.deliveryDaily);
+  const cm360 = flight(ds.cm360Daily);
+  const groups = (byKey, cells, dims) => {
+    const out = new Map();
+    for (const [key, impressions] of byKey) {
+      const vals = [];
+      for (const dim of dims) {
+        const v = resolveDimValue(dim, { key }, cells);
+        if (v == null) { vals.length = 0; break; }
+        vals.push(v);
+      }
+      if (vals.length !== dims.length) continue;
+      const t = tupleKeyOf(vals);
+      out.set(t, (out.get(t) || 0) + impressions);
+    }
+    return out;
+  };
+  const compares = (dims) => {
+    const d = groups(delivery, deliveryCells, dims);
+    for (const [t, impressions] of groups(cm360, cm360Cells, dims)) {
+      if (impressions > 0 && (d.get(t) || 0) > 0) return true;
+    }
+    return false;
+  };
+  if (n >= 2) {
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        if (compares([candidates[i], candidates[j]])) return [candidates[i].id, candidates[j].id];
+      }
+    }
+  }
+  for (const d of candidates) if (compares([d])) return [d.id];
+  return [];
 }
 
 // pivotCompare's own date guard (`assertIsoDate`) is the only throw the chain
@@ -134,7 +233,7 @@ export function projectCm360Comparison(dataset, {
   const deliveryCells = classified.deliveryCells || {};
   const cm360Cells = classified.cm360Cells || {};
 
-  const selection = selectComparisonDims(ds.dims, { selectedDimIds, maxSelected });
+  const selection = selectComparisonDims(ds.dims, { selectedDimIds, maxSelected, dataset: ds });
   const selectedDims = selection.dims;
 
   // One global effective window drives table, expansion and chart values.

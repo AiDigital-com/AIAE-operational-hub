@@ -22,9 +22,10 @@
 // the §8.5 seams', and the two states that belong to the TILE rather than to a view — a
 // window with no delivered facts, and a dimension source that is gone — are answered by
 // the canonical data-state helpers.
+import { groupIndexOf } from '../dim-value-groups.js';
 import { memo, startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import { upgradeConversionDefaults } from '../standard-conversion-format.js';
-import { useParams, useOutletContext } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
 import Currency from '@shared/currency';
 import ValueLabels from '@shared/value-labels';
 import WidgetFrame from './WidgetFrame.jsx';
@@ -251,7 +252,13 @@ export function maskCm360Filters(bundle, sources) {
  * the bq series beside it honours, chips included, through the projection's own windowing.
  */
 function useReportCm360(spec, controlState, breakdownControl, data, focusedIn, selectedMappingId) {
-  const { slug } = useParams();
+  // `campaign.id` IS the dash_slug (Pacing's own buildPacing sets it so). Read from the
+  // store rather than from useParams(): this code moved out of an SPA routed at `/:slug`
+  // into a Hub routed at `/campaigns/:campaignId/pacing`, where that param does not exist.
+  // An undefined slug does not only break a URL - it collapses this file's per-slug cache
+  // keys into one shared key, so two pacings opened inside the 30s TTL would see each
+  // other's rows.
+  const slug = useDashboardStore((s) => s.campaign?.id);
   const isCm360Dataset = !!(spec && spec.dataset && spec.dataset.type === 'deliveryCm360');
   const wants = isCm360Dataset || specWantsCm(spec);
   // Configured means a 3rd-party source on the pacing (config third_party[]), which is
@@ -310,6 +317,9 @@ function useReportCm360(spec, controlState, breakdownControl, data, focusedIn, s
     cm360Raw: (tpData && Array.isArray(tpData.rows)) ? tpData.rows : [],
     mapping: choice.mapping,
     creativeLabel,
+    // The rows above are read as delivered; a row of a widget that runs down a grouped
+    // dimension is joined to CM360 through the lines' dictionaries (spec 2026-10-02).
+    dimGroupIndex: groupIndexOf(liPlan),
   }) : null), [wants, factsDaily, types, liPlan, creatives, tpData, choice, creativeLabel]);
 
   const maxSelected = (breakdownControl && breakdownControl.maxSelected) || null;
@@ -321,7 +331,7 @@ function useReportCm360(spec, controlState, breakdownControl, data, focusedIn, s
   // for one reason: the focus generation is made of it, and the projection is made of the
   // focus. One call each, no circle, and the same function answers for the chips.
   const selection = useMemo(
-    () => (dataset ? selectComparisonDims(dataset.dims, { selectedDimIds, maxSelected }) : null),
+    () => (dataset ? selectComparisonDims(dataset.dims, { selectedDimIds, maxSelected, dataset }) : null),
     [dataset, selectedDimIds, maxSelected],
   );
   const gen = focusGenerationOf(
@@ -874,7 +884,9 @@ export function ReportBody({
   // tile made to build the projection (a null selection means "the runtime default", and the
   // chips have to light the same two dimensions the comparison actually ran over).
   const selectedDimIds = useMemo(() => (cm
-    ? selectComparisonDims(cm.dims, { selectedDimIds: controlState.breakdownIds, maxSelected: cm.maxSelected })
+    ? selectComparisonDims(cm.dims, {
+      selectedDimIds: controlState.breakdownIds, maxSelected: cm.maxSelected, dataset: cm.dataset,
+    })
       .dims.map((d) => d.id)
     : []), [cm, controlState.breakdownIds]);
 

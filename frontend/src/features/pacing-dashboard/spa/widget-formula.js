@@ -43,6 +43,12 @@ export const FIELDS_DAILY = new Set(LEGACY_DAILY.concat(
 // expectedDeltas). It joined with the Daily Performance preset (section-widget parity
 // 2026-09-04): the legacy totals row stacks it under delivered impressions, and `expIm` reads
 // a different, larger number on every mixed-rate pacing.
+// `clExpected` (2026-10-02) is the clicks twin: `expCl` gated to the CLICK-PACED lines,
+// campM's own `clicksExpected`. The Daily Performance preset stacks it under delivered clicks;
+// `expCl` also adds every other line's CTR target, which no totals row should stand against.
+// The name is `cl` + Expected, not campM's: the chip editor ranks a field name that STARTS with
+// the typed letters above a chip's own name (chips/tokens.js suggest), so a field called
+// `clicksExpected` turned the typed word «clicks» into this chip instead of Clicks.
 export const FIELDS_EXPECTED = new Set(['expIm', 'expCo', 'expCl', 'expVw', 'imprExpected', 'clExpected']);
 export const FIELDS_RATES = new Set(['ctr', 'vcr', 'acr', 'cpm', 'cpc', 'cpv']);
 export const FIELDS_PLAN = new Set([
@@ -100,7 +106,10 @@ export const pairsServe = (name) => FIELDS_CM.has(name) || FIELDS_CM_DELIVERY.ha
 // validator blocks Save with them, FormulaField and the Spotlight print them under an input.
 // A sentence retyped at one of those doors is a tile and a Save gate telling the same author
 // two different things about one expression.
-export const NO_CM_JOIN = 'CM360 joins to delivery by date or by mapping dim, and a line item carries nothing to join on';
+// `NO_CM_JOIN` names no grain an author can pick since line items joined
+// (docs/2026-09-29-cm360-by-line.md); it is the answer for a grain this module does not know,
+// a stored config nobody could have built.
+export const NO_CM_JOIN = 'CM360 joins to delivery by date, by mapping dimension or by line item, and these rows are none of them';
 export const PIE_NO_CM = 'CM360 numbers are grouped by the mapping dimensions, so this value cannot be cut by this one';
 export const CM_FORMULA_ONLY = 'A CM360 formula can name im, cl, co and the plan fields this grain carries beside the CM360 fields; nothing else';
 export const CM_BQ_ONLY = 'Auxiliary expressions use the BQ context, which cannot describe this value\'s mapped population';
@@ -343,12 +352,13 @@ function walk(node, visit) {
  *   contextKind 'agg' — aggregate (window functions rejected)
  *   fieldSet — Set of identifiers legal for THIS widget context (e.g. dim rows
  *              exclude plan scalars).
- *   opts.cm  — the CM360 join this slot HAS: 'date' | 'label' | 'window' | 'total' | null
- *              (spec 2026-09-16 §2.5). `formula-scope.js` derives it from the grain; the
- *              highlight family overrides it, because its join is not its grain's.
+ *   opts.cm  — the CM360 join this slot HAS: 'date' | 'label' | 'line' | 'dateLine' |
+ *              'window' | 'total' | null (spec 2026-09-16 §2.5; the two line joins,
+ *              docs/2026-09-29-cm360-by-line.md). `formula-scope.js` derives it from the
+ *              grain; the highlight family overrides it, because its join is not its grain's.
  *   opts.cmRefusal — the sentence to answer when a cm-bearing expression meets `cm: null`.
- *              The SLOT owns that sentence, not this module: a pie says PIE_NO_CM, a line
- *              item says NO_CM_JOIN, and validate only decides when it is said.
+ *              The SLOT owns that sentence, not this module: a pie says PIE_NO_CM, an unknown
+ *              grain says NO_CM_JOIN, and validate only decides when it is said.
  *   opts.cmOnly — this slot's OWNER is cm-fed, so a plain delivery expression beside it
  *              would describe a different population (§2.5). Refused per expression rather
  *              than by disabling the whole slot.
@@ -389,8 +399,9 @@ export function validate(src, contextKind, fieldSet, opts = {}) {
       return { ok: false, error: CM_FORMULA_ONLY };
     }
   } else if (names.length && opts.cmOnly) {
-    // A cm-fed owner whose slot has NO join (a line-item grain): the pairs cannot answer, and
-    // the BQ context describes another population, so a delivery expression stays refused.
+    // A cm-fed owner whose slot has NO join (a pie; a grain this module does not know): the
+    // pairs cannot answer, and the BQ context describes another population, so a delivery
+    // expression stays refused.
     return { ok: false, error: CM_BQ_ONLY };
   }
   let bad = null;
