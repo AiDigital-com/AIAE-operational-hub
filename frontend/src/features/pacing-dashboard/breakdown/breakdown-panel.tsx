@@ -285,7 +285,9 @@ export function BreakdownPanel({ data, filters, setFilters }: BreakdownPanelProp
   }
 
   return (
-    <section className="pdash__section pbrk">
+    // Named so a handoff can scroll to it - the mapping screen's "Open the Breakdown" sends the
+    // viewer here from inside the settings drawer, and the panel sits well below the fold.
+    <section className="pdash__section pbrk" data-pacing-breakdown="">
       <div className="pbrk__head">
         <h2 className="pdash__section-title">Breakdown</h2>
         <label className="pbrk__search">

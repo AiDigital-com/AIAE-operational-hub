@@ -173,6 +173,40 @@ describe("PacingSettingsDrawer", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  it("should put a removed sheet source back on Reset", async () => {
+    // The sheet sources, the display names and the performance sheet are NOT a section's own draft:
+    // they are edited on Mapping and written by Data, so the DRAWER holds them. Reset used to loop
+    // over the section handles only, which reached neither - so a removed source stayed removed and
+    // the footer kept offering to save that removal.
+    renderDrawer({
+      data: {
+        source: "platform_mart",
+        dim_sources: [{
+          id: "apps",
+          loader: "sheet",
+          title: "Apps (pacing)",
+          origin: { spreadsheet_id: "abc", sheet_id: 0, title: "Source", header_row: 0, columns: null },
+          binding: { mode: "id_in_name", map: {}, exclude: [] },
+        }],
+      } as never,
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
+    await userEvent.click(screen.getByRole("button", { name: /3rd Party Data/ }));
+    // Counted rather than fetched: Mapping is mounted beside Data (hidden, not unmounted) and lists
+    // the same source, so the name is on screen twice while it exists and nowhere once it does not.
+    expect(screen.getAllByText("Apps (pacing)").length).toBeGreaterThan(0);
+
+    // Two clicks: disconnecting a source takes its rows off every screen, so it is not a stray click.
+    await userEvent.click(screen.getByRole("button", { name: /^Remove$/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Remove\?$/ }));
+    expect(screen.queryAllByText("Apps (pacing)")).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(screen.getAllByText("Apps (pacing)").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("should keep a section's draft alive while another tab is shown", async () => {
     // Given: an edit in Data
     renderDrawer();
@@ -256,6 +290,8 @@ describe("PacingSettingsDrawer", () => {
 
     // When: the switch is flipped on the Data tab - and NOTHING is saved
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
+    // The cost switches sit in a collapsible section now, closed on every visit.
+    await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
 
@@ -274,6 +310,7 @@ describe("PacingSettingsDrawer", () => {
     expect(screen.queryByLabelText(/Net percent for line item 111/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
 

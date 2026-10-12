@@ -1,0 +1,82 @@
+/* Display names (Settings -> Mapping), the moved editor's own stylesheet.
+ *
+ * Lifted from the retired SPA alongside `spa/DisplayNamesEditor.jsx`, which was moved rather than
+ * rewritten. `.mp3-rowtab*` comes with it because that editor borrows the mapping screen's own tab
+ * strip for its two fields - without these rules the two tabs render as bare text run together.
+ */
+
+.mp3-rowtabs {
+  display: inline-flex; gap: 3px; background: var(--surface-alt);
+  border: 1px solid var(--border-softer); border-radius: 8px; padding: 3px;
+}
+
+.mp3-rowtab {
+  border: 0; background: transparent; color: var(--text-secondary);
+  font-family: var(--font-sans); font-weight: 600; font-size: 12px;
+  padding: 4px 12px; border-radius: 7px; cursor: pointer;
+}
+
+.mp3-rowtab.on {
+  background: var(--surface); color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.mp3-rowtab:disabled { opacity: 0.55; cursor: default; }
+
+.mp3-rows-act .mp3-rowtab { padding: 2px 9px; font-size: 11.5px; }
+
+.mp3-editor .mp3-rowtabs { padding: 2px; gap: 2px; flex-wrap: wrap; }
+
+.mp3-editor .mp3-rowtab { min-height: var(--sp-edit-control-h, 32px); padding: 4px 10px; font-size: 12px; }
+
+/* Display names (spec docs/2026-09-24-display-names.md): one row per raw value — the value
+   and its volume on the left, its name field on the right; a note under the row spans both.
+   No rail accent: a refused name tints the whole row, like .am-state--error. */
+.vl-page > .vl-tabs { align-self: flex-start; max-width: 100%; flex-wrap: wrap; }
+
+.vl-tab-count { font-weight: 500; color: var(--text-muted); }
+
+.mp3-rowtab.on .vl-tab-count { color: var(--text-secondary); }
+
+.vl-list { display: flex; flex-direction: column; gap: 8px; }
+
+.vl-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px 16px;
+  min-height: 58px; padding: 10px 12px; border: 1px solid var(--border-softer); border-radius: var(--rm);
+}
+
+.vl-row--error { border-color: var(--status-red-bold); background: var(--status-red-dim); }
+
+.vl-row-value { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+.vl-row-value strong { overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; color: var(--text-primary); }
+
+.vl-row-value span { font-size: 11.5px; line-height: 1.35; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+.vl-row-edit { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.vl-row-edit .sp-inp { flex: 1 1 auto; min-width: 0; }
+
+.vl-row-edit .vl-clear { flex: none; align-self: center; padding: 0 2px; }
+
+.vl-row-edit .vl-clear--idle { visibility: hidden; }
+
+.vl-row--orphan .vl-row-edit { justify-content: flex-end; }
+
+.vl-row-note { grid-column: 1 / -1; margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+.vl-row-note--error { color: var(--am-danger-text); }
+
+/* The label every renaming field carries for a screen reader. The SPA had this rule globally; the
+   Hub does not, and without it each row's "Display name for <value>" prints above the input. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

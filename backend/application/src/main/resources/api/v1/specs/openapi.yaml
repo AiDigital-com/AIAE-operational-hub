@@ -3438,6 +3438,270 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
 
+  /api/v1/pacing/dashboards/{slug}/sheet-probe:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: probePacingSheet
+      description: >
+        Opens a Google spreadsheet the user pasted a link to and reports what is in it: its tabs,
+        the header row of each, and a couple of data rows. Reads only - nothing is stored, and the
+        caller decides afterwards which tab and which column roles to save.
+
+        A spreadsheet nobody shared with the Pacing service is answered with `readable: false` and
+        the address to share it with, NOT with an error: "not shared yet" is the expected first
+        answer on a brand-new source, and a caller should show it as an instruction.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingSheetProbeRequestV1'
+      responses:
+        '200':
+          description: What the spreadsheet holds, or why it could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingSheetProbeV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many inspection requests - Pacing rate-limits sheet reads on its own budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/dim-source-values:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: readPacingDimSourceValues
+      description: >
+        The distinct values of up to three columns of a sheet tab, each with how many rows carry it.
+
+        This is what spares a person retyping: the mapping screen offers the spellings that are
+        actually in the file instead of asking for them, and a typo there would silently drop rows
+        at refresh time rather than announce itself.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDimSourceValuesRequestV1'
+      responses:
+        '200':
+          description: The distinct values, most rows first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDimSourceValuesV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many inspection requests - Pacing rate-limits sheet reads on its own budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/read:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: readPacingDimSource
+      description: >
+        Re-reads a configured sheet source now, instead of waiting for the next refresh, and reports
+        what came back: how many rows were stored, how many could not be attributed to a line item,
+        and how far the data reaches.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          description: The stored source's id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: What the read produced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDimSourceReadV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many inspection requests - Pacing rate-limits sheet reads on its own budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
+  /api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/suggest:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: suggestPacingDimSource
+      description: >
+        Asks Pacing to propose part of a sheet source's mapping: which line item each unrouted name
+        belongs to (`bindings`), more spellings for one canonical value (`aliases`), or a grouping of
+        a whole column (`groups`).
+
+        Proposals are DRAFTS - nothing is stored, and the caller decides what to accept. Until a
+        model is connected Pacing answers `available: false`, which is a state to show as a sentence
+        rather than an error.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          description: The stored source's id.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingDimSourceSuggestRequestV1'
+      responses:
+        '200':
+          description: The proposal, possibly empty with a reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingDimSourceSuggestionsV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: No pacing with that slug, or no source with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '429':
+          description: Too many suggestion requests - Pacing rate-limits this call on its own budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: The suggestion request failed inside the Pacing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
   /api/v1/pacing/dashboards/{slug}/third-party/status:
     get:
       tags:
@@ -9894,6 +10158,40 @@ components:
             alone.
         dimSources:
           $ref: '#/components/schemas/PacingDimSourcesV1'
+        sheet:
+          $ref: '#/components/schemas/PacingSheetSourceV1'
+        valueLabels:
+          type: object
+          additionalProperties: true
+          description: >
+            Display names for raw delivery values (Pacing spec 2026-09-24) - what a conversion
+            action id or a creative id should read as on the dashboard. The WHOLE object replaces
+            the stored one, so a caller must send every field it means to keep.
+
+            Omit to leave the stored names alone. That is what stops a drawer opened before a
+            teammate's edit from wiping it: this screen sends the key only when this session
+            changed it.
+    PacingSheetSourceV1:
+      type: object
+      description: >
+        The Google Sheet whose tabs REPLACE BigQuery delivery for the line items they are bound to
+        (Pacing spec 2026-08-02). Opaque here and validated there: a spreadsheet id plus a list of
+        tabs, each carrying its column roles and the line item its rows belong to.
+
+        Wrapped for `PacingDimSourcesV1`'s reason, and a sharper one: this field has THREE states,
+        not two. Omitting the wrapper leaves the stored source alone; `entry` with an object replaces
+        it; `entry: null` DISCONNECTS it, which is a real instruction a person gives by removing the
+        source. A bare nullable field cannot carry all three - the Hub omits nulls on the wire, so
+        "disconnect" would arrive as "leave it alone" and the source would quietly stay.
+      properties:
+        entry:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: The source to store, or null to disconnect the one stored.
+      required:
+        - entry
+
     PacingDimSourcesV1:
       type: object
       description: >
@@ -10467,6 +10765,342 @@ components:
             type: string
       required:
         - value
+
+    PacingSheetProbeRequestV1:
+      type: object
+      description: The spreadsheet to look at.
+      properties:
+        url:
+          type: string
+          description: >
+            A Google Sheets link as pasted. Both the bare `/spreadsheets/d/<id>` form and one
+            carrying `/edit#gid=...` are accepted - Pacing takes the id out of it.
+      required:
+        - url
+
+    PacingSheetProbeV1:
+      type: object
+      description: What a spreadsheet holds, as far as the Pacing service can see it.
+      properties:
+        readable:
+          type: boolean
+          description: >
+            False when the file could not be opened - almost always because it has not been shared
+            yet. `tabs` is then empty and `shareWith` says who needs access.
+        spreadsheetId:
+          type: string
+          description: The id taken out of the pasted link, echoed so the caller can store it.
+        title:
+          type: string
+          nullable: true
+          description: The spreadsheet's own name. Null when it could not be read.
+        shareWith:
+          type: string
+          nullable: true
+          description: >
+            The address the file must be shared with for Pacing to read it. Null when the service
+            was not configured with one, or when the file is already readable.
+        error:
+          type: string
+          nullable: true
+          description: Why the file could not be read, when it could not. Null on success.
+        tabs:
+          type: array
+          description: The tabs that hold a grid of values, in the order the spreadsheet lists them.
+          items:
+            $ref: '#/components/schemas/PacingSheetTabV1'
+      required:
+        - readable
+        - spreadsheetId
+        - tabs
+
+    PacingSheetTabV1:
+      type: object
+      description: One tab of a spreadsheet, and enough of its contents to choose column roles.
+      properties:
+        sheetId:
+          type: integer
+          format: int32
+          description: The tab's own id - its `gid` - which is what a stored source names.
+        title:
+          type: string
+          description: The tab's name.
+        rowCount:
+          type: integer
+          format: int32
+          description: How many rows the tab has, header included.
+        colCount:
+          type: integer
+          format: int32
+          description: How many columns the tab has.
+        headerRow:
+          type: integer
+          format: int32
+          description: >
+            Which row the headers were found on, counted from zero. A HINT for the caller to store:
+            the loader finds the header by name on every read, because an index goes stale the
+            moment a row is inserted above it.
+        headers:
+          type: array
+          description: The header cells of that row, trimmed, in column order.
+          items:
+            type: string
+        sample:
+          type: array
+          description: >
+            A few data rows AS THEY ARE, so a person can see what a column actually holds before
+            giving it a role - and so the screen can tell a date cell from text that looks like one.
+            Cell TYPES are preserved: a date arrives as the spreadsheet's serial NUMBER (46170 is
+            2026-05-28), and stringifying it is what makes the column read as text and refuse the
+            Date role. Same column order as `headers`. `grid` is the stringified twin, for display.
+          items:
+            type: array
+            items: {}
+        grid:
+          type: array
+          description: >
+            The raw top of the tab - up to 20 rows - so a header row detected wrongly can be
+            corrected. Showing the detected row with no way to change it leaves anyone whose sheet
+            carries a banner above its headers at a dead end.
+          items:
+            type: array
+            items:
+              type: string
+      required:
+        - sheetId
+        - title
+        - rowCount
+        - colCount
+        - headerRow
+        - headers
+        - sample
+
+    PacingDimSourceValuesRequestV1:
+      type: object
+      description: Which columns of which tab to list the values of.
+      properties:
+        spreadsheetId:
+          type: string
+          description: The spreadsheet the tab belongs to.
+        sheetId:
+          type: integer
+          format: int32
+          description: The tab's `gid`.
+        columns:
+          type: array
+          description: One to three header names, read exactly as they are spelled in the sheet.
+          items:
+            type: string
+        headerRow:
+          type: integer
+          format: int32
+          nullable: true
+          description: Where the header was last seen, counted from zero. Null means the first row.
+      required:
+        - spreadsheetId
+        - sheetId
+        - columns
+
+    PacingDimSourceValuesV1:
+      type: object
+      description: The distinct values found in the requested columns.
+      properties:
+        columns:
+          type: array
+          description: The headers that were read, echoed in the order the values follow.
+          items:
+            type: string
+        values:
+          type: array
+          description: One entry per distinct combination, most rows first.
+          items:
+            $ref: '#/components/schemas/PacingDimSourceValueV1'
+        truncated:
+          type: boolean
+          description: >
+            True when there were more distinct values than the service will return, so the list is
+            a prefix rather than the whole vocabulary.
+        scannedRows:
+          type: integer
+          format: int32
+          description: How many rows were looked at to produce this list.
+      required:
+        - columns
+        - values
+        - truncated
+        - scannedRows
+
+    PacingDimSourceValueV1:
+      type: object
+      description: One distinct value - or combination of values - and how much of the file carries it.
+      properties:
+        values:
+          type: array
+          description: The cell values, in the same order as the requested columns.
+          items:
+            type: string
+        rows:
+          type: integer
+          format: int32
+          description: How many rows carry this combination.
+      required:
+        - values
+        - rows
+
+    PacingDimSourceReadV1:
+      type: object
+      description: What a re-read of a configured sheet source produced.
+      properties:
+        sourceId:
+          type: string
+          description: The source that was read.
+        rows:
+          type: integer
+          format: int32
+          description: >
+            How many rows were stored. Lower than the sheet's own row count by design: rows are
+            summed per day, line item and dimension value, so several sheet rows become one.
+        unboundRows:
+          type: integer
+          format: int32
+          description: >
+            How many rows named something that is not a line item of this pacing. Those rows are
+            left out of the figures, which is why this number is worth showing.
+        unparsedCells:
+          type: integer
+          format: int32
+          description: How many number cells could not be read as numbers.
+        bytes:
+          type: integer
+          format: int64
+          description: How large the stored file is, against the 16 MB a dashboard will load.
+        coverageHint:
+          type: string
+          nullable: true
+          description: The last date the source carries data for, as `YYYY-MM-DD`.
+      required:
+        - sourceId
+        - rows
+        - unboundRows
+        - unparsedCells
+        - bytes
+
+    PacingDimSourceSuggestRequestV1:
+      type: object
+      description: Which part of a sheet source's mapping to propose.
+      properties:
+        kind:
+          type: string
+          enum: [bindings, aliases, groups]
+          description: >
+            `bindings` routes unmatched sheet names to line items; `aliases` extends ONE canonical
+            value with more spellings; `groups` proposes a grouping for a whole column.
+        dim:
+          type: string
+          nullable: true
+          description: The breakdown's key. Required for `aliases` and `groups`.
+        label:
+          type: string
+          nullable: true
+          description: The canonical value being extended. Required for `aliases`.
+        unbound:
+          type: array
+          nullable: true
+          description: >
+            The names that matched no line item, with their row counts. Required for `bindings` -
+            they come from the value list, which is what lets routing be finished before the source
+            has ever been read.
+          items:
+            $ref: '#/components/schemas/PacingDimSourceUnboundNameV1'
+        candidates:
+          type: array
+          nullable: true
+          description: Groupings the screen already guessed, offered so the model does not repeat them.
+          items:
+            type: string
+      required:
+        - kind
+
+    PacingDimSourceUnboundNameV1:
+      type: object
+      description: One sheet name that no rule routed, and how much of the file it carries.
+      properties:
+        value:
+          type: string
+        rows:
+          type: integer
+          format: int32
+      required:
+        - value
+
+    PacingDimSourceSuggestionsV1:
+      type: object
+      description: >
+        A proposal. Drafts only - nothing here is stored until the caller accepts it and saves.
+      properties:
+        available:
+          type: boolean
+          description: >
+            False when there was nothing to ask - no model is connected, or the source has not been
+            read yet, so there are no values to reason about. `notice` says which.
+        notice:
+          type: string
+          nullable: true
+          description: Why the proposal is empty, in words meant for a person.
+        bindings:
+          type: array
+          description: >
+            For the `bindings` kind - one proposed line item per name. Empty for the other kinds.
+          items:
+            $ref: '#/components/schemas/PacingDimSourceBindingV1'
+        members:
+          type: array
+          description: >
+            For the `aliases` kind - the values that should also read as the canonical one.
+          items:
+            type: string
+        groups:
+          type: array
+          description: >
+            For the `groups` kind - the proposed groupings.
+          items:
+            $ref: '#/components/schemas/PacingDimSourceGroupV1'
+        considered:
+          type: integer
+          format: int32
+          description: How many values the proposal was made from.
+      required:
+        - available
+        - bindings
+        - members
+        - groups
+        - considered
+
+    PacingDimSourceBindingV1:
+      type: object
+      description: One proposed route from a sheet name to a line item.
+      properties:
+        value:
+          type: string
+        lineItemId:
+          type: string
+      required:
+        - value
+        - lineItemId
+
+    PacingDimSourceGroupV1:
+      type: object
+      description: One proposed grouping - a name, and the spellings that would read as it.
+      properties:
+        label:
+          type: string
+        members:
+          type: array
+          items:
+            type: string
+      required:
+        - label
+        - members
 
     PacingMappingsUpdateV1:
       type: object

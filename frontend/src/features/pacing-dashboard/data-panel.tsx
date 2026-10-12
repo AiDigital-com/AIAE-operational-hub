@@ -12,7 +12,13 @@ import {
 import { normThirdParty, reportLabel } from "./spa/third-party-norm.js";
 import { useSavePacingDataSettings } from "./hooks";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
-import type { PacingDataSettingsUpdateV1, PacingDataShape, PacingDimSource } from "./types";
+import { SheetSources, type LoadedDimSource } from "./sheet-source-panel";
+import type {
+  PacingDataSettingsUpdateV1,
+  PacingDataShape,
+  PacingDimSource,
+  PacingSheetDimSource,
+} from "./types";
 import "./data-panel.css";
 
 /**
@@ -68,12 +74,32 @@ function devicesOn(dimSources: PacingDimSource[]): boolean {
  * point: the field is a whole-array replace, so a list rebuilt from this one checkbox alone would
  * delete the pacing's sheet-backed sources on a click that has nothing to do with them.
  */
-function dimSourcesFor(devices: boolean, existing: PacingDimSource[]): PacingDimSource[] {
-  const others = existing.filter((entry) => entry?.id !== DEVICES_SOURCE_ID);
+function dimSourcesFor(
+  devices: boolean,
+  sheets: PacingSheetDimSource[] | undefined,
+  existing: PacingDimSource[],
+): PacingDimSource[] {
+  // No sheet list handed in means "this caller does not edit them", NOT "there are none". The two
+  // read the same from here and only one of them is safe: rebuilding the array without the stored
+  // sheet sources deletes them on a click about the Devices checkbox. A caller that DOES edit them
+  // passes its draft, empty list included.
+  const sheetHalf = sheets ?? (existing.filter((e) => e?.loader === "sheet") as PacingSheetDimSource[]);
+  // Everything that is neither the Devices entry nor a sheet source is carried through untouched, in
+  // its original order. The field is a whole-array replace, so an entry rebuilt from this screen's
+  // own controls alone would delete whatever Pacing adds to the list next.
+  const others = existing.filter(
+    (entry) => entry?.id !== DEVICES_SOURCE_ID && entry?.loader !== "sheet",
+  );
   const builtIn: PacingDimSource[] = devices
     ? [{ id: DEVICES_SOURCE_ID, loader: "bq_mart", origin: { catalog: DEVICES_SOURCE_ID } }]
     : [];
-  return [...builtIn, ...others];
+  return [...builtIn, ...sheetHalf, ...others];
+}
+
+/** Order-insensitive on nothing: a sheet source list IS ordered (it is the order the cards show in),
+ *  so this compares the bytes. Used only to decide whether the list moved at all. */
+function sheetsKey(sheets: PacingSheetDimSource[] | undefined): string {
+  return JSON.stringify(sheets);
 }
 
 interface DataDraft {
@@ -110,7 +136,18 @@ function seed(data: PacingDataShape | undefined): DataDraft {
 }
 
 /** The request body for a draft against what was loaded: every changed field, and nothing else. */
-function diff(draft: DataDraft, base: DataDraft, existing: PacingDimSource[]): PacingDataSettingsUpdateV1 {
+function diff(
+  draft: DataDraft,
+  base: DataDraft,
+  existing: PacingDimSource[],
+  sheets: PacingSheetDimSource[] | undefined,
+  storedSheets: PacingSheetDimSource[] | undefined,
+  labels: Record<string, unknown> | null,
+  storedLabels: Record<string, unknown> | null,
+  perf: Record<string, unknown> | null,
+  storedPerf: Record<string, unknown> | null,
+  perfTouched: boolean,
+): PacingDataSettingsUpdateV1 {
   const body: PacingDataSettingsUpdateV1 = {};
   if (draft.source !== base.source) {
     body.source = draft.source as PacingDataSettingsUpdateV1["source"];
@@ -120,13 +157,25 @@ function diff(draft: DataDraft, base: DataDraft, existing: PacingDimSource[]): P
   if (draft.coefEnabled !== base.coefEnabled) body.coefEnabled = draft.coefEnabled;
   if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
   if (draft.primaryCvEnabled !== base.primaryCvEnabled) body.primaryCvEnabled = draft.primaryCvEnabled;
-  if (draft.devices !== base.devices) {
+  const sheetsMoved = !!sheets && sheetsKey(sheets) !== sheetsKey(storedSheets ?? []);
+  if (draft.devices !== base.devices || sheetsMoved) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
     // is built only when this checkbox actually moved. An unwrapped array could not say that - see the
     // contract's own note on why `PacingDimSourcesV1` exists.
     body.dimSources = {
-      entries: dimSourcesFor(draft.devices, existing) as Array<Record<string, unknown>>,
+      entries: dimSourcesFor(draft.devices, sheets, existing) as Array<Record<string, unknown>>,
     };
+  }
+  // Display names: sent only when this session changed them, so a drawer opened before a
+  // teammate's edit cannot wipe it - the same rule the key has on Pacing's side.
+  if (JSON.stringify(labels ?? null) !== JSON.stringify(storedLabels ?? null)) {
+    body.valueLabels = (labels ?? {}) as Record<string, unknown>;
+  }
+  // Three states, and the wrapper is how the third one is said at all: no wrapper leaves the stored
+  // source alone, `entry: null` disconnects it. Sent only when this session touched it AND the value
+  // actually moved, so a drawer opened and closed changes nothing.
+  if (perfTouched && JSON.stringify(perf ?? null) !== JSON.stringify(storedPerf ?? null)) {
+    body.sheet = { entry: perf as Record<string, never> | null };
   }
   return body;
 }
@@ -146,6 +195,46 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
    *  widget's own empty state sends you ("Add one in Settings → Data"), even though it is a
    *  different config key with a different endpoint - see this section's save(). */
   thirdParty: Record<string, unknown>[] | undefined;
+  /** The sheet sources as the Mapping tab currently has them, and as they are stored.
+   *
+   *  This tab WRITES them and does not edit them: they live on `config.data`, which is this tab's
+   *  patch, while the screen that edits them is Mapping - where the reference puts it. Passing both
+   *  is what lets the save send them only when they actually moved. */
+  sheetSources?: PacingSheetDimSource[];
+  storedSheetSources?: PacingSheetDimSource[];
+  /** Display names, same arrangement and for the same reason. */
+  valueLabels?: Record<string, unknown> | null;
+  storedValueLabels?: Record<string, unknown> | null;
+  /** What each source last read, for the block beside it. */
+  dimSourcesLoaded?: Record<string, Record<string, unknown>>;
+  /** This pacing's widgets, so removing a source can say what uses it. */
+  widgets?: unknown;
+  /** Called after a re-read, so the host can refetch the figures that just changed. */
+  onReadSource?: () => void;
+  /** Hands the edited list up: the DRAWER owns this draft, because the Mapping tab edits the same
+   *  list and one Save over two tabs cannot have two owners. */
+  onSheetSourcesChange?: (next: PacingSheetDimSource[]) => void;
+  /** The sheet that replaces delivery: what is on screen, what is stored, and whether this session
+   *  said anything about it at all - the three states the save has to tell apart. */
+  /** Delivery per line item per day - the denominator of the coverage line under each source. */
+  liDaily?: Record<string, unknown> | null;
+  /** This pacing's line items, with their flights. Coverage counts the imported rows over the days
+   *  each line item was RUNNING, so without this list the numerator is zero and the line reads 0%. */
+  lineItems?: ReadonlyArray<{ id: string; label: string; fs?: string | null; fe?: string | null }>;
+  perfSheet?: Record<string, unknown> | null;
+  storedPerfSheet?: Record<string, unknown> | null;
+  perfTouched?: boolean;
+  onPerfSheetChange?: (next: Record<string, unknown> | null) => void;
+  /** What the SPREADSHEET holds - its tabs and their headers. A different question from what the
+   *  pacing has bound, and the editor needs both: the drawer owns it so Mapping sees the same one. */
+  perfProbe?: Record<string, unknown> | null;
+  perfProbing?: boolean;
+  perfProbeMessage?: string | null;
+  /** Binds a spreadsheet to this pacing by URL; resolves `{ok:false, message}` on a bad link or an
+   *  unreadable file, which the connect form prints as it stands. */
+  onPerfConnect?: (url: string) => Promise<{ ok: boolean; message?: string }>;
+  onPerfDisconnect?: () => void;
+  onPerfRetryProbe?: () => void;
   /** Whether this tab is on screen. The campaign picker's list is a BigQuery read on the Pacing
    *  side, so it is asked for only when someone is looking at it. */
   visible: boolean;
@@ -233,12 +322,22 @@ function newThirdPartyId(): string {
 
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
   function PacingDataSection(
-    { slug, data, netRatioCount, seedKey, thirdParty, visible, onDirtyChange, onSwitchesChange },
+    {
+      slug, data, netRatioCount, seedKey, thirdParty, sheetSources, storedSheetSources,
+      valueLabels = null, storedValueLabels = null, dimSourcesLoaded, widgets, onReadSource,
+      onSheetSourcesChange, liDaily, lineItems = [], perfSheet = null, storedPerfSheet = null, perfTouched = false,
+      onPerfSheetChange, perfProbe = null, perfProbing = false, perfProbeMessage = null,
+      onPerfConnect, onPerfDisconnect, onPerfRetryProbe, visible,
+      onDirtyChange, onSwitchesChange,
+    },
     ref,
   ) {
     const [draft, setDraft] = useState<DataDraft>(() => seed(data));
     const [base, setBase] = useState<DataDraft>(() => seed(data));
     const [extrasOpen, setExtrasOpen] = useState(false);
+    // Closed on every visit, like its neighbour: most pacings connect nothing here.
+    const [tpOpen, setTpOpen] = useState(false);
+    const [costOpen, setCostOpen] = useState(false);
     const save = useSavePacingDataSettings(slug);
 
     // ── CM360 source ──────────────────────────────────────────────────────────────────────────
@@ -332,7 +431,16 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seedKey, slug]);
 
-    const body = useMemo(() => diff(draft, base, existingDimSources), [draft, base, existingDimSources]);
+    const body = useMemo(
+      () => diff(
+        draft, base, existingDimSources, sheetSources, storedSheetSources, valueLabels,
+        storedValueLabels, perfSheet, storedPerfSheet, perfTouched,
+      ),
+      [
+        draft, base, existingDimSources, sheetSources, storedSheetSources, valueLabels,
+        storedValueLabels, perfSheet, storedPerfSheet, perfTouched,
+      ],
+    );
     // The CM360 source is dirty on its own terms - it is a different key behind a different
     // endpoint, and the tab's dot has to light up for either.
     const tpDirty = useMemo(
@@ -454,7 +562,25 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
         </section>
 
         <section className="pdata__section">
-          <h3 className="pdata__heading">Third-party source (CM360)</h3>
+          {/* Collapsible with a count, as the reference has it: on most pacings there is nothing here,
+              and a section that is always open spends a screen saying so. The count is what tells
+              you whether to open it. */}
+          <button
+            type="button"
+            className="pdata__collapse"
+            aria-expanded={tpOpen}
+            onClick={() => setTpOpen((value) => !value)}
+          >
+            <svg className="pdata__chevron" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M3 1l4 4-4 4" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+            <span className="pdata__heading">3rd Party Data</span>
+            {tpDraft.length + (sheetSources?.length ?? 0) > 0 && (
+              <span className="pdata__count">{tpDraft.length + (sheetSources?.length ?? 0)}</span>
+            )}
+          </button>
+          {tpOpen && (
+            <>
           <p className="pdata__hint pdata__hint--block">
             Which ad-server campaigns this pacing is compared against. Saving starts a pull; the
             rows land in the background and the compare widget says where it got to.
@@ -575,20 +701,55 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             </p>
           )}
 
-          <button
-            type="button"
-            className="pdata__add"
-            onClick={() => setTpDraft((prev) => [
+          {/* No button of its own any more: "what am I connecting?" is ONE question with three
+              answers, and it is asked once, below. Two buttons in two blocks is what made the third
+              answer - a tab that replaces delivery - look like something the product cannot do. */}
+
+          {/* ONE list, not two sections. CM360 rows and sheet tabs are both "data from somewhere
+              else, hung on this pacing" - the reference lists them together with a kind chip, and
+              splitting them was what made "+ Add" look like two unrelated buttons. */}
+          <SheetSources
+            onAddCm360={() => setTpDraft((prev) => [
               ...prev,
               { key: `new_${prev.length}_${Date.now()}`, report: "", campaigns: [], rest: {} },
             ])}
-          >
-            + Add CM360 source
-          </button>
+            slug={slug}
+            sources={sheetSources ?? []}
+            stored={storedSheetSources ?? []}
+            loaded={(dimSourcesLoaded ?? {}) as Record<string, LoadedDimSource>}
+            widgets={widgets}
+            onRead={() => onReadSource?.()}
+            liDaily={liDaily}
+            lineItems={lineItems}
+            perfSheet={perfSheet}
+            onPerfSheetChange={(next) => onPerfSheetChange?.(next)}
+            perfProbe={perfProbe}
+            perfProbing={perfProbing}
+            perfProbeMessage={perfProbeMessage}
+            onPerfConnect={onPerfConnect}
+            onPerfDisconnect={onPerfDisconnect}
+            onPerfRetryProbe={onPerfRetryProbe}
+            onChange={(next) => onSheetSourcesChange?.(next)}
+          />
+            </>
+          )}
         </section>
 
         <section className="pdata__section">
-          <h3 className="pdata__heading">Client cost</h3>
+          {/* Collapsible for its neighbours' reason: three switches most pacings never touch, each
+              needing a paragraph to explain itself. Closed, the tab reads as what it is about. */}
+          <button
+            type="button"
+            className="pdata__collapse"
+            aria-expanded={costOpen}
+            onClick={() => setCostOpen((value) => !value)}
+          >
+            <svg className="pdata__chevron" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M3 1l4 4-4 4" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+            <span className="pdata__heading">Client cost</span>
+          </button>
+          {costOpen && (
           <div className="pdata__options">
             <label className="pdata__check">
               <input
@@ -655,6 +816,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
               </span>
             </label>
           </div>
+          )}
         </section>
 
         <section className="pdata__section">

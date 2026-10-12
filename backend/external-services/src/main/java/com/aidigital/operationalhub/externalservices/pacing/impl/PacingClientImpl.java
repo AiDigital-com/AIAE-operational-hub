@@ -903,7 +903,7 @@ public class PacingClientImpl implements PacingClient {
 	public void saveDataSettings(HubAssertion assertion, String slug, PacingDataSettings settings) {
 		String header = assertionSigner.sign(assertion);
 		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
-		DataSettingsRequest request = new DataSettingsRequest(toWireDataNamespace(settings));
+		DataSettingsRequest request = new DataSettingsRequest(DataNamespaceWire.of(settings));
 		try {
 			restClient.post()
 					.uri(path)
@@ -920,17 +920,6 @@ public class PacingClientImpl implements PacingClient {
 		}
 	}
 
-	/**
-	 * Renames the settings to the snake_case keys Pacing's {@code config.data} namespace stores.
-	 *
-	 * @param settings the settings to write; null fields stay null and are dropped on serialization
-	 * @return the wire shape of the {@code data} object
-	 */
-	private DataNamespaceRequest toWireDataNamespace(PacingDataSettings settings) {
-		return new DataNamespaceRequest(
-				settings.source(), settings.fetchCreatives(), settings.fetchConversions(),
-				settings.coefEnabled(), settings.netEnabled(), settings.primaryCvEnabled(), settings.dimSources());
-	}
 
 	@Override
 	public void saveCampaignLinks(HubAssertion assertion, String slug, List<PacingCampaignLink> links) {

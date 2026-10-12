@@ -26,6 +26,7 @@
  *
  * Division by zero yields 0 throughout - project canon, see pacing-core.js.
  */
+import ValueLabels from "@shared/value-labels";
 import { getCurrency, getPacingCore } from "../engine/engine-loader";
 import { FILTERABLE_DIMS } from "../filters/breakdown-filter";
 import type { DateRange, FactRow, FlowRow, LiDaily, LiPlanMap } from "../engine/vendor-types";
@@ -347,7 +348,8 @@ export function aggregateCreativeAsset(
   liIdSet: ReadonlySet<string>,
   range: DateRange | null,
   eligibleSet: ReadonlySet<string>,
-  rate: number | null | undefined
+  rate: number | null | undefined,
+  valueLabels?: Record<string, unknown> | null
 ): Record<string, DimBucket> {
   const byKey: Record<string, DimBucket> = {};
   if (!Array.isArray(creatives) || liIdSet.size === 0) return byKey;
@@ -364,7 +366,8 @@ export function aggregateCreativeAsset(
     // literally the same `creative` string collapse into one bucket; that matches what an operator
     // visually expects ("show me totals by creative I see in the DSP UI").
     const name = row.creative != null ? String(row.creative).trim() : "";
-    const key = name || (row.creative_id != null ? String(row.creative_id) : "") || UNCLASSIFIED_KEY;
+    const shown = shownAs(valueLabels, "creative", name);
+    const key = shown || (row.creative_id != null ? String(row.creative_id) : "") || UNCLASSIFIED_KEY;
 
     if (!hasOwn(byKey, key)) byKey[key] = zeroBucket();
     const r = byKey[key];
@@ -384,12 +387,31 @@ export function aggregateCreativeAsset(
   return byKey;
 }
 
+/** What a raw aux value is SHOWN as: the pacing's display name for it, else the value itself.
+ *
+ *  Same rule as the moved renderer's `auxLabel` (widget-data.js), and keyed the same way, so a
+ *  Conversion Action named on Mapping reads the same here as it does on a widget. Two raw values
+ *  sharing one display name collapse into one bucket - that is what naming them is for. */
+function shownAs(
+  labels: Record<string, unknown> | null | undefined,
+  field: "conversion_action" | "creative",
+  raw: string
+): string {
+  if (!raw || !labels) return raw;
+  // `lookup` FIRST, always: the stored shape is a LIST of {raw,label} pairs, and `labelOf` wants
+  // the map that list compiles to. Handing it the list looks like it works - every lookup simply
+  // misses and returns the raw value, which is exactly "display names do nothing".
+  const map = ValueLabels.lookup(labels, field);
+  return map ? String(ValueLabels.labelOf(map, raw)) : raw;
+}
+
 /** The Conversion Action cut: the conversions mart carries no delivery, only the three
  *  conversion counters. */
 export function aggregateConversion(
   conversions: readonly FactRow[] | null | undefined,
   liIdSet: ReadonlySet<string>,
-  range: DateRange | null
+  range: DateRange | null,
+  valueLabels?: Record<string, unknown> | null
 ): Record<string, DimBucket> {
   const byKey: Record<string, DimBucket> = {};
   if (!Array.isArray(conversions) || liIdSet.size === 0) return byKey;
@@ -399,7 +421,7 @@ export function aggregateConversion(
     const date = String(row.date ?? "");
     if (range && (date < range.from || date > range.to)) continue;
     const action = row.conversion_action != null ? String(row.conversion_action).trim() : "";
-    const key = action || UNCLASSIFIED_KEY;
+    const key = shownAs(valueLabels, "conversion_action", action) || UNCLASSIFIED_KEY;
     if (!hasOwn(byKey, key)) byKey[key] = zeroBucket();
     const r = byKey[key];
     r.cv += Number(row.conversions) || 0;

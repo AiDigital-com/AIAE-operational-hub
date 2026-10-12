@@ -40,6 +40,10 @@ import java.util.Map;
  *                         client cost reads net = gross × each line item's ratio everywhere. Null
  *                         leaves the stored switch untouched
  * @param dimSources       the WHOLE dimension-source list to store, opaque - forwarded byte-for-byte
+ * @param valueLabels      display names for raw delivery values; null leaves the stored names alone
+ * @param sheet            what to do with the Google Sheet that replaces delivery: null means
+ *                         "leave the stored one alone", and a present wrapper carries either the
+ *                         source to store or an explicit null to disconnect it
  *                         and validated by Pacing, which refuses a malformed entry rather than
  *                         dropping it. Whole-array replace: a caller that rebuilds this from its own
  *                         built-in toggles alone deletes every sheet-backed source the pacing has, so
@@ -56,5 +60,7 @@ public record PacingDataSettings(
 		Boolean coefEnabled,
 		Boolean netEnabled,
 		Boolean primaryCvEnabled,
-		List<Map<String, Object>> dimSources) {
+		List<Map<String, Object>> dimSources,
+		Map<String, Object> valueLabels,
+		PacingSheetSourceInstruction sheet) {
 }

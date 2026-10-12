@@ -776,3 +776,125 @@ input.pmap__ent-name {
   color: var(--text-muted, #6b7280);
 }
 .pmap__chev { margin-left: 4px; color: var(--text-muted, #6b7280); font-size: 16px; }
+
+/* Display names, as a card in the list.
+   Same geometry as `.pmap__ent` beside it - one list, one kind of card - but it is a <button>, so
+   the browser's own defaults for one have to be undone before it looks like its neighbours. */
+.pmap__names-card {
+  display: block;
+  width: 100%;
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: var(--surface, #fff);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* Both rows stop short of the chevron. It is positioned absolutely, so it takes no space of its own
+   and the chip ran straight under it - measured at -6px, i.e. overlapping. 28px is its 6px plus the
+   12px it sits in from the edge, plus a gap you can see. */
+.pmap__names-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 28px;
+}
+.pmap__names-name {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+.pmap__names-kind {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--status-blue-dim);
+  color: var(--status-blue-bold);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* The summary sits right of the subtitle rather than under it: the two are one sentence - what this
+   renames, and how much of it is named. */
+.pmap__names-counts {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding-right: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pmap__names-open {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* A section inside the Mapping list: what this group of cards is, and what it is for. Three of them
+   on one screen, so the two lines are one block rather than a heading with a loose sentence. */
+/* The panel's own title and the first group's title are two different levels, and 7px between them
+   reads as one four-line heading. Groups further down get their air from `.pmap__section`'s padding;
+   this one follows a row inside the same section, so it has to ask for it. */
+.pmap__row + .pmap__sechead {
+  margin-top: 18px;
+}
+
+.pmap__sechead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pmap__sechead strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.pmap__sechead span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An empty group. One sentence in the same frame a card would occupy, so a list of three groups
+   keeps its shape whether or not they are filled. */
+.pmap__empty {
+  padding: 12px;
+  border: 1px solid var(--border-subtle, #e6e8ec);
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.pmap__empty--action {
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+
+/* The first section starts at the top of the panel, not 20px below it.
+ *
+ * `.pmap__section` pads itself top and bottom so that two of them have air between them - but the
+ * drawer body already pads the panel, so on the FIRST one the two stack and the screen opens with a
+ * band of nothing. It shows on every screen in this panel, not just the list: the mapping editor,
+ * the sheet editor and the names editor all begin with one. */
+.pmap__section:first-child {
+  padding-top: 0;
+}
+
+/* The back link needs air under it. On these screens it is a line of its own, and the eyebrow that
+   follows is set in small caps - with the two a few pixels apart they read as one stacked label
+   rather than as "leave this screen" followed by "this is what you are looking at". */
+.pmap__row--back {
+  margin-bottom: 12px;
+}

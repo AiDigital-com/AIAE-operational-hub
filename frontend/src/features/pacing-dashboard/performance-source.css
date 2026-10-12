@@ -1,0 +1,162 @@
+/* Performance source: the Tabs screen, and what Columns adds on top of the Additional-data one.
+ *
+ * MOVED from the reference's `index.css` (its "Performance source (2026-09-17)" block), for the
+ * reason the components were moved rather than retyped: these class names belong to JSX nobody
+ * re-typed, so a hand-written stylesheet beside it would be a second thing to keep in step.
+ *
+ * Only the `ps-*` rules live here. Three rules of that block - `.am-fig dd.am-fig--warn`,
+ * `.am-fig dd.am-fig--bad` and `.ps-tab > .am-confirm` - already came over with
+ * `additional-mapping.css` and are NOT repeated: two copies of one rule is how they drift.
+ *
+ * Without this file every one of these screens rendered at the browser's defaults - 16px text in a
+ * 12px drawer, a checkbox label twice the size of the sentence it belongs to.
+ */
+
+.ps-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ps-tab {
+  border: 1px solid var(--border-softer);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+/* A tab the spreadsheet no longer has: still listed, so its mapping can be removed on purpose
+   rather than vanishing with the file. */
+.ps-tab--gone {
+  border-style: dashed;
+}
+
+.ps-tab-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 12px;
+}
+
+.ps-tab-row > div {
+  min-width: 0;
+}
+
+.ps-tab-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ps-tab-main strong {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.ps-tab-meta,
+.ps-tab-route > span {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ps-tab-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.ps-tab-route > span.ps-fix {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--status-amber);
+  white-space: nowrap;
+}
+
+.ps-tab-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 10px;
+}
+
+.ps-tab-notes > .sp-tp-status {
+  display: block;
+  line-height: 1.4;
+}
+
+/* A name keeps its line; the badges wrap under it instead of breaking the word. */
+.ps-col-name {
+  flex-wrap: wrap;
+  row-gap: 3px;
+}
+
+.ps-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ps-blocked ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.ps-blocked li {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ps-facts--warn b {
+  color: var(--status-amber);
+}
+
+.ps-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.ps-check input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.ps-check strong {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.ps-check span span {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.ps-split-cols,
+.ps-hand {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.ps-hand {
+  margin-top: 8px;
+}
+
+.ps-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .ps-tab-row {
+    grid-template-columns: 1fr;
+  }
+}
