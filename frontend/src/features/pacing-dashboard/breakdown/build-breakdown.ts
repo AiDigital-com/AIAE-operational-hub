@@ -166,6 +166,11 @@ export interface BreakdownContext {
   splitData: Record<string, Record<string, DimBucket>>;
   creatives: readonly FactRow[] | null;
   conversions: readonly FactRow[] | null;
+  /** The pacing's display names for raw values (Pacing spec 2026-09-24), as `config.data` carries
+   *  them. The two AUX cuts are the only ones that read them: a conversion action and a creative
+   *  are the values a pacing may rename, and two raw values sharing one display name become ONE
+   *  row - which is the point of naming them. */
+  valueLabels: Record<string, unknown> | null;
   liIdSet: ReadonlySet<string>;
   vcrEligible: ReadonlySet<string>;
   range: DateRange | null;
@@ -358,6 +363,7 @@ export function buildBreakdownContext(
       splitData: merged.mergedSplit,
       creatives,
       conversions,
+      valueLabels: (data?.data as { value_labels?: Record<string, unknown> } | undefined)?.value_labels ?? null,
       liIdSet,
       vcrEligible,
       range,
@@ -418,9 +424,11 @@ export function buildBreakdownView(
     // could not name, and what it never saw at all.
     dimMap = deviceBucketMap(sourceResult, rowUnitKey);
   } else if (dim === CREATIVE_ASSET_DIM) {
-    dimMap = aggregateCreativeAsset(ctx.creatives, ctx.liIdSet, ctx.range, ctx.vcrEligible, ctx.rate);
+    dimMap = aggregateCreativeAsset(
+      ctx.creatives, ctx.liIdSet, ctx.range, ctx.vcrEligible, ctx.rate, ctx.valueLabels,
+    );
   } else if (isConversionDim) {
-    dimMap = aggregateConversion(ctx.conversions, ctx.liIdSet, ctx.range);
+    dimMap = aggregateConversion(ctx.conversions, ctx.liIdSet, ctx.range, ctx.valueLabels);
   } else {
     dimMap = aggregateDim(ctx.splitData, dim, ctx.range);
   }

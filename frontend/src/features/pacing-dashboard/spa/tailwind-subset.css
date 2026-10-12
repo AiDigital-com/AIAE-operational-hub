@@ -196,3 +196,23 @@
 .focus\:border-\[var\(--accent\)\]:focus { border-color: var(--accent); }
 .placeholder\:text-\[var\(--text-muted\)\]::placeholder { color: var(--text-muted); }
 .last\:border-b-0:last-child { border-bottom-width: 0; }
+
+/*
+ * The condensed face the moved SPA asks for, which this app does not ship.
+ *
+ * `pacing-spa.css` declares `--font-barlow: 'Barlow Semi Condensed'` and every control styled by
+ * `.sp-btn` asks for it - but nothing in the Hub loads that family, so the browser fell through to
+ * plain `sans-serif`. On a condensed face, 11px uppercase at 0.08em tracking is a compact button; on
+ * the fallback it is a wide, heavy one, which is exactly how the mapping screens read beside the
+ * Hub's own buttons two inches away.
+ *
+ * Pointing the token at the Hub's own family is the smaller change: the moved markup keeps asking
+ * for `--font-barlow` as it always did, and one app has one typeface. Loading Barlow instead would
+ * mean shipping a second webfont so that one panel can disagree with every other screen.
+ *
+ * Specificity, not order: `pacing-spa.css` sets this on `:root`, and which of two stylesheets wins
+ * at equal weight depends on bundle order, which is not a thing to rely on.
+ */
+:root:root {
+  --font-barlow: var(--font);
+}

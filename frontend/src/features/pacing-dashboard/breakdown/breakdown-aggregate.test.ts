@@ -225,6 +225,53 @@ describe("aggregateConversion", () => {
     expect(map.Purchase).toMatchObject({ cv: 5, pc: 3, pv: 2 });
     expect(map[UNCLASSIFIED_KEY].cv).toBe(1);
   });
+
+  /**
+   * Display names (Pacing spec 2026-09-24). The editor promises "the pacing shows it everywhere
+   * after Save", and this cut is part of everywhere - it used to key by the RAW action and ignore
+   * the names entirely. Two raw actions sharing one name become ONE row, which is the point of
+   * naming them.
+   */
+  it("keys by the display name when the pacing renames the action", () => {
+    const conversions: FactRow[] = [
+      { line_item_id: "1", date: "2026-08-01", conversion_action: "Post Engagement", conversions: 7 },
+      { line_item_id: "1", date: "2026-08-02", conversion_action: "Post Reactions", conversions: 2 },
+    ];
+    const labels = {
+      conversion_action: [{ raw: "Post Engagement", label: "All engagements" }],
+      creative: [],
+    };
+    const map = aggregateConversion(conversions, new Set(["1"]), null, labels);
+    expect(map["All engagements"].cv).toBe(7);
+    expect(map["Post Engagement"]).toBeUndefined();
+    // Untouched actions keep their raw value.
+    expect(map["Post Reactions"].cv).toBe(2);
+  });
+
+  it("gathers two raw actions under one display name", () => {
+    const conversions: FactRow[] = [
+      { line_item_id: "1", date: "2026-08-01", conversion_action: "Purchase", conversions: 4 },
+      { line_item_id: "1", date: "2026-08-02", conversion_action: "Purchase (web)", conversions: 6 },
+    ];
+    const labels = {
+      conversion_action: [
+        { raw: "Purchase", label: "Sales" },
+        { raw: "Purchase (web)", label: "Sales" },
+      ],
+    };
+    const map = aggregateConversion(conversions, new Set(["1"]), null, labels);
+    expect(map.Sales.cv).toBe(10);
+  });
+
+  it("leaves the raw action alone when the pacing names nothing", () => {
+    const conversions: FactRow[] = [
+      { line_item_id: "1", date: "2026-08-01", conversion_action: "Purchase", conversions: 3 },
+    ];
+    expect(aggregateConversion(conversions, new Set(["1"]), null, null).Purchase.cv).toBe(3);
+    // A list that renames a value to ITSELF names nothing - `lookup` drops it.
+    const selfNamed = { conversion_action: [{ raw: "Purchase", label: "Purchase" }] };
+    expect(aggregateConversion(conversions, new Set(["1"]), null, selfNamed).Purchase.cv).toBe(3);
+  });
 });
 
 describe("enrichRows", () => {

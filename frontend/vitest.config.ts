@@ -23,6 +23,7 @@ const sharedAlias = Object.fromEntries(
   "@shared/formula-chips": "./src/features/pacing-dashboard/vendor/formula-chips.js",
   "@shared/line-item-columns": "./src/features/pacing-dashboard/vendor/line-item-columns.js",
   "@shared/refresh-freshness": "./src/features/pacing-dashboard/vendor/refresh-freshness.js",
+  "@shared/sheet-convert": "./src/features/pacing-dashboard/vendor/sheet-convert.js",
     "@shared/primary-cv-rule": "./src/features/pacing-dashboard/vendor/primary-cv-rule.js",
     "@shared/dim-value-groups": "./src/features/pacing-dashboard/vendor/dim-value-groups.js",
   "@shared/formula-chips": "./src/features/pacing-dashboard/vendor/formula-chips.js",

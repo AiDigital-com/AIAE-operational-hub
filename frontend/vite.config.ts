@@ -33,6 +33,7 @@ const SHARED_MODULES: Record<string, string> = {
   "@shared/formula-chips": "./src/features/pacing-dashboard/vendor/formula-chips.js",
   "@shared/line-item-columns": "./src/features/pacing-dashboard/vendor/line-item-columns.js",
   "@shared/refresh-freshness": "./src/features/pacing-dashboard/vendor/refresh-freshness.js",
+  "@shared/sheet-convert": "./src/features/pacing-dashboard/vendor/sheet-convert.js",
   };
 const sharedAlias = Object.fromEntries(
   Object.entries(SHARED_MODULES).map(([k, v]) => [k, sharedDir(v)])

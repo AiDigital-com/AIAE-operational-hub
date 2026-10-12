@@ -1,0 +1,359 @@
+/* Sheet sources: connecting a Google Sheet to a pacing as an extra breakdown.
+   Lives inside the Data panel's slide-over, so it inherits that sheet's width and padding and only
+   styles what it adds. */
+
+.ss-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+/* ...except when it IS the top of the screen, where the panel has already paid for the space. */
+.ss-wrap:first-child {
+  margin-top: 0;
+}
+
+.ss-h {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ss-h2 {
+  margin: 8px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ss-lead,
+.ss-empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
+
+/* One connected source. A flat card with a tinted status line - never a coloured edge: a left or
+   right rail is banned across this product. */
+.ss-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ss-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ss-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Pushed right as a group so the actions keep one baseline with the title, whatever the title's
+   length - a per-button margin would stagger them the moment one wraps. */
+.ss-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.ss-card-status,
+.ss-card-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ss-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--status-blue-dim);
+  color: var(--status-blue-bold);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.ss-ok {
+  color: var(--status-green-bold);
+}
+.ss-warn {
+  color: var(--status-amber-bold);
+}
+.ss-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.ss-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--status-green-dim);
+  color: var(--status-green-bold);
+  font-size: 12px;
+}
+.ss-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--status-amber-bold);
+}
+.ss-blocked {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--status-amber-dim);
+  color: var(--status-amber-bold);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Controls. `.ss-link` is a button that reads as text, so an action sits on the same baseline as the
+   anchor beside it instead of standing a button's height taller. */
+.ss-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ss-link:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.ss-link-quiet {
+  color: var(--muted);
+}
+.ss-back {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ss-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ss-btn:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+.ss-add {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* A text field and the button that acts on it, on one baseline. */
+.ss-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ss-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+/* background-COLOR, never the shorthand: the shorthand resets background-image, and the Hub draws a
+   select's chevron with one. */
+.ss-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.ss-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ss-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ss-tab.is-on {
+  background-color: var(--status-blue-dim);
+}
+.ss-tab-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+.ss-tab-meta {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+/* A sample of the file. Scrolls inside itself - a wide sheet must never make the drawer scroll
+   sideways. */
+.ss-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ss-table {
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.ss-table th,
+.ss-table td {
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Column roles. One grid, so every select lines up down the right whatever the header's length. */
+.ss-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ss-col {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 1.6fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ss-col-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ss-col-sample {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ss-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ss-stat-k {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ss-stat-v {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ss-stat-s {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ss-summary {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background-color: var(--status-blue-dim);
+  color: var(--status-blue-bold);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ss-names {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ss-name {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+/* The names are long machine-built strings; they wrap rather than stretch the drawer. */
+.ss-name-text {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ss-name-rows {
+  display: block;
+  color: var(--muted);
+}
+
+.ss-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ss-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}

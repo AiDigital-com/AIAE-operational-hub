@@ -34,6 +34,80 @@ export interface PacingDimSource {
   [key: string]: unknown;
 }
 
+/** What a probed spreadsheet holds. `readable: false` is an ANSWER, not an error - almost always
+ *  "nobody has shared this file with us yet", which `shareWith` then tells the person how to fix. */
+export type PacingSheetProbeV1 = components["schemas"]["PacingSheetProbeV1"];
+/** One tab of a probed spreadsheet: its header row, and a few data rows to recognise a column by. */
+export type PacingSheetTabV1 = components["schemas"]["PacingSheetTabV1"];
+/** The distinct values of up to three columns of a sheet tab, each with how many rows carry it. */
+export type PacingDimSourceValuesV1 = components["schemas"]["PacingDimSourceValuesV1"];
+/** One distinct value and its row count. */
+export type PacingDimSourceValueV1 = components["schemas"]["PacingDimSourceValueV1"];
+/** What a re-read of a configured sheet source produced. */
+export type PacingDimSourceReadV1 = components["schemas"]["PacingDimSourceReadV1"];
+/** The Google Sheet whose tabs replace BigQuery delivery, as `config.data.sheet` stores it. Opaque
+ *  on the wire and owned by Pacing, like a dimension source. */
+export interface PacingPerfSheet {
+  spreadsheet_id?: string;
+  tabs?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+/** A proposal for part of a sheet source's mapping. `available: false` is an answer, not an error. */
+export type PacingDimSourceSuggestionsV1 = components["schemas"]["PacingDimSourceSuggestionsV1"];
+/** One proposed route from a sheet name to a line item. */
+export type PacingDimSourceBindingV1 = components["schemas"]["PacingDimSourceBindingV1"];
+/** One proposed grouping of a column's values. */
+export type PacingDimSourceGroupV1 = components["schemas"]["PacingDimSourceGroupV1"];
+
+/** The roles a sheet column can be given, as a stored source spells them.
+ *
+ *  `date` and at least one of `dims` and one metric are what make a source READABLE - Pacing refuses
+ *  to serve rows for anything less. `line_item` may be absent, but only on a source bound to a single
+ *  line item: with no column naming a line item and no single binding, there is nothing to attribute
+ *  a row to. */
+/** One column given the BREAKDOWN role: the dimension it becomes, and the sheet column it reads.
+ *
+ *  Named because the moved editor hands this whole entry to its callbacks - `onCreateWidget(source,
+ *  dim)` and `onOpenBreakdown(source, dim)` both pass it, not its key. */
+export interface PacingSheetDimColumn {
+  key: string;
+  label: string;
+  column: string;
+  brk_dim?: string | null;
+}
+
+export interface PacingSheetColumns {
+  date?: string;
+  line_item?: string | null;
+  dims?: PacingSheetDimColumn[];
+  metrics?: Record<string, string>;
+  cnb_name?: string | null;
+  [key: string]: unknown;
+}
+
+/** A sheet-backed entry of `data.dim_sources`, narrowed from the opaque {@link PacingDimSource}.
+ *
+ *  Narrowed rather than replaced: the list also carries catalogue entries (`loader: "bq_mart"`, the
+ *  Devices toggle), and both kinds have to survive a save that was about the other. */
+export interface PacingSheetDimSource extends PacingDimSource {
+  loader?: "sheet" | string;
+  title?: string;
+  origin?: {
+    spreadsheet_id?: string;
+    sheet_id?: number;
+    title?: string;
+    header_row?: number;
+    columns?: PacingSheetColumns | null;
+  };
+  binding?: {
+    mode?: "id_in_name" | "manual" | "single";
+    line_item_id?: string;
+    map?: Record<string, string>;
+    exclude?: string[];
+  };
+}
+
 /** The part of the opaque `data` namespace the Data panel reads and writes. Every other key it may
  *  carry (`delivery_tab`, `sheet`, and whatever Pacing adds next) is preserved by not being sent: the
  *  save is a per-key merge on Pacing's side, so a key this type does not name is a key this screen
@@ -56,6 +130,8 @@ export interface PacingDataShape {
    *  and never stored, so it is read-only here. */
   primary_cv_operative?: boolean;
   dim_sources?: PacingDimSource[];
+  /** The sheet that replaces delivery, when one is bound. */
+  sheet?: PacingPerfSheet | null;
   [key: string]: unknown;
 }
 

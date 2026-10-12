@@ -1,0 +1,669 @@
+/* Settings -> Mapping -> Additional data, the moved editor's own stylesheet.
+ *
+ * Lifted from the retired SPA (`index.css` and `MappingAdaptive.css`) alongside
+ * `spa/AdditionalMappingEditor.jsx`, which was moved rather than rewritten. The rules are its, not
+ * ours: they are what makes that screen look like the one people already use, and editing them here
+ * would be a second opinion about a component we did not author.
+ *
+ * Variables resolve against `spa/pacing-spa.css`, which the moved SPA already brings.
+ */
+
+/* ── Additional-data mapping ────────────────────────────────────────────────
+   This is a task workspace, not the compact CM360 matrix. Its controls and
+   rows deliberately use ordinary reading sizes and the drawer's single scroll
+   surface; thousands of source values are reached with search, never a second
+   scroll box nested inside the drawer. */
+.am-page {
+  display: flex; flex-direction: column; gap: 18px;
+  max-width: 980px; width: 100%; font-family: var(--font-sans);
+  --am-danger-text: #b42336;
+}
+
+.dark .am-page { --am-danger-text: var(--status-red); }
+
+.am-page--task { max-width: 900px; }
+
+.am-page .sp-inp {
+  height: 38px; padding: 0 11px; font-size: 13px; font-family: var(--font-sans);
+}
+
+.am-page textarea.sp-inp { height: auto; padding: 9px 11px; line-height: 1.45; }
+
+.am-page .sp-btn { min-height: 36px; font-size: 11.5px; }
+
+.am-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--border-softer);
+}
+
+.am-header > div:first-child, .am-section-head > div { min-width: 0; }
+
+.am-header h3 { margin: 3px 0 4px; font-size: 21px; line-height: 1.2; color: var(--text-primary); overflow-wrap: anywhere; }
+
+.am-header p { margin: 0; max-width: 680px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+
+.am-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+}
+
+.am-header-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; min-width: 0; }
+
+.am-header-actions .am-undo-button {
+  max-width: min(320px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.am-back, .am-text-button {
+  align-self: flex-start; width: max-content; max-width: 100%; min-height: 28px;
+  border: 0; background: transparent; color: var(--accent); padding: 5px 0;
+  font: 600 12.5px/1.3 var(--font-sans); cursor: pointer; text-align: left;
+}
+
+.am-back { margin-bottom: 5px; }
+
+.am-back:hover, .am-text-button:hover { text-decoration: underline; }
+
+.am-text-button:disabled { opacity: .5; cursor: not-allowed; text-decoration: none; }
+
+.am-text-button--danger { color: var(--am-danger-text); }
+
+.am-page :is(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.am-task-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.am-task {
+  display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 12px;
+  min-height: 76px; padding: 13px 14px; text-align: left; cursor: pointer;
+  border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface); color: var(--text-primary);
+}
+
+.am-task:hover:not(:disabled), .am-library-card:hover, .am-purpose-card:hover:not(:disabled) {
+  border-color: var(--border-hover); background: var(--hover-bg);
+}
+
+.am-task:disabled, .am-purpose-card:disabled { opacity: .52; cursor: default; }
+
+.am-task-index {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px;
+  background: var(--surface-alt); color: var(--text-secondary); font-size: 13px; font-weight: 700;
+}
+
+.am-task-main, .am-library-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.am-task-main strong, .am-library-main strong { font-size: 14px; }
+
+.am-task-main span, .am-library-main span { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+
+.am-pill {
+  border: 1px solid var(--status-amber-bold); border-radius: 999px; padding: 3px 8px;
+  color: var(--text-primary); background: var(--status-amber-dim); font-size: 11.5px; font-weight: 700;
+}
+
+.am-pill--ok { border-color: var(--status-green-bold); color: var(--text-primary); background: var(--status-green-dim); }
+
+.am-section {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px;
+  border: 1px solid var(--border-softer); border-radius: 10px; background: var(--surface);
+}
+
+.am-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+
+.am-section-head h4 { margin: 0 0 3px; font-size: 15px; color: var(--text-primary); }
+
+.am-section-head p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-secondary); }
+
+.am-empty, .am-state, .am-note, .am-summary {
+  display: flex; flex-direction: column; gap: 3px; padding: 12px 14px;
+  border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+}
+
+.am-empty { border: 1px dashed var(--border-soft); color: var(--text-muted); background: var(--surface-alt); }
+
+.am-empty strong, .am-summary strong { color: var(--text-primary); font-size: 13.5px; }
+
+.am-state, .am-note { background: var(--surface-alt); color: var(--text-secondary); }
+
+.am-state--error { border: 1px solid var(--status-red-bold); background: var(--status-red-dim); color: var(--text-primary); }
+
+.am-note { border: 1px solid var(--border-softer); }
+
+.am-summary { border: 1px solid var(--status-blue-bold); background: var(--status-blue-dim); color: var(--text-secondary); }
+
+.am-undo-notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 13px; border: 1px solid var(--status-amber-bold); border-radius: 8px;
+  background: var(--status-amber-dim); color: var(--text-secondary); font-size: 12.5px; line-height: 1.45;
+}
+
+.am-undo-notice > span { min-width: 0; overflow-wrap: anywhere; }
+
+.am-undo-notice > .sp-btn { flex: none; }
+
+.am-confirm {
+  display: flex; flex-direction: column; gap: 7px; margin-top: 8px; padding: 11px 12px;
+  border: 1px solid var(--status-amber-bold); border-radius: 8px;
+  background: var(--status-amber-dim); color: var(--text-secondary); font-size: 12px; line-height: 1.45;
+}
+
+.am-confirm strong { color: var(--text-primary); font-size: 12.5px; }
+
+.am-library-list, .am-match-list, .am-canonical-list, .am-source-values, .am-suggestion-list {
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.am-library-card {
+  display: grid; grid-template-columns: minmax(150px,.7fr) minmax(220px,1fr) auto;
+  align-items: center; gap: 14px; min-height: 64px; padding: 11px 13px; text-align: left;
+  border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface-alt); color: var(--text-primary); cursor: pointer;
+}
+
+.am-library-card > *, .am-library-counts { min-width: 0; }
+
+.am-library-main strong, .am-library-main span, .am-library-counts { overflow-wrap: anywhere; }
+
+.am-library-counts { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+
+.am-form-grid, .am-metric-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+
+.am-metric-grid { grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); }
+
+.am-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.am-field > span { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+
+.am-field--wide { max-width: 560px; }
+
+.am-readonly-field {
+  min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 0 11px; border: 1px solid var(--border-softer); border-radius: var(--rs); background: var(--surface-alt);
+}
+
+.am-readonly-field strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text-primary); }
+
+.am-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.am-search { max-width: 520px; }
+
+.am-list-nav {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  min-height: 36px; color: var(--text-secondary); font-size: 12px;
+}
+
+.am-match-row, .am-value-row {
+  display: grid; grid-template-columns: minmax(180px,.75fr) minmax(280px,1.25fr); align-items: center; gap: 16px;
+  min-height: 58px; padding: 10px 12px; border: 1px solid var(--border-softer); border-radius: 8px;
+}
+
+.am-match-name, .am-value-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+.am-match-name strong, .am-value-row strong { overflow-wrap: anywhere; font-size: 13px; color: var(--text-primary); }
+
+.am-match-name span, .am-value-row span { font-size: 11.5px; color: var(--text-secondary); }
+
+.am-match-result, .am-value-row > div:last-child { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.am-match-result { flex-wrap: wrap; }
+
+.am-inline-warning { flex-basis: 100%; font-size: 11.5px; line-height: 1.35; color: var(--status-amber); }
+
+.am-value-row > div:last-child .sp-inp { max-width: 190px; }
+
+.am-create-value { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 10px; background: var(--accent-bg); }
+
+.am-suggestion {
+  display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border-softer); border-radius: 8px;
+}
+
+.am-suggestion > * { min-width: 0; }
+
+.am-suggestion strong { min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; }
+
+.am-suggestion .sp-inp { width: 100%; min-width: 0; }
+
+.am-suggestion > span { font-size: 12px; color: var(--text-secondary); }
+
+.am-suggestion > div { display: flex; gap: 6px; }
+
+.am-hidden-suggestions { padding: 10px 12px; border: 1px solid var(--border-softer); border-radius: 8px; }
+
+.am-hidden-suggestions > summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--text-secondary); }
+
+.am-hidden-suggestions[open] > summary { margin-bottom: 10px; }
+
+.am-library-settings { border-top: 1px solid var(--border-softer); padding-top: 3px; }
+
+.am-library-settings > summary {
+  min-height: 36px; display: list-item; padding: 9px 0; box-sizing: border-box; cursor: pointer;
+  color: var(--text-secondary); font-size: 12.5px; font-weight: 700; line-height: 18px;
+}
+
+.am-library-settings[open] > summary { margin-bottom: 9px; }
+
+.am-canonical { border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden; }
+
+/* A proposal is the same row one state earlier, so it is the same component
+   with a provisional skin: dashed edge, tinted head. Not a left rail — the
+   project bans vertical accents — and not a separate list, which is what hid
+   the members until after the decision. */
+.am-canonical--proposed { border-style: dashed; }
+
+.am-canonical--proposed > .am-canonical-head { background: var(--accent-bg); }
+
+.am-proposed-aliases {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+  border: 1px dashed var(--border-soft); border-radius: 8px; background: var(--accent-bg);
+}
+
+.am-proposed-aliases > strong { font-size: 12.5px; color: var(--text-primary); }
+
+.am-canonical-divider {
+  padding: 4px 2px 0; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+
+.am-canonical-head {
+  width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 12px;
+  min-height: 48px; padding: 9px 12px; border: 0; background: var(--surface-alt); color: var(--text-primary); text-align: left; cursor: pointer;
+}
+
+.am-page .am-canonical-head:focus-visible { outline-offset: -3px; }
+
+.am-canonical-head strong { min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; }
+
+.am-canonical-head > span { font-size: 12px; color: var(--text-muted); }
+
+.am-canonical-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+
+.am-inline-edit { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.am-inline-edit .sp-inp { min-width: 0; flex: 1; }
+
+.am-alias { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 4px 8px; }
+
+.am-alias > span { min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; color: var(--text-secondary); }
+
+.am-danger-zone {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  padding: 14px 16px; border: 1px solid var(--status-red-bold); border-radius: 10px; color: var(--text-secondary); font-size: 12.5px;
+}
+
+.am-mapping-section { display: flex; flex-direction: column; gap: 9px; padding-top: 5px; }
+
+.am-mapping-section + .am-mapping-section { padding-top: 14px; border-top: 1px solid var(--border-softer); }
+
+.am-mapping-section--legacy { opacity: .9; }
+
+.am-mapping-section-head { display: flex; align-items: baseline; gap: 8px; }
+
+.am-mapping-section-head strong { font-size: 13.5px; color: var(--text-primary); }
+
+.am-mapping-section-head span { font-size: 11.5px; color: var(--text-muted); }
+
+.am-purpose {
+  width: min(720px,100%); display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px;
+  padding: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-alt);
+}
+
+.am-purpose-head { grid-column: 1/-1; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+.am-purpose-head strong { font-size: 14px; color: var(--text-primary); }
+
+.am-purpose-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-height: 104px;
+  padding: 13px; text-align: left; border: 1px solid var(--border-soft); border-radius: 8px;
+  background: var(--surface); color: var(--text-primary); cursor: pointer;
+}
+
+.am-purpose-card strong { font-size: 14px; }
+
+.am-purpose-card span { font-size: 12.5px; line-height: 1.4; color: var(--text-secondary); }
+
+.am-purpose-card small { margin-top: auto; font-size: 11px; color: var(--text-muted); }
+
+/* ── the one-screen mapping (2026-08-14) ─────────────────────────────────── */
+/* Four figures, always visible, recomputed on every role change. */
+.am-figures {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); margin: 0;
+  border: 1px solid var(--border-softer); border-radius: 10px; overflow: hidden;
+  background: var(--surface-alt);
+}
+
+.am-fig { padding: 12px 14px; border-right: 1px solid var(--border-softer); min-width: 0; }
+
+.am-fig:last-child { border-right: 0; }
+
+.am-fig dt {
+  margin: 0 0 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+
+.am-fig dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+
+.am-fig-sub { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 400; color: var(--text-secondary); }
+
+.am-fig--warn { color: var(--status-amber); }
+
+.am-fig--bad { color: var(--status-red); }
+
+.am-fig .am-text-button { margin-top: 2px; }
+
+.am-search-box { display: flex; align-items: center; gap: 9px; margin-top: -2px; }
+
+.am-search-box .sp-inp { height: 32px; width: 190px; font-size: 12.5px; }
+
+.am-count { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+
+.am-col-group { display: flex; flex-direction: column; gap: 3px; }
+
+.am-group-head {
+  padding: 12px 2px 3px; font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+
+.am-col-group:first-of-type .am-group-head { padding-top: 2px; }
+
+.am-group-head span { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 11.5px; }
+
+.am-col { border: 1px solid transparent; border-radius: 9px; }
+
+.am-col:hover { background: var(--hover-bg); }
+
+.am-col.is-open { border-color: var(--border-soft); background: var(--surface-alt); }
+
+.am-col.is-off .am-col-name strong { color: var(--text-muted); font-weight: 600; }
+
+.am-col-row {
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.5fr) 176px 28px;
+  align-items: center; gap: 12px; padding: 6px 9px;
+}
+
+.am-col-name {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 0; border: 0;
+  background: transparent; color: inherit; text-align: left; cursor: pointer;
+}
+
+.am-col-name strong { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+
+.am-col-facts {
+  min-width: 0; font-size: 11.5px; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.am-col-facts b { font-weight: 700; color: var(--text-primary); }
+
+.am-col-facts em { font-style: normal; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+/* The role must LOOK changeable, so the native caret stays and only the frame is
+   quieted. Padding is identical in both states — nothing shifts under the pointer. */
+.am-role {
+  width: 100%; height: 30px; padding: 0 6px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border-softer); background: transparent;
+  color: var(--text-primary); font: 700 12.5px/1 var(--font-sans);
+}
+
+.am-col:hover .am-role, .am-role:hover, .am-role:focus { border-color: var(--border-hover); background: var(--surface); }
+
+.am-col.is-off .am-role { color: var(--text-muted); font-weight: 400; }
+
+.am-col-chev {
+  justify-self: end; padding: 4px 5px; border: 0; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--text-muted); font-size: 10px; opacity: 0;
+}
+
+.am-col:hover .am-col-chev, .am-col.is-open .am-col-chev, .am-col-chev:focus-visible { opacity: 1; }
+
+.am-col-body {
+  display: flex; flex-direction: column; gap: 11px; margin: 2px 0 0;
+  padding: 10px 9px 12px; border-top: 1px dashed var(--border-softer);
+}
+
+.am-hint { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+
+/* The role of a thing that is not a column, and therefore cannot be re-pointed. */
+.am-role-static { padding: 0 6px; font: 700 12.5px/1 var(--font-sans); color: var(--text-secondary); }
+
+.am-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+.am-note--bad { border-color: var(--status-red-bold); background: var(--status-red-dim); color: var(--text-primary); }
+
+.am-choice { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 8px; }
+
+.am-choice label {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--border-softer); border-radius: 9px; background: var(--surface);
+}
+
+.am-choice label:hover { border-color: var(--border-hover); }
+
+.am-choice input { margin-top: 2px; accent-color: var(--accent); }
+
+.am-choice strong { display: block; font-size: 12.5px; }
+
+.am-choice span span { font-size: 11.5px; color: var(--text-secondary); }
+
+.am-terminal-row {
+  display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: center;
+  padding: 11px 13px; border: 1px solid var(--border-softer); border-radius: 9px; background: var(--surface-alt);
+}
+
+.am-terminal-row strong { font-size: 13px; }
+
+.am-terminal-meta { margin-top: 2px; max-width: 62ch; font-size: 11.5px; line-height: 1.45; color: var(--text-secondary); }
+
+/* .am-fig dd sets the colour with more weight than the attention modifiers, so the
+   amber and red states never showed (the Additional-data screen included). */
+.am-fig dd.am-fig--warn { color: var(--status-amber); }
+
+.am-fig dd.am-fig--bad { color: var(--status-red); }
+
+.ps-tab > .am-confirm { margin: 0 12px 12px; }
+
+@media (max-width: 720px) {
+  .am-task-list, .am-form-grid, .am-purpose { grid-template-columns: 1fr; }
+
+  .am-purpose-head { grid-column: 1; }
+
+  .am-header { flex-direction: column; align-items: stretch; }
+
+  .am-header-actions { justify-content: flex-start; width: 100%; max-width: 100%; }
+
+  .am-undo-notice { align-items: flex-start; flex-direction: column; }
+
+  .am-library-card, .am-match-row, .am-value-row, .am-suggestion { grid-template-columns: 1fr; }
+
+  .am-canonical-head { grid-template-columns: minmax(0,1fr) auto; }
+
+  .am-canonical-head strong { grid-column: 1 / -1; }
+
+  .am-match-result, .am-value-row > div:last-child { align-items: stretch; flex-direction: column; }
+
+  .am-value-row > div:last-child .sp-inp { max-width: none; }
+
+  .am-mapping-section-head { flex-direction: column; gap: 2px; }
+
+  .am-figures { grid-template-columns: repeat(2, minmax(0,1fr)); }
+
+  .am-fig:nth-child(2) { border-right: 0; }
+
+  .am-col-row { grid-template-columns: minmax(0,1fr) 150px 28px; }
+
+  .am-col-facts { grid-column: 1 / -1; white-space: normal; }
+
+  .am-role { border-color: var(--border-soft); background: var(--surface); }
+
+  .am-col-chev { opacity: 1; }
+
+  .am-terminal-row { grid-template-columns: 1fr; }
+
+  .am-search-box { width: 100%; }
+
+  .am-search-box .sp-inp { width: 100%; }
+}
+
+.mp3-list > .mp3-ent-new:has(.am-purpose), .mp3-list > .am-mapping-section { grid-column: 1 / -1; }
+
+.mp3-list > .am-mapping-section { min-width: 0; padding-top: 0; border-top: 0; gap: 8px; opacity: 1; }
+
+.mp3-list .am-mapping-section-head { flex-wrap: wrap; gap: 4px 8px; }
+
+.mp3-editor .am-page { max-width: none; gap: 12px; }
+
+.mp3-editor .am-header { gap: 12px; padding-bottom: 12px; flex-wrap: wrap; }
+
+.mp3-editor .am-header > div:first-child { flex: 1 1 auto; min-width: min(280px, 100%); }
+
+.mp3-editor .am-header h3 { font-size: 18px; }
+
+.mp3-editor .am-header p { font-size: 12px; }
+
+.mp3-editor .am-page .sp-inp { height: var(--sp-edit-control-h, 32px); padding: 0 9px; font-size: 12px; }
+
+.mp3-editor .am-page textarea.sp-inp { height: auto; padding: 8px 9px; }
+
+.mp3-editor .am-page :is(.sp-btn, .am-text-button, .am-back) { min-height: var(--sp-edit-control-h, 32px); font-size: 12px; }
+
+.mp3-editor .am-page .am-section { padding: 12px; border-radius: var(--r); }
+
+.mp3-editor .am-section-head { gap: 8px 12px; flex-wrap: wrap; }
+
+.mp3-editor .am-section-head h4 { font-size: 13px; font-weight: 600; }
+
+.mp3-editor .am-section-head p { font-size: 12px; }
+
+.mp3-editor .am-col-facts { white-space: normal; line-height: 1.4; }
+
+.mp3-editor .am-role { height: var(--sp-edit-control-h, 32px); font-size: 12px; }
+
+/* Search and ranking are one toolbar, not three full-width form sections. */
+.mp3-editor .am-library-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+
+.mp3-editor .am-library-toolbar .am-search { flex: 1 1 280px; width: auto; max-width: none; }
+
+.mp3-editor .am-library-metric { flex-direction: row; align-items: center; gap: 8px; flex: 0 1 240px; }
+
+.mp3-editor .am-library-metric > span { white-space: nowrap; font-size: 12px; font-weight: 400; }
+
+.mp3-editor .am-library-metric > select { flex: 1; min-width: 0; }
+
+.mp3-editor .am-library-coverage { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-secondary); }
+
+.mp3-editor .am-library-coverage strong { font-weight: 500; }
+
+.mp3-editor .am-library-coverage summary { cursor: pointer; color: var(--text-muted); }
+
+.mp3-editor .am-library-coverage details[open] { flex-basis: 100%; }
+
+.mp3-editor .am-library-coverage p { margin: 4px 0 0; line-height: 1.4; }
+
+.mp3-editor .am-assignment { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 12px; background: var(--accent-bg); border: 1px solid var(--border-soft); border-radius: var(--rs); font-size: 12px; }
+
+.mp3-editor .am-assignment > span { min-width: 0; overflow-wrap: anywhere; }
+
+.mp3-editor .am-assignment strong { font-weight: 500; }
+
+.am-library-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+.am-library-columns > .am-section { min-width: 0; }
+
+.mp3-editor .am-library-columns .am-value-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; }
+
+.mp3-editor .am-library-columns .am-value-row > div:last-child { flex-wrap: wrap; }
+
+.mp3-editor .am-canonical-head { grid-template-columns: minmax(0, 1fr) 14px; gap: 4px 8px; padding: 10px; }
+
+.mp3-editor .am-canonical-head > strong { grid-column: 1; }
+
+.mp3-editor .am-canonical-head > span:not(:last-child) { grid-column: 1; font-size: 12px; line-height: 1.4; }
+
+.mp3-editor .am-canonical-head > span:last-child { grid-column: 2; grid-row: 1 / span 2; }
+
+.mp3-editor .am-canonical.is-open { border-color: var(--border-hover); }
+
+.mp3-editor .am-list-nav { min-height: 32px; }
+
+/*
+ * The moved screens' buttons, in the Hub's own voice.
+ *
+ * `.sp-btn` is Pacing's button: 11px, bold, uppercase, 0.08em tracking. On its own condensed face
+ * that is a compact control; on the Hub's Inter it is a wide, shouty one standing beside ordinary
+ * sentence-case buttons - "+ Add mapping" is eight pixels away and reads nothing like it.
+ *
+ * So the geometry and the voice come from THAT button (`.pmap__add`, same values), and only from it:
+ * one drawer, one kind of button. Scoped to the moved sheet screens rather than applied to `.sp-btn`
+ * everywhere, because the widget editor's buttons were reviewed as they are and this is not the
+ * change to make to them in passing.
+ */
+.am-page .sp-btn,
+.am-page .sp-btn-s,
+.sp-tp-block .sp-btn,
+.sp-tp-flow .sp-btn {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+/*
+ * Two adjustments the Hub's own base type forces on the moved screens.
+ *
+ * The SPA sized its form controls globally and ran on a smaller base; here a radio inherits the
+ * Hub's and comes out a third of the row wide, and `line-height: 24px` on the label pushes a
+ * two-line choice into three. Both are environment, not design: the type sizes inside the control
+ * are the reference's own (12.5px / 11.5px) and are left alone.
+ */
+.am-page input[type="radio"],
+.am-page input[type="checkbox"],
+.sp-tp-block input[type="radio"],
+.sp-tp-block input[type="checkbox"],
+.sp-tp-flow input[type="radio"],
+.sp-tp-flow input[type="checkbox"],
+.vl-page input[type="radio"],
+.vl-page input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  /* `min-height`, and that is the whole point: `app/styles.css` sets `input, select { min-height:
+     42px }` app-wide, and a min-height always beats a height - which is why a 14px radio rendered
+     as a 14x42 bar. `width: 100%` from the same rule is why it needs a width at all. */
+  min-height: 14px;
+  flex: 0 0 14px;
+  align-self: flex-start;
+  margin-top: 3px;
+}
+.am-choice input[type="radio"],
+.am-choice input[type="checkbox"] {
+  margin-top: 3px;
+}
+/* Scoped to the screens themselves rather than to one block: the same inheritance reaches every
+   label on them, and fixing the one that was noticed leaves the next one to be noticed later. */
+.am-page label,
+.sp-tp-block label,
+.sp-tp-flow label,
+.vl-page label {
+  line-height: 1.45;
+}
+
+/* The same app-wide rule reaches every text field and picker on these screens: `min-height: 42px`
+   and `padding: 0 13px` on a control the reference drew at 30-32px. Sized here once, for the moved
+   screens as a whole, rather than per field as each one is noticed. */
+.am-page input[type="text"],
+.am-page input[type="search"],
+.am-page input:not([type]),
+.am-page select,
+.sp-tp-block input[type="text"],
+.sp-tp-block select,
+.sp-tp-flow input[type="text"],
+.sp-tp-flow select,
+.vl-page input[type="text"],
+.vl-page select {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}

@@ -33,6 +33,16 @@ const CAMPAIGNS = {
   ],
 };
 
+/**
+ * Opens one of the Data tab's collapsible sections.
+ *
+ * They are closed on every visit now - most pacings connect nothing and switch nothing, and a tab
+ * that opens with four open sections reads as a wall. A test has to click what a person clicks.
+ */
+async function openSection(name: RegExp) {
+  await userEvent.click(screen.getByRole("button", { name }));
+}
+
 function renderPanel(thirdParty: Record<string, unknown>[] | undefined, ref?: React.Ref<SettingsSectionHandle>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -68,6 +78,7 @@ describe("several CM360 sources", () => {
 
   it("shows every stored source, not just the first", async () => {
     renderPanel(TWO);
+    await openSection(/3rd Party Data/);
     await waitFor(() => expect(sources()).toHaveLength(2));
   });
 
@@ -75,6 +86,7 @@ describe("several CM360 sources", () => {
     // The whole point: editing source A must not delete source B.
     const ref = createRef<SettingsSectionHandle>();
     renderPanel(TWO, ref);
+    await openSection(/3rd Party Data/);
     await screen.findByRole("checkbox", { name: /Autumn Push/ });
 
     // Tick a second campaign on the FIRST source only.
@@ -91,6 +103,7 @@ describe("several CM360 sources", () => {
   it("drops a source whose campaigns were all unticked, and keeps the other", async () => {
     const ref = createRef<SettingsSectionHandle>();
     renderPanel(TWO, ref);
+    await openSection(/3rd Party Data/);
     await screen.findByRole("checkbox", { name: /Winter Tease/ });
 
     const second = sources()[1] as HTMLElement;
@@ -108,9 +121,13 @@ describe("several CM360 sources", () => {
     // exists. Nothing on screen says anything went wrong.
     const ref = createRef<SettingsSectionHandle>();
     renderPanel([], ref);
-    await waitFor(() => expect(screen.getByRole("button", { name: /Add CM360 source/i })).toBeEnabled());
+    await openSection(/3rd Party Data/);
+    // One question with three answers now, asked once: the CM360 source is added by choosing it,
+    // not by its own button in its own block.
+    await waitFor(() => expect(screen.getByRole("button", { name: /\+ Add source/i })).toBeEnabled());
 
-    await userEvent.click(screen.getByRole("button", { name: /Add CM360 source/i }));
+    await userEvent.click(screen.getByRole("button", { name: /\+ Add source/i }));
+    await userEvent.click(screen.getByRole("radio", { name: /CM360/i }));
     await userEvent.selectOptions(document.querySelector(".pdata__cm360 select")!, "R1");
     await userEvent.click(await screen.findByRole("checkbox", { name: /Spring Sale/ }));
     await ref.current!.save();
@@ -123,6 +140,7 @@ describe("several CM360 sources", () => {
   it("keeps the id a stored source already has", async () => {
     const ref = createRef<SettingsSectionHandle>();
     renderPanel([{ id: "tp_kept", type: "cm360", report_name: "R1", campaigns: ["Spring Sale"] }], ref);
+    await openSection(/3rd Party Data/);
     await userEvent.click(await screen.findByRole("checkbox", { name: /Autumn Push/ }));
     await ref.current!.save();
 
@@ -132,13 +150,16 @@ describe("several CM360 sources", () => {
 
   it("adds a source without disturbing the one already there", async () => {
     renderPanel([TWO[0]]);
+    await openSection(/3rd Party Data/);
     await waitFor(() => expect(sources()).toHaveLength(1));
-    await userEvent.click(screen.getByRole("button", { name: /Add CM360 source/i }));
+    await userEvent.click(screen.getByRole("button", { name: /\+ Add source/i }));
+    await userEvent.click(screen.getByRole("radio", { name: /CM360/i }));
     expect(sources()).toHaveLength(2);
   });
 
   it("each source picks from ITS OWN report, which is what scoping is for", async () => {
     renderPanel(TWO);
+    await openSection(/3rd Party Data/);
     await screen.findByRole("checkbox", { name: /Winter Tease/ });
     // R1 carries two campaigns, R2 one.
     expect(within(sources()[0] as HTMLElement).getAllByRole("checkbox")).toHaveLength(2);
@@ -159,6 +180,7 @@ describe("when a save is worth sending", () => {
     // that differs only in the order boxes were clicked must not re-fetch CM360.
     const ref = createRef<SettingsSectionHandle>();
     renderPanel([{ id: "tp_a", type: "cm360", report_name: "R1", campaigns: ["Spring Sale", "Autumn Push"] }], ref);
+    await openSection(/3rd Party Data/);
     const box = await screen.findByRole("checkbox", { name: /Spring Sale/ });
     await userEvent.click(box);   // off - order is now [Autumn Push]
     await userEvent.click(box);   // on  - order is now [Autumn Push, Spring Sale]
@@ -182,12 +204,14 @@ describe("pulling again", () => {
       started: true, notConfigured: false, rateLimited: false,
     });
     renderPanel(ONE);
+    await openSection(/3rd Party Data/);
     await userEvent.click(await screen.findByRole("button", { name: /Pull again/i }));
     expect(api.refetchPacingThirdParty).toHaveBeenCalledWith("nike-ss26");
   });
 
   it("is refused while there is no source to pull", async () => {
     renderPanel([]);
+    await openSection(/3rd Party Data/);
     expect(await screen.findByRole("button", { name: /Pull again/i })).toBeDisabled();
   });
 
@@ -197,6 +221,7 @@ describe("pulling again", () => {
       started: false, notConfigured: true, rateLimited: false,
     });
     renderPanel(ONE);
+    await openSection(/3rd Party Data/);
     await userEvent.click(await screen.findByRole("button", { name: /Pull again/i }));
     expect(await screen.findByText(/no CM360 source to pull/i)).toBeInTheDocument();
   });
@@ -206,6 +231,7 @@ describe("pulling again", () => {
       started: false, notConfigured: false, rateLimited: true,
     });
     renderPanel(ONE);
+    await openSection(/3rd Party Data/);
     await userEvent.click(await screen.findByRole("button", { name: /Pull again/i }));
     expect(await screen.findByText(/try again in a minute/i)).toBeInTheDocument();
   });
@@ -221,6 +247,7 @@ describe("the pull's state", () => {
   it("says a pull is running", async () => {
     vi.mocked(api.getPacingThirdPartyStatus).mockResolvedValue({ state: "pending" } as never);
     renderPanel([]);
+    await openSection(/3rd Party Data/);
     expect(await screen.findByText(/Pulling ad-server rows/i)).toBeInTheDocument();
   });
 
@@ -229,6 +256,7 @@ describe("the pull's state", () => {
       state: "ready", rowCount: 13884, fetchedAt: "2026-10-07T13:38:36.441Z",
     } as never);
     renderPanel([]);
+    await openSection(/3rd Party Data/);
     // Formatted the way the rest of the app writes a date - not the raw ISO stamp with millis.
     expect(await screen.findByText(/13,884 · Oct 7, 2026/)).toBeInTheDocument();
   });
@@ -236,6 +264,7 @@ describe("the pull's state", () => {
   it("says nothing was pulled yet, rather than leaving the section silent", async () => {
     vi.mocked(api.getPacingThirdPartyStatus).mockResolvedValue({ state: "none" } as never);
     renderPanel([]);
+    await openSection(/3rd Party Data/);
     expect(await screen.findByText(/Nothing pulled yet/i)).toBeInTheDocument();
   });
 });

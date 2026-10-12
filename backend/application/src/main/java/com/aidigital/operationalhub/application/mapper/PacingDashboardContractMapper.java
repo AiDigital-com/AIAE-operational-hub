@@ -27,6 +27,14 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRef
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedDimension;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedValue;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceBinding;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceGroup;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceRead;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValue;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValues;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetProbe;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetTab;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
@@ -34,6 +42,14 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPar
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestedDimensionV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestedValueV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceBindingV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceGroupV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceReadV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValueV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValuesV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetProbeV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetTabV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
@@ -53,6 +69,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaign
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetSourceInstruction;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
@@ -164,7 +181,17 @@ public class PacingDashboardContractMapper {
 				// The wrapper, not its contents, is what says "the caller touched this". An absent
 				// wrapper leaves the stored list alone; `entries: []` clears it, and has to survive as
 				// an empty list rather than collapsing back into "absent".
-				body.getDimSources() == null ? null : body.getDimSources().getEntries());
+				body.getDimSources() == null ? null : body.getDimSources().getEntries(),
+				// Absent means "leave the stored names alone" - the screen sends this only when this
+				// session changed them, so a drawer opened before a teammate's edit cannot wipe it.
+				body.getValueLabels(),
+				// Three states, carried by the WRAPPER rather than by the value: no wrapper means "leave
+				// the stored source alone", a wrapper with an entry replaces it, and a wrapper with a null
+				// entry disconnects it. A bare nullable field could not say the third thing - the Hub omits
+				// nulls on the wire, so "disconnect" would arrive as "leave it".
+				body.getSheet() == null
+						? null
+						: new PacingSheetSourceInstruction(body.getSheet().getEntry()));
 	}
 
 	/**
@@ -562,6 +589,139 @@ public class PacingDashboardContractMapper {
 		return new PacingThirdPartyCampaignsV1()
 				.campaigns(list.stream().map(this::toV1).toList())
 				.stale(campaigns.stale());
+	}
+
+	/**
+	 * What a probed spreadsheet holds.
+	 *
+	 * <p>`ok` becomes `readable` on the way out: callers of this contract ask "can I use this file",
+	 * and a field named for the answer is harder to read backwards than one named for the call.
+	 *
+	 * @param probe the probe as Pacing answered it
+	 * @return the generated {@link PacingSheetProbeV1}
+	 */
+	public PacingSheetProbeV1 toV1(PacingSheetProbe probe) {
+		List<PacingSheetTab> tabs = probe.tabs() == null ? List.of() : probe.tabs();
+		return new PacingSheetProbeV1()
+				.readable(probe.ok())
+				.spreadsheetId(probe.spreadsheetId() == null ? "" : probe.spreadsheetId())
+				.title(probe.title())
+				.shareWith(probe.shareWith())
+				.error(probe.error())
+				.tabs(tabs.stream().map(this::toV1).toList());
+	}
+
+	/**
+	 * One tab of a probed spreadsheet.
+	 *
+	 * <p>Sample cells keep their JSON TYPES, and that is load-bearing rather than tidy. The settings
+	 * screen decides whether a column can take the Date role by what the sample holds: a real date
+	 * arrives from the spreadsheet as a serial NUMBER (46170 is 2026-05-28) and reads as a date,
+	 * while the same value as a STRING is taken for text that merely looks numeric - which is
+	 * exactly what "46170 is text, not a date cell" means on that screen. Flattening the sample to
+	 * text here made every date column unusable and blocked the save behind it. {@code grid} is the
+	 * stringified twin and stays that way: it is for showing the top of the tab, not for judging it.
+	 *
+	 * @param tab the tab as Pacing described it
+	 * @return the generated {@link PacingSheetTabV1}
+	 */
+	public PacingSheetTabV1 toV1(PacingSheetTab tab) {
+		List<List<Object>> sample = tab.sample() == null ? List.of() : tab.sample();
+		return new PacingSheetTabV1()
+				.sheetId(tab.sheetId())
+				.title(tab.title())
+				.rowCount(tab.rowCount())
+				.colCount(tab.colCount())
+				.headerRow(tab.headerRow())
+				.headers(tab.headers() == null ? List.of() : tab.headers())
+				.sample(sample)
+				.grid(tab.grid() == null ? List.of() : tab.grid());
+	}
+
+	/**
+	 * The distinct values of the columns a mapping asked about.
+	 *
+	 * @param values the values as Pacing listed them
+	 * @return the generated {@link PacingDimSourceValuesV1}
+	 */
+	public PacingDimSourceValuesV1 toV1(PacingDimSourceValues values) {
+		List<PacingDimSourceValue> rows = values.values() == null ? List.of() : values.values();
+		return new PacingDimSourceValuesV1()
+				.columns(values.columns() == null ? List.of() : values.columns())
+				.values(rows.stream().map(this::toV1).toList())
+				.truncated(values.truncated())
+				.scannedRows(values.scannedRows());
+	}
+
+	/**
+	 * One distinct value and its row count.
+	 *
+	 * @param value the value as Pacing listed it
+	 * @return the generated {@link PacingDimSourceValueV1}
+	 */
+	public PacingDimSourceValueV1 toV1(PacingDimSourceValue value) {
+		return new PacingDimSourceValueV1()
+				.values(value.values() == null ? List.of() : value.values())
+				.rows(value.rows());
+	}
+
+	/**
+	 * A proposal for part of a source's mapping.
+	 *
+	 * @param suggestions the proposal as Pacing answered it
+	 * @return the generated {@link PacingDimSourceSuggestionsV1}
+	 */
+	public PacingDimSourceSuggestionsV1 toV1(PacingDimSourceSuggestions suggestions) {
+		List<PacingDimSourceBinding> bindings =
+				suggestions.bindings() == null ? List.of() : suggestions.bindings();
+		List<PacingDimSourceGroup> groups = suggestions.groups() == null ? List.of() : suggestions.groups();
+		return new PacingDimSourceSuggestionsV1()
+				.available(suggestions.available())
+				.notice(suggestions.notice())
+				.bindings(bindings.stream().map(this::toV1).toList())
+				.members(suggestions.members() == null ? List.of() : suggestions.members())
+				.groups(groups.stream().map(this::toV1).toList())
+				.considered(suggestions.considered());
+	}
+
+	/**
+	 * One proposed route from a sheet name to a line item.
+	 *
+	 * @param binding the route as Pacing proposed it
+	 * @return the generated {@link PacingDimSourceBindingV1}
+	 */
+	public PacingDimSourceBindingV1 toV1(PacingDimSourceBinding binding) {
+		return new PacingDimSourceBindingV1()
+				.value(binding.value())
+				.lineItemId(binding.lineItemId());
+	}
+
+	/**
+	 * One proposed grouping.
+	 *
+	 * @param group the grouping as Pacing proposed it
+	 * @return the generated {@link PacingDimSourceGroupV1}
+	 */
+	public PacingDimSourceGroupV1 toV1(PacingDimSourceGroup group) {
+		return new PacingDimSourceGroupV1()
+				.label(group.label())
+				.members(group.members() == null ? List.of() : group.members());
+	}
+
+	/**
+	 * What a re-read of a sheet source produced.
+	 *
+	 * @param read the outcome as Pacing reported it
+	 * @return the generated {@link PacingDimSourceReadV1}
+	 */
+	public PacingDimSourceReadV1 toV1(PacingDimSourceRead read) {
+		return new PacingDimSourceReadV1()
+				.sourceId(read.sourceId())
+				.rows(read.rows())
+				.unboundRows(read.unboundRows())
+				.unparsedCells(read.unparsedCells())
+				.bytes(read.bytes())
+				.coverageHint(read.coverageHint());
 	}
 
 	/**

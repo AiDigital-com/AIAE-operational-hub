@@ -3,6 +3,12 @@ import { savePacingDisplay } from "./api";
 import { PacingDashboardLibrary } from "./pacing-dashboard-library";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
 import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "./types";
+import { newWidgetId } from "./vendor/layout-materialize.mjs";
+
+/** Pacing's own ceiling on stored widgets (`widgets-validate` LIMITS.widgets). Named here rather
+ *  than guessed: a 65th widget is refused by the save, and refusing it at the click is the
+ *  difference between a sentence and a failed Save three tabs away. */
+const WIDGET_CAP = 64;
 
 /**
  * The widget library as a section of the settings drawer.
@@ -52,6 +58,14 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   onWidgetEditorOpened?: () => void;
 }
 
+/** The dimension a widget is cut by, from either of the two slots that can carry one. */
+function axisOf(widget: Record<string, unknown> | null | undefined): string | null {
+  const slot = (value: unknown) =>
+    (value && typeof value === "object" ? (value as { dim?: unknown }).dim : null);
+  const dim = slot(widget?.rows) ?? slot(widget?.xAxis);
+  return typeof dim === "string" && dim ? dim : null;
+}
+
 const seedOf = (display: PacingDisplayShape): DisplayDraft => ({
   widgets: display.widgets ?? [],
   groups: display.groups ?? [],
@@ -79,6 +93,22 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
     stateRef.current = { draft, dirty };
 
     useImperativeHandle(ref, () => ({
+      addWidget(widget: Record<string, unknown>) {
+        const current = stateRef.current.draft;
+        // A tile already reading this axis is the one the caller wants, not a reason for a second
+        // copy of it. The mapping screen's "Create a table of the top 20" is a button a person
+        // presses again when they come back to the column, and without this each press minted
+        // another identical table until the cap.
+        const axis = axisOf(widget);
+        const existing = axis
+          ? current.widgets.find((w) => axisOf(w as unknown as Record<string, unknown>) === axis)
+          : undefined;
+        if (existing?.id) return String(existing.id);
+        if (current.widgets.length >= WIDGET_CAP) return null;
+        const id = newWidgetId(current.widgets.map((w) => w?.id).filter(Boolean));
+        setDraft({ ...current, widgets: [...current.widgets, { ...widget, id } as PacingWidgetInstance] });
+        return id;
+      },
       async save() {
         const { draft: current, dirty: isDirty } = stateRef.current;
         if (!isDirty) return { ok: true as const };

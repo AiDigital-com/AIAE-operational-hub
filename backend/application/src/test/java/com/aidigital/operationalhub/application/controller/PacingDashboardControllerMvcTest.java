@@ -14,7 +14,19 @@ import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingNsDiffContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetProbeV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValuesV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceReadV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceBindingV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetProbe;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValues;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceRead;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceBinding;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceUnboundName;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
@@ -122,6 +134,9 @@ class PacingDashboardControllerMvcTest {
 	private PacingClient pacingClient;
 
 	@Mock
+	private PacingSheetSourceClient sheetSourceClient;
+
+	@Mock
 	private PacingContractMapper assertionMapper;
 
 	@Mock
@@ -224,7 +239,7 @@ class PacingDashboardControllerMvcTest {
 		// Given: the Data panel moving this pacing onto the manual-adjustments view.
 		stubCurrentUser();
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null);
 		doReturn(settings).when(mapper).toDataSettings(any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
@@ -241,7 +256,7 @@ class PacingDashboardControllerMvcTest {
 	void shouldForwardPacingsDimensionSourceRejectionAsBadRequestTest() throws Exception {
 		// Given: Pacing refuses a malformed dimension source rather than dropping it, naming which one.
 		stubCurrentUser();
-		doReturn(new PacingDataSettings(null, null, null, null, null, null, List.of())).when(mapper).toDataSettings(any());
+		doReturn(new PacingDataSettings(null, null, null, null, null, null, List.of(), null, null)).when(mapper).toDataSettings(any());
 		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
 				"bad_dim_sources", "devices: unknown catalog"))
 				.when(pacingClient).saveDataSettings(any(), any(), any());
@@ -683,5 +698,118 @@ class PacingDashboardControllerMvcTest {
 						.content("{}"))
 				.andExpect(status().isOk());
 		verify(pacingClient).suggestMappingLibrary(any(), eq("nike-ss26"), isNull());
+	}
+
+	@Test
+	void shouldAnswerAnUnreadableSheetWithTwoHundredTest() throws Exception {
+		// "Share it with us first" is an instruction for the person setting a source up, not a fault
+		// of this request - so it has to arrive as a body, not as a status a client treats as broken.
+		// Given:
+		stubCurrentUser();
+		PacingSheetProbe probe =
+				new PacingSheetProbe(false, "abc", null, "pacing@aidigital.com", "forbidden", List.of());
+		doReturn(probe).when(sheetSourceClient).probeSheet(any(), eq("nike-ss26"), eq("https://x/d/abc"));
+		doReturn(new PacingSheetProbeV1().readable(false).spreadsheetId("abc")
+				.shareWith("pacing@aidigital.com").error("forbidden").tabs(List.of()))
+				.when(mapper).toV1(probe);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/sheet-probe", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"url\":\"https://x/d/abc\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.readable").value(false))
+				.andExpect(jsonPath("$.shareWith").value("pacing@aidigital.com"));
+	}
+
+	@Test
+	void shouldForwardTheColumnsAValueListWasAskedForTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingDimSourceValues values = new PacingDimSourceValues(List.of("Line Item"), List.of(), false, 500);
+		doReturn(values).when(sheetSourceClient)
+				.readValues(any(), eq("nike-ss26"), eq("abc"), eq(0), eq(List.of("Line Item")), eq(2));
+		doReturn(new PacingDimSourceValuesV1().columns(List.of("Line Item")).values(List.of())
+				.truncated(false).scannedRows(500))
+				.when(mapper).toV1(values);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/dim-source-values", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"spreadsheetId\":\"abc\",\"sheetId\":0,"
+								+ "\"columns\":[\"Line Item\"],\"headerRow\":2}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.scannedRows").value(500));
+	}
+
+	@Test
+	void shouldReportWhatARereadProducedTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingDimSourceRead read = new PacingDimSourceRead("apps", 60073, 4, 0, 2158194L, "2026-10-10");
+		doReturn(read).when(sheetSourceClient).readSource(any(), eq("nike-ss26"), eq("apps"));
+		doReturn(new PacingDimSourceReadV1().sourceId("apps").rows(60073).unboundRows(4)
+				.unparsedCells(0).bytes(2158194L).coverageHint("2026-10-10"))
+				.when(mapper).toV1(read);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/read",
+						"nike-ss26", "apps"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.rows").value(60073))
+				.andExpect(jsonPath("$.unboundRows").value(4));
+	}
+
+	@Test
+	void shouldAnswerAnUnavailableSuggestionAsOkTest() throws Exception {
+		// Given: no model connected - the path works and there is nothing to ask.
+		stubCurrentUser();
+		PacingDimSourceSuggestions suggestions = PacingDimSourceSuggestions.noModel();
+		doReturn(suggestions).when(sheetSourceClient).suggest(
+				any(), eq("nike-ss26"), eq("apps"), eq("groups"), eq("app"), isNull(),
+				eq(List.of()), eq(List.of()));
+		doReturn(new PacingDimSourceSuggestionsV1().available(false).notice("we need to add ai connection")
+				.bindings(List.of()).members(List.of()).groups(List.of()).considered(0))
+				.when(mapper).toV1(suggestions);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/suggest",
+						"nike-ss26", "apps")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"kind\":\"groups\",\"dim\":\"app\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.available").value(false))
+				.andExpect(jsonPath("$.notice").value("we need to add ai connection"));
+	}
+
+	@Test
+	void shouldCarryUnroutedNamesAndTheirRowCountsIntoASuggestionTest() throws Exception {
+		// The row count travels with the name: it is what says whether a name is worth attention or
+		// is one stray row, both to the model and to the person checking its answer.
+		// Given:
+		stubCurrentUser();
+		PacingDimSourceSuggestions suggestions = new PacingDimSourceSuggestions(
+				true, null, List.of(new PacingDimSourceBinding("Mystery row", "695344")),
+				List.of(), List.of(), 1);
+		doReturn(suggestions).when(sheetSourceClient).suggest(
+				any(), eq("nike-ss26"), eq("apps"), eq("bindings"), isNull(), isNull(),
+				eq(List.of(new PacingDimSourceUnboundName("Mystery row", 7))), eq(List.of()));
+		doReturn(new PacingDimSourceSuggestionsV1().available(true)
+				.bindings(List.of(new PacingDimSourceBindingV1().value("Mystery row").lineItemId("695344")))
+				.members(List.of()).groups(List.of()).considered(1))
+				.when(mapper).toV1(suggestions);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/suggest",
+						"nike-ss26", "apps")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"kind\":\"bindings\",\"unbound\":[{\"value\":\"Mystery row\",\"rows\":7}]}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.bindings[0].lineItemId").value("695344"));
 	}
 }

@@ -37,6 +37,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetTab;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
@@ -633,5 +634,26 @@ class PacingDashboardContractMapperTest {
 		// Then:
 		assertThat(result.getDimensions()).singleElement()
 				.satisfies(d -> assertThat(d.getValues()).isEmpty());
+	}
+
+	@Test
+	void shouldKeepSampleCellTypesSoADateColumnStillReadsAsOneTest() {
+		// Given: a tab whose Date column holds a spreadsheet SERIAL number, which is how Google hands
+		// a real date back - 46170 is 2026-05-28.
+		PacingSheetTab tab = new PacingSheetTab(0, "GAF pacing 2026", 5003, 14, 0,
+				List.of("Date", "Impressions"),
+				List.of(List.of(46170, 5477)),
+				List.of(List.of("46170", "5477")));
+
+		// When:
+		var result = mapper.toV1(tab);
+
+		// Then: the sample keeps the number. Flattened to "46170" the settings screen reads the
+		// column as text that merely looks numeric, refuses it the Date role, and blocks the save.
+		assertThat(result.getSample()).singleElement()
+				.satisfies(row -> assertThat(row.get(0)).isEqualTo(46170));
+		// The grid is the display twin and stays text - it is what the header-row picker shows.
+		assertThat(result.getGrid()).singleElement()
+				.satisfies(row -> assertThat(row.get(0)).isEqualTo("46170"));
 	}
 }

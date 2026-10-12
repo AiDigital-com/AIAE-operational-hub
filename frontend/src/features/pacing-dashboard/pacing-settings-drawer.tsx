@@ -5,12 +5,22 @@ import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
 import { PacingAlertsSection } from "./alerts-panel";
+import { topNCompositeFor } from "./widgets/top-n-widget.js";
+import { probeErrorText } from "./spa/sheet-source-norm.js";
+import { probePacingSheet } from "./api";
 import { PacingMappingSection } from "./mapping-panel";
 import { PacingDataSection, type PacingModeSwitches } from "./data-panel";
 import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
-import type { PacingCampaignLinkV1, PacingDataShape, PacingDisplayShape, PacingNotifySettingsV1 } from "./types";
+import type {
+  PacingCampaignLinkV1,
+  PacingDataShape,
+  PacingDisplayShape,
+  PacingNotifySettingsV1,
+  PacingSheetDimColumn,
+  PacingSheetDimSource,
+} from "./types";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-settings-drawer.css";
 
@@ -49,6 +59,10 @@ export interface PacingSettingsDrawerProps {
   isAdmin: boolean;
   /** Handed to the widget section so its cards preview through the dashboard's own engine. */
   libraryEntries: Record<string, unknown> | undefined;
+  /** What each configured dimension source last read, keyed by source id, straight off the
+   *  dashboard payload. Read-only: the Data tab shows row counts and coverage beside the source
+   *  that produced them, and there is nowhere else those come from. */
+  dimSourcesLoaded: Record<string, Record<string, unknown>> | undefined;
   /** The stored `third_party` list, straight off the dashboard payload. Edited on the Data tab. */
   thirdParty: Record<string, unknown>[] | undefined;
   /** The stored mapping entities (§11), straight off the dashboard payload. NULL means this
@@ -60,6 +74,9 @@ export interface PacingSettingsDrawerProps {
   /** The delivery side as the comparison engine wants it. The mapping editor builds the engine's
    *  own rows from these, so the numbers it shows are the ones the widget will produce. */
   factsDaily: Record<string, unknown>[] | null | undefined;
+  /** Delivery per line item per day, built by the page with the engine the dashboard itself uses.
+   *  The denominator of "this source covers N% of pacing impressions". */
+  liDaily: Record<string, unknown> | null | undefined;
   types: Record<string, unknown>[] | null | undefined;
   liPlan: Record<string, unknown> | null | undefined;
   creatives: Record<string, unknown>[] | null | undefined;
@@ -76,6 +93,8 @@ export interface PacingSettingsDrawerProps {
   initialTab?: SettingsTabId | null;
   /** A widget a tile's "Edit…" asked the drawer to open its builder on. */
   initialWidgetId?: string | null;
+  /** "Open the Breakdown" from a sheet column: the dashboard owns the filters and the scroll. */
+  onOpenBreakdown?: (source: PacingSheetDimSource, dim: PacingSheetDimColumn) => void;
   /** Called once that request has been consumed, so a later open lands on the list instead. */
   onWidgetEditorOpened?: () => void;
   /** Re-read the dashboard after a save that landed. */
@@ -98,6 +117,7 @@ export function PacingSettingsDrawer({
   slug,
   currency,
   planByLineItem,
+  dimSourcesLoaded,
   conversions,
   data,
   display,
@@ -108,6 +128,7 @@ export function PacingSettingsDrawer({
   mappingsV3,
   thirdPartyFile,
   factsDaily,
+  liDaily,
   types,
   liPlan,
   creatives,
@@ -117,6 +138,7 @@ export function PacingSettingsDrawer({
   orderNumber,
   initialTab = null,
   initialWidgetId = null,
+  onOpenBreakdown,
   onWidgetEditorOpened,
   onSaved,
 }: PacingSettingsDrawerProps) {
@@ -162,6 +184,186 @@ export function PacingSettingsDrawer({
   // Net cost mode: how many line items carry a STORED ratio right now. Steers only the hint under
   // the Data tab's switch ("re-validate to pull ratios") - storedNetRatio is the ungated value, so
   // the count is right even while the switch itself is still off.
+  // The line items a sheet source can bind its names to. Labelled the way the dashboard labels them -
+  // "LI <id>" plus the name when there is one - so a person routing 40 sheet names is choosing from
+  // the same list they read everywhere else, not from bare ids.
+  // The tile a mapping handoff just minted, so the Widgets tab opens its editor. Held here rather
+  // than pushed through the host's own `initialWidgetId`, which belongs to whoever opened the
+  // drawer and must not be overwritten by a handoff inside it.
+  const [pendingWidgetId, setPendingWidgetId] = useState<string | null>(null);
+
+  // The table a high-cardinality breakdown needs. 7,616 apps under a line item is not a donut, so
+  // the mapping screen offers a top-20 table instead - and the draft it lands in belongs to the
+  // widget section, behind the same single Save.
+  //
+  // `(source, dim)`, because that is the order the moved editor calls this in, and `dim` arrives as
+  // the whole column entry rather than its key. It used to be declared `(dim, source)`: TypeScript
+  // was happy, and the widget got a title that was a source OBJECT, which threw inside the tile.
+  //
+  // The SHAPE is `topNCompositeFor`, not the moved `topNWidgetFor` - see that file for why: the
+  // moved one still mints the pre-v2 table shape the server has refused since the canonical cutover.
+  const createDimWidget = useCallback((source: Record<string, unknown>, dim: PacingSheetDimColumn) => {
+    const added = widgets.current?.addWidget?.(topNCompositeFor(source, dim, 20));
+    // Null means the cap is reached. The Display tab is where something gets removed, so that is
+    // where this lands either way - with the new widget, or with the reason there is none.
+    setTab("widgets");
+    // And open its editor, as the reference does: landing on a list of twenty tiles with the new one
+    // somewhere in it is not an answer to "create a table of this column". `addWidget` answers with
+    // the EXISTING tile's id when one already reads this axis, so a second press opens that one
+    // instead of minting a duplicate.
+    if (added) setPendingWidgetId(added);
+    return added;
+  }, []);
+
+  // Sheet sources and display names are edited on MAPPING, where the reference puts them, and saved
+  // by DATA, which owns the `config.data` patch. Two tabs over one key is how a save of one silently
+  // drops the other, so the draft is held HERE and handed to both - the editor on one side, the
+  // writer on the other.
+  const [sheetDraft, setSheetDraft] = useState<PacingSheetDimSource[]>([]);
+  const [labelsDraft, setLabelsDraft] = useState<Record<string, unknown> | null>(null);
+  // The sheet that replaces delivery. `undefined` is load-bearing and is NOT the same as null: it
+  // means this session gave no instruction, while null means "disconnect the stored one".
+  const [perfDraft, setPerfDraft] = useState<Record<string, unknown> | null | undefined>(undefined);
+
+  // The performance sheet, as the editor reads it: what tabs the SPREADSHEET has, which is a
+  // different question from what the pacing has bound. Held here, beside the draft, because both
+  // Data (connect, disconnect) and Mapping (the card, the editor) ask it.
+  const [perfProbe, setPerfProbe] = useState<Record<string, unknown> | null>(null);
+  const [perfProbing, setPerfProbing] = useState(false);
+  const [perfProbeErr, setPerfProbeErr] = useState<{ error?: string; shareWith?: string } | null>(null);
+  // The id already ATTEMPTED, not the one that succeeded: the lazy effect below re-runs whenever
+  // `perfProbing` flips back, so keying off success would re-probe for ever on a failure - and burn
+  // the rate budget doing it. Retry clears this explicitly. (The reference's own note.)
+  const probedIdRef = useRef<string | null>(null);
+
+  const runPerfProbe = useCallback(async (id: string) => {
+    probedIdRef.current = id;
+    setPerfProbing(true);
+    setPerfProbeErr(null);
+    try {
+      const r = await probePacingSheet(slug, `https://docs.google.com/spreadsheets/d/${id}/edit`);
+      if (!r.readable) {
+        const e = { error: r.error ?? undefined, shareWith: r.shareWith ?? undefined };
+        setPerfProbeErr(e);
+        return { ok: false as const, ...e };
+      }
+      setPerfProbe({
+        title: r.title ?? "",
+        tabs: (r.tabs ?? []).map((tab) => ({
+          sheet_id: tab.sheetId,
+          title: tab.title,
+          row_count: tab.rowCount,
+          col_count: tab.colCount,
+          header_row: tab.headerRow,
+          headers: tab.headers ?? [],
+          sample: tab.sample ?? [],
+          grid: tab.grid ?? [],
+        })),
+      });
+      return { ok: true as const };
+    } catch {
+      const e = { error: "probe_failed", shareWith: undefined };
+      setPerfProbeErr(e);
+      return { ok: false as const, ...e };
+    } finally {
+      setPerfProbing(false);
+    }
+  }, [slug]);
+
+  const storedSheets = useMemo(
+    () => (Array.isArray(data?.dim_sources) ? data.dim_sources : [])
+      .filter((entry) => (entry as PacingSheetDimSource)?.loader === "sheet") as PacingSheetDimSource[],
+    [data],
+  );
+  const storedLabels = useMemo(
+    () => (data?.value_labels ?? null) as Record<string, unknown> | null,
+    [data],
+  );
+  // Back to what the server holds. Used by BOTH the re-seed on opening and Reset - they are the same
+  // act, and writing it twice is how Reset came to miss these three: a section's own draft is reset
+  // through its handle, but these live HERE because Mapping and Data share them.
+  const seedDrafts = useCallback(() => {
+    setSheetDraft(storedSheets);
+    setLabelsDraft(storedLabels);
+    setPerfDraft(undefined);
+  }, [storedSheets, storedLabels]);
+
+  // Re-seeded on every opening, like every other section: a drawer reopened must never show an edit
+  // abandoned in a previous session.
+  useEffect(() => {
+    seedDrafts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedKey, slug]);
+
+  // The spreadsheet the editor is working against, draft first.
+  const perfSheet = (perfDraft === undefined ? (data?.sheet ?? null) : perfDraft) as
+    { spreadsheet_id?: string } | null;
+  const perfSheetId = perfSheet?.spreadsheet_id ?? "";
+
+  // Probe lazily, and only while the drawer is open on a tab that shows it - the reference's own
+  // gate. Re-connecting the SAME spreadsheet keeps the bindings; a different one starts clean
+  // rather than silently pairing tab ids across two files.
+  useEffect(() => {
+    if (!open || (tab !== "data" && tab !== "mapping")) return;
+    if (!perfSheetId || perfProbing || probedIdRef.current === perfSheetId) return;
+    void runPerfProbe(perfSheetId);
+  }, [open, tab, perfSheetId, perfProbing, runPerfProbe]);
+
+  // A closed drawer forgets the probe, so reopening re-reads rather than showing a stale tab list.
+  useEffect(() => {
+    if (open) return;
+    setPerfProbe(null);
+    setPerfProbeErr(null);
+    probedIdRef.current = null;
+  }, [open]);
+
+  const connectPerfSheet = useCallback(async (url: string) => {
+    const m = String(url).match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{20,120})(?:[/?#]|$)/);
+    if (!m) return { ok: false as const, message: probeErrorText("bad_url") };
+    const id = m[1];
+    const r = await runPerfProbe(id);
+    if (!r.ok) return { ok: false as const, message: probeErrorText(r.error, r.shareWith) };
+    setPerfDraft((cur) => {
+      const current = (cur === undefined ? (data?.sheet ?? null) : cur) as { spreadsheet_id?: string } | null;
+      return current && current.spreadsheet_id === id ? current : { spreadsheet_id: id, tabs: [] };
+    });
+    return { ok: true as const };
+  }, [runPerfProbe, data]);
+
+  const disconnectPerfSheet = useCallback(() => {
+    // null, not undefined: this is an instruction to drop the stored one, not the absence of one.
+    setPerfDraft(null);
+    setPerfProbe(null);
+    setPerfProbeErr(null);
+    probedIdRef.current = null;
+  }, []);
+
+  const perfProbeMessage = perfProbeErr
+    ? probeErrorText(perfProbeErr.error, perfProbeErr.shareWith)
+    : null;
+
+  const sheetLineItems = useMemo(
+    () =>
+      Object.keys(planByLineItem).map((id) => {
+        const plan = planByLineItem[id] as unknown as { name?: unknown; rateType?: unknown };
+        const name = typeof plan?.name === "string" && plan.name.trim() ? plan.name.trim() : "";
+        // The rate type is part of the label, not decoration: on a sheet whose names differ only by
+        // their tail, "LI 695345 · CPV" is what tells a person which of two line items they are
+        // routing to. The reference labels them the same way.
+        const rate = typeof plan?.rateType === "string" && plan.rateType ? plan.rateType : "CPM";
+        // The flight travels with the id: coverage is measured over the days a line item was
+        // actually running, so a source that stops early is not flattered by the days after it.
+        const flight = plan as unknown as { flightStart?: unknown; flightEnd?: unknown };
+        return {
+          id,
+          label: `LI ${id}${name ? ` · ${name}` : ""} · ${rate}`,
+          fs: typeof flight?.flightStart === "string" ? flight.flightStart : null,
+          fe: typeof flight?.flightEnd === "string" ? flight.flightEnd : null,
+        };
+      }),
+    [planByLineItem]
+  );
+
   const netRatioCount = useMemo(
     () =>
       Object.values(planByLineItem).filter(
@@ -242,6 +444,10 @@ export function PacingSettingsDrawer({
 
   function handleReset() {
     for (const t of SETTINGS_TABS) handles[t.id].current?.reset();
+    // The sheet sources, the display names and the performance sheet are NOT a section's own draft -
+    // they are edited on Mapping and written by Data, so the drawer holds them and the loop above
+    // cannot reach them. Without this, Reset left a removed source removed.
+    seedDrafts();
     setErrors([]);
   }
 
@@ -346,6 +552,26 @@ export function PacingSettingsDrawer({
             netRatioCount={netRatioCount}
             seedKey={seedKey}
             thirdParty={thirdParty}
+            sheetSources={sheetDraft}
+            storedSheetSources={storedSheets}
+            valueLabels={labelsDraft}
+            storedValueLabels={storedLabels}
+            dimSourcesLoaded={dimSourcesLoaded}
+            widgets={display?.widgets}
+            onReadSource={onSaved}
+            onSheetSourcesChange={setSheetDraft}
+            liDaily={liDaily}
+            lineItems={sheetLineItems}
+            perfSheet={perfDraft === undefined ? (data?.sheet ?? null) : perfDraft}
+            storedPerfSheet={(data?.sheet ?? null) as Record<string, unknown> | null}
+            perfTouched={perfDraft !== undefined}
+            onPerfSheetChange={setPerfDraft}
+            perfProbe={perfProbe}
+            perfProbing={perfProbing}
+            perfProbeMessage={perfProbeMessage}
+            onPerfConnect={connectPerfSheet}
+            onPerfDisconnect={disconnectPerfSheet}
+            onPerfRetryProbe={() => { probedIdRef.current = null; if (perfSheetId) void runPerfProbe(perfSheetId); }}
             visible={tab === "data"}
             onDirtyChange={markData}
             onSwitchesChange={markSwitches}
@@ -360,8 +586,8 @@ export function PacingSettingsDrawer({
             isAdmin={isAdmin}
             libraryEntries={libraryEntries}
             seedKey={seedKey}
-            initialWidgetId={initialWidgetId}
-            onWidgetEditorOpened={onWidgetEditorOpened}
+            initialWidgetId={pendingWidgetId ?? initialWidgetId}
+            onWidgetEditorOpened={() => { setPendingWidgetId(null); onWidgetEditorOpened?.(); }}
             onDirtyChange={markWidgets}
           />
         </div>
@@ -375,7 +601,25 @@ export function PacingSettingsDrawer({
             types={types}
             liPlan={liPlan}
             creatives={creatives}
+            conversions={conversions}
             seedKey={seedKey}
+            sheetSources={sheetDraft}
+            storedSheetSources={storedSheets}
+            dimSourcesLoaded={dimSourcesLoaded}
+            lineItems={sheetLineItems}
+            widgets={display?.widgets}
+            valueLabels={labelsDraft}
+            onSheetSourcesChange={setSheetDraft}
+            onValueLabelsChange={setLabelsDraft}
+            onCreateDimWidget={createDimWidget}
+            onOpenDimBreakdown={onOpenBreakdown}
+            perfSheet={perfSheet as Record<string, unknown> | null}
+            perfProbe={perfProbe}
+            perfProbing={perfProbing}
+            perfProbeMessage={perfProbeMessage}
+            onPerfSheetChange={setPerfDraft}
+            onPerfRetryProbe={() => { probedIdRef.current = null; if (perfSheetId) void runPerfProbe(perfSheetId); }}
+            onReadSource={onSaved}
             onDirtyChange={markMapping}
           />
         </div>

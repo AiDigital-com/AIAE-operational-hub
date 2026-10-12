@@ -151,9 +151,11 @@ describe("the token pool", () => {
 describe("the editor", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("starts empty for a pacing that has never been mapped, and says why", () => {
+  it("starts empty for a pacing that has never been mapped, and says so in one line", () => {
     renderPanel();
-    expect(screen.getByText(/No mapping yet/i)).toBeInTheDocument();
+    // One sentence per empty group, as the reference has it. The paragraph that used to stand here
+    // explained what a mapping IS, on a screen that lists three different kinds of them.
+    expect(screen.getByText(/No CM360 comparison mappings yet/i)).toBeInTheDocument();
   });
 
   it("shows the three auto dimensions on a mapping that has none of its own", () => {
@@ -539,7 +541,7 @@ describe("reset", () => {
 
     act(() => ref.current!.reset());
     expect(screen.queryByText(/All mappings/)).toBeNull();
-    expect(screen.getByText(/No mapping yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No CM360 comparison mappings yet/i)).toBeInTheDocument();
   });
 });
 
@@ -645,5 +647,37 @@ describe("what a save sends", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toHaveProperty("message");
+  });
+});
+
+/**
+ * The fourth section.
+ *
+ * The reference shows "Performance source" only once a spreadsheet is BOUND (`sheetConnected`), so
+ * a pacing without one reads three sections, not an empty fourth promising something it cannot do.
+ * Both halves of that are pinned here: an absent sheet means no section at all.
+ */
+describe("the performance source section", () => {
+  it("stays away entirely when no spreadsheet is bound", () => {
+    renderPanel();
+    expect(screen.queryByText("Performance source")).toBeNull();
+  });
+
+  it("shows the bound spreadsheet, named by the probe and counted by its tabs", () => {
+    renderPanel({
+      perfSheet: { spreadsheet_id: "abc", tabs: [{ sheet_id: 0 }] },
+      perfProbe: { title: "GAF pacing 2026", tabs: [{ sheet_id: 0 }, { sheet_id: 7 }] },
+    } as never);
+    expect(screen.getByText("Performance source")).toBeTruthy();
+    expect(screen.getByText("GAF pacing 2026")).toBeTruthy();
+    // "1 of 2" is the point of the line: one tab feeds delivery, another sits unclaimed.
+    expect(screen.getByText("1 of 2 tabs mapped")).toBeTruthy();
+    expect(screen.getByText("Performance delivery")).toBeTruthy();
+  });
+
+  it("falls back to the spreadsheet id while the probe has not answered", () => {
+    renderPanel({ perfSheet: { spreadsheet_id: "abc", tabs: [] } } as never);
+    expect(screen.getByText("abc")).toBeTruthy();
+    expect(screen.getByText("no tabs mapped yet")).toBeTruthy();
   });
 });

@@ -139,6 +139,9 @@ app:
       assertion-secret: ${PACING_ASSERTION_SECRET:}
       connect-timeout-ms: ${PACING_CONNECT_TIMEOUT_MS:3000}
       read-timeout-ms: ${PACING_READ_TIMEOUT_MS:5000}
+      # The three sheet-source calls open a Google spreadsheet and read it, which a 72,000-row tab
+      # does not finish inside the general ceiling above. The retired SPA allowed them 185s.
+      sheet-read-timeout-ms: ${PACING_SHEET_READ_TIMEOUT_MS:185000}
       # Short-lived on purpose: a Hub assertion is a bearer token for whatever it asserts, minted fresh
       # per request rather than reused.
       assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}

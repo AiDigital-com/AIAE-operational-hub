@@ -20,6 +20,24 @@ import {
 // alias ORDER (aliases are a set) and to object key order, and it excludes the audit stamps the
 // server writes - so the drawer does not call itself dirty over something nobody edited.
 import { normMappingsV3 } from "./spa/mapping-v3-norm.js";
+import { SheetSources } from "./sheet-source-panel";
+// Display names, MOVED from the retired SPA rather than rewritten - renaming a conversion action is
+// the same job on both sides, and a second version of it would be a second set of rules about what a
+// name may be.
+import DisplayNamesEditorJs from "./spa/DisplayNamesEditor.jsx";
+import { summaryLine as displayNamesSummary } from "./spa/value-labels-editor.js";
+import { additionalMappingStage } from "./spa/additional-mapping.js";
+import type { PacingSheetDimColumn, PacingSheetDimSource } from "./types";
+
+/** The moved Display-names editor, typed at this one boundary. Its two data props are whatever the
+ *  dashboard payload published, so they stay loose here: this file hands them over. */
+const DisplayNamesEditor = DisplayNamesEditorJs as unknown as React.ComponentType<{
+  valueLabels: Record<string, unknown> | null;
+  conversions?: unknown;
+  creatives?: unknown;
+  onChange: (next: Record<string, unknown> | null) => void;
+}>;
+import "./display-names.css";
 import "./mapping-panel.css";
 
 /** The drag payload a pool chip carries. A private type so a stray drag from elsewhere on the page
@@ -121,6 +139,79 @@ interface MappingDraft {
   rest: Record<string, unknown>;
 }
 
+/**
+ * One sheet source, as a card in the Mapping list.
+ *
+ * What it says is the reference's own sentence - how far the source has been taken, then how much of
+ * a vocabulary it carries. The ACTIONS that belong to a source (open the sheet, re-read it, remove
+ * it) are deliberately not here: they live on Data, where the source is connected, and repeating
+ * them in a list of mappings made this screen read as a second Data tab.
+ */
+/** The performance spreadsheet, as a card in the mapping list.
+ *
+ *  "Performance delivery" names what it IS, the way the reference does: these tabs do not add a
+ *  breakdown, they stand in for BigQuery on the line items they name. The count is tabs-bound of
+ *  tabs-in-the-file, so "1 of 2" says there is another tab nobody has claimed. */
+function PerfSourceCard({
+  sheet, probe, onOpen,
+}: {
+  sheet: Record<string, unknown>;
+  probe: Record<string, unknown> | null;
+  onOpen: () => void;
+}) {
+  const tabs = Array.isArray(sheet.tabs) ? sheet.tabs : [];
+  const probed = Array.isArray(probe?.tabs) ? (probe?.tabs as unknown[]).length : null;
+  const title = (probe?.title as string) || String(sheet.spreadsheet_id ?? "");
+  const counts = tabs.length === 0
+    ? "no tabs mapped yet"
+    : `${tabs.length}${probed != null ? ` of ${probed}` : ""} ${tabs.length === 1 && probed == null ? "tab" : "tabs"} mapped`;
+
+  return (
+    <button type="button" className="pmap__names-card" onClick={onOpen}>
+      <span className="pmap__names-top">
+        <span className="pmap__names-name">{title}</span>
+        <span className="pmap__names-kind">Sheet</span>
+      </span>
+      <span className="pmap__names-counts">
+        <span>Performance delivery</span>
+        <span>{counts}</span>
+      </span>
+      <span className="pmap__names-open" aria-hidden="true">›</span>
+    </button>
+  );
+}
+
+function AdditionalDataCard({
+  source, onOpen,
+}: { source: PacingSheetDimSource; onOpen: () => void }) {
+  const dims = Array.isArray(source.origin?.columns?.dims) ? source.origin?.columns?.dims ?? [] : [];
+  const groups = (source as { groups?: Record<string, Array<{ drop?: boolean }>> }).groups ?? {};
+  const values = Object.values(groups).reduce(
+    (n, list) => n + (Array.isArray(list) ? list.filter((g) => g && g.drop !== true).length : 0),
+    0,
+  );
+  const stage = String(additionalMappingStage(source) ?? "connected");
+  const counts = stage === "source_setup"
+    ? "Source fields need finishing"
+    : dims.length === 0
+      ? "Line-item routing set · no value libraries yet"
+      : `${dims.length} ${dims.length === 1 ? "value library" : "value libraries"} · ${values} ${values === 1 ? "canonical value" : "canonical values"}`;
+
+  return (
+    <button type="button" className="pmap__names-card" onClick={onOpen}>
+      <span className="pmap__names-top">
+        <span className="pmap__names-name">{source.title || String(source.id ?? "")}</span>
+        <span className="pmap__names-kind">Additional data</span>
+      </span>
+      <span className="pmap__names-counts">
+        <span>{source.origin?.title || "Google Sheet"}</span>
+        <span>{counts}</span>
+      </span>
+      <span className="pmap__names-open" aria-hidden="true">›</span>
+    </button>
+  );
+}
+
 export interface PacingMappingSectionProps extends SettingsSectionProps {
   slug: string | undefined;
   /** `mappings_v3` from the dashboard payload. NULL and [] are different: null means the pacing
@@ -143,6 +234,40 @@ export interface PacingMappingSectionProps extends SettingsSectionProps {
   creatives?: Record<string, unknown>[] | null;
   /** Changes identity when the server payload is replaced, so the draft re-seeds. */
   seedKey: number;
+  /** Conversion rows, for the Display names screen - it renames the actions this pacing actually
+   *  reported, and there is no other list of them. */
+  conversions?: Record<string, unknown>[] | null;
+  /** The pacing's sheet sources, as the drawer currently has them and as they are stored.
+   *
+   *  Edited HERE, where the reference puts them, and written by the Data tab, which owns the
+   *  `config.data` patch. The draft lives above both so one Save cannot drop the other's half. */
+  sheetSources?: PacingSheetDimSource[];
+  storedSheetSources?: PacingSheetDimSource[];
+  /** What each source last read, for the cards and the editor's own figures. */
+  dimSourcesLoaded?: Record<string, Record<string, unknown>>;
+  /** This pacing's line items, for routing a sheet's names to. */
+  lineItems?: ReadonlyArray<{ id: string; label: string }>;
+  /** This pacing's widgets, so a breakdown says what uses it before being renamed or removed. */
+  widgets?: unknown;
+  /** Display names, same arrangement as the sheet sources. */
+  valueLabels?: Record<string, unknown> | null;
+  onSheetSourcesChange?: (next: PacingSheetDimSource[]) => void;
+  onValueLabelsChange?: (next: Record<string, unknown> | null) => void;
+  /** Mints the table a breakdown with too many values needs, in the widget section's own draft. */
+  onCreateDimWidget?: (source: PacingSheetDimSource, dim: PacingSheetDimColumn) => void;
+  /** The low-cardinality twin of the above: the column goes to the Breakdown panel, not a table. */
+  onOpenDimBreakdown?: (source: PacingSheetDimSource, dim: PacingSheetDimColumn) => void;
+  /** The spreadsheet whose tabs REPLACE BigQuery delivery, and what the file itself holds. The
+   *  reference puts this on Mapping beside the other three, and shows the section only once a
+   *  spreadsheet is bound - which is why a pacing without one sees three sections, not four. */
+  perfSheet?: Record<string, unknown> | null;
+  perfProbe?: Record<string, unknown> | null;
+  perfProbing?: boolean;
+  perfProbeMessage?: string | null;
+  onPerfSheetChange?: (next: Record<string, unknown> | null) => void;
+  onPerfRetryProbe?: () => void;
+  /** Called after a source was re-read, so the host can refetch the figures that just changed. */
+  onReadSource?: () => void;
 }
 
 /** All three levels Pacing stores. `creative` needs the creatives aux file, so it is offered only
@@ -653,13 +778,25 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
   function PacingMappingSection(
     // The data props are all optional: a caller that has not resolved its dashboard payload yet is
     // a normal state, not a programming error, and must not take the tab down with it.
-    { slug, mappings, cm360, factsDaily, types, liPlan, creatives, seedKey, onDirtyChange },
+    {
+      slug, mappings, cm360, factsDaily, types, liPlan, creatives, conversions, seedKey,
+      sheetSources = [], storedSheetSources = [], dimSourcesLoaded, lineItems = [], widgets,
+      valueLabels, onSheetSourcesChange, onValueLabelsChange, onCreateDimWidget, onOpenDimBreakdown, onReadSource,
+      perfSheet = null, perfProbe = null, perfProbing = false, perfProbeMessage = null,
+      onPerfSheetChange, onPerfRetryProbe,
+      onDirtyChange,
+    },
     ref,
   ) {
     const [base, setBase] = useState<MappingDraft[]>(() => seed(mappings));
     const [draft, setDraft] = useState<MappingDraft[]>(base);
     // Never auto-open, even with a single mapping: the list is the point at which someone decides
     // WHICH mapping they are editing, and skipping it hides that there can be more than one.
+    const [namesOpen, setNamesOpen] = useState(false);
+    const [sheetIndex, setSheetIndex] = useState<number | null>(null);
+    // The performance sheet's own screen. A flag rather than an index: there is one spreadsheet per
+    // pacing, which is the rule the chooser enforces on the other side.
+    const [perfOpen, setPerfOpen] = useState(false);
     const [openId, setOpenId] = useState<string | null>(null);
     /** Which dimension a chip is currently hovering over, for the drop highlight. */
     const [dropDimId, setDropDimId] = useState<string | null>(null);
@@ -1162,7 +1299,8 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
         {/* List OR editor, never both. The list is where someone chooses WHICH mapping they are
             working on; leaving it on screen under an open editor made two different things look
             like one page. */}
-        {!open && (
+        {!open && !namesOpen && !perfOpen && sheetIndex === null && (
+        <>
         <section className="pmap__section">
           <div className="pmap__row">
             <h3 className="pmap__label">
@@ -1184,20 +1322,30 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
             </button>
           </div>
 
+                    <div className="pmap__sechead">
+            <strong>Additional data</strong>
+            <span>Line-item routing and value libraries from connected sheets</span>
+          </div>
+          {sheetSources.length === 0 ? (
+            <div className="pmap__empty">No additional-data mappings yet.</div>
+          ) : (
+            <div className="pmap__ents">
+              {sheetSources.map((src, index) => (
+                <AdditionalDataCard
+                  key={String(src.id ?? index)}
+                  source={src}
+                  onOpen={() => setSheetIndex(index)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="pmap__sechead">
+            <strong>CM360 comparisons</strong>
+            <span>Delivery names matched to CM360 placements and creatives</span>
+          </div>
           {draft.length === 0 ? (
-            <p className="pmap__hint pmap__hint--block">
-              No mapping yet. A mapping says which values on the delivery side mean the same thing as
-              which words in the ad server&rsquo;s placements, which is what lets the two be compared
-              at all.
-              {!cm360HasData && (
-                <>
-                  {" "}
-                  CM360 has not been pulled for this pacing yet &mdash; add a source in Settings
-                  &rarr; Data. Building a mapping by hand still works; it just has nothing to check
-                  itself against until the pull lands.
-                </>
-              )}
-            </p>
+            <div className="pmap__empty">No CM360 comparison mappings yet.</div>
           ) : (
             <div className="pmap__ents">
               {draft.map((m) => (
@@ -1215,11 +1363,127 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
             </div>
           )}
         </section>
+
+        {/* Additional data and Display names: the reference's own Mapping tab carries all three
+            kinds side by side, because they answer one question - what does a raw value MEAN here.
+            They are stored on `config.data` rather than in `mappings_v3`, so the drawer owns their
+            draft and the Data tab writes it; this screen is where it is edited. */}
+
+        {/* Display names. A card only once it names something - before that there is nothing to open,
+            and a button that leads to an empty screen is a button that lies. The reference says the
+            same thing with the same sentence. */}
+        <section className="pmap__section">
+          <div className="pmap__sechead">
+            <strong>Display names</strong>
+            <span>Readable names for conversion actions and creatives</span>
+          </div>
+          {displayNamesSummary(valueLabels ?? null) ? (
+            <div className="pmap__ents">
+              <button type="button" className="pmap__names-card" onClick={() => setNamesOpen(true)}>
+                <span className="pmap__names-top">
+                  <span className="pmap__names-name">Display names</span>
+                  <span className="pmap__names-kind">Names</span>
+                </span>
+                <span className="pmap__names-counts">
+                  <span>Conversion actions and creatives</span>
+                  <span>{displayNamesSummary(valueLabels ?? null)}</span>
+                </span>
+                <span className="pmap__names-open" aria-hidden="true">›</span>
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="pmap__empty pmap__empty--action" onClick={() => setNamesOpen(true)}>
+              No display names yet.
+            </button>
+          )}
+        </section>
+
+        {/* Only once a spreadsheet is bound, which is the reference's own gate (`sheetConnected`):
+            a pacing without one shows three sections here, not an empty fourth. */}
+        {perfSheet?.spreadsheet_id ? (
+          <section className="pmap__section">
+            <div className="pmap__sechead">
+              <strong>Performance source</strong>
+              <span>Tabs of a Google Sheet that replace BigQuery delivery</span>
+            </div>
+            <PerfSourceCard
+              sheet={perfSheet}
+              probe={perfProbe}
+              onOpen={() => setPerfOpen(true)}
+            />
+          </section>
+        ) : null}
+        </>
+        )}
+
+        {perfOpen && (
+          <section className="pmap__section">
+            <div className="pmap__row pmap__row--back">
+              <button type="button" className="pmap__back" onClick={() => setPerfOpen(false)}>
+                ← All mappings
+              </button>
+            </div>
+            <SheetSources
+              slug={slug ?? ""}
+              sources={sheetSources}
+              stored={storedSheetSources}
+              loaded={(dimSourcesLoaded ?? {}) as Record<string, never>}
+              lineItems={lineItems}
+              widgets={widgets}
+              initialView="perf"
+              perfSheet={perfSheet}
+              perfProbe={perfProbe}
+              perfProbing={perfProbing}
+              perfProbeMessage={perfProbeMessage}
+              onPerfSheetChange={onPerfSheetChange}
+              onPerfRetryProbe={onPerfRetryProbe}
+              onChange={(next) => onSheetSourcesChange?.(next)}
+            />
+          </section>
+        )}
+
+        {sheetIndex !== null && sheetSources[sheetIndex] && (
+          <section className="pmap__section">
+            <div className="pmap__row pmap__row--back">
+              <button type="button" className="pmap__back" onClick={() => setSheetIndex(null)}>
+                ← All mappings
+              </button>
+            </div>
+            <SheetSources
+              slug={slug ?? ""}
+              sources={sheetSources}
+              stored={storedSheetSources}
+              loaded={(dimSourcesLoaded ?? {}) as Record<string, never>}
+              lineItems={lineItems}
+              widgets={widgets}
+              openIndex={sheetIndex}
+              onCreateWidget={onCreateDimWidget}
+              onOpenBreakdown={onOpenDimBreakdown}
+              onRead={() => onReadSource?.()}
+              onChange={(next) => onSheetSourcesChange?.(next)}
+            />
+          </section>
+        )}
+
+        {namesOpen && (
+          <section className="pmap__section">
+            <div className="pmap__row pmap__row--back">
+              <button type="button" className="pmap__back" onClick={() => setNamesOpen(false)}>
+                ← All mappings
+              </button>
+            </div>
+            <DisplayNamesEditor
+              valueLabels={valueLabels ?? null}
+              conversions={conversions ?? []}
+              creatives={creatives ?? []}
+              onChange={(next) => onValueLabelsChange?.(next)}
+            />
+          </section>
         )}
 
         {open && (
           <section className="pmap__section">
-            <div className="pmap__row">
+            <div className="pmap__row pmap__row--back">
               <button type="button" className="pmap__back" onClick={() => setOpenId(null)}>
                 &larr; All mappings
               </button>

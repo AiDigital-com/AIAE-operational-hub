@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Shape of the {@code POST /api/pacings} request body (§8, US-123).
  *
- * <p>NON_NULL, for {@link DataNamespaceRequest}'s reason: the {@code RestClient}'s default Jackson
+ * <p>NON_NULL, for {@link DataNamespaceWire}'s reason: the {@code RestClient}'s default Jackson
  * converter serializes nulls, and Pacing's create route gates every optional key here on presence
  * ({@code if (insertionOrderId) ...}, {@code if (body.client) ...}, {@code if (Array.isArray(
  * body.campaign_links)) ...}, and {@code body.rate != null} for the rate override) - an untouched

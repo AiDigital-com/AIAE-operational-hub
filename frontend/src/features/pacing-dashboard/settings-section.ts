@@ -23,6 +23,13 @@ export interface SettingsSectionHandle {
   save: () => Promise<SectionSaveResult>;
   /** Drop the draft back to what the server last said. */
   reset: () => void;
+  /** Add a widget to this section's DRAFT, for a screen that is not this one.
+   *
+   *  Only the widget section implements it. A breakdown with thousands of values has no donut worth
+   *  drawing, so the mapping screen offers a table instead - and the draft it must land in lives
+   *  here, behind one Save with everything else. Returns the new widget's id, or null when the cap
+   *  is reached, so the caller can say which happened. */
+  addWidget?: (widget: Record<string, unknown>) => string | null;
 }
 
 export interface SettingsSectionProps {

@@ -49,6 +49,17 @@ public class PacingProperties {
 	private long readTimeoutMs = 5000;
 
 	/**
+	 * Read timeout for the three sheet-source calls, in milliseconds.
+	 *
+	 * <p>Far longer than {@link #readTimeoutMs}, because these three do something no other Pacing call
+	 * does: they open a Google spreadsheet and read it. A 72,000-row tab takes seconds to fetch, and a
+	 * token refresh in front of it takes seconds more - which is why the general 5s ceiling turned a
+	 * working read into "the Pacing service is unreachable". The retired SPA allowed these same calls
+	 * 185s; this is that number, not a guess.
+	 */
+	private long sheetReadTimeoutMs = 185000;
+
+	/**
 	 * How long a minted assertion stays valid, in seconds. Kept short (60-120s recommended): a Hub
 	 * assertion is a bearer token for whatever it asserts, minted fresh per request rather than reused,
 	 * so there is no benefit to a long TTL and a real cost to one leaking.
@@ -116,6 +127,24 @@ public class PacingProperties {
 	 */
 	public long getReadTimeoutMs() {
 		return readTimeoutMs;
+	}
+
+	/**
+	 * Returns the read timeout for the sheet-source calls, in milliseconds.
+	 *
+	 * @return sheet-source read timeout
+	 */
+	public long getSheetReadTimeoutMs() {
+		return sheetReadTimeoutMs;
+	}
+
+	/**
+	 * Sets the read timeout for the sheet-source calls.
+	 *
+	 * @param sheetReadTimeoutMs sheet-source read timeout, in milliseconds
+	 */
+	public void setSheetReadTimeoutMs(long sheetReadTimeoutMs) {
+		this.sheetReadTimeoutMs = sheetReadTimeoutMs;
 	}
 
 	/**

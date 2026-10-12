@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatError } from "../../shared/format/error";
 import { cn } from "../../shared/style/cn";
@@ -30,6 +30,8 @@ import { ReportBoard } from "./widgets/report-board";
 import { PacingStateProvider, setPacingApi, usePacingState } from "./spa/store.js";
 import { WIDGET_CAP, copyWidget, setTileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
 import { resolveWidget } from "./pacing-dashboard-library";
+import { createPacingEngine } from "./engine/engine-loader";
+import { toEngineRaw } from "./engine/build-metrics";
 import { buildPacingMetrics } from "./engine/build-metrics";
 import { buildPacingAlerts } from "./engine/build-alerts";
 import { BreakdownPanel } from "./breakdown/breakdown-panel";
@@ -120,6 +122,28 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const urlFilters = useUrlFilters();
   const { filters, setFilters } = urlFilters;
 
+  // "Open the Breakdown", from a sheet column's mapping screen. The reference writes the axis into
+  // the filters and clears the dashboard's own cuts, because a line-item or channel filter left
+  // over from before can hide the very column the person just picked; the panel follows `brk` on
+  // its own from there. It also closes the drawer - the panel is behind it.
+  const openBreakdownFromMapping = useCallback(
+    (source: { id?: unknown }, dim: { key?: unknown }) => {
+      if (!source?.id || !dim?.key) return;
+      setFilters({
+        brk: `ds:${String(source.id)}:${String(dim.key)}`,
+        brkf: [],
+        selection: [], channels: [], labels: [], platforms: [],
+      });
+      setSettingsOpen(false);
+      // After the drawer's own close, so the panel is on screen to scroll to.
+      window.setTimeout(() => {
+        document.querySelector("[data-pacing-breakdown]")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 200);
+    },
+    [setFilters],
+  );
+
   // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
   // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
   // no URL filter ever reaches it, so it used to sit still while every other figure on the page
@@ -144,6 +168,24 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   // purpose (§ "leave buildMetricBag in the Pacing service alone" - removing it is a later, separate
   // step the owner deliberately sequenced after this one).
   const metrics = useMemo(() => buildPacingMetrics(data, filters), [data, filters]);
+
+  // Delivery per line item per day, for the settings drawer's coverage line ("this source covers
+  // 89% of pacing impressions"). Built HERE because this is where the whole payload is, and with the
+  // engine the rest of the page uses - a figure derived some other way would be a second opinion
+  // about how much this pacing delivered.
+  const sheetCoverageLiDaily = useMemo(() => {
+    if (!data?.campaign || !data?.planByLineItem) return null;
+    try {
+      const { LD } = createPacingEngine().normalize(toEngineRaw(data)) as {
+        LD: Record<string, unknown>;
+      };
+      return LD ?? null;
+    } catch {
+      // A payload the engine cannot normalise is one the dashboard could not draw either; the
+      // coverage line simply does not appear.
+      return null;
+    }
+  }, [data]);
 
 
   const display = useMemo(() => (data?.display ?? {}) as PacingDisplayShape, [data]);
@@ -455,11 +497,14 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           <PacingSettingsDrawer
             open={settingsOpen}
             onClose={() => setSettingsOpen(false)}
+            onOpenBreakdown={openBreakdownFromMapping}
             slug={slug ?? ""}
             currency={data.campaign?.currency ?? "USD"}
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
             conversions={data.conversions as Array<Record<string, unknown>> | undefined}
             data={data.data as PacingDataShape | undefined}
+            dimSourcesLoaded={data.dimSources as Record<string, Record<string, unknown>> | undefined}
+            liDaily={sheetCoverageLiDaily}
             display={display}
             capabilities={(data.capabilities ?? undefined) as Record<string, unknown> | undefined}
             isAdmin={isAdmin}

@@ -17,6 +17,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItem
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetSourceInstruction;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
@@ -2174,7 +2175,7 @@ class PacingClientImplTest {
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, true, null, null, null);
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, true, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2202,7 +2203,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2234,7 +2235,8 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
-				null, false, null, null, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")));
+				null, false, null, null, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")),
+				null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"data\":{\"fetch_creatives\":false,"
@@ -2318,6 +2320,75 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldOmitTheSheetKeyWhenNoInstructionWasGivenTest() {
+		// Given: Pacing gates `data.sheet` on hasOwnProperty, so an absent key is "leave the stored
+		// source alone". A save about something else must not mention it at all.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingDataSettings settings =
+				new PacingDataSettings(null, true, null, null, null, null, null, null, null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json("{\"data\":{\"fetch_creatives\":true}}", true))
+				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveDataSettings(assertion, "nike-ss26", settings);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendAnExplicitNullToDisconnectTheSheetTest() {
+		// Given: this is the state a nullable field could not carry - the Hub drops nulls on the wire,
+		// so "disconnect" would have arrived as "leave it" and the source would have quietly stayed.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingDataSettings settings = new PacingDataSettings(
+				null, null, null, null, null, null, null, null, new PacingSheetSourceInstruction(null));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json("{\"data\":{\"sheet\":null}}", true))
+				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveDataSettings(assertion, "nike-ss26", settings);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendTheSheetSourceWhenOneIsBoundTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingDataSettings settings = new PacingDataSettings(
+				null, null, null, null, null, null, null, null,
+				new PacingSheetSourceInstruction(Map.of("spreadsheet_id", "abc", "tabs", List.of())));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json("{\"data\":{\"sheet\":{\"spreadsheet_id\":\"abc\",\"tabs\":[]}}}", true))
+				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveDataSettings(assertion, "nike-ss26", settings);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
 	void shouldReportTheDetailWhenPacingRefusesADimensionSourceTest() {
 		// Given: dash-gate refuses a malformed dim_sources array rather than dropping it, and names what
 		// was wrong in `detail` - a user has to learn WHICH source was refused, not that "a save failed".
@@ -2331,7 +2402,8 @@ class PacingClientImplTest {
 				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\",\"detail\":\"devices: unknown catalog\"}")
 						.contentType(MediaType.APPLICATION_JSON));
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, null, null, List.of(Map.of("id", "devices")));
+		PacingDataSettings settings =
+				new PacingDataSettings(null, null, null, null, null, null, List.of(Map.of("id", "devices")), null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.saveDataSettings(assertion, "nike-ss26", settings))

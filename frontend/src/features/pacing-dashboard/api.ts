@@ -5,6 +5,9 @@ import type {
   PacingCampaignLinkV1,
   PacingDashboardV1,
   PacingDataSettingsUpdateV1,
+  PacingDimSourceReadV1,
+  PacingDimSourceSuggestionsV1,
+  PacingDimSourceValuesV1,
   PacingDisplaySaveOutcome,
   PacingJournalEntryV1,
   PacingJournalEntryWriteV1,
@@ -15,6 +18,7 @@ import type {
   PacingNotifySettingsV1,
   PacingRefreshOutcome,
   PacingRefreshStatusV1,
+  PacingSheetProbeV1,
   PacingThirdPartyCampaignsV1,
   PacingThirdPartyDataV1,
   PacingThirdPartyStatusV1,
@@ -447,6 +451,103 @@ export async function setPacingLibraryLike(id: string, liked: boolean): Promise<
   const result = liked
     ? await apiClient.POST("/api/v1/pacing/library/{id}/like", { params: { path: { id } } })
     : await apiClient.DELETE("/api/v1/pacing/library/{id}/like", { params: { path: { id } } });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Opens a Google spreadsheet and reports what is in it, so a person can pick the tab a source reads
+ * and say what each column means.
+ *
+ * Reads only - nothing is stored by this call. "We could not open it" comes back as
+ * `readable: false` with an address to share the file with, NOT as a throw: on a source being set up
+ * that is the expected first answer, and the only useful response is to show who to share with.
+ */
+export async function probePacingSheet(
+  slug: string,
+  url: string,
+): Promise<PacingSheetProbeV1> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/sheet-probe", {
+    params: { path: { slug } },
+    body: { url },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * The distinct values of up to three columns of a sheet tab, most rows first.
+ *
+ * What this spares is retyping: a mapping offers the spellings that are really in the file, and a
+ * spelling typed by hand would drop rows silently at refresh time rather than announce itself.
+ */
+export async function readPacingDimSourceValues(
+  slug: string,
+  spreadsheetId: string,
+  sheetId: number,
+  columns: string[],
+  headerRow: number | null,
+): Promise<PacingDimSourceValuesV1> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/dim-source-values", {
+    params: { path: { slug } },
+    body: { spreadsheetId, sheetId, columns, headerRow },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Re-reads a configured sheet source now instead of waiting for the next refresh.
+ *
+ * The row count that comes back is lower than the sheet's own by design - rows are summed per day,
+ * line item and dimension value - so it is reported beside `unboundRows` rather than on its own,
+ * which is the number that actually means something was left out.
+ */
+export async function readPacingDimSource(
+  slug: string,
+  sourceId: string,
+): Promise<PacingDimSourceReadV1> {
+  const result = await apiClient.POST(
+    "/api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/read",
+    { params: { path: { slug, sourceId } } },
+  );
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Asks Pacing to propose part of a sheet source's mapping.
+ *
+ * Three questions, one endpoint: `bindings` routes unmatched names to line items, `aliases` extends
+ * one canonical value with more spellings, `groups` clusters a whole column. Only the list matching
+ * the question is populated.
+ *
+ * `available: false` is an ANSWER - no model is connected, or the sheet has not been read yet. Show
+ * `notice`; do not treat it as a failed request.
+ */
+export async function suggestPacingDimSource(
+  slug: string,
+  sourceId: string,
+  body: {
+    kind: "bindings" | "aliases" | "groups";
+    dim?: string | null;
+    label?: string | null;
+    unbound?: Array<{ value: string; rows?: number }>;
+    candidates?: string[];
+  },
+): Promise<PacingDimSourceSuggestionsV1> {
+  const result = await apiClient.POST(
+    "/api/v1/pacing/dashboards/{slug}/dim-sources/{sourceId}/suggest",
+    { params: { path: { slug, sourceId } }, body },
+  );
   if (result.error || !result.response.ok || result.data === undefined) {
     throw new ApiError(formatError(result.error), result.response.status);
   }

@@ -20,6 +20,16 @@ vi.mock("./api", () => ({
  * and are tested there. Here it is a plain trigger, so these cases stay about which keys the
  * section sends.
  */
+/**
+ * Opens one of the Data tab's collapsible sections.
+ *
+ * They are closed on every visit now - most pacings connect nothing and switch nothing, and a tab
+ * that opens with four open sections reads as a wall. A test has to click what a person clicks.
+ */
+async function openSection(name: RegExp) {
+  await userEvent.click(screen.getByRole("button", { name }));
+}
+
 function renderPanel(data: PacingDataShape | undefined) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = vi.fn();
@@ -142,6 +152,7 @@ describe("PacingDataSection", () => {
   it("should send the coefficient switch on its own, without dragging the net switch along", async () => {
     // Given: a pacing with neither mode on
     renderPanel({ source: "platform_mart" });
+    await openSection(/Client cost/);
 
     // When: only the coefficient switch moves
     await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
@@ -156,6 +167,7 @@ describe("PacingDataSection", () => {
   it("should show the stored coefficient switch and send false when it is turned off", async () => {
     // Given: a pacing already using coefficient margin mode
     renderPanel({ source: "platform_mart", coef_enabled: true });
+    await openSection(/Client cost/);
     expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeChecked();
 
     // When:
@@ -168,10 +180,11 @@ describe("PacingDataSection", () => {
     expect(api.savePacingDataSettings).toHaveBeenCalledWith("nike-ss26", { coefEnabled: false });
   });
 
-  it("should say that existing coefficient line items keep working while the switch is off", () => {
+  it("should say that existing coefficient line items keep working while the switch is off", async () => {
     // Given: the one fact that makes this switch different from Net cost mode beside it. It is a
     // visibility gate, so a user turning it off must not expect the figures to change back.
     renderPanel({ source: "platform_mart" });
+    await openSection(/Client cost/);
 
     // Then: and it says so without naming the switch below it - an option's hint joins its
     // checkbox's accessible name, so borrowing "Net cost mode" here would give this panel two
@@ -251,6 +264,9 @@ describe("PacingDataSection", () => {
       </QueryClientProvider>
     );
 
+    // The switches live in a collapsible section now, closed on every visit.
+    await openSection(/Client cost/);
+
     // When: the switch is turned on and saved
     await user.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -262,9 +278,15 @@ describe("PacingDataSection", () => {
 
     // Then: the switch reads as stored. Without following the payload it would sit here unticked,
     // claiming the save never happened.
-    await waitFor(() =>
-      expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeChecked()
-    );
+    //
+    // Opened inside the wait: a re-seed closes the section, and the re-seed is the very thing being
+    // tested - so which of the two lands first is not something to assume.
+    await waitFor(() => {
+      if (!screen.queryByRole("checkbox", { name: /Coefficient margin mode/ })) {
+        fireEvent.click(screen.getByRole("button", { name: /Client cost/ }));
+      }
+      expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeChecked();
+    });
   });
 
   it("should not let a background refetch eat an edit in progress", async () => {
@@ -294,6 +316,8 @@ describe("PacingDataSection", () => {
       </QueryClientProvider>
     );
 
+    // The switches live in a collapsible section now, closed on every visit.
+    await openSection(/Client cost/);
     await user.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
     act(() => pushPayload({ source: "platform_mart_adjustments_view", coef_enabled: false }));
 

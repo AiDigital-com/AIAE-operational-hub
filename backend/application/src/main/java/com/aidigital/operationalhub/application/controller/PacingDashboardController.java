@@ -19,6 +19,13 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPla
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceReadV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceSuggestRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValuesRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValuesV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetProbeRequestV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetProbeV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyRefetchV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingsUpdateV1;
@@ -41,6 +48,12 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffRe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
+import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceRead;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceUnboundName;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValues;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetProbe;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
@@ -78,6 +91,7 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final CurrentUserService currentUserService;
 	private final PacingScopeResolver pacingScopeResolver;
 	private final PacingClient pacingClient;
+	private final PacingSheetSourceClient sheetSourceClient;
 	private final PacingContractMapper assertionMapper;
 	private final PacingDashboardContractMapper mapper;
 	private final PacingPlanContractMapper planMapper;
@@ -178,6 +192,61 @@ public class PacingDashboardController implements PacingDashboardApi {
 		// 200 even when nothing is proposed: an empty list with a notice means the path works and
 		// there is simply no model connected to ask, which the caller shows as a message.
 		return ResponseEntity.ok(mapper.toV1(suggestions));
+	}
+
+	@Override
+	public ResponseEntity<PacingSheetProbeV1> probePacingSheet(
+			String slug, PacingSheetProbeRequestV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		PacingSheetProbe probe = sheetSourceClient.probeSheet(assertion, slug, body.getUrl());
+		// 200 even when the file could not be opened: "share it with us first" is an instruction for
+		// the person setting the source up, not a fault of this request.
+		return ResponseEntity.ok(mapper.toV1(probe));
+	}
+
+	@Override
+	public ResponseEntity<PacingDimSourceValuesV1> readPacingDimSourceValues(
+			String slug, PacingDimSourceValuesRequestV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		PacingDimSourceValues values = sheetSourceClient.readValues(
+				assertion,
+				slug,
+				body.getSpreadsheetId(),
+				body.getSheetId(),
+				body.getColumns(),
+				body.getHeaderRow());
+		return ResponseEntity.ok(mapper.toV1(values));
+	}
+
+	@Override
+	public ResponseEntity<PacingDimSourceSuggestionsV1> suggestPacingDimSource(
+			String slug, String sourceId, PacingDimSourceSuggestRequestV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		List<PacingDimSourceUnboundName> unbound = body.getUnbound() == null
+				? List.of()
+				: body.getUnbound().stream()
+						.map((name) -> new PacingDimSourceUnboundName(
+								name.getValue(), name.getRows() == null ? 0 : name.getRows()))
+						.toList();
+		PacingDimSourceSuggestions suggestions = sheetSourceClient.suggest(
+				assertion,
+				slug,
+				sourceId,
+				body.getKind() == null ? null : body.getKind().getValue(),
+				body.getDim(),
+				body.getLabel(),
+				unbound,
+				body.getCandidates() == null ? List.of() : body.getCandidates());
+		// 200 even when unavailable: "no model connected" and "nothing read yet" are states to show
+		// as a sentence, not failures of this request.
+		return ResponseEntity.ok(mapper.toV1(suggestions));
+	}
+
+	@Override
+	public ResponseEntity<PacingDimSourceReadV1> readPacingDimSource(String slug, String sourceId) {
+		HubAssertion assertion = signCurrentUser();
+		PacingDimSourceRead read = sheetSourceClient.readSource(assertion, slug, sourceId);
+		return ResponseEntity.ok(mapper.toV1(read));
 	}
 
 	@Override
