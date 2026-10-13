@@ -15,10 +15,10 @@ import './ChipSettingsPanel.css';
 
 const { CATALOG, SETTING_ORDER } = FormulaChips;
 // This app's scale, not Pacing's (see FormulaEditorDialog.css and pacing-spa.css): the panel
-// is a portal on <body> opened from inside the formula dialog, so it joins the Hub's other
-// portalled popovers at 310 — above the dialog's 305 and the drawer's 300, under the tooltip.
+// is a portal on <body> opened from inside the formula dialog, so it sits one step above that
+// dialog's 324 (itself above the popovers at 310 and the Spotlight at 320), under the tooltip.
 // Pacing's own copy keeps 160, correct against its drawer at 100. Do not carry upstream.
-const PANEL_Z = 310;
+const PANEL_Z = 326;
 const N_MAX = 90;
 // The row labels are the chip's hover list's (info.js SETTING_LABELS): one vocabulary for both.
 const LABELS = SETTING_LABELS;

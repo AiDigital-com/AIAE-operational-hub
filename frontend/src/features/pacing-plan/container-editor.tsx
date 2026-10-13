@@ -96,12 +96,12 @@ function DimChildRow({
       <span className="pplan__dim-resolved" aria-hidden={!showResolved}>
         {showResolved ? `= ${fmtInt(Math.round(resolved))}` : ""}
       </span>
-      {/* `native_budget` only - see the note on the date split's Budget field. */}
+      {/* `native_budget` only - see the note on the date split's Spend field. */}
       <NumericField
         value={child.native_budget == null ? "" : String(child.native_budget)}
         onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
-        placeholder="Budget"
-        ariaLabel={`Sub-breakdown budget (${currency})`}
+        placeholder="Spend"
+        ariaLabel={`Sub-breakdown spend (${currency})`}
         className="pplan__input pplan__input--num"
       />
       <input
@@ -189,12 +189,12 @@ function DateChildRow({
       {/* Only `native_budget` is set, never `target_spend`: the contract amount is the money truth
           and dash-gate re-materializes the USD cache from it at the CURRENT campaign rate on every
           save (`currency-detect.mjs`'s nested `remat`). Writing a USD figure here as well would go
-          stale the first time the rate is edited. Same rule the container's own Budget field uses. */}
+          stale the first time the rate is edited. Same rule the container's own Spend field uses. */}
       <NumericField
         value={child.native_budget == null ? "" : String(child.native_budget)}
         onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
-        placeholder="Budget"
-        ariaLabel={`Date split budget (${currency})`}
+        placeholder="Spend"
+        ariaLabel={`Date split spend (${currency})`}
         className="pplan__input pplan__input--num"
       />
       {/* The middle level of the coefficient's margin chain (dim child → DATE CHILD → container →
@@ -406,11 +406,11 @@ export function ContainerCard({
               />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">Budget ({currency})</span>
+              <span className="pplan__field-label">Spend</span>
               <NumericField
                 value={container.native_budget == null ? "" : String(container.native_budget)}
                 onChange={(v) => setField("native_budget", parseEditableNumber(v) ?? null)}
-                ariaLabel="Container budget"
+                ariaLabel="Container spend"
                 className="pplan__input pplan__input--num"
               />
             </label>
@@ -427,7 +427,7 @@ export function ContainerCard({
           </div>
 
           <div className="pplan__subsection">
-            <div className="pplan__subsection-head">Date splits ({splitCount})</div>
+            <div className="pplan__subsection-head">Date splits ({container.date_children.length})</div>
             {container.date_children.map((dc, idx) => (
               <DateChildRow
                 key={dc.id}

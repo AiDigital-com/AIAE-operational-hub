@@ -66,7 +66,7 @@ describe("date split", () => {
 
   it("writes the contract amount and leaves the USD cache to the server", () => {
     const onChange = renderCard();
-    fireEvent.change(screen.getByLabelText("Date split budget (EUR)"), { target: { value: "2500" } });
+    fireEvent.change(screen.getByLabelText("Date split spend (EUR)"), { target: { value: "2500" } });
     const dc = onChange.mock.calls[0][0].date_children[0];
     expect(dc.native_budget).toBe(2500);
     expect(dc.target_spend).toBeNull();
@@ -74,9 +74,9 @@ describe("date split", () => {
 });
 
 describe("sub-breakdown", () => {
-  it("can author a budget too", () => {
+  it("can author a spend too", () => {
     const onChange = renderCard();
-    fireEvent.change(screen.getByLabelText("Sub-breakdown budget (EUR)"), { target: { value: "900" } });
+    fireEvent.change(screen.getByLabelText("Sub-breakdown spend (EUR)"), { target: { value: "900" } });
     const dx = onChange.mock.calls[0][0].dim_children[0];
     expect(dx.native_budget).toBe(900);
     expect(dx.target_spend).toBeNull();

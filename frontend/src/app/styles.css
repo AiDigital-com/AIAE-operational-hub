@@ -81,7 +81,10 @@ dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .empty-text { margin: 0; color: var(--muted); }
 
 /* ── Form controls ── */
-input, select { width: 100%; min-height: 42px; padding: 0 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s; }
+/* Checkboxes and radios are not fields: under this rule they became 100%-wide, 42px slabs, and every
+   new one had to be reset by hand. `:where()` keeps the selector as weak as a bare `input`, so the
+   per-component `.x input` rules still win over it. */
+input:where(:not([type="checkbox"], [type="radio"])), select { width: 100%; min-height: 42px; padding: 0 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s; }
 input::placeholder { color: var(--muted); }
 input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-focus); }
 select { appearance: none; -webkit-appearance: none; padding-right: 34px; cursor: pointer;
