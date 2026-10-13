@@ -199,7 +199,7 @@ function LineItemCard({
               />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">Budget ({currency})</span>
+              <span className="pplan__field-label">Budget</span>
               <NumericField
                 value={li.nativeBudget}
                 onChange={(v) => field("nativeBudget", v)}

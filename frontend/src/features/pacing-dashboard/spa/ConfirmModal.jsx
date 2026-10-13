@@ -84,16 +84,20 @@ export default function ConfirmModal({
   // where the same red on the surface is 4.32:1 — the ratio the filled destructive button
   // has always had. A destructive answer must not be the one word on the dialog that is
   // hardest to read.
+  //
+  // OPERATIONAL HUB: the buttons wear this app's own `.button` family (app/styles.css), the
+  // same pair the Hub's own delete dialogs use — ghost Cancel, outlined-red `button--danger`
+  // for the destructive answer, filled `.button` for a primary that is not destructive (the
+  // `confirmColor: 'var(--accent)'` questions). Pacing's utility classes and inline colours
+  // drew a bordered native Cancel and a filled red Remove here, because this app has no
+  // Tailwind preflight to strip the browser's button chrome. Hub-only — do not carry upstream.
   const cancelButton = (
     <button
       key="cancel"
       type="button"
       ref={cancelIsPrimary ? primaryRef : null}
       onClick={onCancel}
-      className="px-4 py-2 rounded-10 text-sm font-medium transition-colors"
-      style={cancelIsPrimary
-        ? { background: 'var(--accent)', color: 'var(--accent-contrast)' }
-        : { color: 'var(--text-secondary)' }}
+      className={cancelIsPrimary ? 'button button--sm' : 'button button--ghost button--sm'}
     >
       {cancelLabel}
     </button>
@@ -105,15 +109,9 @@ export default function ConfirmModal({
       ref={cancelIsPrimary ? null : primaryRef}
       onClick={onConfirm}
       disabled={disabled || loading}
-      className={cancelIsPrimary
-        ? 'px-4 py-2 rounded-10 text-sm font-medium disabled:opacity-40 transition-colors'
-        : 'px-4 py-2 rounded-10 text-sm font-medium text-white disabled:opacity-40 transition-colors'}
-      style={cancelIsPrimary
-        ? { color: 'var(--status-red)' }
-        : {
-          background: confirmColor || 'var(--status-red)',
-          ...(confirmColor === 'var(--accent)' ? { color: 'var(--accent-contrast)' } : null),
-        }}
+      className={!cancelIsPrimary && confirmColor === 'var(--accent)'
+        ? 'button button--sm'
+        : 'button button--danger button--sm'}
     >
       {loading ? 'Working...' : confirmLabel}
     </button>

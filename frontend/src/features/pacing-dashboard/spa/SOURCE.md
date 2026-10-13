@@ -190,13 +190,16 @@ chip field landed).
 
 ### Two layering numbers were rebased, and they were already wrong
 
-`FormulaEditorDialog.css`'s `.fxd-scrim` (150 → **305**) and `ChipSettingsPanel.jsx`'s `PANEL_Z`
-(160 → **310**). Both came over with Pacing's own z-index scale, where the settings drawer sits at
+`FormulaEditorDialog.css`'s `.fxd-scrim` (150 → **324**) and `ChipSettingsPanel.jsx`'s `PANEL_Z`
+(160 → **326**). Both came over with Pacing's own z-index scale, where the settings drawer sits at
 100 — here it is `.sheet__overlay` at 300, so the whole formula editor painted UNDERNEATH the drawer
 that opened it. This is the same rebase `pacing-spa.css` already records for `.sp-pop` and
 `.sp-spot-scrim`; these two arrived in a later commit and were missed. The ladder is now
-drawer 300 < dialog 305 < popovers and the chip panel 310 < Spotlight 320 < tooltip 330. Pacing's
-own 150/160 are correct against its drawer at 100 — do NOT carry this change upstream.
+drawer 300 < popovers 310 < Spotlight 320 < formula dialog 324 < chip panel 326 < tooltip 330 — the
+same order as Pacing's (popover 120 < Spotlight 130 < dialog 150 < chip panel 160). The first rebase
+put the dialog at 305, under the popovers, and a dialog opened FROM a popover (a table's Highlight
+settings → ƒx formula) then slid under it, with its Apply button covered. Pacing's own 150/160 are
+correct against its drawer at 100 — do NOT carry this change upstream.
 
 ### Our divergence from the reference
 
@@ -230,3 +233,16 @@ NOT taken from the reference's `report-render.js`, deliberately: this app's CPI/
 the buy-unit seven in `V2_CANON_LABELS`. CPI does not exist on the reference side at all (see the
 root `CLAUDE.md`), so a wholesale copy would have deleted it. Those seven lines are the only place
 this file diverges; everything else is the reference's, verbatim.
+
+## Updated 2026-10-13 — the builder's confirm dialog
+
+`ConfirmModal.jsx` is centred by Tailwind's `fixed inset-0`, and neither class was in
+`tailwind-subset.css`: the dialog fell into normal flow at the foot of the Widget builder, so
+"Remove this element?" could only be found by scrolling. Both are in the subset now.
+
+Its two buttons now wear this app's `.button` family — `button--ghost` Cancel, `button--danger`
+for the destructive answer, plain `.button` for a non-destructive primary (`confirmColor:
+'var(--accent)'`) — the pair the Hub's own delete dialogs use. Pacing's utility classes and inline
+colours drew a bordered native Cancel and a filled red Remove here, with no preflight to strip the
+browser's button chrome. This is the one change inside a function in that file; Hub-only, do not
+carry it upstream.
