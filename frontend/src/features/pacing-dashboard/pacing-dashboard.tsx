@@ -15,7 +15,6 @@ import {
   triggerPacingRefresh,
 } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
-import { DailyTable } from "./daily-table";
 import { PacingSettingsDrawer } from "./pacing-settings-drawer";
 import { DocumentsChips } from "./documents/documents-chips";
 import type { SettingsTabId } from "./settings-section";
@@ -24,22 +23,38 @@ import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
 import { computeHasVideo } from "./alerts-panel";
 import { JournalPanel } from "./journal/journal-panel";
-import type { PacingDataShape, PacingDisplayShape } from "./types";
+import type { PacingDataShape, PacingDisplayShape, PacingWidgetInstance } from "./types";
 import { ReportBoard } from "./widgets/report-board";
+import { planAutoAdd } from "./widgets/auto-add";
 // Moved JS from Pacing's SPA - typed by inference under `allowJs` (see spa/SOURCE.md).
-import { PacingStateProvider, setPacingApi, usePacingState } from "./spa/store.js";
-import { WIDGET_CAP, copyWidget, setTileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
+import {
+  PacingStateProvider,
+  bindDimensionHandoff,
+  setDimensionHandoff,
+  setPacingApi,
+  usePacingState,
+} from "./spa/store.js";
+import { SEED_ID_BY_KEY } from "./spa/std-catalog.js";
+import { WIDGET_CAP, copyWidget, setTileEnabled, tileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
 import { resolveWidget } from "./pacing-dashboard-library";
 import { createPacingEngine } from "./engine/engine-loader";
 import { toEngineRaw } from "./engine/build-metrics";
 import { buildPacingMetrics } from "./engine/build-metrics";
 import { buildPacingAlerts } from "./engine/build-alerts";
-import { BreakdownPanel } from "./breakdown/breakdown-panel";
 import { FilterBar } from "./filters/filter-bar";
 import { useUrlFilters } from "./filters/use-url-filters";
 import type { PacingLineItemPlanV1 } from "../pacing-plan/types";
 import "./pacing-dashboard.css";
 
+/** THE Breakdown tile's fixed id - the first addressee of «See in Breakdown». */
+const BREAKDOWN_TILE_ID: string = SEED_ID_BY_KEY["std:v2:breakdown"];
+
+/** Does a widget carry a dimension switch - one that could take a handed-over axis? */
+function hasDimensionSwitch(widget: PacingWidgetInstance): boolean {
+  const spec = widget.spec as { controls?: unknown } | undefined;
+  return Array.isArray(spec?.controls)
+    && spec.controls.some((c) => Boolean(c) && (c as { type?: unknown }).type === "dimension");
+}
 
 interface PacingDashboardProps {
   row: PacingRowV1;
@@ -69,7 +84,8 @@ interface PacingDashboardProps {
  * recomputed here, so US-114's "figures match the existing tool" holds trivially - it is the exact
  * same server figure the user already saw.
  *
- * The Daily Performance table below the charts is §7, in daily-table.tsx.
+ * Breakdown and Daily Performance (§7) are ordinary Standard widgets on the board, as Targets and
+ * Delivery vs CM360 are (the reference's sections cutover, 2026-09-07) - not sections of this page.
  */
 export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingDashboardProps) {
   const slug = row.dashSlug ?? undefined;
@@ -122,28 +138,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const urlFilters = useUrlFilters();
   const { filters, setFilters } = urlFilters;
 
-  // "Open the Breakdown", from a sheet column's mapping screen. The reference writes the axis into
-  // the filters and clears the dashboard's own cuts, because a line-item or channel filter left
-  // over from before can hide the very column the person just picked; the panel follows `brk` on
-  // its own from there. It also closes the drawer - the panel is behind it.
-  const openBreakdownFromMapping = useCallback(
-    (source: { id?: unknown }, dim: { key?: unknown }) => {
-      if (!source?.id || !dim?.key) return;
-      setFilters({
-        brk: `ds:${String(source.id)}:${String(dim.key)}`,
-        brkf: [],
-        selection: [], channels: [], labels: [], platforms: [],
-      });
-      setSettingsOpen(false);
-      // After the drawer's own close, so the panel is on screen to scroll to.
-      window.setTimeout(() => {
-        document.querySelector("[data-pacing-breakdown]")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 200);
-    },
-    [setFilters],
-  );
-
   // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
   // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
   // no URL filter ever reaches it, so it used to sit still while every other figure on the page
@@ -187,8 +181,45 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     }
   }, [data]);
 
-
   const display = useMemo(() => (data?.display ?? {}) as PacingDisplayShape, [data]);
+
+  // The «See in Breakdown» axis (spa/store.js `setDimensionHandoff`), mirrored here only so the
+  // tiles re-render when it changes. A pacing switched away from leaves nothing behind for the next.
+  const [dimensionHandoff, setDimensionHandoffState] = useState<string | null>(null);
+  useEffect(() => bindDimensionHandoff(setDimensionHandoffState), []);
+  useEffect(() => () => setDimensionHandoff(null), [slug]);
+
+  // "Open the Breakdown", from a sheet column's mapping screen - the reference's own handoff
+  // (SettingsDrawer.jsx openBreakdownFromMapping). The axis goes into the URL filters, clearing the
+  // dashboard's own cuts, because a line-item or channel filter left over from before can hide the
+  // very column the person just picked. The Breakdown WIDGET reads no URL - its cut is the tile's
+  // own - so the axis is also handed to the first tile on the board that could take it: THE
+  // Breakdown tile, else any tile with a dimension switch, else a library-linked copy (it carries
+  // no inline spec to ask). With no such tile nothing is handed over and nothing waits for one.
+  const openBreakdownFromMapping = useCallback(
+    (source: { id?: unknown }, dim: { key?: unknown }) => {
+      if (!source?.id || !dim?.key) return;
+      const axis = `ds:${String(source.id)}:${String(dim.key)}`;
+      setFilters({
+        brk: axis,
+        brkf: [],
+        selection: [], channels: [], labels: [], platforms: [],
+      });
+      const shown = (display.widgets ?? []).filter((w) => tileEnabled(display, w.id));
+      const target = shown.find((w) => w.id === BREAKDOWN_TILE_ID)
+        ?? shown.find((w) => hasDimensionSwitch(w))
+        ?? shown.find((w) => Boolean((w as { lib?: unknown }).lib) && !(w as { spec?: unknown }).spec);
+      if (target) setDimensionHandoff(axis);
+      setSettingsOpen(false);
+      if (!target) return;
+      // After the drawer's own close, so the tile is on screen to scroll to.
+      window.setTimeout(() => {
+        document.querySelector(`[data-tile-id="${target.id}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 200);
+    },
+    [setFilters, display],
+  );
 
   /**
    * What Pacing's own renderer reads its figures from (`spa/store.js`). Assembled here because this
@@ -322,7 +353,56 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     urlFilters,
     actions: widgetActions,
     journalHighlight,
+    dimensionHandoff,
   });
+
+  // The one-shot auto-add (widgets/auto-add.ts), after every load of the payload - the reference
+  // runs it once per fetch, and the drawer's save of a CM360 source refetches, which is how the
+  // comparison widget appears on this open rather than the next. A no-op in silence whenever the
+  // receipts already cover what the rules want, which is every load but the first after a change.
+  //
+  // ONE save carries both halves - the new instances and the receipts - as a patch the server merges
+  // under the payload's revision. A 409 is not an error: another tab did it first, and the next load
+  // sees their result. Nothing else is shown either - nobody clicked anything - but the console says
+  // what happened, so a dashboard that quietly never grew its chart can be explained.
+  const autoAddRan = useRef<unknown>(null);
+  useEffect(() => {
+    if (!slug || !data || !pacingState.campaign || autoAddRan.current === data) return;
+    autoAddRan.current = data;
+    const plan = planAutoAdd(display, pacingState.liPlan, pacingState.facts, pacingState.thirdParty);
+    if (!plan) return;
+    const capabilities = data.capabilities as Record<string, unknown> | undefined;
+    const storedReceipts = (display as { autoAdded?: unknown }).autoAdded;
+    void (async () => {
+      try {
+        const outcome = await savePacingDisplay(
+          slug,
+          {
+            widgets: [...(display.widgets ?? []), ...plan.added],
+            autoAdded: [...(Array.isArray(storedReceipts) ? storedReceipts : []), ...plan.fresh],
+          },
+          Number(display.rev ?? 0),
+          capabilities
+        );
+        if (outcome.status === "conflict") return;
+        // A stale off-switch on a fixed id, cleared only after the tile is stored. `enabled` is
+        // sent WHOLE: beside a revision this is a full display write, which replaces the map.
+        const saved = outcome.display as PacingDisplayShape;
+        if (plan.staleOff.length && saved.rev !== undefined) {
+          let enabled = saved.enabled ?? {};
+          for (const id of plan.staleOff) enabled = setTileEnabled(enabled, id, true);
+          try {
+            await savePacingDisplay(slug, { enabled }, Number(saved.rev), capabilities);
+          } catch (error) {
+            console.warn("[autoAdd] switch", formatError(error));
+          }
+        }
+        queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+      } catch (error) {
+        console.warn("[autoAdd]", formatError(error));
+      }
+    })();
+  }, [slug, data, display, pacingState, queryClient]);
 
   async function handleRefresh() {
     setRefreshError(null);
@@ -479,11 +559,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               refuse to slide back when it is switched on again. */}
           <ReportBoard display={display} actions={boardActions} />
 
-          {/* Where the delivery above actually went, one tab per dimension this pacing carries.
-              Sits with the charts rather than down by the tables because it answers the same kind
-              of question they do — and because a click in it filters every one of them. */}
-          <BreakdownPanel data={data} filters={filters} setFilters={setFilters} />
-
           {/* §6's Line Items block is NOT here any more (2026-10-05): it is a tile of the board
               above, placed on Pacing's own slot scale between the summary widgets and the charts
               (`widgets/report-board.tsx`, LINE_ITEMS_ID). It used to be a fixed section below the
@@ -536,8 +611,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onHighlightDate={setJournalHighlight}
             setFilters={setFilters}
           />
-
-          <DailyTable metrics={metrics} />
         </PacingStateProvider>
       )}
     </section>

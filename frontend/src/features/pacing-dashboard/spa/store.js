@@ -49,6 +49,30 @@ export function useDashboardStore(selector) {
   return typeof selector === 'function' ? selector(state) : state;
 }
 
+// The «See in Breakdown» handoff (Settings → Mapping hands one dimension axis to the Breakdown
+// widget; sections cutover 2026-09-07). `useReportControls.js` reads and clears it through
+// `useDashboardStore.getState()` — the one place the renderer reaches the store outside a render —
+// and relies on that read being CURRENT: when two tiles could take the axis, the store, not either
+// closure, says who was first. So the axis lives here, outside React, and the page mirrors it into
+// its own state only to re-render the tiles (`bindDimensionHandoff`).
+const handoff = { axis: null, notify: null };
+
+/** Hand an axis to the first tile that offers it, or clear it with `null`. */
+export function setDimensionHandoff(axis) {
+  handoff.axis = axis ?? null;
+  if (handoff.notify) handoff.notify(handoff.axis);
+}
+
+/** The page's re-render hook for the handoff. Returns the unbind. */
+export function bindDimensionHandoff(notify) {
+  handoff.notify = notify;
+  return () => {
+    if (handoff.notify === notify) handoff.notify = null;
+  };
+}
+
+useDashboardStore.getState = () => ({ dimensionHandoff: handoff.axis, setDimensionHandoff });
+
 /** The SPA's `useDashboard.js` exported this beside the store; the renderer uses it for the
  *  line items a widget is scoped to. */
 export function useEffLIs() {
@@ -156,7 +180,7 @@ function bridgePlanKeys(payload) {
  * existed", not "nothing available", and `conversionTags` missing means the conversion rows were
  * never tagged, not that their tags were dropped.
  */
-export function usePacingState({ data, urlFilters, actions, journalHighlight }) {
+export function usePacingState({ data, urlFilters, actions, journalHighlight, dimensionHandoff }) {
   return useMemo(() => {
     const fetched = data ?? null;
     // Value groups (spec 2026-10-02): a line item can say that several delivered values of one
@@ -213,15 +237,15 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight }) 
       notify: raw?.notify ?? null,
       display: raw?.display ?? {},
       journalHighlight: journalHighlight ?? null,
-      // Page state the SPA kept in the same store and the Hub has no equivalent for: the dimension
-      // hand-off between a tile and the Breakdown panel, and period-scope mode.
-      dimensionHandoff: null,
+      // The «See in Breakdown» axis (see `setDimensionHandoff` above). Page state the SPA kept in
+      // the same store and the Hub has no equivalent for: period-scope mode.
+      dimensionHandoff: dimensionHandoff ?? null,
       selectedPeriodKey: null,
       splitScopedMode: false,
       splitScopedPlans: null,
       urlFilters, actions,
     };
-  }, [data, urlFilters, actions, journalHighlight]);
+  }, [data, urlFilters, actions, journalHighlight, dimensionHandoff]);
 }
 
 // ── the SPA's `hooks/useDashboard.js`, the part the renderer uses ──────────────────────────────

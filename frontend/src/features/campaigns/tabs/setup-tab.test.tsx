@@ -24,7 +24,6 @@ function renderSetupTab(campaign: CampaignV1 = aCampaignV1({ id: 46252 })) {
             element={<Outlet context={{ campaign } satisfies CampaignTabContext} />}
           >
             <Route path="setup" element={<SetupTab />} />
-            <Route path="reporting" element={<div>Reporting content</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -45,7 +44,7 @@ describe("SetupTab", () => {
     renderSetupTab();
 
     // Then:
-    expect(screen.getByRole("status", { name: "Loading campaign setup" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading Netsuite data" })).toBeInTheDocument();
   });
 
   it("should show a human-readable error when insertion orders fail to load", async () => {
@@ -103,6 +102,20 @@ describe("SetupTab", () => {
     expect(meta.textContent).toContain("4 line items");
   });
 
+  it("should title the tab Netsuite data, with no pre-loaded note and no create-report button", async () => {
+    // Given:
+    vi.mocked(listCampaignInsertionOrders).mockResolvedValue([anInsertionOrderV1({ order_id: 1 })]);
+
+    // When:
+    renderSetupTab();
+    await screen.findByText(/IO SO/);
+
+    // Then:
+    expect(screen.getByRole("heading", { level: 2, name: "Netsuite data" })).toBeInTheDocument();
+    expect(screen.queryByText(/Pre-loaded/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create report/i })).not.toBeInTheDocument();
+  });
+
   it("should show the extra media tactics in a tooltip on the +N channel tag", async () => {
     // Given:
     vi.mocked(listCampaignInsertionOrders).mockResolvedValue([
@@ -145,7 +158,7 @@ describe("SetupTab", () => {
     await screen.findByText("IO SO1");
 
     // When:
-    await userEvent.type(screen.getByLabelText("Search setup"), "meta");
+    await userEvent.type(screen.getByLabelText("Search Netsuite data"), "meta");
 
     // Then: only the Meta line item shows, not its DOOH/YouTube/Video siblings
     expect(screen.getByText("LI 40")).toBeInTheDocument();
@@ -171,7 +184,7 @@ describe("SetupTab", () => {
     await screen.findByText("IO SO1");
 
     // When:
-    await userEvent.type(screen.getByLabelText("Search setup"), "video");
+    await userEvent.type(screen.getByLabelText("Search Netsuite data"), "video");
 
     // Then:
     expect(screen.getByText("LI 20")).toBeInTheDocument();
@@ -185,7 +198,7 @@ describe("SetupTab", () => {
     await screen.findByText(/IO SO/);
 
     // When:
-    await userEvent.type(screen.getByLabelText("Search setup"), "ctv");
+    await userEvent.type(screen.getByLabelText("Search Netsuite data"), "ctv");
 
     // Then:
     expect(listCampaignInsertionOrders).toHaveBeenCalledTimes(1);

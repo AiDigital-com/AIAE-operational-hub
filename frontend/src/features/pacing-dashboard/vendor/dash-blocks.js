@@ -9,10 +9,12 @@
  * flight-span and both sides import THIS file.
  * Browser/Vite: globalThis.DashBlocks; Node: module.exports.
  *
- * SCOPE: enabled{} covers the 8 functional block ids and canonical `w_` Widget instance
- * ids, and that is the WHOLE switch domain. Standard templates, Hero, Finance and every
- * Chart are ordinary inline Widget instances, so they reach enabled{} through the instance
- * half and FUNCTIONAL_BLOCK_IDS stays exactly the same 8 ids. Do not widen it.
+ * SCOPE: enabled{} covers the 4 functional block ids and canonical `w_` Widget instance
+ * ids, and that is the WHOLE switch domain. Standard templates, Hero, Finance, the four
+ * sections that left the page in the cutover (Targets, 3rd Party Data, Breakdown, Daily
+ * Performance) and every Chart are ordinary inline Widget instances, so they reach
+ * enabled{} through the instance half and FUNCTIONAL_BLOCK_IDS stays exactly the same
+ * 4 ids. Do not widen it.
  * The frame domain lives beside it: display.groups[] (normGroups /
  * sweepGroups below) is arrangement state with no switch — a `g_` id never enters
  * enabled{}.
@@ -20,16 +22,22 @@
 (function (root) {
 "use strict";
 
-// FLOW_REGISTRY (workspace/src/pages/Dashboard/tile-registry.jsx) exactly. Hero and
-// Finance are Widgets rather than functional ids, so the two lists are the same eight
-// ids with no exceptions. tests/dashboard/dash-blocks.test.js pins this and the order.
-var FUNCTIONAL_BLOCK_IDS = [
-  'launchPlan', 'alerts', 'targets', 'lineItems',
-  'thirdParty', 'breakdown', 'dailyTable', 'journal'
-];
+// FLOW_REGISTRY (workspace/src/pages/Dashboard/tile-registry.jsx) exactly. Hero, Finance
+// and the four sections are Widgets rather than functional ids, so the two lists are the
+// same four ids with no exceptions. tests/dashboard/dash-blocks.test.js pins this and the
+// order.
+var FUNCTIONAL_BLOCK_IDS = ['launchPlan', 'alerts', 'lineItems', 'journal'];
 
 var FUNCTIONAL_SET = {};
 for (var i = 0; i < FUNCTIONAL_BLOCK_IDS.length; i++) FUNCTIONAL_SET[FUNCTIONAL_BLOCK_IDS[i]] = true;
+
+// The page slot of every functional block (sections cutover 2026-09-07, spec §5) — ONE
+// scale with std-entries.js seedSlot, so a pacing with no saved layout reads in today's
+// order: 100 launchPlan · 200 hero · 300 Finance · 400 alerts · 500 Targets · 600 lineItems ·
+// 700+ charts · 800 3rd Party Data · 900 Breakdown · 1000 Daily Performance · 1100 journal.
+// This map is COMPLETE: the four flow blocks are every id the registry renders, and every
+// other slot on the scale belongs to a Standard entry's seedSlot.
+var FLOW_SLOTS = { launchPlan: 100, alerts: 400, lineItems: 600, journal: 1100 };
 
 // The single source of the widget-instance id pattern:
 // dash-gate/lib/widgets-validate.mjs aliases this as WIDGET_ID, and the workspace
@@ -148,6 +156,7 @@ function sweepGroups(groups, liveIds) {
 
 var DashBlocks = {
   FUNCTIONAL_BLOCK_IDS: FUNCTIONAL_BLOCK_IDS,
+  FLOW_SLOTS: FLOW_SLOTS,
   WIDGET_INSTANCE_RE: WIDGET_INSTANCE_RE,
   isEnabledKey: isEnabledKey,
   tileEnabled: tileEnabled,

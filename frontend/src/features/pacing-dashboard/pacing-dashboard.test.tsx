@@ -456,3 +456,47 @@ describe("PacingDashboard", () => {
     expect(screen.queryByText("Hidden widget")).not.toBeInTheDocument();
   });
 });
+
+describe("PacingDashboard auto-add", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.listPacingLibrary).mockResolvedValue([]);
+    vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1({ refreshId: "r1" }));
+  });
+
+  it("stores «Delivery vs CM360» and its receipt on the first open after a source is configured", async () => {
+    // Given:
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1({
+      display: { rev: 7, widgets: [] },
+      thirdParty: [{ id: "cm1" }] as unknown as ReturnType<typeof aPacingDashboardV1>["thirdParty"],
+    }));
+    vi.mocked(api.savePacingDisplay).mockResolvedValue({ status: "saved", display: { rev: 8 } });
+
+    // When:
+    renderDashboard();
+
+    // Then: one save, a patch under the payload's revision, carrying the tile and the receipt
+    await waitFor(() => expect(api.savePacingDisplay).toHaveBeenCalled());
+    const [, patch, rev] = vi.mocked(api.savePacingDisplay).mock.calls[0];
+    expect(rev).toBe(7);
+    expect((patch.widgets as { id: string }[]).map((w) => w.id)).toContain("w_thirdparty");
+    expect(patch.autoAdded).toContain("std:v2:third-party");
+  });
+
+  it("saves nothing when the receipts already cover what the rules want", async () => {
+    // Given: no source, and the rate-type rules already answered for this plan
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1({
+      display: { rev: 7, widgets: [], autoAdded: ["std:v2:chart:vcr"] } as ReturnType<typeof aPacingDashboardV1>["display"],
+    }));
+
+    // When:
+    renderDashboard();
+
+    // Then:
+    await waitFor(() => expect(api.getPacingDashboard).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const calls = vi.mocked(api.savePacingDisplay).mock.calls;
+    for (const [, patch] of calls) expect(patch.autoAdded).toBeUndefined();
+  });
+});
+

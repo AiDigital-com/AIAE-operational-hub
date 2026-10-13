@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import { formatError } from "../../../shared/format/error";
 import { cn } from "../../../shared/style/cn";
 import { BranchIcon, ChevronRightIcon, FolderIcon } from "../../../shared/ui/icons/icons";
@@ -18,15 +18,13 @@ function matchesQuery(fields: string[], q: string): boolean {
 }
 
 /**
- * W3 — Campaign setup (US-009…011): the real IO/LI tree read from NetSuite (`useCampaignSetup`), with
+ * W3 — the "Netsuite" tab (US-009…011; route segment still `setup`): the real IO/LI tree read from NetSuite (`useCampaignSetup`), with
  * expand/collapse and real-time search. Manually adding a whole insertion order (US-013) is supported
  * as a client-only adjustment (never mutating the base rows); adding a line item to an existing order
  * (US-012) isn't yet, since Setup has no write path for it - only for whole manual orders.
  */
 export function SetupTab() {
   const { campaign } = useOutletContext<CampaignTabContext>();
-  const navigate = useNavigate();
-  const location = useLocation();
   const setup = useCampaignSetup(campaign);
 
   const [query, setQuery] = useState("");
@@ -65,7 +63,7 @@ export function SetupTab() {
   }, [data, q, closedIds]);
 
   if (setup.isPending) {
-    return <LoadingBlock label="Loading campaign setup" />;
+    return <LoadingBlock label="Loading Netsuite data" />;
   }
   if (setup.isError || !data) {
     return <p className="form-error">{formatError(setup.error)}</p>;
@@ -88,17 +86,13 @@ export function SetupTab() {
 
   return (
     <div className="setup-tab">
-      <h2 className="setup-tab__title">Campaign setup</h2>
+      <h2 className="setup-tab__title">Netsuite data</h2>
 
       <div className="setup-tab__toolbar">
         <div className="setup-tab__meta">
           <span><b>{data.ios.length}</b> insertion orders</span>
           <span><b>{totalLis}</b> line items</span>
           <span><b>{fmtMoney(totalBudget)}</b> total media</span>
-          <span className="setup-tab__sync-note">
-            <span className="setup-tab__led" />
-            Pre-loaded from NetSuite
-          </span>
         </div>
         <div className="setup-tab__actions">
           <button
@@ -121,7 +115,7 @@ export function SetupTab() {
           <input
             type="search"
             placeholder="Search line items, insertion orders or channels…"
-            aria-label="Search setup"
+            aria-label="Search Netsuite data"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -166,16 +160,6 @@ export function SetupTab() {
             ))}
           </tbody>
         </table>
-      </div>
-
-      <div className="setup-tab__footer">
-        <button
-          type="button"
-          className="button button--primary"
-          onClick={() => navigate("../reporting", { state: location.state })}
-        >
-          Verify &amp; create report →
-        </button>
       </div>
     </div>
   );

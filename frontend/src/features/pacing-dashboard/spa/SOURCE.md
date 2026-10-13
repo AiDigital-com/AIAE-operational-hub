@@ -246,3 +246,27 @@ for the destructive answer, plain `.button` for a non-destructive primary (`conf
 colours drew a bordered native Cancel and a filled red Remove here, with no preflight to strip the
 browser's button chrome. This is the one change inside a function in that file; Hub-only, do not
 carry it upstream.
+
+## Updated 2026-10-13 — the sections cutover
+
+Breakdown and Daily Performance are Standard widgets on the board now, as in the reference, so the
+page's own `BreakdownPanel` and `DailyTable` are gone (the helpers under `../breakdown/` stay:
+`dim-runtime.js` and `mapping-columns.js` read `dim-coverage`).
+
+`store.js` grew the «See in Breakdown» handoff the reference keeps in its Zustand store:
+`setDimensionHandoff` / `bindDimensionHandoff`, and `useDashboardStore.getState()` for the one
+caller outside a render (`report/useReportControls.js`). The axis lives in the module, not in React
+state, because that caller relies on a CURRENT read to decide which of two tiles took it first; the
+page mirrors it into state only to re-render the tiles. `../pacing-dashboard.tsx`
+`openBreakdownFromMapping` is the reference's `SettingsDrawer.jsx` handler, addressed to the board.
+
+The reference's one-shot auto-add (`dashboardStore.js` `applyAutoAdd`, called by `DashboardShell.jsx`
+after every load and by the drawer after a CM360 save) is ported as `../widgets/auto-add.ts` plus an
+effect in `../pacing-dashboard.tsx` that runs after every payload fetch — the drawer's save refetches,
+which covers its call too. It mints the rate-type charts and, since the cutover, «Delivery vs CM360»
+where a 3rd-party source is configured, and stores the receipts in `display.autoAdded`.
+`../widgets-section.tsx` learns of tiles that land behind an open draft (the reference's
+`rebaseFromStore` / minted-tile append), because its save sends `widgets` whole under the live
+revision and would otherwise delete them. dash-gate's `settings-audit.js` keeps such a save out of
+Slack.
+

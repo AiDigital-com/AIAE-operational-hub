@@ -166,8 +166,9 @@ export interface PacingWidgetGroup {
 
 /** The subset of the opaque `display` object the Hub's widget management UI reads and writes. Every
  *  other key dash-gate's `display` may carry (`layout`, `widgetRanges`, `projectionModes`,
- *  `autoAdded`) is preserved as-is on save by spreading the original object - the Hub never originates
- *  or reshapes them (§6: "service logic: None"). */
+ *  `autoAdded`) is preserved as-is on save by spreading the original object - the Hub never reshapes
+ *  them. ONE exception originates `autoAdded`: the reference's one-shot auto-add, ported in
+ *  `widgets/auto-add.ts` (2026-10-13), which appends Standard tiles and their receipts. */
 export interface PacingDisplayShape {
   rev?: number;
   widgets?: PacingWidgetInstance[];

@@ -23,7 +23,7 @@ been synced from `ogan-team` at `823a42d`.
 
 | File | Copied from | Branch | Date | sha256 (first 16) | What it governs |
 |---|---|---|---|---|---|
-| `dash-blocks.js` | `shared/dash-blocks.js` | `1.0.0` | 2026-10-01 | `a596628a9c8711ca…` | widget-instance / group id grammar, the `display.enabled` on/off rule, group normalize + sweep |
+| `dash-blocks.js` | `shared/dash-blocks.js` | `1.0.0` | 2026-10-13 | `1f5ff24d25ad9e83…` | widget-instance / group id grammar, the `display.enabled` on/off rule, group normalize + sweep |
 | `report-v2.js` | `shared/report-v2.js` | `1.0.0` | 2026-10-01 | `5dd8251070d9f97b…` | the widget-builder v2 wire grammar — every stored widget is normalized and refused by it |
 | `std-entries.js` | `shared/std-entries.js` | `1.0.0` | 2026-10-01 | `30c4dbedfef74099…` | the 32 Standard widget templates, and the `std:v2:*` key rule |
 | `widget-metrics.js` | `shared/widget-metrics.js` | `1.0.0` | 2026-10-01 | `581b8912beb045b8…` | the two context functions `normReport` runs on: `checkDimKey`, `isCanonicalMetric` |
@@ -104,7 +104,25 @@ OUR DIVERGENCE in `formula-chips.js`, not to be overwritten by the next sync: th
 written as «not CPC and not CPV», so an install-paced line passed as impression-paced — which is
 also the DEFAULT a rate chip picks. Guarded by `AIAE-paicing/tests/rate-type-units-test.mjs`.
 
-## dim-value-groups.js (added 2026-10-05)
+## Re-copied 2026-10-13 — the sections cutover
+
+`dash-blocks.js` now carries the reference's post-cutover block-id domain: four functional blocks
+(`launchPlan`, `alerts`, `lineItems`, `journal`) instead of eight, plus `FLOW_SLOTS`. Targets, 3rd
+Party Data, Breakdown and Daily Performance are ordinary Standard widgets (`w_targets`,
+`w_thirdparty`, `w_breakdown`, `w_daily`), and `AIAE-paicing` seeds the three that do not need a
+CM360 source on every new pacing (`dash-gate/lib/widget-seed.mjs`). The page lost its own Breakdown
+section and Daily Performance table to match (`../pacing-dashboard.tsx`).
+
+Taken WITHOUT the reference's data migration (`dash-gate/scripts/sections-cutover.mjs`), by owner
+decision: the Hub is dev-only and older pacings are recreated rather than converted. Such a pacing
+has no section widgets, and if it ever switched a section off, `display.enabled` still names the old
+id — dash-gate now refuses every display save on it (`unknown tile id`).
+
+The grammar epoch stays at 2. The reference numbers the cutover 5, after epochs 3 and 4 (recursive
+containers, domain readings), which `AIAE-paicing` has not taken; the epoch is compared for
+equality, so claiming 5 would advertise those too.
+
+
 
 `AIAE-paicing/shared/dim-value-groups.js`, copied byte-identical, same obligation as the rest of
 this directory. It is the SAVE half of value groups (spec 2026-10-02) - what a line item's
