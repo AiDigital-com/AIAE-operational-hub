@@ -85,7 +85,7 @@ describe("CampaignWorkspace", () => {
     renderWorkspace("/campaigns/42/setup", FULL_STATE);
 
     // Then:
-    expect(screen.getByRole("link", { name: "Setup" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Netsuite" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Reporting" })).not.toHaveAttribute("aria-current");
   });
 
@@ -97,7 +97,7 @@ describe("CampaignWorkspace", () => {
     // Then:
     expect(screen.getByRole("link", { name: "Pacing" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboards" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /^(Setup|Pacing|Reporting|Dashboards)$/ })).toHaveLength(4);
+    expect(screen.getAllByRole("link", { name: /^(Netsuite|Pacing|Reporting|Dashboards)$/ })).toHaveLength(4);
   });
 
   it("should render a tab's content reached by a direct link", () => {

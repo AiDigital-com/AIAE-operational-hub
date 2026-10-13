@@ -25,21 +25,6 @@
   color: var(--ink);
   font-weight: 800;
 }
-.setup-tab__sync-note {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 600;
-}
-.setup-tab__led {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--good);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);
-}
 .setup-tab__actions {
   display: flex;
   gap: 10px;
@@ -269,10 +254,4 @@
 .setup-tab__add-li-inline svg {
   width: 15px;
   height: 15px;
-}
-
-.setup-tab__footer {
-  margin-top: 24px;
-  display: flex;
-  justify-content: flex-end;
 }

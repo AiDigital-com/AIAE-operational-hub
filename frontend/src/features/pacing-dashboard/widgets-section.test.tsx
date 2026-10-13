@@ -80,3 +80,36 @@ describe("PacingWidgetsSection.addWidget", () => {
     expect(ref.current?.addWidget?.(TABLE)).toBeNull();
   });
 });
+
+describe("PacingWidgetsSection, a tile that lands behind an open draft", () => {
+  it("keeps it on the next save rather than deleting it under the live revision", async () => {
+    // Given: a draft with an edit of its own (a new table)
+    const { savePacingDisplay } = await import("./api");
+    vi.mocked(savePacingDisplay).mockResolvedValue({ status: "saved", display: {} });
+    const ref = createRef<SettingsSectionHandle>();
+    const props = {
+      ref, slug: "nike-ss26", capabilities: undefined, isAdmin: true,
+      libraryEntries: undefined, seedKey: 1, onDirtyChange: vi.fn(),
+    };
+    const before = { rev: 4, widgets: [{ id: "w_finance" }], groups: [], enabled: {} } as unknown as PacingDisplayShape;
+    const { rerender } = render(<PacingWidgetsSection {...props} display={before} />);
+    ref.current?.addWidget?.(TABLE);
+
+    // When: the page's auto-add stores the CM360 comparison, and the payload refetches
+    const after = {
+      ...before,
+      rev: 5,
+      widgets: [{ id: "w_finance" }, { id: "w_thirdparty", title: "Delivery vs CM360" }],
+    } as unknown as PacingDisplayShape;
+    rerender(<PacingWidgetsSection {...props} display={after} />);
+    await ref.current?.save?.();
+
+    // Then: the save carries both the user's table and the new tile
+    const sent = vi.mocked(savePacingDisplay).mock.calls.at(-1);
+    const ids = ((sent?.[1] as { widgets?: { id: string }[] }).widgets ?? []).map((w) => w.id);
+    expect(ids).toContain("w_thirdparty");
+    expect(ids).toContain("w_finance");
+    expect(ids).toHaveLength(3);
+    expect(sent?.[2]).toBe(5);
+  });
+});

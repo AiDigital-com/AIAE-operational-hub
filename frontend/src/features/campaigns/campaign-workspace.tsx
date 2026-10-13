@@ -33,6 +33,15 @@ type Tab = (typeof TABS)[number];
 // set (and VISIBLE_TABS below) is kept so a future mock-only tab has somewhere to register itself.
 const HIDDEN_TABS = new Set<Tab>([]);
 const VISIBLE_TABS = TABS.filter((tab) => !HIDDEN_TABS.has(tab));
+// What the tab bar and breadcrumb print. Only the label of "setup" changed (it shows NetSuite data,
+// there is no setup step any more); its URL segment stays, so bookmarks and the tab stored for the
+// session keep resolving.
+const TAB_LABELS: Record<Tab, string> = {
+  setup: "Netsuite",
+  pacing: "Pacing",
+  reporting: "Reporting",
+  dashboards: "Dashboards",
+};
 const DEFAULT_TAB: Tab = "reporting";
 
 function sessionTabKey(campaignId: string): string {
@@ -74,7 +83,7 @@ function clientListRoute(state: WorkspaceState): string {
 
 /**
  * The campaign layout route: hero (title, agency/client eyebrow, status + flight-date pills) and the
- * Setup/Pacing/Reporting/Dashboards tab bar (US-007, US-008), rendering the active tab via
+ * Netsuite/Pacing/Reporting/Dashboards tab bar (US-007, US-008), rendering the active tab via
  * `<Outlet/>`. The active tab is derived from the URL and persisted per campaign for the session.
  *
  * Opening the workspace from a list (Overview, the Campaigns table) carries the campaign along in
@@ -152,7 +161,7 @@ export function CampaignWorkspace() {
         {activeTab && (
           <>
             <span className="campaign-ws__crumbs-sep">›</span>
-            <span className="campaign-ws__crumbs-cur">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</span>
+            <span className="campaign-ws__crumbs-cur">{TAB_LABELS[activeTab]}</span>
           </>
         )}
       </div>
@@ -185,7 +194,7 @@ export function CampaignWorkspace() {
             state={location.state}
             className={({ isActive }) => cn("campaign-ws__tab", isActive && "campaign-ws__tab--active")}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {TAB_LABELS[tab]}
           </NavLink>
         ))}
       </nav>

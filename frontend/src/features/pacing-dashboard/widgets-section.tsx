@@ -84,6 +84,26 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seedKey, slug]);
 
+    // Tiles that land in the stored display behind an open draft - the page's auto-add
+    // (widgets/auto-add.ts) minting «Delivery vs CM360» right after this drawer saved a CM360
+    // source. The save below sends `widgets` whole under the LIVE revision, so a draft that never
+    // learned of them would delete them with no 409 to stop it. They join the draft AND its
+    // baseline, so a draft that was clean stays clean. Only ids the baseline never held: a tile the
+    // user deleted in this draft was in the baseline, so it stays deleted.
+    const baseRef = useRef(base);
+    baseRef.current = base;
+    useEffect(() => {
+      const known = new Set(baseRef.current.widgets.map((w) => w.id));
+      const arrived = (display.widgets ?? []).filter((w) => !known.has(w.id));
+      if (!arrived.length) return;
+      const join = (list: PacingWidgetInstance[]) => {
+        const have = new Set(list.map((w) => w.id));
+        return [...list, ...arrived.filter((w) => !have.has(w.id))];
+      };
+      setBase((b) => ({ ...b, widgets: join(b.widgets) }));
+      setDraft((d) => ({ ...d, widgets: join(d.widgets) }));
+    }, [display.widgets]);
+
     // By value, not by identity: the library rebuilds both arrays on every action, so an identity
     // check would call an untouched layout dirty as soon as anything re-rendered.
     const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(base), [draft, base]);
