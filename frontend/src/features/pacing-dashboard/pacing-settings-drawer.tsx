@@ -452,6 +452,17 @@ export function PacingSettingsDrawer({
     setSaving(true);
     setErrors([]);
     const failures: Array<{ tab: SettingsTabId; message: string }> = [];
+    // All or nothing on a precheck, as the reference's single-request save is: a coefficient error
+    // in the plan used to stop the plan alone while Data and the rest went through.
+    for (const id of dirtyTabs) {
+      const check = handles[id].current?.precheck?.();
+      if (check && !check.ok) failures.push({ tab: id, message: check.message });
+    }
+    if (failures.length > 0) {
+      setSaving(false);
+      setErrors(failures);
+      return;
+    }
     // Sequential, not parallel: three writes to one pacing, and the order they land in is the order
     // a reader would expect. Concurrency here would buy milliseconds and cost a comprehensible
     // failure story.

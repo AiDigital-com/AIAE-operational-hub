@@ -45,7 +45,9 @@
 .fb-period__list {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  /* Opens toward the left: the picker sits at the right end of the filter row, beside the settings
+     gear, and a left-anchored list ran past the window's right edge. */
+  right: 0;
   z-index: 60;
   min-width: 260px;
   max-height: 360px;

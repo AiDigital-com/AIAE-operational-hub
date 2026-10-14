@@ -790,6 +790,12 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     stateRef.current = { ids, lineItems, dirty, netFeatureOn, rateState, rateChanged };
 
     useImperativeHandle(ref, () => ({
+      precheck() {
+        const { ids: currentIds, lineItems: current, dirty: isDirty } = stateRef.current;
+        if (!isDirty) return { ok: true as const };
+        const coefErrors = collectCoefErrors(currentIds.map((id) => current[id]));
+        return coefErrors.length > 0 ? { ok: false as const, message: coefErrorMessage(coefErrors) } : { ok: true as const };
+      },
       async save() {
         const { ids: currentIds, lineItems: current, dirty: isDirty, netFeatureOn: netOn, rateState: rateNow, rateChanged: rateMoved } =
           stateRef.current;
