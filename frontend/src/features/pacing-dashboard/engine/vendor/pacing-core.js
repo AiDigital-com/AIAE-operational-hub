@@ -1346,6 +1346,11 @@ function isLiPaused(plan, asOf) {
             if (isYmd(a) && a <= asOf && (b == null || !isYmd(b) || asOf <= b)) return true;   // manual pause covers asOf
         }
     }
+    return isLiAutoPaused(plan, asOf);
+}
+
+function isLiAutoPaused(plan, asOf) {
+    if (!plan || !asOf) return false;
     // Auto-pause ONLY WITHIN the flight window: a fully-containerized LI on a day
     // no container covers ("dark between containers"). Out-of-flight days
     // (ended / not-yet-started) are deliberately NOT treated as paused — an ended
@@ -1358,12 +1363,9 @@ function isLiPaused(plan, asOf) {
     return false;
 }
 
-/* "Currently paused" for DISPLAY (marker + demand Tgt + badge): an OPEN manual
- * pause interval (to == null) means paused NOW regardless of the data date — so a
- * pause set after the last data day still shows as paused in a day-old summary.
- * Otherwise falls back to isLiPaused(asOf). NOT for the freeze or the leak
- * detector — those stay on the data date so past expected isn't rewritten and
- * no false "delivering while paused" fires on pre-pause delivery. */
+/* Current manual pause: an OPEN interval counts regardless of the data date.
+ * Closed intervals remain in historical calculations, but never restore the
+ * current pause after Resume. Automatic schedule gaps still use asOf. */
 function isLiPausedNow(plan, asOf) {
     var iv = plan && plan.pause_intervals;
     if (iv && iv.length) {
@@ -1371,7 +1373,7 @@ function isLiPausedNow(plan, asOf) {
             if (iv[i] && iv[i].to == null && isYmd(iv[i].from)) return true;   // open manual pause = paused now
         }
     }
-    return isLiPaused(plan, asOf);
+    return isLiAutoPaused(plan, asOf);
 }
 
 /* ─── Public API ───────────────────────────────────────────────────────────── */

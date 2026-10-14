@@ -133,7 +133,7 @@ export default function SplitRow({ liId, kind, child, container, planOverride, r
   const progress = childProgress({ ti, au: auFull, fs, fe, asOf });
   // Per-LI pause: a paused LI's split demands no daily delivery (needed/day → 0)
   // and carries a muted "paused" chip. isLiPausedNow = open manual interval
-  // (paused now) ∪ isLiPaused(asOf); expected remains frozen as of the facts.
+  // plus schedule gaps; historical expected remains frozen as of the facts.
   const liPaused = PacingCore.isLiPausedNow(plan, asOf);
 
   // ── Margin (realized, from dynamic cost — consistent with LI/campaign) ───────

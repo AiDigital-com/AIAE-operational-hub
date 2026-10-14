@@ -304,8 +304,8 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
   // decision), so it can sit ABOVE plan when catching up. These parallel the
   // CPM-only imprPlan/imprDailyRate* below but are UNGATED (no isCpc/isCpv).
   let allPlanImpr = 0, allImprDailyRateAvg = 0, allImprDailyRateActive = 0, allImprEndedCount = 0, allImprLiCount = 0;
-  // Paused-remaining accumulators: sum of (plan − delivered) over LIs currently
-  // paused at asOf. Subtracted from the canonical reforecast pace-to-goal total
+  // Paused-remaining accumulators: sum of (plan − delivered) over LIs with an
+  // open pause or a schedule gap at asOf. Subtracted from the reforecast goal
   // so a paused LI's remaining plan stops demanding delivery.
   // Additive-only: stays 0 when nothing is paused, so non-paused campaigns are
   // byte-identical to before this feature.
@@ -460,9 +460,10 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     // This line's own days left for «Needed per day»: calendar, range-free, the campaign's
     // days-left rule for one line. 0 once it has ended, while it is paused, and before it starts
     // (it cannot deliver yet; the Slack summary's pre-flight guard reads such a line as 0 too).
-    // With no data day at all every line still counts, as before.
+    // Without data, unpaused lines still count their full flight.
     const prLine = prorate(p, asOf);
-    const lineDaysLeft = PacingCore.isLiPaused(p, asOf) || prLine.st === 'not_started'
+    const pausedNow = PacingCore.isLiPausedNow(p, asOf);
+    const lineDaysLeft = pausedNow || prLine.st === 'not_started'
       ? 0 : Math.max(0, prLine.fDays - prLine.dP);
 
     const rt = p.rateType || 'CPM';
@@ -506,7 +507,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
     // Per-LI pause: a paused LI's REMAINING plan should not be demanded by the
     // reforecast pace-to-goal (it won't deliver until resumed). Its delivered
     // stays in the chart's actual bars — we only shrink the goal total.
-    if (PacingCore.isLiPaused(p, asOf)) {
+    if (pausedNow) {
       // planUnit is in the LI's rate-type unit, so the delivered side must be too
       // — subtracting impressions from a CPC/CPV/CPI goal mixes units. isCpc/isCpv/isCpi
       // are already resolved for this LI a few lines above.
@@ -565,7 +566,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
       if (planUnit > 0) {
         imprPlan += planWin;
         imprPlanFlight += planUnit;
-        if (PacingCore.isLiPaused(p, asOf)) imprPlanPausedRem += Math.max(0, planWin - (m.im || 0));
+        if (pausedNow) imprPlanPausedRem += Math.max(0, planWin - (m.im || 0));
         addNeed('impr', planWin - (m.im || 0), lineDaysLeft);
         imprDailyRateAvg += planUnit / liFDays;
         if (asOf && asOf >= p.fs) {
@@ -613,7 +614,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
         const dayRow = liDaily[id]?.[asOf];
         if (dayRow) latestDayClicks += dayRow.cl || 0;
       }
-      if (PacingCore.isLiPaused(p, asOf)) clicksPlanPausedRem += Math.max(0, liClicksPlanWin - (m.cl || 0));
+      if (pausedNow) clicksPlanPausedRem += Math.max(0, liClicksPlanWin - (m.cl || 0));
       if (liClicksPlan > 0) addNeed('clicks', liClicksPlanWin - (m.cl || 0), lineDaysLeft);
       clicksExpected += m.eCl || 0;
       // Daily rate for clicks side: liExpUnits already prorates planImpr
@@ -655,7 +656,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
       if (planUnit > 0) {
         viewsPlan += planWin;
         viewsPlanFlight += planUnit;
-        if (PacingCore.isLiPaused(p, asOf)) viewsPlanPausedRem += Math.max(0, planWin - (m.co || 0));
+        if (pausedNow) viewsPlanPausedRem += Math.max(0, planWin - (m.co || 0));
         addNeed('views', planWin - (m.co || 0), lineDaysLeft);
         cpvViewsPlan += planWin;
         cpvViewsPlanFlight += planUnit;
@@ -685,7 +686,7 @@ export function campM(liDaily, liPlan, asOf, effLIs, range, splitScopedMode, spl
       if (planUnit > 0) {
         installsPlan += planWin;
         installsPlanFlight += planUnit;
-        if (PacingCore.isLiPaused(p, asOf)) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
+        if (pausedNow) installsPlanPausedRem += Math.max(0, planWin - (m.cv || 0));
         addNeed('installs', planWin - (m.cv || 0), lineDaysLeft);
         installsDailyRateAvg += planUnit / liFDays;
         if (asOf && asOf >= p.fs) {

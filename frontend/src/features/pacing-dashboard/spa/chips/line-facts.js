@@ -51,7 +51,7 @@ export const classOf = (plan, dayMap) => gatesOf(plan, dayMap);
 
 /** 'running' | 'paused' | 'ended' | 'notStarted' | null. `rule`: 'now' is the row badge's
  *  (PacingCore.isLiPausedNow: an open pause is paused now whatever the data date); 'dataDate'
- *  is campM's (isLiPaused). The calendar wins over a pause; no asOf means nothing has started. */
+ *  checks historical pauses (isLiPaused). The calendar wins over a pause; no asOf means nothing has started. */
 export function status(plan, asOf, rule = 'now') {
   if (!plan) return null;
   if (!asOf) return 'notStarted';
