@@ -7,10 +7,11 @@
    line, up to 360px when there is room. */
 .spot {
   position: relative;
-  /* It still grows to 360px when the row has room. The floor is 140px rather than 200px so the
-     period-scope toggle, its picker and the settings gear fit on the same row, as in the reference. */
-  flex: 1 1 140px;
-  min-width: 140px;
+  /* It still grows to 360px when the row has room. The floor is low so the period-scope toggle, its
+     picker and the settings gear fit on the same row, as in the reference: with a month-named period
+     ("Sep 2026") a 140px floor already pushed the toggle onto a second line at a 1470px window. */
+  flex: 1 1 96px;
+  min-width: 96px;
   max-width: 360px;
 }
 

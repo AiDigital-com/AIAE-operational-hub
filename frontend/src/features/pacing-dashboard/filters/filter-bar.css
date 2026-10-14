@@ -152,7 +152,9 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 140px;
+  /* 120px, not 140px: "All Platforms" fits in it, and the 20px each is what keeps the period-scope
+     toggle on the filter row (see .spot). */
+  min-width: 120px;
   white-space: nowrap;
 }
 .fb-multiselect__label {

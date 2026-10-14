@@ -19,7 +19,9 @@
   /* Sized by its label ("6th", or a date range) rather than the reference's 200px floor, so the
      toggle and the picker stay on the filter row beside the date range. */
   min-width: 96px;
-  max-width: 320px;
+  /* A period named by its dates ("Oct 6, 2026 – Oct 12, 2026") is clipped with an ellipsis rather
+     than pushing the row onto two lines; the trigger's title carries the full name. */
+  max-width: 200px;
   color: var(--ink);
   font-weight: 600;
 }

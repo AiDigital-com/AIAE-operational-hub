@@ -108,6 +108,7 @@ function PeriodPicker({ periods, selectedKey, onSelect }: PeriodPickerProps) {
         className={`fb-control fb-period__trigger${open ? " fb-control--active" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
+        title={selected ? formatPeriod(selected) : undefined}
         onClick={() => setOpen((value) => !value)}
       >
         <svg className="fb-period__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
