@@ -52,6 +52,8 @@ const STYLESHEETS = [
   "src/features/pacing-dashboard/spa/pacing-spa.css",
   "src/features/pacing-dashboard/spa/tailwind-subset.css",
   "src/features/pacing-dashboard/spa/kit.css",
+  // The block's ⋯ is this app's own kebab (widgets/tile-menu.tsx), drawn in the card's header.
+  "src/features/pacing-dashboard/widgets/tile-menu.css",
 ];
 
 /**
@@ -116,10 +118,13 @@ async function renderExpanded() {
   });
   await waitFor(() => expect(section.textContent).toMatch(/LI 70123/));
 
-  // Open the first card, so the split rows and the timeline are in the DOM too.
-  const header = section.querySelector('[class*="cursor-pointer"]');
-  if (header) await userEvent.click(header as HTMLElement);
-  await waitFor(() => expect(section.querySelectorAll("*").length).toBeGreaterThan(50));
+  // Open the first card, so the split rows and the timeline are in the DOM too. The chevron opens
+  // it - a click on the row itself selects the line item instead - so this asks for the chevron,
+  // and then for a split row, which is what proves the open state was actually reached.
+  const chevron = section.querySelector('.li-row svg[class*="cursor-pointer"]');
+  expect(chevron).toBeTruthy();
+  await userEvent.click(chevron as Element);
+  await waitFor(() => expect(section.querySelector(".sp-row")).toBeTruthy());
 
   return section;
 }

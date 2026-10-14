@@ -5,22 +5,33 @@
  * Nothing inside a function changed - only the import specifiers, the same rule the rest of this
  * folder follows. What came over with it, and is the reason the block is cheap to mount:
  *
- *   - six cards render by default (`liVisibleLimit`), the rest behind "Show all";
+ *   - six cards render by default (`liVisibleLimit`, or the stored `display.lineItems.rows`), the
+ *     rest behind "Show all";
  *   - beyond that the list fills in batches of 40 (`LINE_ITEMS_STEP`) through `requestIdleCallback`,
  *     so a 180-line-item pacing never builds 180 cards in one commit;
  *   - the search box runs under `useDeferredValue`, so typing does not block on the filter;
  *   - `LineItemCard` is memoized on its own props, and the figures it reads come from selectors
  *     cached per filter key - six cards share one computation, they do not each pay for it.
  *
- * In Pacing this was one entry in a registry the dashboard grid placed. Here it is mounted directly
- * by `pacing-dashboard.tsx`, beside Alerts, Breakdown and the Journal, because this app's functional
- * blocks are page-level and only widgets go through the board.
+ * In Pacing this was one entry in a registry the dashboard grid placed. Here `widgets/report-board.tsx`
+ * places it as the board's one flow tile.
+ *
+ * The block's settings (`display.lineItems`: columns, sort, default view, rows - Pacing commit
+ * `85d353c`) are read here exactly as Pacing's registry entry reads them; the function body below is
+ * that entry's, verbatim. Changed outside it: `SectionCard` takes a `menu` (this app's ⋯, drawn in
+ * the card's own header rather than floated over the cell as Pacing's grid does) and the tile hands
+ * its `menu` prop to it.
  */
 import { Component, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import LineItemCard from './LineItemCard.jsx';
 import { groupLineItemsByChannel } from '../row-utils.js';
-import { useDisplay, useLiPlan, useFilters, useCardLIs } from '../store.js';
+import { useDisplay, useLiPlan, useFilters, useCardLIs, useEffRange } from '../store.js';
 import { useDashboardStore } from '../store.js';
+// The Line Items block's settings (spec 2026-10-01): rows, sort and the default view.
+import { resolveLineItemSettings, sortLineItems } from '../line-item-columns.js';
+import { liM } from '../metrics.js';
+import { getEffPlan } from '../config.js';
+import { selectDeliveryFacts, selectScopedFacts } from '../selectors.js';
 
 const INITIAL_LINE_ITEMS = 40;
 const LINE_ITEMS_STEP = 40;
@@ -44,7 +55,7 @@ export class SectionBoundary extends Component {
 }
 
 
-export function SectionCard({ title, children, flush }) {
+export function SectionCard({ title, children, flush, menu = null }) {
   return (
     <div style={{
       background: 'var(--surface)',
@@ -68,6 +79,7 @@ export function SectionCard({ title, children, flush }) {
           }}>
             {title}
           </span>
+          {menu && <span className="lis-menu">{menu}</span>}
         </div>
       )}
       <div style={{ padding: flush ? 0 : '20px' }}>
@@ -77,14 +89,18 @@ export function SectionCard({ title, children, flush }) {
   );
 }
 
-export default function LineItemsTile() {
+export default function LineItemsTile({ menu = null }) {
   const display = useDisplay();
   const liPlan = useLiPlan();
   const { filters, setFilters } = useFilters();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [liExpanded, setLiExpanded] = useState(false);
-  const liVisibleLimit = 6;
+  // display.lineItems (Line Items settings spec 2026-10-01): absent = today's six rows,
+  // default order, the flat list.
+  const stored = display?.lineItems;
+  const settings = useMemo(() => resolveLineItemSettings(stored), [stored]);
+  const liVisibleLimit = settings.rows;
   const deferredQuery = useDeferredValue(searchQuery);
 
   // Card list: channel + label filters only.
@@ -114,7 +130,34 @@ export default function LineItemsTile() {
       return false;
     });
   }, [lineItems, deferredQuery, liPlan, liNames]);
-  const deferredVisibleLineItems = useDeferredValue(visibleLineItems);
+  const deferredVisible = useDeferredValue(visibleLineItems);
+  // The configured order (spec 2026-10-01): one sort key per line through the door's
+  // readers, over the same reads the cards make (Lens delivery, Scope plan; the whole-flight
+  // Scope read only for Needed per day). `default` keeps the plan's order. Applied BEFORE the
+  // progressive slice and before the channel grouping, so the groups are sorted too.
+  const deliveryFacts = useDashboardStore((st) => selectDeliveryFacts(st, filters));
+  const scopedFacts = useDashboardStore((st) => selectScopedFacts(st, filters));
+  const effRange = useEffRange();
+  const showDescription = !!display?.showDescription;
+  const deferredVisibleLineItems = useMemo(() => {
+    const sort = settings.sort;
+    if (!sort || sort.key === 'default') return sortLineItems(deferredVisible, sort, () => null);
+    const ctxFor = (id, index) => {
+      const p = liPlan?.[id] || null;
+      const effPlan = p ? getEffPlan(liPlan, id, scopedFacts?.mode, scopedFacts?.plans) : null;
+      const read = (daily, range) => (p && daily
+        ? liM(id, daily, liPlan, deliveryFacts?.asOf, range, scopedFacts?.mode, scopedFacts?.plans) : null);
+      return {
+        p: p || {}, effPlan, liId: id, index,
+        m: read(deliveryFacts?.liDaily, effRange),
+        pacing: read(scopedFacts?.liDaily, effRange),
+        flight: sort.key === 'neededPerDay' ? read(scopedFacts?.liDaily, null) : null,
+        name: liNames[id] || (showDescription && p?.desc) || `LI ${id}`,
+        asOf: deliveryFacts?.asOf,
+      };
+    };
+    return sortLineItems(deferredVisible, sort, ctxFor);
+  }, [deferredVisible, settings.sort, liPlan, deliveryFacts, scopedFacts, effRange, liNames, showDescription]);
   const [lineItemRenderCount, setLineItemRenderCount] = useState(INITIAL_LINE_ITEMS);
 
   const visibleCount = deferredVisibleLineItems.length;
@@ -158,8 +201,11 @@ export default function LineItemsTile() {
 
   const renderedLineItems = deferredVisibleLineItems.slice(0, lineItemRenderCount);
   // Channel view: grouped, collapsible, ranked by delivery. Offered only when
-  // there is more than one channel to separate.
-  const [byChannel, setByChannel] = useState(false);
+  // there is more than one channel to separate. The stored default view (spec
+  // 2026-10-01) is the starting point; the two buttons override it for this session,
+  // and the override resets when the stored value changes, so a saved change shows at once.
+  const [viewOverride, setViewOverride] = useState(null);
+  useEffect(() => { setViewOverride(null); }, [settings.view]);
   const [collapsedChannels, setCollapsedChannels] = useState({});
   const liDailyForChannels = useDashboardStore((st) => st.facts?.liDaily);
   const channelGroups = useMemo(
@@ -167,20 +213,21 @@ export default function LineItemsTile() {
     [deferredVisibleLineItems, liPlan, liDailyForChannels],
   );
   const channelCount = channelGroups.length;
+  const byChannel = (viewOverride ?? settings.view === 'byChannel') && channelCount > 1;
   const liVisible = liExpanded ? renderedLineItems : renderedLineItems.slice(0, liVisibleLimit);
   const liOverflow = liExpanded
     ? false
     : (renderedLineItems.length > liVisibleLimit) || (deferredVisibleLineItems.length > renderedLineItems.length);
 
   return (
-    <SectionCard title="Line Items" flush>
+    <SectionCard title="Line Items" flush menu={menu}>
       <SectionBoundary name="LineItems">
         {channelCount > 1 && (
           <div className="lis-view">
             <button type="button" className={byChannel ? 'sp-tp-link' : 'sp-tp-link confirm'}
-              onClick={() => setByChannel(false)}>All lines</button>
+              onClick={() => setViewOverride(false)}>All lines</button>
             <button type="button" className={byChannel ? 'sp-tp-link confirm' : 'sp-tp-link'}
-              onClick={() => setByChannel(true)}>By channel</button>
+              onClick={() => setViewOverride(true)}>By channel</button>
           </div>
         )}
         {/* Search input */}
@@ -233,7 +280,7 @@ export default function LineItemsTile() {
             {!byChannel && liVisible.map((id) => (
               <LineItemCard key={id} liId={id} filters={filters} setFilters={setFilters} />
             ))}
-            {liOverflow && (
+            {!byChannel && liOverflow && (
               <div
                 style={{
                   position: 'sticky',
@@ -270,7 +317,7 @@ export default function LineItemsTile() {
               </div>
             )}
           </div>
-          {liExpanded && deferredVisibleLineItems.length > liVisibleLimit && (
+          {!byChannel && liExpanded && deferredVisibleLineItems.length > liVisibleLimit && (
             <div
               style={{
                 borderTop: '1px solid var(--border-soft)',

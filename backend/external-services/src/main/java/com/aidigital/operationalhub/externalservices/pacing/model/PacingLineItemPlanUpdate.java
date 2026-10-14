@@ -51,6 +51,11 @@ import java.util.Map;
  * @param containers        date-based plan overrides (§9), opaque - forwarded byte-for-byte; Pacing is
  *                          the only party that parses or validates their shape (container existence,
  *                          the target-impressions bound against this line item's own plan)
+ * @param dimGroups         value groups (Pacing spec 2026-10-02), opaque - forwarded verbatim as
+ *                          {@code dim_groups}; Pacing alone validates them ({@code bad_dim_groups}).
+ *                          Null leaves the stored groups alone (the key is omitted from the wire -
+ *                          {@code dim_groups} is not in Pacing's {@code PLAN_OWNED} set); any list,
+ *                          an empty one included, replaces them
  */
 public record PacingLineItemPlanUpdate(
 		String lineItemId,
@@ -71,5 +76,6 @@ public record PacingLineItemPlanUpdate(
 		Double netRatio,
 		Boolean netRatioLocked,
 		List<String> primaryConversions,
-		List<Map<String, Object>> containers) {
+		List<Map<String, Object>> containers,
+		List<Map<String, Object>> dimGroups) {
 }

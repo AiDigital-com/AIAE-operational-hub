@@ -14,6 +14,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateDa
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
@@ -778,6 +779,41 @@ class PacingClientImplTest {
 		// Then:
 		assertThat(result.ok()).isTrue();
 		assertThat(result.display()).containsEntry("rev", 4);
+		server.verify();
+	}
+
+	@Test
+	void shouldPassLineItemsSettingsThroughUntouchedTest() {
+		// Given: the Line Items block's settings ride the opaque display map - an object to store, and
+		// null for "Reset to default", which dash-gate reads as "delete the stored key". A dropped null
+		// would turn the reset into a no-op.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		Map<String, Object> settings = Map.of(
+				"columns", List.of("ctr", "spend"),
+				"sort", Map.of("key", "spend", "dir", "desc"),
+				"view", "byChannel",
+				"rows", 12);
+		Map<String, Object> reset = new java.util.HashMap<>();
+		reset.put("widgets", List.of());
+		reset.put("lineItems", null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json("{\"display\":{\"widgets\":[],\"lineItems\":{\"columns\":[\"ctr\",\"spend\"],"
+						+ "\"sort\":{\"key\":\"spend\",\"dir\":\"desc\"},\"view\":\"byChannel\",\"rows\":12}},\"display_rev\":3}"))
+				.andRespond(withSuccess("{\"ok\":true,\"display\":{\"rev\":4}}", MediaType.APPLICATION_JSON));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(content().json("{\"display\":{\"widgets\":[],\"lineItems\":null},\"display_rev\":4}"))
+				.andRespond(withSuccess("{\"ok\":true,\"display\":{\"rev\":5}}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveDisplay(assertion, "nike-ss26", Map.of("widgets", List.of(), "lineItems", settings), 3, null);
+		client.saveDisplay(assertion, "nike-ss26", reset, 4, null);
+
+		// Then:
 		server.verify();
 	}
 
@@ -2083,7 +2119,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", null, 0.85, false, null, List.of(Map.of("id", "c1", "target_impressions", 100000)));
+				"2026-01-01", "2026-01-31", null, 0.85, false, null, List.of(Map.of("id", "c1", "target_impressions", 100000)), null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(method(POST))
 				.andExpect(content().json(
@@ -2097,7 +2133,63 @@ class PacingClientImplTest {
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
 		// When-Then: no exception - void on success.
-		client.savePlan(assertion, "nike-ss26", List.of(li));
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+		server.verify();
+	}
+
+	@Test
+	void shouldSendRateAndRateLockedInTheSameBodyAsLineItemsTest() {
+		// Given: a plan save that also changes the campaign's exchange rate. Both keys must ride the
+		// SAME request as line_items: dash-gate stores config.rate before merging the line items, so
+		// only then does the new rate govern the USD figures this save re-materializes.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json(
+						"{\"line_items\":[{\"line_item_id\":\"599852\"}],\"rate\":0.27,\"rate_locked\":true}"))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(0.27, true));
+
+		// Then: exactly one request carried all three keys.
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitRateAndRateLockedWhenTheSaveDoesNotTouchTheRateTest() {
+		// Given: a plan save with no rate change. The keys must be ABSENT, not null - a present
+		// `rate: null` would reach dash-gate's `config.rate !== undefined` check as a value.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).doesNotContain("\"rate\"");
+					assertThat(body).doesNotContain("\"rate_locked\"");
+					assertThat(body).contains("\"line_items\"");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
 		server.verify();
 	}
 
@@ -2115,7 +2207,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", null, null, null, null, List.of());
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2133,7 +2225,7 @@ class PacingClientImplTest {
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
 		// When:
-		client.savePlan(assertion, "nike-ss26", List.of(li));
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
 		server.verify();
 	}
 
@@ -2150,10 +2242,10 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate off = new PacingLineItemPlanUpdate(
 				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", false, null, null, null, List.of());
+				"2026-01-01", "2026-01-31", false, null, null, null, List.of(), null);
 		PacingLineItemPlanUpdate on = new PacingLineItemPlanUpdate(
 				"599853", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
-				"2026-01-01", "2026-01-31", true, null, null, null, List.of());
+				"2026-01-01", "2026-01-31", true, null, null, null, List.of(), null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"line_items\":[{\"line_item_id\":\"599852\",\"cost_coef\":false},"
@@ -2161,7 +2253,145 @@ class PacingClientImplTest {
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
 		// When-Then: no exception - void on success.
-		client.savePlan(assertion, "nike-ss26", List.of(off, on));
+		client.savePlan(assertion, "nike-ss26", List.of(off, on), new PacingPlanRateUpdate(null, null));
+		server.verify();
+	}
+
+	@Test
+	void shouldForwardDimGroupsVerbatimWhenSavingPlanTest() {
+		// Given: value groups are opaque to the Hub - every key of every group, one the Hub has never
+		// heard of included, must reach dash-gate as `dim_groups` exactly as received.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		Map<String, Object> group = Map.of(
+				"dim_key", "geo", "name", "Northeast", "values", List.of("NY", "MA"), "future_key", 7);
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), List.of(group));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(jsonPath("$.line_items[0].dim_groups.length()").value(1))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].length()").value(4))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].dim_key").value("geo"))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].name").value("Northeast"))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].values[0]").value("NY"))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].values[1]").value("MA"))
+				.andExpect(jsonPath("$.line_items[0].dim_groups[0].future_key").value(7))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitPrimaryConversionsKeyWhenTheChoiceIsUntouchedTest() {
+		// Given: an untouched choice (null) - Pacing keeps the stored list only while the KEY is absent.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).doesNotContain("\"primary_conversions\"");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendEmptyPrimaryConversionsAsExplicitClearTest() {
+		// Given: the deliberate clear - an explicit empty list must still be written.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, List.of(), List.of(), null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).contains("\"primary_conversions\":[]");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldOmitDimGroupsKeyWhenSavingPlanWithoutGroupsTest() {
+		// Given: no groups on this line item - `dim_groups` is not in dash-gate's PLAN_OWNED set, so an
+		// ABSENT key keeps the stored groups, while a present one would replace them.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).doesNotContain("\"dim_groups\"");
+					assertThat(body).contains("\"line_item_id\":\"599852\"");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendEmptyDimGroupsListAsExplicitClearWhenSavingPlanTest() {
+		// Given: an explicit empty list is the deliberate clear - NON_NULL must still write it.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
+				"599852", null, null, null, null, null, "CPM", 1000.0, 500000.0, 20.0, null, null,
+				"2026-01-01", "2026-01-31", null, null, null, null, List.of(), List.of());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(request -> {
+					String body = ((MockClientHttpRequest) request).getBodyAsString();
+					assertThat(body).contains("\"dim_groups\":[]");
+				})
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
+
+		// Then:
 		server.verify();
 	}
 
@@ -2673,7 +2903,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
 				"7", "Display", "New line item", "40539", "2026_Campaign", "TM-1", "CPM", 1000.0,
-				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of());
+				500000.0, 20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of(), null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"line_items\":[{\"line_item_id\":\"7\",\"channel\":\"Display\","
@@ -2682,7 +2912,7 @@ class PacingClientImplTest {
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
 
 		// When:
-		client.savePlan(assertion, "nike-ss26", List.of(li));
+		client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null));
 		server.verify();
 	}
 
@@ -2703,10 +2933,10 @@ class PacingClientImplTest {
 								+ "\"value\":150}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"599852", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
+		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("line item 599852: container:March 2026 is out of range "
@@ -2729,10 +2959,10 @@ class PacingClientImplTest {
 								+ "\"a\":\"container:Jan\",\"b\":\"container:Feb\"}]}]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
+		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("line item 1: overlapping coefficient-cost margins on container:Jan and container:Feb");
@@ -2753,10 +2983,10 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_coef_config\",\"details\":[]}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
+		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("one or more line items have an invalid coefficient-cost margin");
@@ -2777,10 +3007,10 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\"}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingLineItemPlanUpdate li = new PacingLineItemPlanUpdate(
-				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+				"1", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li)))
+		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(li), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_BAD_REQUEST);
@@ -2801,7 +3031,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "gone", List.of()))
+		assertThatThrownBy(() -> client.savePlan(assertion, "gone", List.of(), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
@@ -2822,7 +3052,7 @@ class PacingClientImplTest {
 				});
 
 		// When-Then:
-		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of()))
+		assertThatThrownBy(() -> client.savePlan(assertion, "nike-ss26", List.of(), new PacingPlanRateUpdate(null, null)))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
@@ -4375,6 +4605,50 @@ class PacingClientImplTest {
 
 		// When:
 		client.saveMappings(assertion, "nike-ss26", null);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSavePeriodScopeAsItsOwnSettingsFragmentTest() {
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json(
+						"{\"period_scope\":true,\"period_scope_key\":\"2026-10-06|2026-10-12\"}", true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePeriodScope(assertion, "nike-ss26", true, "2026-10-06|2026-10-12");
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
+	void shouldSendANullPeriodKeyWhenPeriodScopeTurnsOffTest() {
+		// Turning scope off must clear the key saved with it, so the key goes as null, not absent.
+		// Given:
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{\"period_scope\":false,\"period_scope_key\":null}", true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.savePeriodScope(assertion, "nike-ss26", false, null);
 
 		// Then:
 		server.verify();

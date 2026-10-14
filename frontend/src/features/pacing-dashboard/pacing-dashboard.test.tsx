@@ -23,6 +23,7 @@ vi.mock("./api", () => ({
   getPacingRefreshStatus: vi.fn(),
   triggerPacingRefresh: vi.fn(),
   savePacingDisplay: vi.fn(),
+  savePacingPeriodScope: vi.fn(),
   listPacingLibrary: vi.fn(),
   createPacingLibraryEntry: vi.fn(),
   updatePacingLibraryEntry: vi.fn(),
@@ -157,8 +158,9 @@ describe("PacingDashboard", () => {
     // Then: nothing of the panel is on the page…
     expect(screen.queryByText(/this pacing's widgets/i)).not.toBeInTheDocument();
 
-    // When: the gear is pressed and the Widgets tab chosen…
-    await userEvent.click(screen.getByRole("button", { name: /^settings$/i }));
+    // When: the gear is pressed and the Widgets tab chosen… The gear sits at the end of the filter
+    // row (as in the reference), which renders once the dashboard payload has arrived.
+    await userEvent.click(await screen.findByRole("button", { name: /^settings$/i }));
     await userEvent.click(screen.getByRole("button", { name: /^widgets$/i }));
 
     // Then: …it opens, and as a dialog rather than another section of the page.
@@ -497,6 +499,92 @@ describe("PacingDashboard auto-add", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const calls = vi.mocked(api.savePacingDisplay).mock.calls;
     for (const [, patch] of calls) expect(patch.autoAdded).toBeUndefined();
+  });
+});
+
+describe("PacingDashboard period scope", () => {
+  // One line item, one container split into two date periods; the payload's data reaches Aug 15.
+  const withPeriods = (campaign: Record<string, unknown> = {}) => aPacingDashboardV1({
+    campaign: { ...aPacingDashboardV1().campaign, ...campaign },
+    planByLineItem: {
+      "111": aPacingLineItemPlanV1({
+        lineItemId: "111",
+        flightStart: "2026-08-01",
+        flightEnd: "2026-08-31",
+        containers: [{
+          id: "c1", name: "Halves", fs: "2026-08-01", fe: "2026-08-31", target_impressions: 1_000_000,
+          date_children: [
+            { id: "d1", name: "1st", fs: "2026-08-01", fe: "2026-08-15", target_impressions: 500_000 },
+            { id: "d2", name: "2nd", fs: "2026-08-16", fe: "2026-08-31", target_impressions: 500_000 },
+          ],
+          dim_children: [],
+        }],
+      }),
+    },
+  } as Partial<ReturnType<typeof aPacingDashboardV1>>);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.listPacingLibrary).mockResolvedValue([]);
+    vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1({ refreshId: "r1" }));
+    vi.mocked(api.savePacingPeriodScope).mockResolvedValue(undefined);
+  });
+
+  it("should turn period scope on at the current period and save it as the pacing's period", async () => {
+    // Given:
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(withPeriods({ periodScope: false }));
+    const { row } = renderDashboard();
+    const toggle = await screen.findByRole("button", { name: "Period Scope" });
+
+    // When:
+    await userEvent.click(toggle);
+
+    // Then: the period the data date sits in, shown at once and saved
+    expect(api.savePacingPeriodScope).toHaveBeenCalledWith(row.dashSlug, true, "2026-08-01|2026-08-15");
+    expect(await screen.findByText("Period scope active")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1st" })).toBeInTheDocument();
+  });
+
+  it("should open on the saved period and save another one picked from the list", async () => {
+    // Given: a pacing saved on its second period, which the data has not reached yet
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(
+      withPeriods({ periodScope: true, periodScopeKey: "2026-08-16|2026-08-31" }));
+    const { row } = renderDashboard();
+    expect(await screen.findByText("Upcoming")).toBeInTheDocument();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "2nd" }));
+    await userEvent.click(screen.getByRole("option", { name: "1st" }));
+
+    // Then:
+    expect(api.savePacingPeriodScope).toHaveBeenCalledWith(row.dashSlug, true, "2026-08-01|2026-08-15");
+    expect(await screen.findByText("Period scope active")).toBeInTheDocument();
+  });
+
+  it("should turn period scope off and clear the saved period", async () => {
+    // Given:
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(
+      withPeriods({ periodScope: true, periodScopeKey: "2026-08-01|2026-08-15" }));
+    const { row } = renderDashboard();
+    await screen.findByText("Period scope active");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Full Flight" }));
+
+    // Then:
+    expect(api.savePacingPeriodScope).toHaveBeenCalledWith(row.dashSlug, false, null);
+    await waitFor(() => expect(screen.queryByText("Period scope active")).not.toBeInTheDocument());
+  });
+
+  it("should not offer period scope on a pacing whose containers define no period", async () => {
+    // Given / When:
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1());
+    renderDashboard();
+    await waitFor(() => expect(api.getPacingDashboard).toHaveBeenCalled());
+
+    // Then:
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("button", { name: "Period Scope" })).not.toBeInTheDocument();
   });
 });
 

@@ -11,11 +11,11 @@ import { selectScopedFacts, selectScopeFilters, selectDeliveryFacts, selectHasCo
 import { getEffPlan } from '../config.js';
 import { matchDimSplits, resolveOwningContainer, buildVirtualPlanFromDimChild } from '../dim-scope.js';
 import PacingCore from '../pacing-core.js';
-import { fI, f$, fP, fDs, badgeCls } from '../format.js';
-import { rateLabel } from '../metrics.js';
-import { completionLabelForLI } from '../completion-label.js';
-import { basisLabel } from '../coef-rebuild.js';
+import { fP, fDs, badgeCls } from '../format.js';
 import { netPct } from '../currency-marker.js';
+// The metric cells come from the column catalogue (Line Items settings spec 2026-10-01):
+// the stored `display.lineItems.columns` in order, each cell's text from the door's readers.
+import { cellFor, resolveLineItemSettings } from '../line-item-columns.js';
 import PaceBar from './PaceBar.jsx';
 import Timeline from './Timeline.jsx';
 
@@ -80,26 +80,6 @@ function ChannelTag({ ch }) {
       {ch}
     </span>
   );
-}
-
-// ── SpendStatus ───────────────────────────────────────────────────────────────
-
-function spendStatus(sp, costPr, thresholds) {
-  if (!costPr || costPr <= 0) return '';
-  const pct = (sp / costPr) * 100;
-  if (pct <= (thresholds?.spendWarn ?? 105)) return 'text-[var(--status-green)]';
-  if (pct <= (thresholds?.spendBad ?? 115)) return 'text-[var(--status-amber)]';
-  return 'text-[var(--status-red)]';
-}
-
-// ── MarginStatus ──────────────────────────────────────────────────────────────
-
-function marginStatusCls(mA, mTgt, thresholds) {
-  const warnThreshold = thresholds?.marginWarn ?? -5;
-  const st = PacingCore.marginStatus(mA, mTgt, warnThreshold);
-  return st === 'g' ? 'text-[var(--status-green)]' :
-         st === 'w' ? 'text-[var(--status-amber)]' :
-                      'text-[var(--status-red)]';
 }
 
 function SplitRowsFallback() {
@@ -251,6 +231,27 @@ function LineItemCard({ liId, filters, setFilters }) {
     [m, liId, p, facts?.liDaily, facts?.cvCtx, actionLabels],
   );
 
+  // ── The columns (Line Items settings spec 2026-10-01) ──
+  // The stored list in its order; `conv` only when the pacing has conversions. Needed per day
+  // reads the Scope delivery over the WHOLE flight (the hero's rule), a third liM only when
+  // that column is on. All above the early return: hook order.
+  const stored = display?.lineItems;
+  const settings = useMemo(() => resolveLineItemSettings(stored), [stored]);
+  const columns = useMemo(
+    () => settings.columns.filter((key) => key !== 'conv' || hasConv),
+    [settings.columns, hasConv],
+  );
+  const needsFlight = columns.includes('neededPerDay');
+  const flight = useMemo(() => {
+    if (!needsFlight || !p || !pacingFacts?.liDaily) return null;
+    return liM(liId, pacingFacts.liDaily, liPlan, facts?.asOf, null, pacingFacts.mode, pacingFacts.plans);
+  }, [needsFlight, liId, p, pacingFacts, liPlan, facts?.asOf]);
+  const cells = useMemo(() => {
+    if (!p) return [];
+    const ctx = { p, effPlan, m, pacing, flight, liId, hasLens, thresholds, conv, asOf: facts?.asOf };
+    return columns.map((key) => ({ key, cell: cellFor(key, ctx) })).filter((c) => c.cell);
+  }, [p, effPlan, m, pacing, flight, liId, hasLens, thresholds, conv, facts?.asOf, columns]);
+
   if (!p) return null;
 
   // Current manual pause plus schedule gaps on the data date. Closed pauses
@@ -276,8 +277,6 @@ function LineItemCard({ liId, filters, setFilters }) {
   const hasTemp = dateRows.length > 0;
   const hasExpand = hasDimCfg || hasTemp;
 
-  const rt = p.rateType || 'CPM';
-  const uLbl = rateLabel(rt);
   const showDescription = !!display?.showDescription;
   const hasAltLabel = !!(liNames[liId] || (showDescription && p.desc));
   const origId = liOrigId(liId, liNames, p.desc, showDescription);
@@ -291,30 +290,6 @@ function LineItemCard({ liId, filters, setFilters }) {
 
   const flightStr = p.fs && p.fe ? `${fDs(p.fs)} — ${fDs(p.fe)}` : null;
 
-  // Metric values
-  const mA = m?.mA ?? 0;
-  const mTgt = effPlan.mTgt ?? 0;
-  const sp = m?.sp ?? 0;
-  const costPr = pacing?.costPr ?? 0;
-  const au = m?.au ?? 0;
-  const eI = pacing?.eI ?? 0;
-  const pI = pacing?.pI ?? 0;
-  const st = pacing?.st ?? 'no_data';
-  const dP = pacing?.dP ?? 0;
-  const fDays = pacing?.fDays ?? 0;
-
-  // Rate-specific cost metric
-  const rtCost =
-    rt === 'CPC' ? (m?.cl > 0 ? sp / m.cl : 0) :
-    rt === 'CPV' ? (m?.co > 0 ? sp / m.co : 0) :
-    (m?.cpm ?? 0);
-
-  const rtSub =
-    p.vcrTgt != null && p.vcrTgt > 0 ? `${completionLabelForLI(p)} ${fP(m?.vcr ?? 0)} / target ${fP(p.vcrTgt)}` :
-    // A stored CTR target of 0 is «no target» (owner decision 2026-09-23): no «target 0.00%».
-    p.ctrTgt > 0 ? `CTR ${fP(m?.ctr ?? 0)} / target ${fP(p.ctrTgt)}` :
-    null;
-
   return (
     <div
       className={`border-b border-[var(--border-soft)] transition-[opacity,background,border-color] duration-150 last:border-b-0 ${isSelected ? 'hover:bg-[var(--accent-bg)]' : 'hover:bg-[var(--hover-bg)]'}`}
@@ -322,12 +297,13 @@ function LineItemCard({ liId, filters, setFilters }) {
         contentVisibility: 'auto',
         containIntrinsicBlockSize: expanded ? 420 : 60,
         background: isSelected ? 'var(--accent-bg)' : expanded ? 'var(--surface-alt)' : undefined,
+        // The rendered column count: .li-row and the split rows below read it, so the cells line up.
+        '--li-cols': cells.length,
       }}
     >
       {/* ── Main row ── */}
       <div
-        className="grid gap-1.5 items-center px-5 py-2 cursor-pointer select-none min-h-[44px]"
-        style={{ gridTemplateColumns: `96px minmax(210px,2.5fr) repeat(${hasConv ? 6 : 5},1fr)` }}
+        className="li-row"
         onClick={toggleSelection}
         title={[
           liNames[liId] || `LI ${liId}`,
@@ -338,12 +314,12 @@ function LineItemCard({ liId, filters, setFilters }) {
         ].filter(Boolean).join(' | ')}
       >
         {/* ── Channel column ── */}
-        <div className="flex items-center">
+        <div className="li-ch flex items-center">
           <ChannelTag ch={p.ch || 'Unknown'} />
         </div>
 
         {/* ── Identity column ── */}
-        <div className="flex items-start gap-1.5 min-w-0">
+        <div className="li-id flex items-start gap-1.5 min-w-0">
           {/* Expand arrow or placeholder */}
           {hasExpand ? (
             <svg
@@ -419,53 +395,15 @@ function LineItemCard({ liId, filters, setFilters }) {
           </div>
         </div>
 
-        {/* ── Margin ── */}
-        <MetricCell
-          label={basisLabel('Margin', 'margin', p.k > 0 && p.k < 1)}
-          value={fP(mA)}
-          sub={`target ${fP(mTgt)}`}
-          valueCls={pacing ? (hasLens || p.coef === true ? 'text-[var(--text-primary)]' : marginStatusCls(pacing.mA, mTgt, thresholds)) : 'text-[var(--text-muted)]'}
-        />
-
-        {/* ── Spend ── */}
-        <MetricCell
-          label="Spend / Cost Bud."
-          value={f$(sp)}
-          sub={`${f$(costPr)} pror. · day ${dP}/${fDays}`}
-          valueCls={pacing && !hasLens ? spendStatus(pacing.sp, costPr, thresholds) : ''}
-        />
-
-        {/* ── Impressions/Units ── */}
-        <MetricCell
-          label={uLbl}
-          value={fI(au)}
-          sub={`${fI(Math.round(eI))} expected`}
-        />
-
-        {/* ── Pacing bar ── */}
-        <div className="min-w-0">
-          <div className="text-10 text-[var(--text-muted)] mb-1" title={hasLens ? 'Pacing uses Scope delivery and plan. Lens filters the displayed delivery.' : undefined}>
-            {hasLens ? 'Pacing · Scope' : 'Pacing'}
+        {/* ── The metric cells, in the configured order (the catalogue's readers) ── */}
+        {cells.map(({ key, cell }) => (key === 'pacing' ? (
+          <div key={key} className="min-w-0">
+            <div className="text-10 text-[var(--text-muted)] mb-1" title={cell.labelTitle}>{cell.label}</div>
+            <PaceBar value={cell.pace.value} status={cell.pace.status} />
           </div>
-          <PaceBar value={pI} status={st} />
-        </div>
-
-        {/* ── Rate cost column (CPM / CPC / CPV) ── */}
-        <MetricCell
-          label={rt}
-          value={f$(rtCost)}
-          sub={rtSub}
-        />
-
-        {/* ── Conv / CVR column (auto-shown when any LI has cv > 0, or has primary conversions) ── */}
-        {hasConv && (
-          <MetricCell
-            label="Conv"
-            value={conv.value}
-            sub={conv.sub}
-            title={conv.title}
-          />
-        )}
+        ) : (
+          <MetricCell key={key} label={cell.label} value={cell.value} sub={cell.sub} valueCls={cell.valueCls} title={cell.title} />
+        )))}
       </div>
 
       {/* ── Expanded content ── */}
@@ -484,7 +422,7 @@ function LineItemCard({ liId, filters, setFilters }) {
                 container={container}
                 planOverride={planOverride}
                 range={effRange}
-                hasConv={hasConv}
+                columns={columns}
               />
             ))}
 
@@ -503,7 +441,7 @@ function LineItemCard({ liId, filters, setFilters }) {
                     container={container}
                     planOverride={planOverride}
                     range={effRange}
-                    hasConv={hasConv}
+                    columns={columns}
                   />
                 ))}
               </>

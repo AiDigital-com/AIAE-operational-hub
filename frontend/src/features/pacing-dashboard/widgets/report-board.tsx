@@ -84,7 +84,7 @@ const LINE_ITEMS_ID = "lineItems";
 const FLOW_REGISTRY = [{ id: LINE_ITEMS_ID, kind: "flow" }];
 const FLOW_SLOTS: Record<string, number> = { [LINE_ITEMS_ID]: 600 };
 const tileSlot = (id: string) => (id in FLOW_SLOTS ? FLOW_SLOTS[id] : seedSlotOf(id));
-const LineItemsTile = LineItemsTileUntyped as unknown as React.ComponentType;
+const LineItemsTile = LineItemsTileUntyped as unknown as React.ComponentType<{ menu?: React.ReactNode }>;
 const ReportWidget = ReportWidgetUntyped as unknown as React.ComponentType<{
   widget: PacingWidgetInstance;
   menu?: React.ReactNode;
@@ -107,6 +107,8 @@ export interface BoardActions {
   onTurnOff: (widgetId: string) => void;
   /** Remove it from this pacing. Saves at once. */
   onRemove: (widgetId: string) => void;
+  /** Open the settings drawer on the Line Items block's own settings (Pacing `85d353c`). */
+  onCustomizeLineItems?: () => void;
   /** True while a save is in flight, so the menu can grey itself out rather than queue clicks. */
   saving: boolean;
 }
@@ -210,8 +212,9 @@ export function ReportBoard({
       ))}
       {entries.map(({ id, tile }) => {
         const widget = widgets.find((w) => w.id === id);
-        // The one flow tile draws its own block and carries no widget, no ⋯ menu and no stored
-        // height: `flow` is always full width and auto height (layout-grid's SIZES table).
+        // The one flow tile draws its own block and carries no widget and no stored height: `flow`
+        // is always full width and auto height (layout-grid's SIZES table). Its ⋯ carries the one
+        // action that is the block's own, Customize… (Pacing's DashGrid `flowMenuFor`).
         if (!widget && id !== LINE_ITEMS_ID) return null;
         const explicitHeight = H_PX[String(tile.h)];
         return (
@@ -222,7 +225,7 @@ export function ReportBoard({
             style={{ gridColumn: `${tile.x + 1} / span ${tile.w}`, gridRow: `${tile.y + 1}` }}
           >
             {id === LINE_ITEMS_ID ? (
-              <LineItemsTile />
+              <LineItemsTile menu={actions ? <LineItemsMenu actions={actions} /> : null} />
             ) : (
               <ReportWidget
                 widget={widget as PacingWidgetInstance}
@@ -234,6 +237,27 @@ export function ReportBoard({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The Line Items block's ⋯. Pacing's flow-block menu carries Customize… and Turn off; only the first
+ * is here. Turn off was never on this tile in this app, and a block switched off from here would have
+ * no switch anywhere to bring it back - the widgets tab's Page sections card has no on/off.
+ */
+function LineItemsMenu({ actions }: { actions: BoardActions }) {
+  return (
+    <WidgetTileMenu
+      label="Block actions: Line Items"
+      items={[
+        {
+          key: "customize",
+          label: "Customize…",
+          disabled: !actions.onCustomizeLineItems,
+          onSelect: () => actions.onCustomizeLineItems?.(),
+        },
+      ]}
+    />
   );
 }
 

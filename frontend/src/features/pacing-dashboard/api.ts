@@ -203,6 +203,25 @@ export async function savePacingMappings(
   }
 }
 
+/**
+ * Turns period scope on or off and says which period it shows (`<start>|<end>`, or null). A
+ * pacing-level setting: every viewer, the Overview row and the Slack summary follow it. Off sends a
+ * null key, so the period saved with it is cleared rather than kept.
+ */
+export async function savePacingPeriodScope(
+  slug: string,
+  periodScope: boolean,
+  periodScopeKey: string | null,
+): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/period-scope", {
+    params: { path: { slug } },
+    body: { periodScope, periodScopeKey },
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
 /** What a CM360 re-pull request came back with. None of the three is an error. */
 export interface PacingThirdPartyRefetchOutcome {
   started: boolean;

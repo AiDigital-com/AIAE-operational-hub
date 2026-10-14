@@ -51,8 +51,8 @@ export function coefConfigBlocksSave(li: CoefPrecheckInput): boolean {
  * leaving it there while a coefficient problem is ALSO live would name the lesser of the two
  * reasons the save is about to fail.
  *
- * @param overPlan whether the containers' combined target already exceeds the line item's own plan
- *                 (`containers.ts`'s `containerSumExceedsPlan`)
+ * @param overPlan whether the containers exceed the line item - units over its plan, spend over its
+ *                 budget, or a period outside its flight (`containers.ts`'s `containersExceedLi`)
  * @param coefBlocked whether `coefConfigBlocksSave` found a coefficient problem
  */
 export function planWarningSentence(overPlan: boolean, coefBlocked: boolean): string | null {
@@ -60,8 +60,60 @@ export function planWarningSentence(overPlan: boolean, coefBlocked: boolean): st
   if (coefBlocked) {
     return "Coefficient margins block saving - overlapping containers both set a margin, or a margin is out of range";
   }
-  if (overPlan) {
-    return "Containers' combined target exceeds this line item's own target impressions. Pacing may reject this on save.";
-  }
+  if (overPlan) return "Containers exceed the LI plan";
   return null;
+}
+
+/** A `validateCoefLi` finding, tagged with its line item. */
+export interface CoefError {
+  code: string;
+  where?: string;
+  a?: string;
+  b?: string;
+  li: string;
+}
+
+/** "container:Jan 2026" → 'container “Jan 2026”' - the reference's `humanCoefWhere`. */
+function humanCoefWhere(where: string | undefined): string {
+  if (!where) return "";
+  if (where === "li") return "LI margin";
+  const i = where.indexOf(":");
+  if (i < 0) return where;
+  const kind = where.slice(0, i);
+  const name = where.slice(i + 1);
+  const label = kind === "container" ? "container" : kind === "date_child" ? "date split" : kind === "dim_child" ? "dim split" : kind;
+  return name ? `${label} “${name}”` : label;
+}
+
+function describeCoefError(e: CoefError): string {
+  const li = `LI ${e.li}`;
+  if (e.code === "coef_margin_overlap") return `${li}: coefficient margins overlap (${humanCoefWhere(e.a)} & ${humanCoefWhere(e.b)})`;
+  if (e.code === "coef_margin_range") return `${li}: ${humanCoefWhere(e.where)} must be ≥ 0 and < 100`;
+  if (e.code === "coef_not_boolean") return `${li}: invalid coefficient flag`;
+  return `${li}: invalid coefficient config`;
+}
+
+/**
+ * Every line item's coefficient errors, the check the reference's drawer runs before it sends
+ * anything (`collectCoefErrors`): the save is stopped here with the reason, instead of round-tripping
+ * to dash-gate's `bad_coef_config` refusal, which stays as the backstop.
+ */
+export function collectCoefErrors(lineItems: Array<CoefPrecheckInput & { lineItemId: string }>): CoefError[] {
+  const out: CoefError[] = [];
+  for (const li of lineItems) {
+    const errors = getPacingCore().validateCoefLi({
+      cost_coef: li.costCoef === true,
+      margin_percent: li.marginTargetPct,
+      containers: li.containers as unknown as Record<string, unknown>[],
+    });
+    for (const e of errors) out.push({ ...e, a: e.a, b: e.b, li: li.lineItemId });
+  }
+  return out;
+}
+
+/** One line for the save error: the first two specifics and a "+N more" tail (`coefErrorMessage`). */
+export function coefErrorMessage(errors: CoefError[]): string {
+  const lines = errors.map(describeCoefError);
+  const head = lines.slice(0, 2).join("; ");
+  return lines.length > 2 ? `Can’t save — ${head} (+${lines.length - 2} more)` : `Can’t save — ${head}`;
 }

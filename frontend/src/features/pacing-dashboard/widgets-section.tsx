@@ -4,6 +4,24 @@ import { PacingDashboardLibrary } from "./pacing-dashboard-library";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
 import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "./types";
 import { newWidgetId } from "./vendor/layout-materialize.mjs";
+// Moved JS from Pacing's SPA (see ./spa/SOURCE.md): the Line Items settings catalogue's door.
+import * as LineItemColumnsUntyped from "./spa/line-item-columns.js";
+
+const { isDefault: lineItemsIsDefault, normLineItems } = LineItemColumnsUntyped as unknown as {
+  isDefault: (value: unknown) => boolean;
+  normLineItems: (value: unknown) => { ok: boolean; value?: unknown };
+};
+
+/**
+ * `display.lineItems` as the dirty check sees it - Pacing's `display-norm.js` `normLineItemsKey`:
+ * absent, null and the default object are ONE setting (today's render), so none of them can dirty
+ * the drawer against another; any other readable value compares in canonical key order.
+ */
+function lineItemsKey(value: unknown): unknown {
+  if (lineItemsIsDefault(value)) return null;
+  const r = normLineItems(value);
+  return r.ok ? r.value : value;
+}
 
 /** Pacing's own ceiling on stored widgets (`widgets-validate` LIMITS.widgets). Named here rather
  *  than guessed: a 65th widget is refused by the save, and refusing it at the click is the
@@ -40,6 +58,10 @@ interface DisplayDraft {
    *  outright if anything changed meanwhile. There is no window in which this map can go stale
    *  without the save failing loudly. */
   enabled: Record<string, boolean>;
+  /** The Line Items block's settings (Pacing `85d353c`): columns, sort, default view, rows. An
+   *  object, `null` for a pending «Reset to default» (the save sends it and dash-gate deletes the
+   *  stored key), or undefined - never touched and never stored, and then the save omits it. */
+  lineItems: unknown;
 }
 
 export interface PacingWidgetsSectionProps extends SettingsSectionProps {
@@ -56,6 +78,10 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   initialWidgetId?: string | null;
   /** Called once that request is consumed, so a later open lands on the list. */
   onWidgetEditorOpened?: () => void;
+  /** A tile's ⋯ → Customize… on the Line Items block: open that card's editor. */
+  customizeLineItemsRequest?: number | null;
+  /** Called once that request is consumed. */
+  onCustomizeLineItemsOpened?: () => void;
 }
 
 /** The dimension a widget is cut by, from either of the two slots that can carry one. */
@@ -70,10 +96,26 @@ const seedOf = (display: PacingDisplayShape): DisplayDraft => ({
   widgets: display.widgets ?? [],
   groups: display.groups ?? [],
   enabled: display.enabled ?? {},
+  lineItems: display.lineItems,
 });
 
 export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidgetsSectionProps>(
-  function PacingWidgetsSection({ slug, display, capabilities, isAdmin, libraryEntries, seedKey, initialWidgetId, onWidgetEditorOpened, onDirtyChange }, ref) {
+  function PacingWidgetsSection(
+    {
+      slug,
+      display,
+      capabilities,
+      isAdmin,
+      libraryEntries,
+      seedKey,
+      initialWidgetId,
+      onWidgetEditorOpened,
+      customizeLineItemsRequest,
+      onCustomizeLineItemsOpened,
+      onDirtyChange,
+    },
+    ref
+  ) {
     const [draft, setDraft] = useState<DisplayDraft>(() => seedOf(display));
     const [base, setBase] = useState<DisplayDraft>(() => seedOf(display));
 
@@ -106,7 +148,10 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
 
     // By value, not by identity: the library rebuilds both arrays on every action, so an identity
     // check would call an untouched layout dirty as soon as anything re-rendered.
-    const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(base), [draft, base]);
+    const dirty = useMemo(() => {
+      const comparable = (d: DisplayDraft) => JSON.stringify({ ...d, lineItems: lineItemsKey(d.lineItems) });
+      return comparable(draft) !== comparable(base);
+    }, [draft, base]);
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
     const stateRef = useRef({ draft, dirty });
@@ -134,12 +179,16 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
         if (!isDirty) return { ok: true as const };
         // The revision comes off the payload this draft was seeded from, so a layout edited
         // elsewhere since then is what earns the 409 below rather than being overwritten.
-        const next = {
+        const next: Record<string, unknown> = {
           ...display,
           widgets: current.widgets,
           groups: current.groups,
           enabled: current.enabled,
         };
+        // Sent when the draft holds the key (null = the reset, which deletes the stored key);
+        // omitted when it never held one - Pacing's SettingsDrawer.jsx buildConfig rule.
+        if (current.lineItems !== undefined) next.lineItems = current.lineItems;
+        else delete next.lineItems;
         try {
           const outcome = await savePacingDisplay(slug, next, display.rev ?? 0, capabilities);
           if (outcome.status === "conflict") {
@@ -179,11 +228,17 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
         // section, is the point of having one Save.
         saving={false}
         saveError={null}
-        onSave={(patch) => setDraft({ widgets: patch.widgets, groups: patch.groups, enabled: patch.enabled })}
+        onSave={(patch) =>
+          setDraft((d) => ({ ...d, widgets: patch.widgets, groups: patch.groups, enabled: patch.enabled }))
+        }
         isAdmin={isAdmin}
         libraryEntries={libraryEntries}
         initialWidgetId={initialWidgetId}
         onWidgetEditorOpened={onWidgetEditorOpened}
+        lineItems={draft.lineItems}
+        onLineItemsChange={(next) => setDraft((d) => ({ ...d, lineItems: next }))}
+        customizeLineItemsRequest={customizeLineItemsRequest}
+        onCustomizeLineItemsOpened={onCustomizeLineItemsOpened}
       />
     );
   }

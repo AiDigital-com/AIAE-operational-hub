@@ -3319,6 +3319,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
 
+  /api/v1/pacing/dashboards/{slug}/period-scope:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingPeriodScope
+      description: >
+        Turns period scope on or off for this pacing, and says which period it shows. Reaches Pacing
+        as POST .../settings carrying only the `period_scope` / `period_scope_key` fragment - the
+        same single write path the display and mapping saves use. A pacing-level setting, so every
+        viewer, the Overview row and the Slack summary follow it; Pacing keeps it out of the
+        settings audit, because switching a view is not a config edit.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingPeriodScopeUpdateV1'
+      responses:
+        '204':
+          description: The period scope was saved.
+        '400':
+          description: The request was malformed (no switch, or a period key not shaped start|end).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving to the Pacing service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+
   /api/v1/pacing/dashboards/{slug}/third-party/refetch:
     post:
       tags:
@@ -9856,8 +9910,13 @@ components:
             `netRatio` (both keys or neither): `true` after a manual ratio edit, `false` after
             Reset-to-NS - an explicit `false` is what unlocks a stored lock, since an omitted key is
             preserved from storage.
+        # `nullable: true` is load-bearing, same as on `dimGroups` below: without it the generator
+        # initializes the Java field to `new ArrayList<>()`, so a body that OMITS the key reached Pacing
+        # as `primary_conversions: []` - the explicit clear - and wiped the stored choice of every line
+        # item a plan save did not touch. Nullable, the field starts null and NON_NULL drops the key.
         primaryConversions:
           type: array
+          nullable: true
           description: >
             Primary conversions (Pacing spec 2026-09-13 §2): the conversion actions this line item
             counts as ITS conversions. Sent only when the list actually CHANGED as a set against what
@@ -9891,6 +9950,25 @@ components:
           items:
             type: object
             additionalProperties: true
+        # `nullable: true` is load-bearing, not decoration: without it the generator initializes the
+        # Java field to `new ArrayList<>()`, so a body that OMITS the key would reach Pacing as
+        # `dim_groups: []` - the explicit clear - and wipe the stored groups on every save. Nullable,
+        # the field starts null, and null is what drops the key from the wire (NON_NULL). With
+        # openApiNullable=false (application/pom.xml) this does NOT produce a JsonNullable wrapper.
+        dimGroups:
+          type: array
+          nullable: true
+          description: >
+            Value groups (Pacing spec 2026-10-02) - opaque here, same as `containers`: forwarded
+            verbatim to Pacing as `dim_groups`, each entry Pacing's own `{ dim_key, name, values[] }`.
+            Pacing is the only party that validates them (`bad_dim_groups`) or reshapes them; the Hub
+            never opens one. The key is NOT plan-owned on Pacing's side, so presence is the whole
+            contract: OMIT the key (or send null) to keep the stored groups untouched - which is what
+            an untouched line item must do; send it, even as an explicit empty list, to REPLACE them -
+            an empty list is the deliberate clear.
+          items:
+            type: object
+            additionalProperties: true
       required:
         - lineItemId
     PacingPlanUpdateV1:
@@ -9904,6 +9982,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PacingLineItemPlanUpdateV1'
+        # `nullable: true` on the two below is load-bearing, for the same reason as on `dimGroups`:
+        # presence is the contract. An omitted key must stay null so NON_NULL drops it from Pacing's
+        # body, and a plan save that does not touch the rate stays byte-identical to one sent before
+        # these fields existed.
+        rate:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            The campaign's exchange rate (USD per one unit of its currency), set from Settings →
+            Plan. Sent to Pacing as top-level `rate` IN THE SAME request as `line_items`: Pacing
+            stores the rate before merging the line items, so the new rate governs the USD figures
+            of every line item and container this very save writes - a separate request would leave
+            them at the old rate. Omit (or null) to leave the stored rate alone. Must be > 0 when
+            present (400 otherwise); Pacing remains the authority on anything further.
+        rateLocked:
+          type: boolean
+          nullable: true
+          description: >
+            Whether `rate` is locked against NetSuite refreshes, sent to Pacing as top-level
+            `rate_locked`: `true` after a manual rate edit, `false` after Reset to NS. Omit (or null)
+            to leave the stored lock alone.
       required:
         - lineItems
     PacingPlanUpdateResultV1:
@@ -11120,6 +11222,26 @@ components:
       # way to say it is `null` - which a required field refuses before the controller sees it.
       # Absent and null therefore mean the same thing here: clear.
 
+    PacingPeriodScopeUpdateV1:
+      type: object
+      description: The period-scope switch and the period it shows.
+      properties:
+        periodScope:
+          type: boolean
+          description: True shows one period of the containers; false shows the whole flight.
+        periodScopeKey:
+          type: string
+          nullable: true
+          maxLength: 21
+          pattern: '^\d{4}-\d{2}-\d{2}\|\d{4}-\d{2}-\d{2}$'
+          description: >
+            The period to show, as `<start>|<end>` (YYYY-MM-DD|YYYY-MM-DD) - the key the client's
+            `PacingCore.periodKeyOf` builds. Null with `periodScope: false` (nothing is scoped), and
+            null with `periodScope: true` when the pacing has no period to show (Pacing then shows the
+            full flight and says so).
+      required:
+        - periodScope
+
     PacingThirdPartyStatusV1:
       type: object
       description: >
@@ -11233,6 +11355,19 @@ components:
             both `currency` and `rate` to `'USD'`/`1` when `config.currency` is unset). A MATH input
             for the browser-side engine (`Currency.currencyToUsd` converts delivery cost with it) -
             not display-only.
+        rateLocked:
+          type: boolean
+          description: >
+            True when `rate` was set by hand (`config.rate_locked`): NetSuite refreshes keep it
+            instead of re-detecting it. False when Pacing omits it. Written with the plan save
+            (`PacingPlanUpdateV1.rateLocked`).
+        nsRate:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            The NetSuite-detected rate - what the Settings → Plan "Reset to NS" restores - or null
+            when Pacing does not know one (`buildCampaign`'s `nsRate`).
         netMode:
           type: boolean
           description: >
@@ -11241,6 +11376,21 @@ components:
             statement about what every money figure on this dashboard means: while true, each `dc`
             the engine computes is already net (gross × the line item's `netRatio`). Display reads
             it to caption the gross/net pair; the math itself is driven per line item.
+        periodScope:
+          type: boolean
+          description: >
+            Period scope's saved switch (`config.period_scope`): while true, the dashboard shows ONE
+            period of the line items' containers instead of the whole flight - the same setting
+            Pacing's Overview row and Slack summary already apply. A pacing-level setting, shared
+            by every viewer, written via `POST /api/v1/pacing/dashboards/{slug}/period-scope`.
+        periodScopeKey:
+          type: string
+          nullable: true
+          description: >
+            The saved period (`config.period_scope_key`), as `<start>|<end>` (YYYY-MM-DD|YYYY-MM-DD),
+            or null when none was saved. Only a hint: the client re-resolves it against the line
+            items' current containers (`PacingCore.resolvePeriodKey`), so a stale key heals rather
+            than showing a period that no longer exists.
         status:
           type: string
         orderNumber:

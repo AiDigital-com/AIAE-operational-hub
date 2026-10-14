@@ -12,16 +12,19 @@
 // estimate alone was good enough for years and the upward flip drifted.
 
 /**
- * @param {{top:number,bottom:number,right:number}} trigger viewport rect of the button
- * @param {{panelW:number,panelH:number,viewportW:number,viewportH:number,gap?:number,edge?:number}} opts
- *   `gap` — space between trigger and panel; `edge` — minimum viewport margin.
+ * @param {{top:number,bottom:number,right:number,left?:number}} trigger viewport rect of the button
+ * @param {{panelW:number,panelH:number,viewportW:number,viewportH:number,gap?:number,edge?:number,align?:'end'|'start'}} opts
+ *   `gap` — space between trigger and panel; `edge` — minimum viewport margin;
+ *   `align` — 'end' (default) lines the panel's right edge up with the trigger's, 'start'
+ *   its left edge with the trigger's (needs `trigger.left`).
  * @returns {{top:number,left:number,flipped:boolean}}
  */
-export function placeMenu(trigger, { panelW, panelH, viewportW, viewportH, gap = 4, edge = 8 }) {
-  // Right-aligned to the trigger, then clamped to the viewport. If the viewport is
+export function placeMenu(trigger, { panelW, panelH, viewportW, viewportH, gap = 4, edge = 8, align = 'end' }) {
+  // Aligned to the trigger, then clamped to the viewport. If the viewport is
   // narrower than the panel the left margin wins and the panel overflows right —
   // deliberate: a menu pinned to the left edge is at least readable from its start.
-  const left = Math.max(edge, Math.min(trigger.right - panelW, viewportW - panelW - edge));
+  const anchorLeft = align === 'start' && Number.isFinite(trigger.left) ? trigger.left : trigger.right - panelW;
+  const left = Math.max(edge, Math.min(anchorLeft, viewportW - panelW - edge));
   const below = trigger.bottom + gap;
   // Flip up only if the panel actually FITS up there. With no room either way it
   // stays below and overflows, rather than covering the trigger it belongs to.

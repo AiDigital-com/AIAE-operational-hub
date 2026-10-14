@@ -25,7 +25,8 @@ export function useAddableLineItems(slug: string | undefined, enabled: boolean) 
 export function useSavePacingPlan(slug: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (lineItems: PacingLineItemPlanUpdateV1[]) => savePacingPlan(slug as string, lineItems),
+    mutationFn: ({ lineItems, rate, rateLocked }: { lineItems: PacingLineItemPlanUpdateV1[]; rate?: number; rateLocked?: boolean }) =>
+      savePacingPlan(slug as string, lineItems, rate === undefined ? undefined : { rate, rateLocked: !!rateLocked }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing"] });
     },

@@ -12,6 +12,7 @@ import {
   getPacingThirdPartyData,
   getPacingThirdPartyStatus,
   savePacingDisplay,
+  savePacingPeriodScope,
   triggerPacingRefresh,
 } from "./api";
 import { StatusControl } from "../pacing-plan/status-control";
@@ -31,9 +32,12 @@ import {
   PacingStateProvider,
   bindDimensionHandoff,
   setDimensionHandoff,
+  periodsOf,
   setPacingApi,
   usePacingState,
 } from "./spa/store.js";
+import { resolvePeriodKey } from "./spa/periods.js";
+import { PeriodScopeBanner, type ScopePeriod } from "./filters/period-scope";
 import { SEED_ID_BY_KEY } from "./spa/std-catalog.js";
 import { WIDGET_CAP, copyWidget, setTileEnabled, tileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
 import { resolveWidget } from "./pacing-dashboard-library";
@@ -110,6 +114,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   /** Which widget the drawer should open its editor on, set by a tile's "Edit…". Cleared by the
    *  drawer once consumed, so a later open lands on the list rather than on the last edited tile. */
   const [editWidgetId, setEditWidgetId] = useState<string | null>(null);
+  /** The Line Items tile's ⋯ → Customize…: a new number per request, cleared by the drawer once it
+   *  has opened that block's settings card. */
+  const [customizeLineItems, setCustomizeLineItems] = useState<number | null>(null);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
   // rather than re-arming itself on the next status fetch.
@@ -138,18 +145,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const urlFilters = useUrlFilters();
   const { filters, setFilters } = urlFilters;
 
-  // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
-  // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
-  // no URL filter ever reaches it, so it used to sit still while every other figure on the page
-  // moved under a filter. `buildPacingAlerts` (`./engine/build-alerts.ts`) is the browser port of
-  // the retired SPA's own `computeDashboardAlerts`, sharing `buildPacingMetrics`'s engine and its
-  // `effLIs` Scope split - a Scope filter changes the alert set, a Lens filter does not, same as the
-  // KPI strip below. Falls back to `row.alerts` while the dashboard query has not resolved yet (no
-  // engine input to compute from), so the block does not flash empty then fill in on every open.
-  const alerts = useMemo(
-    () => (data ? buildPacingAlerts(data, filters) : (row.alerts ?? [])),
-    [data, filters, row.alerts]
-  );
 
   // Computed HERE now, not read off `data.metrics` (Operational Hub migration, filters): Pacing's
   // engine (shared/dashboard-metrics.js) moved into the browser byte-identical
@@ -330,6 +325,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
         setSettingsOpen(true);
         setEditWidgetId(widgetId);
       },
+      onCustomizeLineItems: () => {
+        setSettingsTab("widgets");
+        setSettingsOpen(true);
+        setCustomizeLineItems((n) => (n ?? 0) + 1);
+      },
       onDuplicate: (widgetId: string) => {
         const list = widgetsOf();
         const widget = list.find((w) => w.id === widgetId);
@@ -348,13 +348,96 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     };
   }, [slug, display, data, queryClient, boardSaving]);
 
+  // Period scope (the reference's `toggleScopeMode` / `selectPeriod`). The saved setting comes with
+  // the payload; this is the optimistic copy while a change is being saved, so the switch answers at
+  // once. Dropped whenever a payload arrives - the refetch after the save carries the saved value.
+  const [periodScopeOverride, setPeriodScopeOverride] =
+    useState<{ periodScope: boolean; periodScopeKey: string | null } | null>(null);
+  useEffect(() => setPeriodScopeOverride(null), [data]);
+
   const pacingState = usePacingState({
     data,
     urlFilters,
     actions: widgetActions,
     journalHighlight,
     dimensionHandoff,
+    periodScopeOverride,
   });
+
+  const scopePeriods = periodsOf(pacingState.liPlan) as ScopePeriod[];
+  const scoped = !!pacingState.splitScopedMode;
+  const selectedPeriodKey: string | null = pacingState.selectedPeriodKey ?? null;
+
+  // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
+  // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
+  // no URL filter ever reaches it, so it used to sit still while every other figure on the page
+  // moved under a filter. `buildPacingAlerts` (`./engine/build-alerts.ts`) is the browser port of
+  // the retired SPA's own `computeDashboardAlerts`, sharing `buildPacingMetrics`'s engine and its
+  // `effLIs` Scope split - a Scope filter changes the alert set, a Lens filter does not, same as the
+  // KPI strip below. Under period scope they judge the selected period, as the reference does. Falls back to `row.alerts` while the dashboard query has not resolved yet (no
+  // engine input to compute from), so the block does not flash empty then fill in on every open.
+  const alerts = useMemo(
+    () => (data
+      ? buildPacingAlerts(data, filters, undefined, { scoped, periodKey: selectedPeriodKey })
+      : (row.alerts ?? [])),
+    [data, filters, row.alerts, scoped, selectedPeriodKey]
+  );
+
+  /** Saves a period-scope change and shows it at once; a failed save puts the stored state back. */
+  const savePeriodScope = useCallback(
+    (periodScope: boolean, periodScopeKey: string | null) => {
+      if (!slug) return;
+      setPeriodScopeOverride({ periodScope, periodScopeKey });
+      savePacingPeriodScope(slug, periodScope, periodScopeKey)
+        .then(() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] }))
+        .catch((error) => {
+          setPeriodScopeOverride(null);
+          setRefreshError(formatError(error));
+        });
+    },
+    [slug, queryClient]
+  );
+
+  // A custom range likely names days outside the new period, so turning scope on or picking another
+  // period drops it, as the reference does.
+  const dropCustomRange = useCallback(() => {
+    if (filters.range === "custom") setFilters({ range: "all", customRange: { from: "", to: "" } });
+  }, [filters.range, setFilters]);
+
+  const handleScopeToggle = useCallback(
+    (mode: "full" | "period") => {
+      const wantScoped = mode === "period";
+      if (wantScoped === scoped) return;
+      if (!wantScoped) {
+        savePeriodScope(false, null);
+        return;
+      }
+      dropCustomRange();
+      // Turning it on lands on the CURRENT period (no saved key), which is then saved as the
+      // pacing's period, so the Overview row and the Slack summary follow it.
+      const current = resolvePeriodKey(pacingState.liPlan, pacingState.facts?.asOf || null, null);
+      savePeriodScope(true, current.key ?? null);
+    },
+    [scoped, savePeriodScope, dropCustomRange, pacingState.liPlan, pacingState.facts]
+  );
+
+  const handlePeriodSelect = useCallback(
+    (key: string) => {
+      if (!scoped || !key) return;
+      dropCustomRange();
+      savePeriodScope(true, key);
+    },
+    [scoped, savePeriodScope, dropCustomRange]
+  );
+
+  // The Custom calendar's bounds follow the period while scoped - its start, and its end capped at
+  // the data edge (`FilterBar.jsx`'s effMinDate / effMaxDate).
+  const asOfDay: string | undefined = metrics?.asOf ?? undefined;
+  const [periodFs, periodFe] = scoped && selectedPeriodKey ? selectedPeriodKey.split("|") : [undefined, undefined];
+  const calendarMin = periodFs || data?.campaign?.startDate;
+  const calendarMax = periodFe
+    ? (asOfDay && asOfDay < periodFe ? asOfDay : periodFe)
+    : (asOfDay ?? data?.campaign?.endDate);
 
   // The one-shot auto-add (widgets/auto-add.ts), after every load of the payload - the reference
   // runs it once per fetch, and the drawer's save of a CM360 source refetches, which is how the
@@ -456,20 +539,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           <StatusControl pacingId={row.id} status={row.status} />
           <button
             type="button"
-            className="button button--ghost button--sm"
-            onClick={() => {
-              setSettingsTab(null);
-              setSettingsOpen(true);
-            }}
-            aria-haspopup="dialog"
-            aria-expanded={settingsOpen}
-            title="Pacing settings"
-          >
-            <SettingsIcon />
-            Settings
-          </button>
-          <button
-            type="button"
             className="button button--ghost button--sm pdash__refresh"
             onClick={handleRefresh}
             disabled={isRefreshing || inCooldown}
@@ -522,8 +591,43 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           setFilters={setFilters}
           liPlan={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
           factsDaily={data.factsDaily}
-          minDate={data.campaign?.startDate}
-          maxDate={metrics?.asOf ?? data.campaign?.endDate}
+          minDate={calendarMin}
+          maxDate={calendarMax}
+          periodScope={{
+            visible: scopePeriods.length > 0 || scoped,
+            scoped,
+            periods: scopePeriods,
+            selectedKey: selectedPeriodKey,
+            onToggle: handleScopeToggle,
+            onSelect: handlePeriodSelect,
+          }}
+          actions={
+            // The dashboard's settings, at the right end of the filter row as in the reference
+            // (it used to sit in the header beside Refresh data).
+            <button
+              type="button"
+              className="fb-icon-btn"
+              onClick={() => {
+                setSettingsTab(null);
+                setSettingsOpen(true);
+              }}
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+              aria-label="Settings"
+              title="Pacing settings"
+            >
+              <SettingsIcon />
+            </button>
+          }
+        />
+      )}
+
+      {dashboardQuery.isSuccess && data && (
+        <PeriodScopeBanner
+          scoped={scoped}
+          state={pacingState.periodScopeState ?? null}
+          periods={scopePeriods}
+          selectedKey={selectedPeriodKey}
         />
       )}
 
@@ -575,6 +679,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onOpenBreakdown={openBreakdownFromMapping}
             slug={slug ?? ""}
             currency={data.campaign?.currency ?? "USD"}
+            rate={data.campaign?.rate ?? 1}
+            rateLocked={data.campaign?.rateLocked ?? false}
+            nsRate={data.campaign?.nsRate ?? null}
+            availableSplits={data.availableSplits as Record<string, Record<string, string[]>> | null | undefined}
+            splitFacts={pacingState.facts}
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
             conversions={data.conversions as Array<Record<string, unknown>> | undefined}
             data={data.data as PacingDataShape | undefined}
@@ -598,6 +707,8 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             initialTab={settingsTab}
             initialWidgetId={editWidgetId}
             onWidgetEditorOpened={() => setEditWidgetId(null)}
+            customizeLineItemsRequest={customizeLineItems}
+            onCustomizeLineItemsOpened={() => setCustomizeLineItems(null)}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 

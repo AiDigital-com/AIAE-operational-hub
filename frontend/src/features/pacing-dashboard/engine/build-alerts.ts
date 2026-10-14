@@ -11,12 +11,17 @@
  * `scalars`) - so "a Scope filter (channels/labels/selection/range) changes the alert set, a Lens
  * filter (platforms/brk/brkf) does not" holds here for the exact same reason it holds there.
  *
+ * Scope, as the reference's store selectors resolve it for `AlertsBlock`:
+ *   - Period Scope (`splitScopedMode`/`splitScopedPlans`/`selectedPeriodKey`) - the `period`
+ *     argument below. Container dim scope (spec 2026-08-14) rides on it: the campaign reading is
+ *     taken over `buildPeriodScopedDaily`, as the reference's `selectPeriodDaily` does.
+ *   - Dim-split Scope - a `brkf` chip that matches a declared dim split. The reference's
+ *     `selectEffLIs` cuts the line items to the split's, and `makeFullFlightMetricsSelector` reads
+ *     the campaign over the split's filtered delivery and its own virtual plans. Both resolve it
+ *     through `resolvePlanningScope`; this file calls the same moved pair (`spa/selectors.js`). The
+ *     per-line-item metrics and the day rows do NOT take it, in the reference either.
+ *
  * NOT ported from `computeDashboardAlerts`:
- *   - `splitScopedMode`/`splitScopedPlans`/`selectedPeriodKey` - the retired SPA's dim-scope engine
- *     (`dim-scope.js`), which this Hub build has never vendored (see `../filters/spotlight-core.ts`'s
- *     own docblock on why porting it is a separate task). Every call below passes `false`/`null` for
- *     these, which is exactly what the reference itself does whenever no dim-split Scope is active -
- *     the common case, and the ONLY case this Hub build can represent today.
  *   - the conversion-only-day skip inside the reference's own `alertsDailyInput` (`cvOnlyDaysOf`,
  *     `primary-cv.js`) - a Primary Conversions overlay that mutates `liDaily` maps elsewhere in the
  *     retired SPA's store. This Hub's `factsDaily` never goes through that overlay, so there is no
@@ -48,6 +53,22 @@ import { computeEffLIs } from "../filters/eff-lis";
 import type { DashboardFilters } from "../filters/types";
 import type { PacingAlertsConfigV1, PacingDashboardV1 } from "../types";
 import type { PacingAlertV1 } from "../../pacing-overview/types";
+// Moved JS from Pacing's SPA - typed by inference under `allowJs` (see spa/SOURCE.md). The same
+// period-scoped delivery the widgets read, so alerts and widgets judge one slice.
+import { buildPeriodScopedDaily } from "../spa/container-scope.js";
+import { makeDimScopeResolver, makeScopeFiltersSelector } from "../spa/selectors.js";
+
+// The reference's `resolvePlanningScope` (`spa/selectors.js`), as a private pair of instances - the
+// way `spa/report/useWidgetData.js` holds its own - so computing the alerts never evicts the memo
+// slots the board's widgets read through the shared ones.
+const scopeReaders = { scope: makeScopeFiltersSelector(), dim: makeDimScopeResolver() };
+
+/** Period scope as the page resolved it (`spa/store.js`): on, and the period key it landed on -
+ *  null under `no_period`, which keeps the full flight, as the reference does. */
+export interface AlertsPeriodScope {
+  scoped: boolean;
+  periodKey: string | null;
+}
 
 /** The 13 configurable detectors, camelCase (the Hub's `PacingAlertsConfigV1`) bridged to the
  *  snake_case keys/fields `AlertsCore.computeAlerts`'s `cfg` argument reads (`shared/alerts-
@@ -84,6 +105,14 @@ function liLabel(plan: NormalizedLiPlan | undefined): string | undefined {
   return plan?.desc || plan?.ch || undefined;
 }
 
+/** `alertsDailyInput`'s period window (`AlertsBlock.jsx`): only the selected period's days. */
+function windowToPeriod<T>(days: Record<string, T>, periodKey: string): Record<string, T> {
+  const [fs, fe] = periodKey.split("|");
+  const kept: Record<string, T> = {};
+  for (const day of Object.keys(days)) if (day >= fs && day <= fe) kept[day] = days[day];
+  return kept;
+}
+
 /** `computeDashboardAlerts`'s `scopeObjectByIds`, ported verbatim. */
 function scopeObjectByIds<T, R>(obj: Record<string, T> | undefined, ids: string[], mapValue: (v: T, id: string) => R): Record<string, R> {
   const out: Record<string, R> = {};
@@ -105,7 +134,8 @@ export function buildPacingAlerts(
   // Wall-clock, exactly the value `AlertsBlock.jsx` passes its own `computeDashboardAlerts`
   // (`today: new Date().toISOString().slice(0, 10)`). A parameter (as in the reference) so tests
   // can pin a date; production callers take the default.
-  today: string = new Date().toISOString().slice(0, 10)
+  today: string = new Date().toISOString().slice(0, 10),
+  period: AlertsPeriodScope = { scoped: false, periodKey: null }
 ): PacingAlertV1[] {
   if (!data || !data.campaign || !data.planByLineItem) return [];
   try {
@@ -116,8 +146,38 @@ export function buildPacingAlerts(
     const { LP, LD: LD0, asOf } = engine.normalize(raw);
     if (!asOf) return [];
 
-    const effLIs = computeEffLIs(LP, filters);
+    // Dim-split Scope (the reference's `resolvePlanningScope`, over the state shape its store
+    // selectors read): inactive - the common case - unless a `brkf` chip names a declared split.
+    const periodKeyForScope = period.scoped ? period.periodKey : null;
+    const scopeState = {
+      facts: { factsDaily: raw.factsDaily, liDaily: LD0, asOf, rate: raw.campaign.rate },
+      liPlan: LP,
+      splitScopedMode: period.scoped,
+      selectedPeriodKey: periodKeyForScope,
+      campaign: { rate: raw.campaign.rate },
+    };
+    const dimScope = scopeReaders.dim(scopeState, scopeReaders.scope(scopeState, filters));
+
+    // `selectEffLIs`: the line-item filters, cut to the split's line items when one is active.
+    let effLIs = computeEffLIs(LP, filters);
+    if (dimScope.active) {
+      const allow = new Set<string>(dimScope.eligibleIds);
+      effLIs = effLIs.filter((id) => allow.has(id));
+    }
     if (!effLIs.length) return [];
+
+    // Period scope (the reference's AlertsBlock + makeFullFlightMetricsSelector): the line items'
+    // plans become the period's virtual plans, the campaign reading is taken over the period's
+    // delivery, and the volume detectors see only the period's days. No key (`no_period`, or scope
+    // off) keeps the full flight.
+    const periodKey = periodKeyForScope;
+    const scopedPlans: Record<string, unknown> | null = periodKey
+      ? Object.fromEntries(Object.keys(LP).map((id) => [id, PacingCore.buildScopedPlanForPeriodKey(LP[id], periodKey)]))
+      : null;
+    const periodDaily: LiDaily = periodKey && !dimScope.active
+      ? (buildPeriodScopedDaily({ liDaily: LD0, factsDaily: raw.factsDaily, cvCtx: null }, LP,
+        Number(data.campaign.rate) || 1, periodKey) as LiDaily)
+      : LD0;
 
     // Campaign-level reading for the state's `pacing.cost_budget_total`/`plan_impressions_total`:
     // the full-flight `campM(LD0, LP, asOf, effLIs, null)`, computed HERE on purpose - alerts are
@@ -125,7 +185,12 @@ export function buildPacingAlerts(
     // SPA's `computeDashboardAlerts` takes `flCM` explicitly in its own signature (`AlertsBlock.
     // jsx`). `metrics.campaign` is the RANGED reading since 2026-09-26 and must not feed this.
     // (LD0 - unfiltered by Lens, matching every other campaign-level reading.)
-    const flCM = engine.campM(LD0, LP, asOf, effLIs, null);
+    //
+    // Under a dim-split Scope, `makeFullFlightMetricsSelector`'s other branch: the split's filtered
+    // delivery and its virtual plans (which already carry the period when one is selected).
+    const flCM = dimScope.active
+      ? engine.campM(dimScope.facts.liDaily as LiDaily, LP, asOf, effLIs, null, true, dimScope.plans as Record<string, unknown>)
+      : engine.campM(periodDaily, LP, asOf, effLIs, null, period.scoped, scopedPlans);
 
     // `Record<string, unknown>`, not `LiPlanMap`: `AlertsCore.buildState` (untyped, like every
     // vendored engine call below `Record<string, unknown>`) reads a `.name` field per line item that
@@ -133,14 +198,14 @@ export function buildPacingAlerts(
     const scopedLiPlan: Record<string, unknown> = scopeObjectByIds(LP, effLIs, (plan) => ({ ...plan, name: liLabel(plan) }));
     // UNCLIPPED, matching the reference's `alertsDailyInput` (`AlertsBlock.jsx`) exactly: it scopes
     // by `effLIs`, drops conversion-only days (not applicable here - see this file's docblock), and
-    // windows by the selected period ONLY when Period Scope is on - which this Hub build has no way
-    // to switch on, so there is nothing to window. No `rd < plan.fs || rd > plan.fe` clip: that
+    // windows by the selected period ONLY when Period Scope is on (`windowToPeriod`). No
+    // `rd < plan.fs || rd > plan.fe` clip: that
     // predicate is `health.mjs`'s (the Overview list's), revoked here 2026-09-26 (docblock above).
-    const scopedLiDaily: LiDaily = scopeObjectByIds(LD0, effLIs, (dd) => dd);
+    const scopedLiDaily: LiDaily = scopeObjectByIds(LD0, effLIs, (dd) => (periodKey ? windowToPeriod(dd, periodKey) : dd));
 
     const liMetrics: Record<string, unknown> = {};
     for (const id of effLIs) {
-      const m = engine.liM(id, LD0, LP, asOf, null, false, null);
+      const m = engine.liM(id, LD0, LP, asOf, null, period.scoped, scopedPlans);
       if (!m) continue;
       // `mT` is NOT one of `liM`'s own fields - verified by reading it (`engine/vendor/
       // dashboard-metrics.js`'s `function liM`: `{...t, ...pr, mA, pI, au, ctr, vcr, cvr, cpm,

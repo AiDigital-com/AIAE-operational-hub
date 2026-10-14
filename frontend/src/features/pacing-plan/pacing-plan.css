@@ -260,7 +260,9 @@
    remove button onto a line of its own. */
 .pplan__date-child .pplan__input--name {
   flex: 1 1 120px;
-  min-width: 100px;
+  /* 72px, not 100px: the units column carries the fill-from-budget button's slot now, and the
+     remove button must stay on the row. */
+  min-width: 72px;
 }
 .pplan__date-child .pplan__input--num {
   width: 92px;
@@ -422,19 +424,37 @@
   background: var(--surface);
 }
 
-.pplan__input--dim-key { width: 112px; flex: none; }
-.pplan__input--dim-mode { width: 74px; flex: none; }
-.pplan__input--dim-value { flex: 1 1 150px; min-width: 150px; }
+.pplan__input--dim-mode { width: 60px; flex: none; }
+/* The split's dimension and value - fixed once added (the reference's `.sp-dim-identity`). The one
+   part with give, so the number columns keep their widths. */
+.pplan__dim-identity {
+  flex: 1 1 140px;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+.pplan__dim-key {
+  font-size: 11px;
+  color: var(--muted);
+}
+.pplan__dim-value {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pplan__dim-child .pplan__input--num { width: 92px; flex: none; }
 /* Same width as the date split's margin column, and for the same reason: no labels here, so the
    placeholder is the field's name and "Margin %" clips at the numeric columns' 92px. */
 .pplan__dim-child .pplan__input--dim-margin { width: 104px; flex: none; }
 
-/* The resolved figure appears only for a percent target. Fixed width and a reserved
-   slot so switching units ⇄ % does not shuffle the margin field and the remove button
-   sideways under the cursor. */
+/* The resolved units, always shown (the reference's Resolved column). Fixed width, so a longer
+   number does not shuffle the chip and the remove button sideways under the cursor. */
 .pplan__dim-resolved {
-  width: 78px;
+  width: 84px;
   flex: none;
   text-align: right;
   font-size: 12px;
@@ -601,4 +621,405 @@
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* ── Units with a "fill from budget" button, and money with its USD line ──
+   Ported from the reference's `.sp-inp-affix` / `.sp-unit-fill` and `.mf-wrap` / `.mf-usd`
+   (`plan-number-inputs.tsx`). */
+.pplan-units {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.pplan-units > .pplan__input {
+  flex: 1;
+  min-width: 0;
+}
+.pplan-units__fill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pplan-units__fill:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.pplan-money {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pplan-money__usd {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--muted);
+  white-space: nowrap;
+  text-align: right;
+}
+/* A non-USD campaign with no USD line right now keeps the line's box, so the field does not change
+   height when the rate starts or stops converting. */
+.pplan-money--reserve::after {
+  content: "";
+  display: block;
+  height: 1.2em;
+  font-size: 11px;
+}
+
+/* In the label-less split rows every control is centred on one line. A money field's USD line would
+   lift its input above that line, so the same height is reserved above it too (the reference's
+   `.cp-tbl .mf-wrap.has-usd::before`). Both wrappers are fixed columns, like the inputs they hold. */
+:is(.pplan__date-child, .pplan__dim-child) :is(.pplan-units, .pplan-money) {
+  flex: none;
+}
+:is(.pplan__date-child, .pplan__dim-child) :is(.pplan-money--usd, .pplan-money--reserve)::before {
+  content: "";
+  display: block;
+  height: 1.2em;
+  font-size: 11px;
+}
+
+/* ── Container editor: the reference's split tools (Distribute, dim split menu, Summary chip),
+   value groups and the Fit LI banner. Tints and badges only - no side stripes. ── */
+.pplan__split-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pplan__dist-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pplan__dist-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pplan__add-btn--empty {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 12px;
+}
+.pplan__add-hint {
+  font-weight: 500;
+  color: var(--muted);
+}
+.pplan__input--over {
+  border-color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 10%, var(--surface));
+}
+.pplan__hint--info {
+  background: var(--n-100);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+}
+.pplan__hint--bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+}
+.pplan__container-scope {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border-radius: var(--pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.pplan__vg-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pplan__notify-chip {
+  flex: none;
+  width: 84px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pplan__notify-chip--on {
+  border-color: transparent;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+/* The two split menus, portalled to <body> and placed from their button (fixed). */
+.pplan-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop, 0 14px 30px rgba(15, 23, 42, 0.14));
+}
+.pplan-menu__hd {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pplan-menu__item {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pplan-menu__item:hover {
+  background: var(--n-100);
+}
+.pplan-menu__item--action {
+  color: var(--primary);
+  font-weight: 600;
+}
+.pplan-menu__ft {
+  position: sticky;
+  bottom: -4px;
+  margin-top: 4px;
+  padding-bottom: 4px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+/* Three controls on one line, one height: the global 42px input floor is overridden for all three. */
+.pplan-menu__form {
+  display: flex;
+  gap: 6px;
+  padding: 4px 12px 6px;
+}
+.pplan-menu__form > select,
+.pplan-menu__form > input,
+.pplan-menu__form > button {
+  height: 32px;
+  min-height: 32px;
+  padding-block: 0;
+}
+.pplan-menu__form > select {
+  flex: none;
+  width: 110px;
+}
+.pplan-menu__form > input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Value groups: the chips and the editor (the reference's `.sp-vg-*`). */
+.pplan-vg__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pplan-vg__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pplan-vg__chip:hover,
+.pplan-vg__chip[aria-expanded="true"] {
+  background: var(--n-100);
+}
+.pplan-vg__chip-dim {
+  color: var(--muted);
+}
+.pplan-vg__chip-name {
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pplan-vg__chip-n {
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+.pplan-vg__chip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--pill);
+  cursor: pointer;
+}
+.pplan-vg__chip-x:hover:not(:disabled) {
+  background: var(--n-100);
+  color: var(--bad);
+}
+.pplan-vg__chip-x:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.pplan-vg__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pplan-vg__editor .pplan__field {
+  min-width: 0;
+}
+.pplan-vg__box {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pplan-vg__search {
+  position: sticky;
+  top: 0;
+  min-height: 34px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  font-size: 12px;
+}
+.pplan-vg__opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pplan-vg__opt[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+.pplan-vg__opt-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pplan-vg__opt-why {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pplan-vg__empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pplan-vg__addrow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pplan-vg__addrow > .pplan__input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  padding-block: 0;
+}
+
+/* Fit LI to containers: the banner's text takes the slack, the button keeps its width. */
+.pplan__fit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pplan__fit-text {
+  flex: 1;
+  min-width: 0;
+}
+.pplan__fit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.pplan__fit-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pplan__fit-table td {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pplan__fit-table .pplan__fit-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pplan__fit-to {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* The campaign exchange rate (the reference's RateControl), above the line items. */
+.pplan__rate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.pplan__rate-currency {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.pplan__rate-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

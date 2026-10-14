@@ -121,7 +121,7 @@ the settings drawer, the journal.
   below it: on a Complete pacing it printed "No data" and a dash while the hero widget computed
   92.90% margin from the same facts, and its CPM was the cost-side one next to Finance's client-side
   CPM, neither labelled. `pacing-dashboard-health.ts` went with it. Do not reintroduce it.
-- **The sections cutover is not adopted**, on either side. Pacing's `shared/dash-blocks.js` and
-  `std-entries.js` are deliberately pre-cutover, because adopting it needs a data migration on
-  `access.pacings` and there is no fresh production dump to rehearse on. The full reasoning is in
-  `AIAE-paicing/CLAUDE.md`, "Twelve SPA suites are red on purpose".
+- **The sections cutover is adopted (2026-10-13)**, on both sides, without the reference's data
+  migration (owner decision: the Hub is dev-only, older pacings are recreated). Breakdown, Daily
+  Performance, Targets and Delivery vs CM360 are Standard widgets on the board. The full story is in
+  `AIAE-paicing/CLAUDE.md`, "The sections cutover is adopted".

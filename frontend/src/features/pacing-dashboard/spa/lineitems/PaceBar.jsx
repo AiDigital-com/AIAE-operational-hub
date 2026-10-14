@@ -22,11 +22,11 @@ function PaceBar({ value, status }) {
   // N/A states — show dash with empty track
   if (status === 'not_started' || status === 'no_data') {
     return (
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-13 font-semibold min-w-[52px] whitespace-nowrap text-[var(--text-muted)]">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="font-mono text-13 font-semibold min-w-[52px] whitespace-nowrap flex-shrink-0 text-[var(--text-muted)]">
           —
         </span>
-        <div className="w-14 h-[5px] bg-[var(--border-soft)] rounded-full flex-shrink-0 relative">
+        <div className="h-[5px] bg-[var(--border-soft)] rounded-full relative flex-[0_1_56px] min-w-[20px]">
           <div className="absolute left-1/2 w-px h-full bg-[var(--border-hover)]" />
         </div>
       </div>
@@ -50,14 +50,13 @@ function PaceBar({ value, status }) {
   const bl = value >= 0 ? 50 : 50 - bw;
 
   return (
-    <div className="flex items-center gap-2">
-      <span className={`font-mono text-13 font-semibold min-w-[52px] whitespace-nowrap ${textCls}`}>
+    <div className="flex items-center gap-2 min-w-0">
+      <span className={`font-mono text-13 font-semibold min-w-[52px] whitespace-nowrap flex-shrink-0 ${textCls}`}>
         {fPP(value)}
       </span>
-      <div
-        className="w-14 h-[5px] bg-[var(--border-soft)] rounded-full flex-shrink-0 relative"
-        style={{ width: '56px' }}
-      >
+      {/* The track gives way before the value does (Line Items settings 2026-10-01: eight
+          columns at 1440, or two per line on a phone, leave a cell narrower than 56 + 8 + 52). */}
+      <div className="h-[5px] bg-[var(--border-soft)] rounded-full relative flex-[0_1_56px] min-w-[20px]">
         {/* Center tick */}
         <div className="absolute left-1/2 w-px h-full bg-[var(--border-hover)]" />
         {/* Fill bar */}

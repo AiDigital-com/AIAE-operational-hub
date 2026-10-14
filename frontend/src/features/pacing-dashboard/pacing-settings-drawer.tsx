@@ -4,6 +4,7 @@ import { CloseIcon } from "../../shared/ui/icons/icons";
 import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
 import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
+import type { SplitFacts } from "../pacing-plan/container-editor";
 import { PacingAlertsSection } from "./alerts-panel";
 import { topNCompositeFor } from "./widgets/top-n-widget.js";
 import { probeErrorText } from "./spa/sheet-source-norm.js";
@@ -49,6 +50,18 @@ export interface PacingSettingsDrawerProps {
   onClose: () => void;
   slug: string;
   currency: string;
+  /** The campaign rate (native → USD), 1 on a USD campaign - the plan editor converts budgets with it. */
+  rate: number;
+  /** The rate was set by hand (NetSuite refreshes leave it alone). */
+  rateLocked?: boolean;
+  /** The NetSuite rate the plan's Reset to NS restores. */
+  nsRate?: number | null;
+  /** The delivered values per dimension per line item, as fetched - the dim split menu and the
+   *  value group editor list them. */
+  availableSplits?: Record<string, Record<string, string[]>> | null;
+  /** `facts.liDaily` / `facts.liSplitDaily` from the page's state - a container's "not covered by
+   *  the splits" warning reads them. */
+  splitFacts?: SplitFacts | null;
   planByLineItem: Record<string, PacingLineItemPlanV1>;
   /** The pacing's conversion-mart rows, straight off the dashboard payload. The plan editor needs
    *  them to offer a line item the actions it actually has - there is no other list of them. */
@@ -97,6 +110,11 @@ export interface PacingSettingsDrawerProps {
   onOpenBreakdown?: (source: PacingSheetDimSource, dim: PacingSheetDimColumn) => void;
   /** Called once that request has been consumed, so a later open lands on the list instead. */
   onWidgetEditorOpened?: () => void;
+  /** The Line Items tile's ⋯ → Customize… (Pacing `85d353c`): open that block's settings card on the
+   *  widgets tab. A new value per request. */
+  customizeLineItemsRequest?: number | null;
+  /** Called once that request has been consumed. */
+  onCustomizeLineItemsOpened?: () => void;
   /** Re-read the dashboard after a save that landed. */
   onSaved: () => void;
 }
@@ -116,6 +134,11 @@ export function PacingSettingsDrawer({
   onClose,
   slug,
   currency,
+  rate,
+  rateLocked,
+  nsRate,
+  availableSplits,
+  splitFacts,
   planByLineItem,
   dimSourcesLoaded,
   conversions,
@@ -140,6 +163,8 @@ export function PacingSettingsDrawer({
   initialWidgetId = null,
   onOpenBreakdown,
   onWidgetEditorOpened,
+  customizeLineItemsRequest = null,
+  onCustomizeLineItemsOpened,
   onSaved,
 }: PacingSettingsDrawerProps) {
   const [tab, setTab] = useState<SettingsTabId>("plan");
@@ -535,6 +560,12 @@ export function PacingSettingsDrawer({
             ref={plan}
             slug={slug}
             currency={currency}
+            rate={rate}
+            rateLocked={rateLocked}
+            nsRate={nsRate}
+            rawSplits={availableSplits}
+            splitFacts={splitFacts}
+            widgets={display?.widgets as unknown[] | undefined}
             netFeatureOn={liveSwitches.netEnabled}
             coefEnabled={liveSwitches.coefEnabled}
             primaryCvEnabled={liveSwitches.primaryCvEnabled}
@@ -588,6 +619,8 @@ export function PacingSettingsDrawer({
             seedKey={seedKey}
             initialWidgetId={pendingWidgetId ?? initialWidgetId}
             onWidgetEditorOpened={() => { setPendingWidgetId(null); onWidgetEditorOpened?.(); }}
+            customizeLineItemsRequest={customizeLineItemsRequest}
+            onCustomizeLineItemsOpened={onCustomizeLineItemsOpened}
             onDirtyChange={markWidgets}
           />
         </div>

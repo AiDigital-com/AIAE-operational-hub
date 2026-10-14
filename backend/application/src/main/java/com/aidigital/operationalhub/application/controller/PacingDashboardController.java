@@ -14,6 +14,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDis
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPeriodScopeUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
@@ -171,6 +172,13 @@ public class PacingDashboardController implements PacingDashboardApi {
 	}
 
 	@Override
+	public ResponseEntity<Void> updatePacingPeriodScope(String slug, PacingPeriodScopeUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		pacingClient.savePeriodScope(assertion, slug, body.getPeriodScope(), body.getPeriodScopeKey());
+		return ResponseEntity.noContent().build();
+	}
+
+	@Override
 	public ResponseEntity<PacingThirdPartyRefetchV1> refetchPacingThirdParty(String slug) {
 		HubAssertion assertion = signCurrentUser();
 		PacingThirdPartyRefetchOutcome outcome = pacingClient.refetchThirdParty(assertion, slug);
@@ -291,7 +299,8 @@ public class PacingDashboardController implements PacingDashboardApi {
 	@Override
 	public ResponseEntity<PacingPlanUpdateResultV1> updatePacingPlan(String slug, PacingPlanUpdateV1 body) {
 		HubAssertion assertion = signCurrentUser();
-		pacingClient.savePlan(assertion, slug, planMapper.toPlanUpdateLineItems(body));
+		pacingClient.savePlan(
+				assertion, slug, planMapper.toPlanUpdateLineItems(body), planMapper.toPlanRateUpdate(body));
 		return ResponseEntity.ok(new PacingPlanUpdateResultV1().saved(true));
 	}
 

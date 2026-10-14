@@ -99,7 +99,10 @@ interface DashboardMetricsEngine {
     liPlan: LiPlanMap,
     asOf: string | null,
     effLIs: string[],
-    range: DateRange | null
+    range: DateRange | null,
+    /** Period scope: on, with the period's virtual plans by line-item id (`build-alerts.ts`). */
+    splitScopedMode?: boolean,
+    splitScopedPlans?: unknown
   ): Record<string, unknown>;
   campaignScalars(
     liPlan: LiPlanMap,
@@ -242,6 +245,9 @@ interface DashboardMetricsGlueModule {
 interface PacingCoreModule {
   _parseUTC(s: string): Date;
   resolveDimAbs(child: Record<string, unknown>, container: Record<string, unknown>): number;
+  /** The values a container's dim splits cover, per dimension, or null when they cover nothing
+   *  (spec 2026-08-14 container dim scope): such a container counts only that delivery. */
+  containerDimFilter(container: Record<string, unknown>): Record<string, string[]> | null;
   buildDimScopeIndex(plan: NormalizedLiPlan): unknown;
   factOutsideSplits(idx: unknown, dimKey: string, row: Record<string, unknown>): boolean;
   /** Whether a line item is paused as of the given date (manual pause intervals - NOT the
@@ -249,6 +255,10 @@ interface PacingCoreModule {
    *  (the data-freshness date), matching the retired SPA's own `AlertsBlock.jsx` comment: "so the
    *  badge, the frozen expected, and the alert suppression all resolve pause as-of the same date." */
   isLiPaused(plan: NormalizedLiPlan, asOf: string | null): boolean;
+  /** A line item's virtual plan for one period (`start|end`): the date child or standalone container
+   *  that owns the period, its window and its prorated target - or null when none does. The one
+   *  implementation dash-gate's Overview, the Slack summary and the dashboard all scope with. */
+  buildScopedPlanForPeriodKey(plan: NormalizedLiPlan, periodKey: string): unknown;
   /** The coefficient-cost config check, and the ONE implementation of it: this is the same function
    *  dash-gate runs on every settings save (`db.mjs` -> 400 `bad_coef_config`), so a pre-save warning
    *  built on it cannot drift from what the server will actually refuse. Takes the WIRE line-item
@@ -266,6 +276,12 @@ interface PacingCoreModule {
 interface CurrencyModule {
   isConverted(currency: string | null, rate: number | null | undefined): boolean;
   currencyToUsd(amount: number, rate: number | null | undefined): number;
+  /** "$1,235" - whole dollars, the reference's "= $X USD" money-field line. */
+  formatUsd(amount: number): string;
+  /** USD -> the contract currency; rate null/0/1 hands the amount back unchanged. */
+  usdToNative(amount: number, rate: number | null | undefined): number;
+  /** "CA$1,000" - an amount in the campaign currency, with its symbol. */
+  formatNative(amount: number, currency: string | null | undefined): string;
   [key: string]: unknown;
 }
 

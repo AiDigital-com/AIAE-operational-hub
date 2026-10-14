@@ -30,7 +30,11 @@ function renderSheet(
   // Coefficient margin mode's pacing switch (`data.coef_enabled`). Off by default, which is what
   // every case that predates the feature is asserting against - note that off does NOT mean the
   // controls are hidden: a line item already carrying the flag shows them on its own.
-  coefEnabled = false
+  coefEnabled = false,
+  // The values the pacing has delivered (`availableSplits`) - what "+ Add dim split" lists.
+  rawSplits: Record<string, Record<string, string[]>> | null = null,
+  // The campaign's currency and exchange rate, as the drawer hands them down.
+  money: { currency: string; rate: number; rateLocked?: boolean; nsRate?: number | null } = { currency: "USD", rate: 1 }
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
@@ -41,10 +45,14 @@ function renderSheet(
         <PacingPlanSection
           ref={ref}
           slug="nike-ss26"
-          currency="USD"
+          currency={money.currency}
+          rate={money.rate}
+          rateLocked={money.rateLocked}
+          nsRate={money.nsRate}
           netFeatureOn={false}
           coefEnabled={coefEnabled}
           planByLineItem={planByLineItem}
+          rawSplits={rawSplits}
           seedKey={1}
           onDirtyChange={() => {}}
         />
@@ -222,19 +230,46 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
     await user.click(screen.getByRole("button", { name: /\+ Add container/i }));
   }
 
-  it("adds a free-text sub-breakdown with its own target and margin, and saves it (US-129/130)", async () => {
+  it("names the first container Default and the next ones Container N, as the reference does", async () => {
+    const user = userEvent.setup();
+    renderSheet({
+      "111": aPacingLineItemPlanV1({
+        lineItemId: "111",
+        plannedImpressions: 1_000_000,
+        clientBudget: 5000,
+        flightStart: "2026-09-01",
+        flightEnd: "2026-10-31",
+      }),
+    });
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /\+ Add container/i }));
+
+    // Only the first one may take the month name; a later one is numbered even in a one-month flight.
+    expect(screen.getByDisplayValue("Default")).toBeInTheDocument();
+    expect(screen.getByText("Container 2")).toBeInTheDocument();
+  });
+
+  /** "+ Add dim split" → "Type a value…": a split on a value that has not delivered yet. */
+  async function typeDimSplit(user: ReturnType<typeof userEvent.setup>, dim: string, value: string) {
+    await user.click(screen.getByRole("button", { name: /\+ Add dim split/i }));
+    await user.click(screen.getByRole("button", { name: "Type a value…" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Dimension" }), dim);
+    await user.type(screen.getByRole("textbox", { name: "Value" }), value);
+    await user.click(screen.getByRole("button", { name: "Add" }));
+  }
+
+  it("adds a dim split on a value not delivered yet, with its own target and margin, and saves it", async () => {
     const user = userEvent.setup();
     vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
     renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) });
 
     await openContainer(user);
-    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
-
-    // A value NetSuite has never heard of — that is the whole of US-130.
-    await user.selectOptions(screen.getByRole("combobox", { name: /sub-breakdown dimension/i }), "audience");
-    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown value/i }), { target: { value: "Client's own label" } });
-    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown target/i }), { target: { value: "250000" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: /sub-breakdown margin percent/i }), { target: { value: "35" } });
+    // A value NetSuite has never heard of - a campaign that starts next week can be planned today.
+    await typeDimSplit(user, "audience", "Client's own label");
+    fireEvent.change(screen.getByRole("textbox", { name: /dim split target/i }), { target: { value: "250000" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: /dim split margin percent/i }), { target: { value: "35" } });
+    await user.click(screen.getByRole("button", { name: "Summary" }));
 
     await user.click(screen.getByRole("button", { name: /Save plan/i }));
 
@@ -248,7 +283,29 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
       target_mode: "absolute",
       target_value: 250000,
       margin_percent: 35,
+      notify_in_summary: true,
     });
+  });
+
+  it("offers the delivered values, minus the ones this container already splits on", async () => {
+    const user = userEvent.setup();
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) },
+      vi.fn(),
+      false,
+      { geo: { "111": ["TX", "NY"], "222": ["CA"] } }
+    );
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /\+ Add dim split/i }));
+    // Only this line item's values; CA belongs to another one.
+    expect(screen.queryByRole("button", { name: "CA" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "TX" }));
+
+    expect(screen.getByText("TX")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /\+ Add dim split/i }));
+    expect(screen.queryByRole("button", { name: "TX" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "NY" })).toBeInTheDocument();
   });
 
   it("shows what a percent target resolves to against the parent container", async () => {
@@ -257,12 +314,12 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
 
     await openContainer(user);
     // buildDefaultContainer copies the LI's plan, so the parent carries 1,000,000.
-    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
-    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown target/i }), { target: { value: "30" } });
-    await user.selectOptions(screen.getByRole("combobox", { name: /sub-breakdown target mode/i }), "percent");
+    await typeDimSplit(user, "geo", "TX");
+    // Mode first: switching an existing number converts it (30 units would become 0 %).
+    await user.selectOptions(screen.getByRole("combobox", { name: /dim split target mode/i }), "percent");
+    fireEvent.change(screen.getByRole("textbox", { name: /dim split target/i }), { target: { value: "30" } });
 
-    // 30% of the parent's 1,000,000 — the number the manager would otherwise
-    // have to work out to know what they just planned.
+    // 30% of the parent's 1,000,000 - the number the manager would otherwise have to work out.
     expect(await screen.findByText("= 300,000")).toBeInTheDocument();
   });
 
@@ -272,41 +329,121 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
 
     await openContainer(user);
 
-    // Two axes, 60k each. Summed they would be 120k against a 100k container and
-    // warn for nothing — the exact false positive the retired SPA had to fix.
-    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
-    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
-    const values = screen.getAllByRole("textbox", { name: /sub-breakdown value/i });
-    const targets = screen.getAllByRole("textbox", { name: /sub-breakdown target/i });
-    const dims = screen.getAllByRole("combobox", { name: /sub-breakdown dimension/i });
-    await user.selectOptions(dims[0], "audience");
-    fireEvent.change(values[0], { target: { value: "Sports fans" } });
+    // Two axes, 60k each. Summed they would be 120k against a 100k container and warn for nothing.
+    await typeDimSplit(user, "audience", "Sports fans");
+    await typeDimSplit(user, "geo", "TX");
+    const targets = screen.getAllByRole("textbox", { name: /dim split target/i });
     fireEvent.change(targets[0], { target: { value: "60000" } });
-    await user.selectOptions(dims[1], "geo");
-    fireEvent.change(values[1], { target: { value: "TX" } });
     fireEvent.change(targets[1], { target: { value: "60000" } });
 
-    expect(screen.queryByText(/outrun this container/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/splits resolve to/i)).not.toBeInTheDocument();
 
     // Push ONE axis over on its own and it must say so, naming that axis.
     fireEvent.change(targets[1], { target: { value: "150000" } });
-    expect(await screen.findByText(/Geo sub-breakdowns outrun this container/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Audience sub-breakdowns outrun/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Geo splits resolve to 150,000 — above the container target \(100,000\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Audience splits resolve to/i)).not.toBeInTheDocument();
   });
 
-  it("removes a sub-breakdown without touching the date splits beside it", async () => {
+  it("removes a dim split without touching the date splits beside it", async () => {
     const user = userEvent.setup();
     renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) });
 
     await openContainer(user);
     await user.click(screen.getByRole("button", { name: /\+ Add date split/i }));
-    await user.click(screen.getByRole("button", { name: /\+ Add sub-breakdown/i }));
-    fireEvent.change(screen.getByRole("textbox", { name: /sub-breakdown value/i }), { target: { value: "TX" } });
+    await typeDimSplit(user, "geo", "TX");
 
-    await user.click(screen.getByRole("button", { name: /Remove sub-breakdown/i }));
+    await user.click(screen.getByRole("button", { name: /Remove dim split Geo: TX/i }));
 
-    expect(screen.queryByRole("textbox", { name: /sub-breakdown value/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("TX")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /Date split name/i })).toBeInTheDocument();
+  });
+
+  it("distributes the container by month, the last month taking the remainder", async () => {
+    const user = userEvent.setup();
+    renderSheet({
+      "111": aPacingLineItemPlanV1({
+        lineItemId: "111",
+        plannedImpressions: 1_000_000,
+        clientBudget: 5000,
+        flightStart: "2026-09-01",
+        flightEnd: "2026-10-31",
+      }),
+    });
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /Distribute/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Equal (fixed per month)" }));
+
+    expect(screen.getByDisplayValue("Sep 2026")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Oct 2026")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("500,000")).toHaveLength(2);
+    expect(screen.getAllByDisplayValue("2,500")).toHaveLength(2);
+  });
+
+  it("offers to fit the line item to containers that outgrow it, and applies only what has to grow", async () => {
+    const user = userEvent.setup();
+    vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
+    renderSheet({
+      "111": aPacingLineItemPlanV1({
+        lineItemId: "111",
+        plannedImpressions: 100_000,
+        clientBudget: 5000,
+        flightStart: "2026-09-01",
+        flightEnd: "2026-09-30",
+        containers: [
+          {
+            id: "c1", name: "Big", fs: "2026-09-01", fe: "2026-10-15", target_impressions: 150_000,
+            target_spend: 4000, native_budget: 4000, margin_percent: null, date_children: [], dim_children: [],
+          },
+        ],
+      }),
+    });
+
+    await user.click(screen.getByRole("button", { name: /line item 111/i }));
+    expect(screen.getByText(/Containers units sum \(150,000\) exceeds LI total \(100,000\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Container period extends past LI flight/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fit LI to containers" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    // Units and the flight end grow; the budget already covers $4,000, so it stays.
+    expect(lineItems[0]).toMatchObject({ targetImpressions: 150_000, flightEnd: "2026-10-15", flightStart: "2026-09-01", nativeBudget: 5000 });
+  });
+
+  it("makes a value group from the dim split menu and saves it with the plan", async () => {
+    const user = userEvent.setup();
+    vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000, clientBudget: 5000 }) },
+      vi.fn(),
+      false,
+      { geo: { "111": ["Dallas", "Austin", "NY"] } }
+    );
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /\+ Add dim split/i }));
+    await user.click(screen.getByRole("button", { name: "Group values…" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Dimension" }), "geo");
+    await user.type(screen.getByRole("textbox", { name: "Group name" }), "Texas");
+    await user.click(screen.getByRole("checkbox", { name: /Dallas/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Austin/ }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(screen.getByText("Value groups (1)")).toBeInTheDocument();
+    // The group is offered once, under its name, in place of its members.
+    await user.click(screen.getByRole("button", { name: /\+ Add dim split/i }));
+    expect(screen.getByRole("button", { name: /Texas\s*group · 2 values/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dallas" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Texas\s*group/ }));
+
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    expect(lineItems[0].dimGroups).toEqual([{ dim_key: "geo", name: "Texas", values: ["Dallas", "Austin"] }]);
+    const containers = lineItems[0].containers as unknown as Array<{ dim_children: Array<Record<string, unknown>> }>;
+    expect(containers[0].dim_children[0]).toMatchObject({ dim_key: "geo", dim_value: "Texas" });
   });
 });
 
@@ -325,8 +462,9 @@ describe("PacingPlanSection - coefficient margin mode", () => {
     return {
       id: "c1",
       name: "March 2026",
-      fs: "2026-03-01",
-      fe: "2026-03-31",
+      // Inside the factory's Aug-Sep flight: a container outside it is a second, separate warning.
+      fs: "2026-08-01",
+      fe: "2026-08-31",
       target_impressions: targetImpressions,
       target_spend: 1000,
       margin_percent: 150,
@@ -457,9 +595,9 @@ describe("PacingPlanSection - coefficient margin mode", () => {
     );
     await screen.findByText("LI 111");
 
-    // Then: the coefficient sentence, naming both ways this can fail.
+    // Then: the line item's warning badge carries the coefficient sentence, naming both ways this can fail.
     expect(
-      screen.getByText(/Coefficient margins block saving - overlapping containers both set a margin/)
+      screen.getByRole("img", { name: /Coefficient margins block saving - overlapping containers both set a margin/ })
     ).toBeInTheDocument();
   });
 
@@ -482,8 +620,27 @@ describe("PacingPlanSection - coefficient margin mode", () => {
     // Then: one sentence covering both - the container-sum line on its own would name the lesser of
     // the two reasons the save is about to fail.
     expect(
-      screen.getByText(/Containers exceed the LI plan, and the coefficient margins block saving/)
+      screen.getByRole("img", { name: /Containers exceed the LI plan, and the coefficient margins block saving/ })
     ).toBeInTheDocument();
+  });
+
+  it("stops the save before sending it and names what the coefficient check refuses", async () => {
+    // Given: the out-of-range container margin, and an edit that makes the plan dirty.
+    const user = userEvent.setup();
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111", costCoef: true, containers: [aBadMarginContainer()] }) },
+      vi.fn(),
+      true
+    );
+    await user.click(screen.getByRole("button", { name: /line item 111/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /target impressions|units/i }), { target: { value: "900000" } });
+
+    // When:
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    // Then: nothing is sent; the reason is the reference's sentence.
+    expect(await screen.findByText(/Can’t save — LI 111: container “March 2026” must be ≥ 0 and < 100/)).toBeInTheDocument();
+    expect(savePacingPlan).not.toHaveBeenCalled();
   });
 
   it("stays silent about a margin on a line item that is not on coefficient cost", async () => {
@@ -497,7 +654,7 @@ describe("PacingPlanSection - coefficient margin mode", () => {
     await screen.findByText("LI 111");
 
     // Then:
-    expect(screen.queryByText(/Coefficient margins block saving/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Coefficient margins block saving/ })).not.toBeInTheDocument();
   });
 
   it("tints the margin cell when a coefficient line item's own margin is out of range", async () => {
@@ -517,5 +674,72 @@ describe("PacingPlanSection - coefficient margin mode", () => {
 
     // Then: the tint clears as it is typed, not on save.
     expect(screen.getByRole("spinbutton", { name: "Margin % (client cost)" })).not.toHaveAttribute("aria-invalid");
+  });
+});
+
+describe("PacingPlanSection - exchange rate", () => {
+  beforeEach(() => {
+    vi.mocked(savePacingPlan).mockReset().mockResolvedValue({ saved: true });
+    vi.mocked(getAddablePacingLineItems).mockReset().mockResolvedValue(emptyAddable);
+  });
+
+  const cadPlan = () => ({
+    "111": aPacingLineItemPlanV1({ lineItemId: "111", clientBudget: 7500, nativeBudget: 10_000 }),
+  });
+
+  it("is not drawn on a USD campaign", () => {
+    renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111" }) });
+    expect(screen.queryByText("Exchange Rate")).not.toBeInTheDocument();
+  });
+
+  it("saves a typed rate, locked, in the same request as the line items", async () => {
+    const user = userEvent.setup();
+    renderSheet(cadPlan(), vi.fn(), false, null, { currency: "CAD", rate: 0.75, nsRate: 0.75 });
+
+    const input = screen.getByRole("textbox", { name: /USD per CAD/ });
+    await user.clear(input);
+    await user.type(input, "0.8");
+    await user.tab();
+    expect(screen.getByText("Locked")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    const [, lineItems, rate] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[], unknown];
+    expect(lineItems.map((li) => li.lineItemId)).toEqual(["111"]);
+    expect(rate).toEqual({ rate: 0.8, rateLocked: true });
+  });
+
+  it("restores the NetSuite rate and clears the lock", async () => {
+    const user = userEvent.setup();
+    renderSheet(cadPlan(), vi.fn(), false, null, { currency: "CAD", rate: 0.8, rateLocked: true, nsRate: 0.75 });
+
+    await user.click(screen.getByRole("button", { name: "Reset to NS" }));
+
+    expect(screen.getByRole("textbox", { name: /USD per CAD/ })).toHaveValue("0.75");
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    expect(vi.mocked(savePacingPlan).mock.calls[0][2]).toEqual({ rate: 0.75, rateLocked: false });
+  });
+
+  it("sends no rate when only a line item changed", async () => {
+    const user = userEvent.setup();
+    renderSheet(cadPlan(), vi.fn(), false, null, { currency: "CAD", rate: 0.75, nsRate: 0.75 });
+
+    await user.click(screen.getByRole("button", { name: /line item 111/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Units for line item 111/ }), { target: { value: "900000" } });
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    expect(vi.mocked(savePacingPlan).mock.calls[0][2]).toBeUndefined();
+  });
+
+  it("shows the line item's budget in its own currency with the USD figure under it", async () => {
+    const user = userEvent.setup();
+    renderSheet(cadPlan(), vi.fn(), false, null, { currency: "CAD", rate: 0.75, nsRate: 0.75 });
+
+    await user.click(screen.getByRole("button", { name: /line item 111/i }));
+
+    expect(screen.getByRole("textbox", { name: /Budget for line item 111/ })).toHaveValue("10,000");
+    expect(screen.getByText("= $7,500 USD")).toBeInTheDocument();
   });
 });

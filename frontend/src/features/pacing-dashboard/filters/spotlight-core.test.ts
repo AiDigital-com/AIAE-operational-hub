@@ -96,11 +96,8 @@ describe("patchForSource", () => {
 });
 
 describe("tierOf", () => {
-  // 2026-09-25 follow-up (item 4): a dim value is LENS unconditionally in this build - this Hub
-  // never vendored `dim-scope.js`, the engine that would actually re-pace a headline against a
-  // declared split's own target, so a SCOPE label on a dim value would be a lie about the maths.
-  // `splitKeys` is still accepted (and still built by `buildFilterSources` below) so the day
-  // `dim-scope.js` lands, flipping this back is a one-line diff - see `tierOf`'s own comment.
+  // The reference's own assertions (`tests/filter-spotlight-core-test.mjs`): a dim value is Scope
+  // iff it carries a declared split.
   const splitKeys = new Set(["geo:TX", "geo:CA", "audience:Auto intenders"]);
 
   it("li/channel/label are always scope", () => {
@@ -111,13 +108,13 @@ describe("tierOf", () => {
   it("platform is always lens", () => {
     expect(tierOf({ type: "platform", value: "TTD" }, splitKeys)).toBe("lens");
   });
-  it("a dim value is lens even with a declared split - this build has no engine to back a SCOPE claim up", () => {
-    expect(tierOf({ type: "geo", value: "TX" }, splitKeys)).toBe("lens");
+  it("a dim value with a declared split is scope, without one lens", () => {
+    expect(tierOf({ type: "geo", value: "TX" }, splitKeys)).toBe("scope");
     expect(tierOf({ type: "geo", value: "NY" }, splitKeys)).toBe("lens");
-    expect(tierOf({ type: "audience", value: "Auto intenders" }, splitKeys)).toBe("lens");
+    expect(tierOf({ type: "audience", value: "Auto intenders" }, splitKeys)).toBe("scope");
     expect(tierOf({ type: "audience", value: "Lookalike" }, splitKeys)).toBe("lens");
   });
-  it("empty splitKeys -> every dim value is lens too (same answer either way now)", () => {
+  it("empty splitKeys -> every dim value is lens", () => {
     expect(tierOf({ type: "geo", value: "TX" }, new Set())).toBe("lens");
   });
 });
@@ -149,13 +146,13 @@ describe("buildFilterSources - tier tagging end to end", () => {
     expect(findSrc("label", "priority")?.tier).toBe("scope");
     expect(findSrc("platform", "TTD")?.tier).toBe("lens");
   });
-  it("split-backed dim value is STILL lens (item 4) - display is unaffected", () => {
-    expect(findSrc("geo", "TX")?.tier).toBe("lens");
+  it("split-backed dim value -> scope, non-split -> lens; display is unaffected", () => {
+    expect(findSrc("geo", "TX")?.tier).toBe("scope");
     expect(findSrc("geo", "NY")?.tier).toBe("lens");
     expect(findSrc("geo", "TX")?.display).toBe("TX");
   });
   it("search results carry tier", () => {
-    expect(searchFilterSources(taggedSources, "TX")[0]?.tier).toBe("lens");
+    expect(searchFilterSources(taggedSources, "TX")[0]?.tier).toBe("scope");
   });
 
   describe("browseSources", () => {
@@ -165,9 +162,9 @@ describe("buildFilterSources - tier tagging end to end", () => {
       expect(browse.scope.every((s) => s.tier === "scope")).toBe(true);
       expect(browse.lens.every((s) => s.tier === "lens")).toBe(true);
     });
-    it("split-backed geo:TX lands in LENS too (item 4) - not promoted to SCOPE without dim-scope.js", () => {
-      expect(browse.scope.some((s) => s.type === "geo" && s.value === "TX")).toBe(false);
-      expect(browse.lens.some((s) => s.type === "geo" && s.value === "TX")).toBe(true);
+    it("split-backed geo:TX lands in SCOPE", () => {
+      expect(browse.scope.some((s) => s.type === "geo" && s.value === "TX")).toBe(true);
+      expect(browse.lens.some((s) => s.type === "geo" && s.value === "TX")).toBe(false);
     });
     it("non-split geo:NY lands in LENS", () => {
       expect(browse.lens.some((s) => s.type === "geo" && s.value === "NY")).toBe(true);

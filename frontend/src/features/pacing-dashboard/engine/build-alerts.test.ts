@@ -151,6 +151,42 @@ describe("buildPacingAlerts - reference rule (AlertsBlock.jsx): unclipped liDail
     expect(gap!.value).toBe("7d"); // 7 days with no data between 08-01 and 08-09
   });
 
+  it("under period scope the detectors see only the selected period's days, as the reference's AlertsBlock windows them", () => {
+    // Given: the data_gap case above, on a line item whose container splits the flight in two periods
+    const plan = aPacingLineItemPlanV1({
+      lineItemId: "400",
+      flightStart: "2026-08-01",
+      flightEnd: "2026-08-20",
+      ctrTargetPct: null,
+      vcrTargetPct: null,
+      containers: [{
+        id: "c1", name: "Two", fs: "2026-08-01", fe: "2026-08-20", target_impressions: 1_000_000,
+        date_children: [
+          { id: "d1", name: "1st", fs: "2026-08-01", fe: "2026-08-05", target_impressions: 250_000 },
+          { id: "d2", name: "2nd", fs: "2026-08-06", fe: "2026-08-20", target_impressions: 750_000 },
+        ],
+        dim_children: [],
+      }],
+    });
+    const data = aPacingDashboardV1({
+      planByLineItem: { "400": plan },
+      factsDaily: [
+        { line_item_id: "400", date: "2026-08-01", impressions: 1000, clicks: 5, spend: 50, completes: 0, dynamic_cost: 50 },
+        { line_item_id: "400", date: "2026-08-09", impressions: 1000, clicks: 5, spend: 50, completes: 0, dynamic_cost: 50 },
+      ],
+      notify: aPacingNotifySettingsV1(),
+    });
+
+    // When:
+    const fullFlight = buildPacingAlerts(data, DEFAULT_FILTERS, "2026-08-10");
+    const secondPeriod = buildPacingAlerts(data, DEFAULT_FILTERS, "2026-08-10",
+      { scoped: true, periodKey: "2026-08-06|2026-08-20" });
+
+    // Then: the 7-day gap spans the two periods; inside the second there is one day and no gap
+    expect(fullFlight.find((a) => a.type === "data_gap")).toBeDefined();
+    expect(secondPeriod.find((a) => a.type === "data_gap")).toBeUndefined();
+  });
+
   it("vcr_over_100 (data-integrity) fires regardless of the window rule", () => {
     const plan = aPacingLineItemPlanV1({
       lineItemId: "500",
@@ -174,5 +210,101 @@ describe("buildPacingAlerts - reference rule (AlertsBlock.jsx): unclipped liDail
     expect(bad).toBeDefined();
     expect(bad!.severity).toBe("critical");
     expect(bad!.liId).toBe("500");
+  });
+});
+
+/**
+ * Scope pins against the reference's store selectors (`AlertsBlock.jsx` reads `useEffLIs` and
+ * `useFullFlightMetrics`, both resolving `resolvePlanningScope` in `selectors.js`). One line item is
+ * delivered in two geos at very different prices: TX at a $20 CPM, NY at a $1 CPM. Only the
+ * campaign reading (`flCM`) takes the scoped delivery, so the campaign-level
+ * `dsp_forecast_overspend` (forecast = delivered CPM x planned impressions) shows which delivery
+ * it was given: TX alone forecasts far over budget, the blend does not.
+ */
+describe("buildPacingAlerts - container dim scope and dim-split Scope", () => {
+  const days = ["2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09"];
+  const geoRows = (liId: string) => days.flatMap((date) => [
+    { line_item_id: liId, date, geo: "TX", impressions: 10_000, clicks: 5, spend: 200, completes: 0, dynamic_cost: 200 },
+    { line_item_id: liId, date, geo: "NY", impressions: 900_000, clicks: 5, spend: 900, completes: 0, dynamic_cost: 900 },
+  ]);
+  const geoPlan = (txPct: number, dateChildren: unknown[]) => aPacingLineItemPlanV1({
+    lineItemId: "400",
+    flightStart: "2026-08-01",
+    flightEnd: "2026-08-20",
+    ctrTargetPct: null,
+    vcrTargetPct: null,
+    containers: [{
+      id: "c1", name: "Geo", fs: "2026-08-01", fe: "2026-08-20", target_impressions: 1_000_000,
+      date_children: dateChildren,
+      dim_children: [{ id: "g1", dim_key: "geo", dim_value: "TX", target_mode: "percent", target_value: txPct }],
+    }],
+  });
+  const forecastOf = (alerts: ReturnType<typeof buildPacingAlerts>) =>
+    alerts.find((a) => a.type === "dsp_forecast_overspend");
+
+  it("under period scope, a container its dim splits cover counts only the declared values' delivery", () => {
+    // Given: the same delivery under a container covered by geo:TX (100%) and one it only carves (50%)
+    const periods = [
+      { id: "d1", name: "1st", fs: "2026-08-01", fe: "2026-08-05", target_impressions: 250_000 },
+      { id: "d2", name: "2nd", fs: "2026-08-06", fe: "2026-08-20", target_impressions: 750_000 },
+    ];
+    const dataFor = (txPct: number) => aPacingDashboardV1({
+      planByLineItem: { "400": geoPlan(txPct, periods) },
+      factsDaily: geoRows("400"),
+      notify: aPacingNotifySettingsV1(),
+    });
+    const period = { scoped: true, periodKey: "2026-08-06|2026-08-20" };
+
+    // When:
+    const covered = buildPacingAlerts(dataFor(100), DEFAULT_FILTERS, "2026-08-10", period);
+    const carvedOut = buildPacingAlerts(dataFor(50), DEFAULT_FILTERS, "2026-08-10", period);
+
+    // Then: TX alone ($20 CPM x the period's 750k) is over the period's $6,000; the blend is not
+    expect(forecastOf(covered)?.text).toMatch(/^DSP forecast \$15000\.00 exceeds cost budget \$6000\.00/);
+    expect(forecastOf(carvedOut)).toBeUndefined();
+    // and the per-line-item readings take the whole delivery in both, as the reference's liM does
+    const pace = (alerts: typeof covered) => alerts.find((a) => a.type === "pacing_off_pace")?.text;
+    expect(pace(covered)).toBe(pace(carvedOut));
+  });
+
+  describe("a breakdown chip naming a declared dim split", () => {
+    // Given: line item 400 declares a geo:TX split (40% of its container); 500 declares none
+    const dataWithSplit = () => aPacingDashboardV1({
+      planByLineItem: {
+        "400": geoPlan(40, []),
+        "500": aPacingLineItemPlanV1({
+          lineItemId: "500", channel: "Video", flightStart: "2026-08-01", flightEnd: "2026-08-20",
+          ctrTargetPct: null, vcrTargetPct: null,
+        }),
+      },
+      factsDaily: [
+        ...geoRows("400"),
+        ...days.map((date) => ({ line_item_id: "500", date, geo: "NY", impressions: 50_000, clicks: 5, spend: 100, completes: 0, dynamic_cost: 100 })),
+      ],
+      notify: aPacingNotifySettingsV1(),
+    });
+
+    it("cuts the alerts to the split's line items and judges the campaign on the split's delivery and plan", () => {
+      // When:
+      const baseline = buildPacingAlerts(dataWithSplit(), DEFAULT_FILTERS, "2026-08-10");
+      const split = buildPacingAlerts(dataWithSplit(), { ...DEFAULT_FILTERS, brk: "geo", brkf: ["geo:TX"] }, "2026-08-10");
+
+      // Then: 500 carries no TX split and drops out
+      expect(baseline.some((a) => a.liId === "500")).toBe(true);
+      expect(split.some((a) => a.liId === "500")).toBe(false);
+      expect(split.some((a) => a.liId === "400")).toBe(true);
+      // and the campaign reads TX only against the split's own plan: $20 CPM x 400k vs 40% of $8,000
+      expect(forecastOf(baseline)).toBeUndefined();
+      expect(forecastOf(split)?.text).toMatch(/^DSP forecast \$8000\.00 exceeds cost budget \$3200\.00/);
+    });
+
+    it("a chip with no declared split stays a Lens - the alert set is the baseline's", () => {
+      // When:
+      const baseline = buildPacingAlerts(dataWithSplit(), DEFAULT_FILTERS, "2026-08-10");
+      const lens = buildPacingAlerts(dataWithSplit(), { ...DEFAULT_FILTERS, brk: "geo", brkf: ["geo:NY"] }, "2026-08-10");
+
+      // Then:
+      expect(lens).toEqual(baseline);
+    });
   });
 });
