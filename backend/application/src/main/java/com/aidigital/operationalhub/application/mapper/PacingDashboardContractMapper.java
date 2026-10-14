@@ -375,10 +375,14 @@ public class PacingDashboardContractMapper {
 				.endDate(parseDate(campaign.endDate()))
 				.currency(campaign.currency())
 				.rate(campaign.rate())
+				.rateLocked(Boolean.TRUE.equals(campaign.rateLocked()))
+				.nsRate(campaign.nsRate())
 				.status(campaign.status())
 				.orderNumber(campaign.orderNumber())
 				.sourceUrl(campaign.sourceUrl())
 				.netMode(Boolean.TRUE.equals(campaign.netMode()))
+				.periodScope(Boolean.TRUE.equals(campaign.periodScope()))
+				.periodScopeKey(campaign.periodScopeKey())
 				.links(toLinksV1(campaign.links()));
 	}
 

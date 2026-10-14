@@ -6,6 +6,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLin
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -23,7 +24,9 @@ import java.util.List;
  * particular {@code containers} is forwarded as the opaque {@code List<Map<String, Object>>} the
  * caller sent - this mapper does not open a single container object, since that shape is Pacing's own
  * to parse and validate (container existence, the target-impressions bound against the line item's
- * plan).
+ * plan). {@code dimGroups} rides the same way, and its null is meaningful: an absent key in the
+ * request (the generated DTO leaves it null) must stay null here, so Pacing keeps its stored value
+ * groups instead of receiving an empty list that would clear them.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,6 +43,18 @@ public class PacingPlanContractMapper {
 	 */
 	public List<PacingLineItemPlanUpdate> toPlanUpdateLineItems(PacingPlanUpdateV1 body) {
 		return body.getLineItems().stream().map(this::toPlanUpdateLineItem).toList();
+	}
+
+	/**
+	 * Lifts a plan save's optional campaign exchange-rate change (Settings → Plan) into the shape the
+	 * Pacing client sends beside the line items - a straight copy. An absent key stays null, which
+	 * the client omits from Pacing's body, so a save that does not touch the rate leaves it alone.
+	 *
+	 * @param body the plan save request
+	 * @return the rate change, never null; both fields null when the request carries none
+	 */
+	public PacingPlanRateUpdate toPlanRateUpdate(PacingPlanUpdateV1 body) {
+		return new PacingPlanRateUpdate(body.getRate(), body.getRateLocked());
 	}
 
 	private PacingLineItemPlanUpdate toPlanUpdateLineItem(PacingLineItemPlanUpdateV1 li) {
@@ -62,7 +77,8 @@ public class PacingPlanContractMapper {
 				li.getNetRatio(),
 				li.getNetRatioLocked(),
 				li.getPrimaryConversions(),
-				li.getContainers());
+				li.getContainers(),
+				li.getDimGroups());
 	}
 
 	/**

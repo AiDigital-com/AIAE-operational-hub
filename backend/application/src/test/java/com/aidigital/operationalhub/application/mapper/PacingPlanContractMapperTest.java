@@ -6,6 +6,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLin
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateLineItem;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +73,30 @@ class PacingPlanContractMapperTest {
 	}
 
 	@Test
+	void shouldCopyRateAndRateLockedVerbatimTest() {
+		// Given: a save that sets the campaign's exchange rate by hand.
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of()).rate(0.27).rateLocked(true);
+
+		// When:
+		PacingPlanRateUpdate result = mapper.toPlanRateUpdate(body);
+
+		// Then:
+		assertThat(result).isEqualTo(new PacingPlanRateUpdate(0.27, true));
+	}
+
+	@Test
+	void shouldKeepAbsentRateAndRateLockedNullTest() {
+		// Given: a save that does not touch the rate - both keys absent from the request.
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of());
+
+		// When:
+		PacingPlanRateUpdate result = mapper.toPlanRateUpdate(body);
+
+		// Then: null on both, so the client omits the keys and Pacing keeps the stored rate and lock.
+		assertThat(result).isEqualTo(new PacingPlanRateUpdate(null, null));
+	}
+
+	@Test
 	void shouldForwardContainersOpaquelyTest() {
 		// Given: a container carrying the duplicate-action transport fields (Pacing's own existing
 		// mechanism) - the mapper must not touch a single key inside it.
@@ -88,6 +113,53 @@ class PacingPlanContractMapperTest {
 
 		// Then: the exact same map instance/content, untouched.
 		assertThat(result.get(0).containers()).containsExactly(container);
+	}
+
+	@Test
+	void shouldForwardDimGroupsOpaquelyTest() {
+		// Given: value groups are Pacing's to validate - the mapper must not open or reshape one,
+		// including a key it has never heard of.
+		Map<String, Object> group = Map.of(
+				"dim_key", "geo", "name", "Northeast", "values", List.of("NY", "MA"), "future_key", 7);
+		PacingLineItemPlanUpdateV1 li = new PacingLineItemPlanUpdateV1()
+				.lineItemId("599852")
+				.dimGroups(List.of(group));
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of(li));
+
+		// When:
+		List<PacingLineItemPlanUpdate> result = mapper.toPlanUpdateLineItems(body);
+
+		// Then:
+		assertThat(result.get(0).dimGroups()).containsExactly(group);
+	}
+
+	@Test
+	void shouldKeepAbsentDimGroupsNullTest() {
+		// Given: a line item that does not touch its groups - null is what keeps the key off the wire,
+		// so Pacing preserves the stored groups; an empty list here would clear them.
+		PacingLineItemPlanUpdateV1 li = new PacingLineItemPlanUpdateV1().lineItemId("599852");
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of(li));
+
+		// When:
+		List<PacingLineItemPlanUpdate> result = mapper.toPlanUpdateLineItems(body);
+
+		// Then:
+		assertThat(result.get(0).dimGroups()).isNull();
+	}
+
+	@Test
+	void shouldKeepAnExplicitlyEmptyDimGroupsListEmptyTest() {
+		// Given: an explicit empty list is the deliberate clear and must not collapse into "absent".
+		PacingLineItemPlanUpdateV1 li = new PacingLineItemPlanUpdateV1()
+				.lineItemId("599852")
+				.dimGroups(List.of());
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of(li));
+
+		// When:
+		List<PacingLineItemPlanUpdate> result = mapper.toPlanUpdateLineItems(body);
+
+		// Then:
+		assertThat(result.get(0).dimGroups()).isNotNull().isEmpty();
 	}
 
 	@Test

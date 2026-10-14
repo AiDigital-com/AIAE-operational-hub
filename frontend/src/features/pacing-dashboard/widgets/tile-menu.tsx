@@ -14,6 +14,7 @@
  * its styling the day that screen is split.
  */
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MoreVerticalIcon } from "../../../shared/ui/icons/icons";
 import { cn } from "../../../shared/style/cn";
 import "./tile-menu.css";
@@ -41,13 +42,15 @@ export function WidgetTileMenu({ label, items }: { label: string; items: TileMen
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Outside click, Escape and scroll all close it - the panel is position:fixed, so a scroll would
   // otherwise leave it hanging where the tile no longer is.
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (event: MouseEvent) => {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!wrapRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -86,8 +89,17 @@ export function WidgetTileMenu({ label, items }: { label: string; items: TileMen
       >
         <MoreVerticalIcon />
       </button>
-      {open && (
-        <div className="wtm__menu" role="menu" style={{ width: MENU_WIDTH, ...(anchor ?? {}) }}>
+      {/* Portalled to <body>: the panel is position:fixed, and a tile that sets `content-visibility`
+          (Pacing's Line Items card does) or a transform becomes the box `fixed` measures from, which
+          threw the panel off-screen. Its clicks still stop at the tile, like the trigger's. */}
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          className="wtm__menu"
+          role="menu"
+          style={{ width: MENU_WIDTH, ...(anchor ?? {}) }}
+          onClick={(event) => event.stopPropagation()}
+        >
           {items.map((item) => (
             <button
               key={item.key}
@@ -104,7 +116,8 @@ export function WidgetTileMenu({ label, items }: { label: string; items: TileMen
               {item.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   );

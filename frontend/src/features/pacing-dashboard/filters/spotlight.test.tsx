@@ -115,7 +115,7 @@ describe("Spotlight", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("a dim value backed by a declared split is still tagged LENS, not SCOPE (2026-09-25 item 4 - this build has no dim-scope.js to back a Scope claim up)", async () => {
+  it("a dim value backed by a declared split is tagged SCOPE with the \"· split\" marker, as in the reference", async () => {
     const splitLiPlan = {
       "100": {
         channel: "Video",
@@ -140,9 +140,8 @@ describe("Spotlight", () => {
     await userEvent.click(input);
     await userEvent.type(input, "TX");
 
-    // No more "· split" marker (that claimed the value paces the dashboard, which it does not
-    // here) - the row shows the LENS tier tag instead.
-    expect(screen.queryByText("· split")).not.toBeInTheDocument();
-    expect(screen.getByText("LENS")).toBeInTheDocument();
+    // The split re-paces the board (spa/selectors.js resolvePlanningScope), so the row claims it.
+    expect(screen.getByText("· split")).toBeInTheDocument();
+    expect(screen.getByText("SCOPE")).toBeInTheDocument();
   });
 });

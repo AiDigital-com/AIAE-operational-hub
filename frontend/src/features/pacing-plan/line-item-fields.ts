@@ -50,6 +50,10 @@ export interface EditableLineItem {
   /** What Pacing reported as stored. The wire compares against THIS, not against the operative list,
    *  so an untouched line sends no key and the server's back-fill keeps its choice. */
   primaryCvStored: string[];
+  /** Value groups (Pacing spec 2026-10-02): several delivered values of one naming dimension that
+   *  read as one named value, so one dim split carries a shared target for them. The line's own
+   *  dictionary, edited in place and sent whole on every save, as the reference does. */
+  dimGroups: DimGroup[];
   /** True for a line item added in this editing session (US-126) - not yet on the pacing, so its
    *  identity fields have nothing stored to fall back to and must be carried explicitly on save. */
   isNew: boolean;
@@ -101,6 +105,24 @@ export function netPctToRatio(value: string): number | null {
   return Number.isFinite(n) && n > 0 && n < 100 ? n / 100 : null;
 }
 
+/** One value group, the wire shape dash-gate stores (`shared/dim-value-groups.js`). */
+export interface DimGroup {
+  dim_key: string;
+  name: string;
+  values: string[];
+}
+
+/** The stored groups as the editor holds them; anything not shaped like a group is dropped. */
+function groupList(list: unknown): DimGroup[] {
+  if (!Array.isArray(list)) return [];
+  const out: DimGroup[] = [];
+  for (const g of list as Array<Record<string, unknown>>) {
+    if (!g || typeof g.dim_key !== "string" || typeof g.name !== "string") continue;
+    out.push({ dim_key: g.dim_key, name: g.name, values: Array.isArray(g.values) ? g.values.map(String) : [] });
+  }
+  return out;
+}
+
 /**
  * Seeds one editable row from Pacing's own stored plan. `nativeBudget` falls back to `clientBudget`
  * for a USD line item (where Pacing stores no separate native figure - the two are numerically
@@ -127,6 +149,7 @@ export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
     nsNetRatio: realRatio(plan.nsNetRatio) ? plan.nsNetRatio : null,
     primaryCv: cvList(plan.storedPrimaryConversions),
     primaryCvStored: cvList(plan.storedPrimaryConversions),
+    dimGroups: groupList(plan.dimGroups),
     isNew: false,
     campaignId: null,
     campaignName: null,
@@ -171,6 +194,7 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     // otherwise, which is the same default a line that predates the feature has.
     primaryCv: [],
     primaryCvStored: [],
+    dimGroups: [],
     isNew: true,
     campaignId: candidate.campaignId ?? null,
     campaignName: candidate.campaignName ?? null,
@@ -209,6 +233,9 @@ export function toPlanUpdateLineItem(li: EditableLineItem, netFeatureOn: boolean
     flightStart: li.flightStart || undefined,
     flightEnd: li.flightEnd || undefined,
     containers: li.containers as unknown as Record<string, unknown>[],
+    // Always the whole dictionary, the reference's `dim_groups: p.dimGroups || []`: seeded from what
+    // is stored, so an untouched line sends it back unchanged, and [] is a real "no groups".
+    dimGroups: li.dimGroups.map((g) => ({ dim_key: g.dim_key, name: g.name, values: [...g.values] })),
   };
   // Net cost mode: while the pacing switch is OFF nothing is sent - stored ratios stay inert and a
   // save from a pacing that never used the feature is byte-identical to what it always sent. With

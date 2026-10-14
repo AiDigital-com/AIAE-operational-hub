@@ -177,8 +177,9 @@ brought along with it. 45 files touched, 9 new. What a user can see:
   `../vendor/std-entries.js`, and the read-time upgrade of its first CPM-only version in
   `standard-conversion-format.js`.
 - **Line Items column settings** (`85d353c`): `line-item-columns.js` and `display-norm.js` (both
-  new). The engine is here and validated; PERSISTENCE IS NOT — that needs a dash-gate migration
-  `AIAE-paicing` has not taken, so a change made in this UI will not survive a reload.
+  new). Wired end to end on 2026-10-14 - see "the Line Items block's settings" below. (This line
+  used to say persistence needed a dash-gate migration. It did not: dash-gate here keeps no display
+  history, so the reference's migration 052 has nothing to change.)
 - **Data freshness** (`85d353c`): `refresh-freshness.js`, `relative-time.js` (both new).
 - **Chart guides and the progress bar's marker** (`3679c20`): `brick-data.js` learns the format a
   field prints in when none is named.
@@ -278,4 +279,83 @@ line resumed while the data date still sits inside its now-closed pause demands 
 Our CPI bucket in `metrics.js` reads it too. `chips/line-facts.js`, `lineitems/LineItemCard.jsx`
 and `lineitems/SplitRow.jsx` changed comments only. The behaviour itself lives in
 `../engine/vendor/pacing-core.js` (`isLiPausedNow` / `isLiAutoPaused`), re-copied the same day.
+
+## Updated 2026-10-14 — Period Scope
+
+`store.js` no longer pins `splitScopedMode` / `splitScopedPlans` / `selectedPeriodKey` to off.
+`usePacingState` resolves them the way the reference's `dashboardStore.js` `load` does - the payload's
+`campaign.periodScope` / `periodScopeKey` through `resolvePeriodKey` and `buildScopedPlansForPeriod` -
+plus `periodScopeState`, and takes the page's optimistic `periodScopeOverride` while a change is being
+saved. New hooks `useSelectedPeriodKey`, `usePeriodScopeState` and `periodsOf` (the reference's
+`usePeriods.js` cache). Every moved selector, widget and split row already read these fields, so this
+alone switched them on. The toggle, the picker and the banner are this app's own
+(`../filters/period-scope.tsx`); the save is `POST /api/v1/pacing/dashboards/{slug}/period-scope`.
+
+
+## Updated 2026-10-14 — the container editor's split tools and value groups
+
+Two moved in for the plan editor (`../../pacing-plan/`), byte for byte apart from import paths:
+`dim-groups-editor.js` (reference `lib/settings/dim-groups-editor.js`: what the dim split menu and
+the value group editor list, tick and refuse) and `container-warnings.js` (reference
+`pages/Dashboard/components/Settings/container-warnings.js`). `Popover.jsx`, `ui/Popover.jsx` and
+`menu-placement.js` were brought up to the reference's current copy, which adds `align: 'start'`
+(the group editor opens from the start of a row); the default stays `'end'`, so existing callers
+draw as before.
+
+
+## Updated 2026-10-14 — the Line Items block's settings, value-group members, CPI on split rows
+
+**From the reference, moved again.** `lineitems/LineItemCard.jsx`, `SplitRow.jsx` and `PaceBar.jsx`
+are the reference's current copies (`85d353c` Line Items settings, `a33ba97` value groups,
+`a51e361` comments), import specifiers rewritten as before and `lazyWithRetry` → `lazy` as in the
+first move. `lineitems/LineItemsCustomize.jsx` is new, moved from the reference's
+`Settings/Widgets/LineItemsCustomize.jsx`. `lineitems/LineItemsTile.jsx`'s function body is the
+reference `tile-registry.jsx` `LineItemsTile`, verbatim. What a reader sees:
+
+- The card prints the columns `display.lineItems.columns` names, in that order (`cellFor` in
+  `line-item-columns.js`), and its split rows print one cell per column so they line up; the tile
+  sorts (`sortLineItems`), opens on the stored view, and shows the stored number of rows before
+  "Show all". Nothing stored ≡ today's render.
+- A dim split row whose value is one of the line's value groups carries an "N values" toggle and
+  opens into its members, each with its own delivery (`sumDimMembers`, which was already here).
+
+Outside function bodies: `SectionCard` takes a `menu`, and `LineItemsTile` hands its `menu` prop
+to it - this app's ⋯ in the card header, where every other tile on the board carries its menu,
+rather than floated over the cell as the reference's grid does.
+
+`pacing-spa.css` gained `.li-row`, the `--li-cols` split-row grid, `.sp-vg-toggle` and the member
+rows, the 960 px / 700 px rules for both, and the `.lic-*` editor rules (from the reference's
+`DisplaySettings.css`). The split row's old fixed 56 px spacer and five/six columns (`data-conv`)
+are gone with the reference's. The editor's rules differ in three places, said in the file: its
+↑ ↓ are scoped under `.lic` (the reference scopes them under its `.settings-drawer`), the narrow
+layout is an `@container` on the hosting card (the reference has a `settings` container), and the
+app-wide `input, select { min-height: 42px }` is undone for its controls. `tailwind-subset.css`
+gained `flex-[0_1_56px]`, `min-w-[20px]` and `rotate-90` - the last was missing before this too: a
+card's chevron never turned when opened, and `line-items-styles.test.tsx` did not see it because
+it clicked the row (which selects) instead of the chevron (which opens). It clicks the chevron now
+and asserts a split row is on screen.
+
+**This app's own half** (ordinary TypeScript, not moved): the tile's ⋯ → Customize…
+(`../widgets/report-board.tsx`), the drawer's deep-open (`../pacing-dashboard.tsx`,
+`../pacing-settings-drawer.tsx`), the «Page sections» Line Items card with its Customize disclosure
+on the widgets tab (`../pacing-dashboard-library.tsx`, the reference's `BlockLibrary.jsx` card),
+and the draft key in `../widgets-section.tsx`, which compares it the way the reference's
+`display-norm.js` does (absent, null and the defaults are one setting) and sends `null` for «Reset
+to default». NOT taken from the reference's block menu and card: «Turn off» and the on/off switch,
+and «Show description» - neither was on this tile here before, and a Turn off with no switch to
+undo it would strand the block.
+
+### Our divergence from the reference: CPI
+
+The reference has no CPI rate type, so it prices a CPI line as CPM and counts its impressions. Ours
+counts installs = conversions (`PacingCore.liActualUnits`), and the card's units cell already did
+through `liM`. Brought in line, deliberately:
+
+- `lineitems/SplitRow.jsx`: `nativeUnits` reads `cv` and `rtCost` is spend / conversions on a CPI
+  line; a member's units and its rate cell likewise, and both print a dash where the member has no
+  conversion number of its own (primary conversions on the line - the Conv cell's own rule).
+- `line-item-columns.js` `rateCostOf`: the card's CPI cell is spend / conversions. It printed the
+  line's CPM under the label «CPI» before, and the split rows below it would now have disagreed.
+
+Covered by `lineitems/line-item-settings.test.tsx`.
 

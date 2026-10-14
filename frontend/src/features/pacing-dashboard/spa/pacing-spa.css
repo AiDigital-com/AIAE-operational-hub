@@ -516,24 +516,47 @@ select.wgf-pick { width: 240px; height: var(--sp-ctl-h); }
   display: flex; flex-direction: column;
 }
 
+/* ── Line item card: the main row (LineItemCard.jsx) ──
+   The channel tag, the identity cell, then one column per configured metric cell
+   (Line Items settings spec 2026-10-01): --li-cols is the rendered count, set on the
+   card root so the split rows below share the template and their cells line up.
+   Copied from Pacing's index.css with the Line Items settings (`85d353c`); the split row's
+   old fixed five/six columns (`data-conv`) went with it. */
+.li-row {
+  display: grid;
+  grid-template-columns: 96px minmax(210px, 2.5fr) repeat(var(--li-cols, 5), 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 8px 20px;
+  min-height: 44px;
+  cursor: pointer;
+  user-select: none;
+}
 /* ── Split row (SplitRow.jsx) ── */
 .sp-row {
   display: grid;
-  grid-template-columns: 56px minmax(210px, 2.5fr) repeat(5, 1fr);
-  gap: 4px;
+  grid-template-columns: 96px minmax(210px, 2.5fr) repeat(var(--li-cols, 5), 1fr);
+  gap: 6px;
   align-items: center;
   padding: 4px 20px;
   border-top: 1px solid var(--border-soft);
   min-height: 34px;
   position: relative;
 }
-.sp-row[data-conv="1"] {
-  grid-template-columns: 56px minmax(210px, 2.5fr) repeat(6, 1fr);
-}
+/* Both grids resolve their 1fr tracks from the same floor: a cell's content must not
+   widen its track (a long "pror." sub did, by up to 7 px), or the split cells drift
+   from the card cells above them. The card's cells carry min-w-0 already. */
+.li-row > *, .sp-row > * { min-width: 0; }
+/* Every metric cell starts on the same line: a cell with no sub-line, or one whose sub
+   wraps at eight columns, would otherwise float to its own vertical centre and the labels
+   of one row would read at three heights. The channel tag and the identity cell stay centred. */
+.li-row > :not(.li-ch):not(.li-id), .sp-row > :not(.sp-spacer):not(.sp-head) { align-self: start; }
 .sp-row::before {
   content: '';
   position: absolute;
-  left: 96px;
+  /* Inside the label cell's own padding, 16 px before its dot, as it was when the spacer
+     column was 56 px: 20 + 96 + 6 + 16. */
+  left: 138px;
   top: 4px;
   bottom: 4px;
   width: 2px;
@@ -597,6 +620,47 @@ select.wgf-pick { width: 240px; height: var(--sp-ctl-h); }
   margin-top: 1px;
 }
 
+/* ── Value group on the line card (spec 2026-10-02): the group's toggle and its member rows.
+   A member row is the group row's own grid one step deeper: delivery only, lighter text, no
+   repeated column labels. No rail and no tint: indentation carries the nesting.
+   Copied from Pacing's index.css with the value-groups change (`a33ba97`). ── */
+.sp-vg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rp);
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.sp-vg-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.sp-vg-toggle svg { width: 8px; height: 8px; transition: transform .15s; }
+.sp-vg-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.sp-vg-toggle--more { margin-left: 0; }
+.sp-row--member { min-height: 24px; padding-block: 2px; border-top: 0; }
+/* The name starts on the line of its values: one 11px/16px line box on both sides. */
+.sp-row--member > .sp-head { align-self: start; font-size: 11px; line-height: 16px; }
+/* The column labels are the group row's, one line up: hidden from the eye, kept for a reader. */
+.sp-row--member .sp-ml {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sp-row--member .sp-nm { font-weight: 400; color: var(--text-muted); }
+.sp-row--member .sp-mv { font-weight: 400; line-height: 16px; color: var(--text-secondary); }
+.sp-row--member-last { padding-bottom: 6px; }
+
 .sp-section-hd {
   font-size: 9px;
   font-weight: 700;
@@ -612,6 +676,55 @@ select.wgf-pick { width: 240px; height: var(--sp-ctl-h); }
 }
 .sp-others:hover {
   opacity: 0.9;
+}
+
+/* Below 960 px a card row is two lines (spec 2026-10-01): the channel tag and the
+   identity cell across the first, the metric cells wrapping on the next on an auto-fit
+   grid, so eight columns never force sideways scrolling. A split row follows: its
+   spacer goes, its label spans the first line. */
+@media (max-width: 960px) {
+  .li-row, .sp-row {
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  }
+  .li-row > .li-ch { grid-column: 1 / 2; }
+  .li-row > .li-id { grid-column: 2 / -1; }
+  .sp-row {
+    padding-left: 20px;
+  }
+  .sp-row > * {
+    min-width: 0;
+  }
+  .sp-row > .sp-spacer { display: none; }
+  .sp-row > .sp-head { grid-column: 1 / -1; padding-left: 16px !important; }
+  .sp-row::before {
+    left: 16px;
+  }
+  /* A member row one step past its group's label (16px + the 4px dot + the 8px gap = 28px).
+     Its cells wrap here instead of sitting under the group row's columns, so they show their
+     own labels again. */
+  .sp-row--member > .sp-head { padding-left: 40px !important; }
+  .sp-row--member .sp-ml {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0 0 1px;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+}
+@media (max-width: 700px) {
+  /* LI card and split rows keep the two-line auto-fit grid from the 960 px rule;
+     only the gutter tightens. */
+  .li-row {
+    padding: 8px 12px;
+  }
+  .sp-row {
+    padding: 8px 12px;
+  }
+  /* A group's member rows keep their compact height (the rule above comes later than theirs). */
+  .sp-row--member { padding-block: 2px; }
+  .sp-row--member-last { padding-bottom: 6px; }
 }
 .sp-head-actions {
   display: flex;
@@ -4599,3 +4712,46 @@ textarea.sp-inp { height: auto; min-height: var(--sp-ctl-h); padding: 5px 8px; }
 }
 
 .lis-ch-head:hover { background: var(--hover-bg); }
+
+/* The block's ⋯ (this app's kebab, `widgets/tile-menu.tsx`) at the right of the card's own header,
+   where every other tile on the board carries its menu. Pacing floats it over the cell instead
+   (`.dash-cell--menu`); the negative block margin keeps the 32 px trigger from growing the header
+   past its title line. */
+.lis-menu { display: inline-flex; margin: -8px -10px -8px auto; }
+
+/* ── The Line Items block's Customize editor (lineitems/LineItemsCustomize.jsx) ──
+   Copied from Pacing's DisplaySettings.css with the Line Items settings (`85d353c`). The body is a
+   checklist (checked columns first, in display order, with ↑ ↓), then label-stacked fields on one
+   .sp-card-fields row, then the reset link and the save hint. No left rail anywhere: the off rows
+   are muted text, the on rows a filled checkbox.
+   What differs: Pacing scopes the small ↑ ↓ under `.settings-drawer` and narrows the sort pair
+   with `@container settings`; neither exists here, so the buttons are scoped under `.lic` and the
+   container is the card that hosts the editor (`.lic-host`, ../pacing-dashboard-library.tsx). And
+   the app-wide `input, select { min-height: 42px; padding-right: 34px }` (app/styles.css) is undone
+   for the editor's own controls, or they would stand 16px taller than Pacing's 26px row. */
+.lic { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.lic-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.lic-lbl { min-width: 0; }
+.lic-count { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lic-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lic-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.lic-row .sp-chk { padding: 2px 0; min-width: 0; flex: 1 1 auto; }
+.lic-row--off .lic-label { color: var(--text-muted); }
+.lic-row--muted .lic-label { color: var(--text-faint); }
+.lic-row .sp-chk input[type="checkbox"]:disabled { cursor: default; opacity: .5; }
+.lic-label { white-space: nowrap; }
+.lic-note { font-size: 10px; color: var(--text-faint); white-space: nowrap; }
+.lic-move { display: inline-flex; gap: 4px; flex: none; }
+.lic .lic-btn { min-width: 24px; min-height: 24px; height: 24px; padding: 0 6px; font-size: 11px; line-height: 1; }
+.lic-fields { margin-top: 2px; }
+.lic-sort { grid-column: span 2; }
+.lic-pair { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 6px; }
+.lic-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lic-hint { margin-top: 0; }
+.lic .sp-inp { min-height: 0; }
+.lic select.sp-inp { padding-right: 24px; background-position: right 6px center; background-size: 12px; }
+.lic-host { container-type: inline-size; container-name: lic-host; }
+@container lic-host (max-width: 620px) {
+  .lic-sort { grid-column: auto; }
+  .lic-pair { grid-template-columns: minmax(0, 1fr); }
+}

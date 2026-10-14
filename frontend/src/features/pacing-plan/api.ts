@@ -18,11 +18,13 @@ import type {
  */
 export async function savePacingPlan(
   slug: string,
-  lineItems: PacingLineItemPlanUpdateV1[]
+  lineItems: PacingLineItemPlanUpdateV1[],
+  /** The campaign exchange rate, when it changed - saved in the same request as the line items. */
+  rate?: { rate: number; rateLocked: boolean }
 ): Promise<PacingPlanUpdateResultV1> {
   const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/plan", {
     params: { path: { slug } },
-    body: { lineItems },
+    body: rate ? { lineItems, rate: rate.rate, rateLocked: rate.rateLocked } : { lineItems },
   });
   if (result.error || !result.response.ok || result.data === undefined) {
     throw new ApiError(formatError(result.error), result.response.status);

@@ -9,7 +9,8 @@
  * container-existence rule, the target-impressions bound against the line item's own plan). What
  * lives here is string/number bookkeeping to build the JSON object the user asked for (a new
  * container, a duplicate scaled by a factor they typed) - never a delivery figure, an actual, or a
- * proration. `imprWarning` below is the informational-only mirror of the retired SPA's own warning:
+ * proration of delivery. The one proportion here is the reference's own budget→units fill
+ * (`unitsFromBudget`), over two numbers the user typed. `imprWarning` below is the informational-only mirror of the retired SPA's own warning:
  * Pacing owns the real "container total exceeds the line item's plan" rejection (or, today, does not
  * yet enforce it at save time at all - see the migration notes); this never blocks a save.
  */
@@ -75,6 +76,9 @@ export interface LiPlanForContainer {
   fe: string;
   targetImpressions: number | null;
   nativeBudget: number | null;
+  /** The line item's budget in USD - the reference's `plan.budget`, i.e. the native budget at the
+   *  campaign rate (`setBudgetNative` keeps it that way on every edit). */
+  budgetUsd: number | null;
 }
 
 /** Generates a short, human-scannable id for a new container/date-child - never sent to Pacing as a
@@ -86,27 +90,89 @@ export function genId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Builds the default container that covers a line item's entire flight - offered when the manager
- *  adds the first container to a line item that has none yet. Copies the LI's own targets 1:1 so the
- *  new container starts as "the whole flight, once", the natural starting point before splitting it. */
-export function buildDefaultContainer(plan: LiPlanForContainer, name = "Container"): PacingContainer {
-  let label = name;
+/** Builds the default container that covers a line item's entire flight - the reference's
+ *  `buildDefaultContainer`. Named "Default", or "Mar 2026" when the flight sits in one month; a
+ *  container added after the first is renamed "Container N" by the caller, as in the reference. */
+export function buildDefaultContainer(plan: LiPlanForContainer): PacingContainer {
+  let name = "Default";
   if (plan.fs && plan.fe && plan.fs.slice(0, 7) === plan.fe.slice(0, 7)) {
     const month = Number(plan.fs.slice(5, 7));
-    if (month >= 1 && month <= 12) label = `${MONTHS[month - 1]} ${plan.fs.slice(0, 4)}`;
+    if (month >= 1 && month <= 12) name = `${MONTHS[month - 1]} ${plan.fs.slice(0, 4)}`;
   }
   return {
     id: genId("c"),
-    name: label,
+    name,
     fs: plan.fs || "",
     fe: plan.fe || "",
     target_impressions: plan.targetImpressions ?? 0,
     native_budget: plan.nativeBudget ?? null,
-    target_spend: null,
+    target_spend: plan.budgetUsd || 0,
     margin_percent: null,
     date_children: [],
     dim_children: [],
   };
+}
+
+/** What the units/budget helpers need to know about the owning line item. */
+export interface LiBudgetBase {
+  planImpr: number;
+  budgetUsd: number;
+}
+
+/** `shared/units-from-budget.js`: a row's USD budget as units, in proportion to the line item's own
+ *  units per USD. Null when the line item has no budget to prorate against. */
+export function unitsFromBudget(budgetUsd: number, liUnits: number, liBudgetUsd: number): number | null {
+  const liBud = Number(liBudgetUsd) || 0;
+  if (!liBud) return null;
+  return Math.round(((Number(budgetUsd) || 0) * (Number(liUnits) || 0)) / liBud);
+}
+
+/**
+ * A Spend edit on a container, date split or dim split - the reference's `setSpendNative`. The
+ * typed amount is the contract-currency truth (`native_budget`); `target_spend` is its USD cache at
+ * the campaign rate. Blank or zero clears both. `toUsd` is `Currency.currencyToUsd`.
+ */
+export function spendFromRaw(
+  raw: string,
+  rate: number,
+  toUsd: (native: number, rate: number) => number
+): { native_budget: number | null; target_spend: number | null } {
+  const native = parseFloat(String(raw).replace(/,/g, ""));
+  if (!Number.isFinite(native) || native === 0) return { native_budget: null, target_spend: null };
+  return { native_budget: native, target_spend: toUsd(native, rate) };
+}
+
+/** The reference's `withBudgetUnits`: after a Spend edit the units follow the new budget (the user
+ *  can still type over them). Unchanged when the line item has no budget to prorate against. */
+export function withBudgetUnits<T extends { target_impressions: number | null }>(
+  base: T,
+  budgetUsd: number,
+  li: LiBudgetBase
+): T {
+  const units = unitsFromBudget(budgetUsd, li.planImpr, li.budgetUsd);
+  return units == null ? base : { ...base, target_impressions: units };
+}
+
+/**
+ * Switching a dim split between units and percent - the reference's `setMode`. The number is
+ * converted, so 100 000 units does not silently become 100 000 %. Going to percent also drops the
+ * split's budget, so no money hides behind a share.
+ */
+export function dimChildWithMode(
+  child: PacingDimChild,
+  container: Pick<PacingContainer, "target_impressions">,
+  mode: PacingDimChild["target_mode"]
+): PacingDimChild {
+  const base = Number(container.target_impressions) || 0;
+  if (mode === "percent") {
+    const abs = Number(child.target_value) || 0;
+    const pct = base > 0 && abs > 0 ? Math.round((abs / base) * 10000) / 100 : null;
+    return { ...child, target_mode: "percent", target_value: pct, target_spend: null, native_budget: null };
+  }
+  const wasPercent = (child.target_mode || "absolute") === "percent";
+  const pct = Number(child.target_value) || 0;
+  const abs = wasPercent && base > 0 && pct > 0 ? Math.round((base * pct) / 100) : wasPercent ? null : child.target_value;
+  return { ...child, target_mode: mode, target_value: abs };
 }
 
 /** Calendar-month shift: the default {fs, fe, name} the Duplicate dialog seeds for "next period". */
@@ -325,4 +391,145 @@ export function containerSumExceedsPlan(planTargetImpressions: number | null, co
 export function currencyMatches(candidateCurrency: string | null | undefined, pacingCurrency: string | null | undefined): boolean {
   const normalize = (c: string | null | undefined) => (c || "USD").toUpperCase();
   return normalize(candidateCurrency) === normalize(pacingCurrency);
+}
+
+/** One calendar month of a container's window - the reference's `genMonthlyPeriods`. */
+export interface MonthPeriod {
+  start: string;
+  end: string;
+  days: number;
+  label: string;
+}
+
+/** The calendar months covering [fs, fe], the first and last clipped to the window. */
+export function genMonthlyPeriods(fs: string, fe: string): MonthPeriod[] {
+  const periods: MonthPeriod[] = [];
+  let c = new Date(`${fs}T00:00:00Z`);
+  const end = new Date(`${fe}T00:00:00Z`);
+  while (c <= end) {
+    const ps = c.toISOString().slice(0, 10);
+    const me = new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 0));
+    const pe = me < end ? me.toISOString().slice(0, 10) : fe;
+    const days = Math.round((new Date(`${pe}T00:00:00Z`).getTime() - new Date(`${ps}T00:00:00Z`).getTime()) / 864e5) + 1;
+    periods.push({ start: ps, end: pe, days, label: `${MONTHS[c.getUTCMonth()]} ${c.getUTCFullYear()}` });
+    c = new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 1));
+  }
+  return periods;
+}
+
+/** Whether Distribute can run: a real window and a units target to split. */
+export function canDistribute(container: Pick<PacingContainer, "fs" | "fe" | "target_impressions">): boolean {
+  return !!(container.fs && container.fe && container.fs <= container.fe && (Number(container.target_impressions) || 0) > 0);
+}
+
+/**
+ * Distribute by Month - the reference's `doDistribute`. Replaces the container's date splits with
+ * one per calendar month: `proportional` by days in the month, `equal` the same share each. The last
+ * month takes the remainder, so units and USD spend add up exactly. Each split's native budget is
+ * its USD share converted back at the campaign rate (`usdToNative`), so a non-USD Spend cell is
+ * filled too.
+ */
+export function distributeByMonth(
+  container: PacingContainer,
+  mode: "proportional" | "equal",
+  rate: number,
+  usdToNative: (usd: number, rate: number) => number
+): PacingContainer {
+  const { fs, fe } = container;
+  if (!fs || !fe || fs > fe) return container;
+  const ti = Number(container.target_impressions) || 0;
+  const ts = Number(container.target_spend) || 0;
+  const periods = genMonthlyPeriods(fs, fe);
+  const totalDays = periods.reduce((sum, p) => sum + p.days, 0);
+  const n = periods.length;
+  let usedU = 0;
+  let usedB = 0;
+  const next: PacingDateChild[] = periods.map((pr, i) => {
+    const isLast = i === n - 1;
+    const dcTi = mode === "equal"
+      ? (isLast ? ti - usedU : Math.round(ti / n))
+      : (isLast ? ti - usedU : Math.round((ti * pr.days) / totalDays));
+    const dcTs = mode === "equal"
+      ? (isLast ? Math.round((ts - usedB) * 100) / 100 : Math.round((ts / n) * 100) / 100)
+      : (isLast ? Math.round((ts - usedB) * 100) / 100 : Math.round(((ts * pr.days) / totalDays) * 100) / 100);
+    usedU += dcTi;
+    usedB += dcTs;
+    const dcNb = dcTs ? Math.round(usdToNative(dcTs, rate) * 100) / 100 : null;
+    return {
+      id: genId("d"),
+      name: pr.label,
+      fs: pr.start,
+      fe: pr.end,
+      target_impressions: dcTi || null,
+      native_budget: dcNb,
+      target_spend: dcTs || null,
+      margin_percent: null,
+    };
+  });
+  return { ...container, date_children: next };
+}
+
+/** What "Fit LI to containers" would change - the reference's `fitProposal`. */
+export interface FitProposal {
+  sumTi: number;
+  sumTs: number;
+  earliestFs: string;
+  latestFe: string;
+  needsImpr: boolean;
+  needsBudget: boolean;
+  needsFs: boolean;
+  needsFe: boolean;
+  anyFit: boolean;
+}
+
+/**
+ * Does every container fit inside its line item? A container with no USD budget of its own counts
+ * its units' share of the line item's budget. `planImpr` / `budgetUsd` / `fs` / `fe` are the line
+ * item's as currently typed.
+ */
+export function fitProposal(
+  li: { planImpr: number; budgetUsd: number; fs: string; fe: string },
+  containers: readonly PacingContainer[]
+): FitProposal {
+  const planImpr = Number(li.planImpr) || 0;
+  const planBud = Number(li.budgetUsd) || 0;
+  let sumTi = 0;
+  let sumTs = 0;
+  let earliestFs = li.fs || "";
+  let latestFe = li.fe || "";
+  for (const c of containers || []) {
+    const cTi = Number(c.target_impressions) || 0;
+    sumTi += cTi;
+    if (c.target_spend != null && Number(c.target_spend) > 0) sumTs += Number(c.target_spend);
+    else if (planImpr > 0 && cTi > 0) sumTs += (cTi / planImpr) * planBud;
+    if (c.fs && (!earliestFs || c.fs < earliestFs)) earliestFs = c.fs;
+    if (c.fe && (!latestFe || c.fe > latestFe)) latestFe = c.fe;
+  }
+  const needsImpr = sumTi > planImpr;
+  const needsBudget = sumTs > planBud + 0.0001;
+  const needsFs = !!(earliestFs && li.fs && earliestFs < li.fs);
+  const needsFe = !!(latestFe && li.fe && latestFe > li.fe);
+  return { sumTi, sumTs, earliestFs, latestFe, needsImpr, needsBudget, needsFs, needsFe, anyFit: needsImpr || needsBudget || needsFs || needsFe };
+}
+
+/**
+ * The line item's warning dot, the reference's `liWarnings.fit`: container units over the plan, USD
+ * spend over the budget, or a container outside the flight. Stricter than `fitProposal` on spend -
+ * a container with no budget of its own adds nothing here, as in the reference.
+ */
+export function containersExceedLi(
+  li: { planImpr: number; budgetUsd: number; fs: string; fe: string },
+  containers: readonly PacingContainer[]
+): boolean {
+  const planImpr = Number(li.planImpr) || 0;
+  const planBud = Number(li.budgetUsd) || 0;
+  let sumTi = 0;
+  let sumTs = 0;
+  let outside = false;
+  for (const c of containers || []) {
+    sumTi += Number(c.target_impressions) || 0;
+    sumTs += Number(c.target_spend) || 0;
+    if ((c.fs && li.fs && c.fs < li.fs) || (c.fe && li.fe && c.fe > li.fe)) outside = true;
+  }
+  return (planImpr > 0 && sumTi > planImpr) || (planBud > 0 && sumTs > planBud + 0.0001) || outside;
 }

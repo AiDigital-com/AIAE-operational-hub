@@ -180,7 +180,7 @@ function bridgePlanKeys(payload) {
  * existed", not "nothing available", and `conversionTags` missing means the conversion rows were
  * never tagged, not that their tags were dropped.
  */
-export function usePacingState({ data, urlFilters, actions, journalHighlight, dimensionHandoff }) {
+export function usePacingState({ data, urlFilters, actions, journalHighlight, dimensionHandoff, periodScopeOverride }) {
   return useMemo(() => {
     const fetched = data ?? null;
     // Value groups (spec 2026-10-02): a line item can say that several delivered values of one
@@ -218,6 +218,17 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight, di
       facts = { factsDaily: raw.factsDaily, liDaily: LD, liSplitDaily: LSD,
                 asOf: raw.asOf ?? asOf, rate, cvCtx };
     }
+    // Period scope (the reference's dashboardStore `load`): a persisted pacing setting. The saved
+    // key is only a hint - resolvePeriodKey honours it, heals a stale one, and answers `no_period`
+    // when the containers carry none - so this dashboard, Pacing's Overview row and the Slack summary
+    // land on the same period. `periodScopeOverride` is the page's optimistic copy while a toggle or
+    // a pick is being saved, so the switch answers at once instead of after the refetch.
+    const scopeSource = periodScopeOverride
+      || { periodScope: !!raw?.campaign?.periodScope, periodScopeKey: raw?.campaign?.periodScopeKey ?? null };
+    const resolvedScope = scopeSource.periodScope
+      ? resolvePeriodKey(LP, facts.asOf || null, scopeSource.periodScopeKey)
+      : { key: null, state: null };
+    const selectedPeriodKey = resolvedScope.key;
     return {
       campaign: raw?.campaign ?? null,
       facts,
@@ -237,15 +248,16 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight, di
       notify: raw?.notify ?? null,
       display: raw?.display ?? {},
       journalHighlight: journalHighlight ?? null,
-      // The «See in Breakdown» axis (see `setDimensionHandoff` above). Page state the SPA kept in
-      // the same store and the Hub has no equivalent for: period-scope mode.
+      // The «See in Breakdown» axis (see `setDimensionHandoff` above).
       dimensionHandoff: dimensionHandoff ?? null,
-      selectedPeriodKey: null,
-      splitScopedMode: false,
-      splitScopedPlans: null,
+      // Period scope, resolved above. Every moved selector, widget and split row reads these three.
+      selectedPeriodKey,
+      periodScopeState: resolvedScope.state,
+      splitScopedMode: !!scopeSource.periodScope,
+      splitScopedPlans: selectedPeriodKey ? buildScopedPlansForPeriod(LP, selectedPeriodKey) : null,
       urlFilters, actions,
     };
-  }, [data, urlFilters, actions, journalHighlight, dimensionHandoff]);
+  }, [data, urlFilters, actions, journalHighlight, dimensionHandoff, periodScopeOverride]);
 }
 
 // ── the SPA's `hooks/useDashboard.js`, the part the renderer uses ──────────────────────────────
@@ -267,6 +279,8 @@ import {
 import { normalize, buildFactsAggregates } from './normalize.js';
 import { makeCvCtx } from './primary-cv.js';
 import { groupIndexOf, groupedView } from './dim-value-groups.js';
+import { extractPeriods, resolvePeriodKey } from './periods.js';
+import { buildScopedPlansForPeriod } from './config.js';
 
 export const useCampaign = () => useDashboardStore(selectCampaign);
 export const useDisplay = () => useDashboardStore(selectDisplay);
@@ -310,11 +324,23 @@ export function useBreakdownFacts() {
   return useDashboardStore((s) => selectDeliveryFacts(s, filters));
 }
 
-/** Period-scope mode. Always false here — `usePacingState` pins it, because this app has no period
- *  picker — and the block handles that as "no scope", which is how Pacing itself behaves with the
- *  mode off. Exported rather than inlined so the day the Hub grows a period picker there is one
- *  place to change, and the moved code keeps reading the name it was written against. */
+/** Period-scope mode — `config.period_scope`, resolved by `usePacingState` (the reference's
+ *  `useDashboard.js` hooks of the same names). */
 export const useSplitScopedMode = () => useDashboardStore((s) => s.splitScopedMode);
+export const useSelectedPeriodKey = () => useDashboardStore((s) => s.selectedPeriodKey);
+export const usePeriodScopeState = () => useDashboardStore((s) => s.periodScopeState);
+
+// The reference's `hooks/usePeriods.js`: one extractPeriods per plan map, shared by every reader.
+const periodsCache = new WeakMap();
+/** The periods the line items' containers define (`PacingCore.extractPeriods`), cached per plan map. */
+export function periodsOf(liPlan) {
+  if (!liPlan) return [];
+  const cached = periodsCache.get(liPlan);
+  if (cached) return cached;
+  const result = extractPeriods(liPlan);
+  periodsCache.set(liPlan, result);
+  return result;
+}
 
 /** `filtersOverride`: a chart's own period chip patches the DATA selector's filters, so a target
  *  value read from campM follows the same window as the series it annotates. */

@@ -42,9 +42,37 @@
 }
 .fb__controls {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+/* The right end of the row: the settings gear, as the reference's filter bar has it. */
+.fb__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.fb-icon-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 15px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+.fb-icon-btn:hover,
+.fb-icon-btn[aria-expanded="true"] {
+  border-color: var(--border-strong);
+  color: var(--ink);
 }
 
 /* Shared control chrome (multiselect trigger, segmented buttons). */
@@ -84,7 +112,9 @@
 }
 .fb-seg__btn {
   height: 100%;
-  padding: 0 11px;
+  /* 9px rather than 11px: with the period-scope pair and the settings gear on the same row, the
+     two pixels per segment are what keep the whole bar on one line beside the app sidebar. */
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   border-radius: 6px;

@@ -41,6 +41,11 @@ import java.util.Map;
  * @param primary_conversions primary conversions (Pacing spec 2026-09-13 §2) - the conversion
  *                             actions this line item counts as its own; absent when unchanged
  * @param containers          date-based plan overrides (§9), opaque - forwarded byte-for-byte
+ * @param dim_groups          value groups (Pacing spec 2026-10-02), opaque - forwarded verbatim. Null
+ *                            = omit the key, which dash-gate reads as "keep the stored groups"
+ *                            ({@code dim_groups} is not in its {@code PLAN_OWNED} set); a present
+ *                            list - an empty {@code []} included, which this NON_NULL still writes -
+ *                            replaces them
  */
 // NON_NULL (not the class-wide default of always-include): dash-gate's own merge checks
 // `'channel' in newLi` / `'description' in newLi` / `'campaign_id' in newLi` /
@@ -70,5 +75,6 @@ record LineItemPlanUpdateRequest(
 		Double net_ratio,
 		Boolean net_ratio_locked,
 		List<String> primary_conversions,
-		List<Map<String, Object>> containers) {
+		List<Map<String, Object>> containers,
+		List<Map<String, Object>> dim_groups) {
 }

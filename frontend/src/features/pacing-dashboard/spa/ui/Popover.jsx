@@ -44,6 +44,8 @@
 //   onClose       asked to close: Escape, a pointerdown outside, the coordinator
 //   title         the panel's accessible name and its head caption
 //   width         panel width in px (default 360), clamped to the visible viewport
+//   align         'end' (default): the panel's right edge on the chip's; 'start': its left
+//                 edge on the chip's, for a panel that opens from the start of a row
 //   initialFocus  'first' (default) — the first control in the panel; 'none' — leave
 //                 focus alone; or anything useFocusOnOpen resolves (ref / element /
 //                 selector / function)
@@ -77,7 +79,7 @@ function fitWidth(width, viewport = visibleViewport()) {
 }
 
 export function PopoverPanel({
-  id, title, width, anchorRef, onClose, initialFocus = 'first', active = true, children,
+  id, title, width, align = 'end', anchorRef, onClose, initialFocus = 'first', active = true, children,
 }) {
   const [pos, setPos] = useState(null);
   const panelRef = useRef(null);
@@ -101,6 +103,7 @@ export function PopoverPanel({
       top: rect.top - viewport.top,
       bottom: rect.bottom - viewport.top,
       right: rect.right - viewport.left,
+      left: rect.left - viewport.left,
     }, {
       panelW: panelWidth,
       panelH: panelHeight,
@@ -108,6 +111,7 @@ export function PopoverPanel({
       viewportH: viewport.height,
       gap: POPOVER_GAP,
       edge: POPOVER_EDGE,
+      align,
     });
     // Ordinary menus may overflow when neither side fits. A settings panel must
     // retain every control, so that case moves within the screen and scrolls.
@@ -118,7 +122,7 @@ export function PopoverPanel({
     next.maxHeight = maxHeight;
     setPos((cur) => (cur && cur.top === next.top && cur.left === next.left
       && cur.width === next.width && cur.maxHeight === next.maxHeight ? cur : next));
-  }, [anchorRef, width]);
+  }, [anchorRef, width, align]);
 
   // The one measurement everything after the first frame is placed from. Two reads
   // per event, both BEFORE anything is written back, so a scroll costs one layout.
@@ -176,6 +180,9 @@ export function PopoverPanel({
     if (!active) return undefined;
     function onEscape(e) {
       if (e.key !== 'Escape' || e.defaultPrevented || e.cancelBubble) return;
+      // An open suggestion list in a formula field inside this panel is the field's: its own
+      // handler dismisses the list and stops the key, so this panel stands back without taking it.
+      if (openCombobox(e.target)) return;
       // Leave the browser's default action intact so this Escape closes the native list.
       // Stop propagation so the drawer behind this portalled panel cannot take it too.
       if (openNativeSelect(e.target)) { e.stopPropagation(); return; }
@@ -281,7 +288,7 @@ export function PopoverPanel({
 }
 
 export default function Popover({
-  anchorRef, open, onClose, title, width = 360, initialFocus = 'first', id, keepMounted = false, children,
+  anchorRef, open, onClose, title, width = 360, align = 'end', initialFocus = 'first', id, keepMounted = false, children,
 }) {
   const autoId = useId();
   if ((!open && !keepMounted) || typeof document === 'undefined') return null;
@@ -290,6 +297,7 @@ export default function Popover({
       id={id || `sp-pop-${autoId}`}
       title={title}
       width={width}
+      align={align}
       anchorRef={anchorRef}
       onClose={onClose}
       initialFocus={initialFocus}

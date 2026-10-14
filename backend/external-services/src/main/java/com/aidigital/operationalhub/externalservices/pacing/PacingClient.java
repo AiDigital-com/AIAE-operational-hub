@@ -10,6 +10,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaign
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
@@ -218,6 +219,19 @@ public interface PacingClient {
 	void saveMappings(HubAssertion assertion, String slug, List<Map<String, Object>> mappingsV3);
 
 	/**
+	 * Turns period scope on or off for this pacing and says which period it shows - Pacing's
+	 * {@code period_scope} / {@code period_scope_key}. A pacing-level setting: every viewer, the
+	 * Overview row and the Slack summary follow it. Pacing keeps it out of the settings audit.
+	 *
+	 * @param assertion      the signed caller identity and scope
+	 * @param slug           the pacing's dash_slug
+	 * @param periodScope    true to show one period of the containers, false for the whole flight
+	 * @param periodScopeKey the period as {@code start|end}, or null to store none (sent as null, so
+	 *                       a key saved earlier is cleared rather than kept)
+	 */
+	void savePeriodScope(HubAssertion assertion, String slug, boolean periodScope, String periodScopeKey);
+
+	/**
 	 * Asks Pacing to propose dimensions for a mapping, mined from the words actually present in this
 	 * pacing's delivery rows and CM360 placements.
 	 *
@@ -423,16 +437,25 @@ public interface PacingClient {
 	 * there is no conflict outcome to return - a rejection (e.g. an out-of-range coefficient-cost
 	 * margin) throws.
 	 *
-	 * @param assertion who is calling and what they may see
-	 * @param slug      the pacing's dash_slug
-	 * @param lineItems the whole line-item set to persist
+	 * <p>{@code rateUpdate} rides in the SAME request as the line items, as top-level {@code rate} /
+	 * {@code rate_locked}: Pacing stores the rate before merging the line items, so the new rate
+	 * governs the USD figures this save writes. Its null fields are omitted from the body.
+	 *
+	 * @param assertion  who is calling and what they may see
+	 * @param slug       the pacing's dash_slug
+	 * @param lineItems  the whole line-item set to persist
+	 * @param rateUpdate the campaign exchange-rate change, never null; both its fields null = no change
 	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
 	 *         on a non-2xx response or network failure (unchecked) - a structurally invalid plan
 	 *         (e.g. {@code bad_coef_config}) is {@link com.aidigital.operationalhub.externalservices
 	 *         .pacing.exception.PacingFailureReason#UPSTREAM_BAD_REQUEST} with a human {@code detail}
 	 *         naming the line item and field
 	 */
-	void savePlan(HubAssertion assertion, String slug, List<PacingLineItemPlanUpdate> lineItems);
+	void savePlan(
+			HubAssertion assertion,
+			String slug,
+			List<PacingLineItemPlanUpdate> lineItems,
+			PacingPlanRateUpdate rateUpdate);
 
 	/**
 	 * Saves a pacing's data settings: which BigQuery table its delivery is read from, and which

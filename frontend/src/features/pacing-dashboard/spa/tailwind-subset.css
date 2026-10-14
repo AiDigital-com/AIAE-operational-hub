@@ -112,6 +112,7 @@
 .select-none { -webkit-user-select: none; user-select: none; }
 .flex-1 { flex: 1 1 0%; }
 .flex-shrink-0 { flex-shrink: 0; }
+.flex-\[0_1_56px\] { flex: 0 1 56px; }
 .z-10 { z-index: 10; }
 .top-0 { top: 0; }
 .bottom-0 { bottom: 0; }
@@ -129,6 +130,7 @@
 .h-\[22px\] { height: 22px; }
 .min-h-\[44px\] { min-height: 44px; }
 .min-w-\[52px\] { min-width: 52px; }
+.min-w-\[20px\] { min-width: 20px; }
 /* spacing */
 .mb-1 { margin-bottom: 0.25rem; }
 .mt-\[1px\] { margin-top: 1px; }
@@ -192,6 +194,8 @@
 .duration-150 { transition-duration: 150ms; }
 .duration-200 { transition-duration: 200ms; }
 .duration-300 { transition-duration: 300ms; }
+/* transform - v4 writes a rotation to the individual `rotate` property */
+.rotate-90 { rotate: 90deg; }
 
 /* variants */
 .hover\:bg-\[var\(--hover-bg\)\]:hover { background-color: var(--hover-bg); }

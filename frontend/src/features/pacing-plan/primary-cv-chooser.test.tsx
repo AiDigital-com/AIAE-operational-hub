@@ -46,6 +46,7 @@ function renderSheet(over: { conversions?: Any; planByLineItem?: Any; primaryCvE
       <PacingPlanSection
         slug="s"
         currency="USD"
+        rate={1}
         netFeatureOn={false}
         coefEnabled={false}
         primaryCvEnabled={over.primaryCvEnabled ?? true}

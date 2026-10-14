@@ -16,6 +16,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateDa
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateLineItem;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOptions;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
@@ -446,6 +447,11 @@ public class PacingClientImpl implements PacingClient {
 	}
 
 	@Override
+	public void savePeriodScope(HubAssertion assertion, String slug, boolean periodScope, String periodScopeKey) {
+		saveSettingsFragment(assertion, slug, new PeriodScopeSettingsRequest(periodScope, periodScopeKey));
+	}
+
+	@Override
 	public PacingThirdPartyRefetchOutcome refetchThirdParty(HubAssertion assertion, String slug) {
 		String header = assertionSigner.sign(assertion);
 		String path = DASHBOARDS_PATH + "/" + slug + "/third-party/refetch";
@@ -870,11 +876,16 @@ public class PacingClientImpl implements PacingClient {
 	}
 
 	@Override
-	public void savePlan(HubAssertion assertion, String slug, List<PacingLineItemPlanUpdate> lineItems) {
+	public void savePlan(
+			HubAssertion assertion,
+			String slug,
+			List<PacingLineItemPlanUpdate> lineItems,
+			PacingPlanRateUpdate rateUpdate) {
 		String header = assertionSigner.sign(assertion);
 		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
 		List<LineItemPlanUpdateRequest> wireLineItems = lineItems.stream().map(this::toWirePlanLineItem).toList();
-		PlanSettingsRequest request = new PlanSettingsRequest(wireLineItems);
+		PlanSettingsRequest request =
+				new PlanSettingsRequest(wireLineItems, rateUpdate.rate(), rateUpdate.rateLocked());
 		try {
 			restClient.post()
 					.uri(path)
@@ -896,7 +907,7 @@ public class PacingClientImpl implements PacingClient {
 				li.lineItemId(), li.channel(), li.description(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.rateType(), li.nativeBudget(), li.targetImpressions(), li.marginPercent(),
 				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.costCoef(),
-				li.netRatio(), li.netRatioLocked(), li.primaryConversions(), li.containers());
+				li.netRatio(), li.netRatioLocked(), li.primaryConversions(), li.containers(), li.dimGroups());
 	}
 
 	@Override

@@ -7,6 +7,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDis
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPlanUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.application.exception.GlobalExceptionHandler;
 import com.aidigital.operationalhub.application.exception.mapper.GlobalExceptionResponseHelperImpl;
@@ -45,6 +46,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboar
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
@@ -73,6 +75,7 @@ import com.aidigital.operationalhub.service.rbac.model.PacingScope;
 import org.instancio.Instancio;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -83,6 +86,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -92,6 +96,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -198,8 +203,10 @@ class PacingDashboardControllerMvcTest {
 		stubCurrentUser();
 		List<PacingLineItemPlanUpdate> lineItems = List.of(
 				new PacingLineItemPlanUpdate("111", null, null, null, null, null, "CPM", 5000.0, 1_000_000.0,
-						20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of()));
+						20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of(), null));
 		doReturn(lineItems).when(planMapper).toPlanUpdateLineItems(any());
+		PacingPlanRateUpdate rateUpdate = new PacingPlanRateUpdate(null, null);
+		doReturn(rateUpdate).when(planMapper).toPlanRateUpdate(any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		String body = "{\"lineItems\":[{\"lineItemId\":\"111\",\"rateType\":\"CPM\","
@@ -211,7 +218,107 @@ class PacingDashboardControllerMvcTest {
 						.contentType(APPLICATION_JSON).content(body))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.saved").value(true));
-		verify(pacingClient).savePlan(any(), eq("nike-ss26"), eq(lineItems));
+		verify(pacingClient).savePlan(any(), eq("nike-ss26"), eq(lineItems), eq(rateUpdate));
+	}
+
+	@Test
+	void shouldDeserializeRateAndRateLockedKeepingAbsentNullTest() throws Exception {
+		// Given: one save that sets the rate by hand, one that does not touch it. The untouched one must
+		// reach the mapper as null on both fields, so Pacing's body omits the keys and keeps the stored
+		// rate and lock.
+		stubCurrentUser();
+		doReturn(List.of()).when(planMapper).toPlanUpdateLineItems(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+		ArgumentCaptor<PacingPlanUpdateV1> captor = ArgumentCaptor.forClass(PacingPlanUpdateV1.class);
+
+		// When:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{\"lineItems\":[],\"rate\":0.27,\"rateLocked\":true}"))
+				.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{\"lineItems\":[]}"))
+				.andExpect(status().isOk());
+
+		// Then:
+		verify(planMapper, times(2)).toPlanRateUpdate(captor.capture());
+		assertThat(captor.getAllValues().get(0).getRate()).isEqualTo(0.27);
+		assertThat(captor.getAllValues().get(0).getRateLocked()).isTrue();
+		assertThat(captor.getAllValues().get(1).getRate()).isNull();
+		assertThat(captor.getAllValues().get(1).getRateLocked()).isNull();
+	}
+
+	@Test
+	void shouldRefuseANonPositiveRateWithBadRequestTest() throws Exception {
+		// Given: a rate of zero and a negative one - structurally meaningless as an exchange rate, so
+		// the Hub refuses them before the controller method runs, so nothing reaches Pacing.
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{\"lineItems\":[],\"rate\":0}"))
+				.andExpect(status().isBadRequest());
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{\"lineItems\":[],\"rate\":-1.5}"))
+				.andExpect(status().isBadRequest());
+		verifyNoInteractions(pacingClient);
+	}
+
+	@Test
+	void shouldDeserializeDimGroupsKeepingAbsentNullAndEmptyEmptyTest() throws Exception {
+		// Given: three line items - groups present, key absent, explicit []. The absent one must reach
+		// the mapper as null (not the generator's usual empty-list default), or the save would send
+		// `dim_groups: []` and Pacing would clear the stored groups of every untouched line item.
+		stubCurrentUser();
+		doReturn(List.of()).when(planMapper).toPlanUpdateLineItems(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+		String body = "{\"lineItems\":["
+				+ "{\"lineItemId\":\"111\",\"dimGroups\":[{\"dim_key\":\"geo\",\"name\":\"Northeast\","
+				+ "\"values\":[\"NY\",\"MA\"]}]},"
+				+ "{\"lineItemId\":\"222\"},"
+				+ "{\"lineItemId\":\"333\",\"dimGroups\":[]}]}";
+		ArgumentCaptor<PacingPlanUpdateV1> captor = ArgumentCaptor.forClass(PacingPlanUpdateV1.class);
+
+		// When:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content(body))
+				.andExpect(status().isOk());
+
+		// Then:
+		verify(planMapper).toPlanUpdateLineItems(captor.capture());
+		PacingPlanUpdateV1 received = captor.getValue();
+		assertThat(received.getLineItems().get(0).getDimGroups()).containsExactly(
+				Map.of("dim_key", "geo", "name", "Northeast", "values", List.of("NY", "MA")));
+		assertThat(received.getLineItems().get(1).getDimGroups()).isNull();
+		assertThat(received.getLineItems().get(2).getDimGroups()).isNotNull().isEmpty();
+	}
+
+	@Test
+	void shouldDeserializePrimaryConversionsKeepingAbsentNullAndEmptyEmptyTest() throws Exception {
+		// Given: a changed choice, an untouched line item (no key) and the deliberate clear ([]). The
+		// untouched one must reach the mapper as null - the generator's empty-list default sent it on as
+		// `primary_conversions: []`, which Pacing reads as "clear", wiping every untouched choice.
+		stubCurrentUser();
+		doReturn(List.of()).when(planMapper).toPlanUpdateLineItems(any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+		String body = "{\"lineItems\":["
+				+ "{\"lineItemId\":\"111\",\"primaryConversions\":[\"Purchase\"]},"
+				+ "{\"lineItemId\":\"222\"},"
+				+ "{\"lineItemId\":\"333\",\"primaryConversions\":[]}]}";
+		ArgumentCaptor<PacingPlanUpdateV1> captor = ArgumentCaptor.forClass(PacingPlanUpdateV1.class);
+
+		// When:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/plan", "nike-ss26")
+						.contentType(APPLICATION_JSON).content(body))
+				.andExpect(status().isOk());
+
+		// Then:
+		verify(planMapper).toPlanUpdateLineItems(captor.capture());
+		PacingPlanUpdateV1 received = captor.getValue();
+		assertThat(received.getLineItems().get(0).getPrimaryConversions()).containsExactly("Purchase");
+		assertThat(received.getLineItems().get(1).getPrimaryConversions()).isNull();
+		assertThat(received.getLineItems().get(2).getPrimaryConversions()).isNotNull().isEmpty();
 	}
 
 	@Test
@@ -221,7 +328,7 @@ class PacingDashboardControllerMvcTest {
 		doReturn(List.of()).when(planMapper).toPlanUpdateLineItems(any());
 		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
 				"bad_coef_config", "line item 111: its margin is out of range (coefficient-cost margin must be 0-99.99)"))
-				.when(pacingClient).savePlan(any(), any(), any());
+				.when(pacingClient).savePlan(any(), any(), any(), any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
 				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
 				.build();
@@ -484,6 +591,30 @@ class PacingDashboardControllerMvcTest {
 	}
 
 	@Test
+	@SuppressWarnings("unchecked")
+	void shouldHandTheLineItemsResetToPacingAsAnExplicitNullTest() throws Exception {
+		// Given: "Reset to default" on the Line Items block's settings is `lineItems: null` - the one
+		// top-level removal dash-gate's display save knows. The display map is opaque here, and must stay
+		// that way down to the null: dropped, the key would be absent and the reset a silent no-op.
+		stubCurrentUser();
+		PacingDisplaySaveOutcome outcome = PacingDisplaySaveOutcome.saved(Map.of("widgets", List.of()));
+		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), anyInt(), any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/settings", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"display\":{\"widgets\":[],\"lineItems\":null},\"displayRev\":3}"))
+				.andExpect(status().isOk());
+
+		// Then:
+		ArgumentCaptor<Map<String, Object>> display = ArgumentCaptor.forClass(Map.class);
+		verify(pacingClient).saveDisplay(any(), eq("nike-ss26"), display.capture(), eq(3), any());
+		assertThat(display.getValue()).containsKey("lineItems");
+		assertThat(display.getValue().get("lineItems")).isNull();
+	}
+
+	@Test
 	void shouldReturn409WithCurrentRevOnStaleSettingsConflictTest() throws Exception {
 		// Given: US-118 - a concurrent edit is reported, never silently overwritten
 		stubCurrentUser();
@@ -613,6 +744,60 @@ class PacingDashboardControllerMvcTest {
 						.content("{\"mappings\":null}"))
 				.andExpect(status().isNoContent());
 		verify(pacingClient).saveMappings(any(), eq("nike-ss26"), isNull());
+	}
+
+	@Test
+	void shouldSavePeriodScopeAndAnswerNoContentTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/period-scope", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"periodScope\":true,\"periodScopeKey\":\"2026-10-06|2026-10-12\"}"))
+				.andExpect(status().isNoContent());
+		verify(pacingClient).savePeriodScope(any(), eq("nike-ss26"), eq(true), eq("2026-10-06|2026-10-12"));
+	}
+
+	@Test
+	void shouldForwardANullPeriodKeyWhenScopeTurnsOffTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/period-scope", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"periodScope\":false,\"periodScopeKey\":null}"))
+				.andExpect(status().isNoContent());
+		verify(pacingClient).savePeriodScope(any(), eq("nike-ss26"), eq(false), isNull());
+	}
+
+	@Test
+	void shouldRejectAPeriodKeyNotShapedStartPipeEndTest() throws Exception {
+		// Given:
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/period-scope", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"periodScope\":true,\"periodScopeKey\":\"October\"}"))
+				.andExpect(status().isBadRequest());
+		verifyNoInteractions(pacingClient);
+	}
+
+	@Test
+	void shouldRejectAPeriodScopeSaveWithoutTheSwitchTest() throws Exception {
+		// Given:
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/period-scope", "nike-ss26")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"periodScopeKey\":\"2026-10-06|2026-10-12\"}"))
+				.andExpect(status().isBadRequest());
+		verifyNoInteractions(pacingClient);
 	}
 
 	@Test

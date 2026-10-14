@@ -1,10 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { CheckIcon, CloseIcon, CopyIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon } from "../../shared/ui/icons/icons";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  CopyIcon,
+  EditIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+  UploadIcon,
+} from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import {
   createPacingLibraryEntry,
@@ -27,6 +38,10 @@ import {
   withWidgetRemoved,
 } from "./widgets/widget-tiles";
 import { WidgetPreview } from "./widget-preview";
+// Moved JS from Pacing's SPA - typed by inference under `allowJs` (see ./spa/SOURCE.md).
+import LineItemsCustomizeUntyped from "./spa/lineitems/LineItemsCustomize.jsx";
+import { useDashboardStore } from "./spa/store.js";
+import { selectHasConversions } from "./spa/selectors.js";
 import { WidgetEditor } from "./widget-editor";
 import type {
   PacingDisplayShape,
@@ -38,6 +53,13 @@ import type {
 import "./pacing-dashboard-library.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
+/** Re-typed at the boundary: `allowJs` infers `hasConversions` from its default and `value` from
+ *  nothing at all. The real contract is in the file's own header. */
+const LineItemsCustomize = LineItemsCustomizeUntyped as unknown as ComponentType<{
+  value: unknown;
+  onChange: (next: unknown) => void;
+  hasConversions?: boolean;
+}>;
 const KIND_OPTIONS: Array<{ value: PacingLibraryKindV1 | "all"; label: string }> = [
   { value: "all", label: "All" },
   { value: "widget", label: "Widgets" },
@@ -95,6 +117,16 @@ interface PacingDashboardLibraryProps {
   initialWidgetId?: string | null;
   /** Called once that has been honoured, so reopening the drawer lands on the list. */
   onWidgetEditorOpened?: () => void;
+  /** The Line Items block's settings in the section's DRAFT (`display.lineItems`): an object, `null`
+   *  for a pending «Reset to default», or undefined when untouched and never stored. */
+  lineItems?: unknown;
+  /** Writes that draft key. Absent, the Page sections card is not offered at all. */
+  onLineItemsChange?: (next: unknown) => void;
+  /** A request from the tile's ⋯ → Customize… to open the Line Items card's editor - a new value per
+   *  request, so asking twice opens it twice. */
+  customizeLineItemsRequest?: number | null;
+  /** Called once that request has been honoured. */
+  onCustomizeLineItemsOpened?: () => void;
 }
 
 /**
@@ -104,7 +136,20 @@ interface PacingDashboardLibraryProps {
  * reproducing Pacing's full widget-spec rendering engine is out of scope here (see the migration
  * report); the dashboard's own health/financial/chart sections above render the real figures directly.
  */
-export function PacingDashboardLibrary({ display, saving, saveError, onSave, isAdmin, libraryEntries, initialWidgetId, onWidgetEditorOpened }: PacingDashboardLibraryProps) {
+export function PacingDashboardLibrary({
+  display,
+  saving,
+  saveError,
+  onSave,
+  isAdmin,
+  libraryEntries,
+  initialWidgetId,
+  onWidgetEditorOpened,
+  lineItems,
+  onLineItemsChange,
+  customizeLineItemsRequest,
+  onCustomizeLineItemsOpened,
+}: PacingDashboardLibraryProps) {
   const queryClient = useQueryClient();
   const widgets = useMemo(() => display.widgets ?? [], [display.widgets]);
   const groups = useMemo(() => display.groups ?? [], [display.groups]);
@@ -122,6 +167,28 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
     setEditingId(initialWidgetId);
     onWidgetEditorOpened?.();
   }, [initialWidgetId, onWidgetEditorOpened]);
+  // The Line Items card's Customize disclosure (Pacing's BlockLibrary.jsx, Line Items settings
+  // `85d353c`). Opening it writes nothing: the draft changes only when a value does. The tile's
+  // ⋯ → Customize… asks for it from the board: an open widget editor is left first (its edits are
+  // already in the draft - this editor has no unsaved state of its own to guard), then the card is
+  // expanded and scrolled into view once it is in the DOM.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [scrollToCustomize, setScrollToCustomize] = useState(false);
+  const lineItemsCardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (customizeLineItemsRequest == null) return;
+    setEditingId(null);
+    setCustomizeOpen(true);
+    setScrollToCustomize(true);
+    onCustomizeLineItemsOpened?.();
+  }, [customizeLineItemsRequest, onCustomizeLineItemsOpened]);
+  useEffect(() => {
+    if (!scrollToCustomize) return;
+    const el = lineItemsCardRef.current;
+    if (!el) return;
+    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    setScrollToCustomize(false);
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragId, setDragId] = useState<string | null>(null);
 
@@ -457,6 +524,34 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
 
   return (
     <div className="pdl">
+      {onLineItemsChange && (
+        <div className="pdl__section">
+          <div className="pdl__section-head">
+            <h3 className="pdl__section-title">Page sections</h3>
+          </div>
+          <div className="pdl__block lic-host" ref={lineItemsCardRef}>
+            <div className="pdl__block-head">
+              <span className="pdl__block-name">Line Items</span>
+              <span className="pdl__block-desc">Per-line delivery, pacing and margin cards.</span>
+            </div>
+            <button
+              type="button"
+              className="pdl__block-toggle"
+              aria-expanded={customizeOpen}
+              aria-controls="lic-editor"
+              onClick={() => setCustomizeOpen((v) => !v)}
+            >
+              {customizeOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
+              Customize
+            </button>
+            {customizeOpen && (
+              <div id="lic-editor" className="pdl__block-body">
+                <LineItemsCustomizePanel value={lineItems} onChange={onLineItemsChange} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="pdl__section">
         <div className="pdl__section-head">
           <h3 className="pdl__section-title">This pacing&apos;s widgets</h3>
@@ -688,6 +783,16 @@ export function PacingDashboardLibrary({ display, saving, saveError, onSave, isA
       )}
     </div>
   );
+}
+
+/**
+ * The moved editor, fed the one thing it asks of the page: whether this pacing has conversions (its
+ * Conv row is greyed with a note when it has none). Read from the dashboard state the drawer renders
+ * inside, and mounted only while the card is open - the same read Pacing's BlockLibrary makes.
+ */
+function LineItemsCustomizePanel({ value, onChange }: { value: unknown; onChange: (next: unknown) => void }) {
+  const hasConversions = useDashboardStore(selectHasConversions as (state: unknown) => boolean);
+  return <LineItemsCustomize value={value} onChange={onChange} hasConversions={hasConversions} />;
 }
 
 function WidgetCard({

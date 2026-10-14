@@ -46,6 +46,7 @@ function renderDrawer(overrides: Partial<Parameters<typeof PacingSettingsDrawer>
         onSaved={onSaved}
         slug="nike-ss26"
         currency="USD"
+        rate={1}
         planByLineItem={{ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000 }) }}
         data={{ source: "platform_mart" }}
         display={{ rev: 3, widgets: [], groups: [] }}
@@ -341,6 +342,7 @@ describe("PacingSettingsDrawer", () => {
             onSaved={vi.fn()}
             slug="nike-ss26"
             currency="USD"
+            rate={1}
             planByLineItem={{ "111": aPacingLineItemPlanV1({ lineItemId: "111", plannedImpressions: 1_000_000 }) }}
             data={{ source: "platform_mart" }}
             display={{ rev: 3, widgets: [], groups: [] }}

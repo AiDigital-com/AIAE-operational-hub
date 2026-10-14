@@ -38,10 +38,6 @@ const SECTION_CAPTION: Record<FilterTier, string> = {
 
 // A dim source (anything not one of these four whole-unit kinds) that is Scope-tier is backed by
 // a declared split - flagged with a tiny inline "· split" marker (text, never a stripe/bar).
-// Currently dormant: `spotlight-core.ts`'s `tierOf` tags every dim value LENS (2026-09-25 item 4 -
-// this build has no `dim-scope.js` to back a Scope claim up), so `splitMarker` below is never true
-// today. Left in place rather than deleted - it is the correct rendering for the day `tierOf` goes
-// back to checking `splitKeys`, and there is nothing to fix here when that day comes.
 const WHOLE_UNIT_KINDS = new Set(["li", "channel", "label", "platform"]);
 
 type Row =

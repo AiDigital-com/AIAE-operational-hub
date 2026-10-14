@@ -498,3 +498,54 @@
   gap: 8px;
   margin-top: 6px;
 }
+
+/* ── Page sections: the Line Items block's card (Pacing's BlockLibrary.jsx «Page sections») ──
+   One card for now: the block's own settings, behind a Customize disclosure. The editor inside is
+   Pacing's moved `LineItemsCustomize.jsx`, styled by its `.lic-*` rules in spa/pacing-spa.css. The
+   card is a size container (`.lic-host`) so the editor's sort pair can stack on a narrow drawer.
+   No left rail: the open state is the chevron and the editor itself. */
+.pdl__block {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px;
+}
+.pdl__block-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pdl__block-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+}
+.pdl__block-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.pdl__block-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 28px;
+  margin-top: 8px;
+  padding: 6px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+.pdl__block-toggle:hover { color: var(--ink); }
+.pdl__block-toggle svg { width: 14px; height: 14px; flex: none; }
+.pdl__block-body { padding-top: 6px; }

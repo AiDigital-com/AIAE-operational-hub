@@ -80,10 +80,14 @@ export function neededPerDay(effPlan, asOf, scopeActualUnits) {
 
 const net = (p) => p.k > 0 && p.k < 1;
 const unitsOf = (m) => m?.au ?? 0;
+// CPI is ours (Pacing's reference has no such rate type): cost per install, spend over the
+// conversions PacingCore.liActualUnits counts as a CPI line's units. Without it the CPI column
+// printed the line's CPM under the label «CPI».
 const rateCostOf = (rt, m) => (
   rt === 'CPC' ? (m?.cl > 0 ? (m.sp || 0) / m.cl : 0)
     : rt === 'CPV' ? (m?.co > 0 ? (m.sp || 0) / m.co : 0)
-      : (m?.cpm ?? 0)
+      : rt === 'CPI' ? (m?.cv > 0 ? (m.sp || 0) / m.cv : 0)
+        : (m?.cpm ?? 0)
 );
 const rateSubOf = (p, m) => (
   p.vcrTgt != null && p.vcrTgt > 0 ? `${completionLabelForLI(p)} ${fP(m?.vcr ?? 0)} / target ${fP(p.vcrTgt)}`

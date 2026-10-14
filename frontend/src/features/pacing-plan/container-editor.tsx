@@ -6,102 +6,145 @@
  * rule, and the "sum of container targets must not exceed the line item's plan" rule, are Pacing's own
  * to enforce; this editor only builds the JSON object the user asked for.
  */
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Modal } from "../../shared/ui/modal/modal";
-import { NumericField } from "../pacing-create/numeric-field";
-import { fmtInt, parseEditableNumber } from "../pacing-create/format";
+import { fmtInt } from "../pacing-create/format";
+import { getCurrency, getPacingCore } from "../pacing-dashboard/engine/engine-loader";
+// Moved JS from Pacing's SPA - typed by inference under `allowJs` (see spa/SOURCE.md).
+import { detectDateChildOverlaps } from "../pacing-dashboard/spa/containers.js";
+import { imprWarning, spendWarning, dimSumsByKey, dimOverKeys, uncoveredInWindow } from "../pacing-dashboard/spa/container-warnings.js";
+import { menuItems, splitKey, valuesLabel, draftSplitDaily } from "../pacing-dashboard/spa/dim-groups-editor.js";
+import { foldValue, memberDailyOf, GROUP_DIM_KEYS } from "../pacing-dashboard/spa/dim-value-groups.js";
 import {
   buildDateChild,
   buildDimChild,
-  DIM_KEYS,
+  canDistribute,
   DIM_LABELS,
-  dimKeysOverTarget,
+  dimChildWithMode,
+  distributeByMonth,
   duplicateContainer,
   genId,
   nextMonthPeriod,
   resolveDimAbs,
+  spendFromRaw,
+  unitsFromBudget,
+  withBudgetUnits,
+  type LiBudgetBase,
   type PacingContainer,
   type PacingDateChild,
   type PacingDimChild,
 } from "./containers";
+import type { DimGroup } from "./line-item-fields";
+import { fmtUnits, MoneyInput, UnitsBudgetInput, UnitsInput } from "./plan-number-inputs";
+
+/** The delivered values per dimension per line item, as fetched: `{ [dim]: { [liId]: string[] } }`. */
+export type RawSplits = Record<string, Record<string, string[]>>;
+
+/** What the "not covered by the splits" warning reads: the line's per-day and per-value-per-day
+ *  delivery (`facts.liDaily` / `facts.liSplitDaily`, grouped by the SAVED value groups). */
+export interface SplitFacts {
+  liDaily?: Record<string, Record<string, { im?: number }>>;
+  liSplitDaily?: Record<string, Record<string, Record<string, { im?: number }>>>;
+}
+
+interface MenuSection {
+  key: string;
+  label: string;
+  items: Array<{ value: string; group: { count: number } | null }>;
+}
+
+/** The Spend cell's value - the reference's rule: a USD campaign shows the USD figure, any other
+ *  shows the contract-currency amount it was typed in. */
+function spendShown(currency: string, row: { native_budget?: number | null; target_spend: number | null }) {
+  return currency === "USD" ? row.target_spend : (row.native_budget ?? null);
+}
+
+function toUsd(native: number, rate: number): number {
+  return getCurrency().currencyToUsd(native, rate);
+}
 
 /**
- * One sub-breakdown row (§10, US-129/130).
+ * One dim split row - the reference's `DimChildRow`. Its dimension and value are fixed once added
+ * (they come from the "+ Add dim split" menu); a split on one of the line's value groups says how
+ * many values stand behind the name.
  *
- * The value is a free-text input, not a picker. The retired SPA offered only values
- * BigQuery had already delivered (`availableSplits` in PacingTab.jsx), which makes a
- * brand-new plan impossible to write - and US-130 is explicitly about planning against
- * a label that does not exist in NetSuite yet. Free text is the wider behaviour and
- * subsumes the old one.
- *
- * `%`/`units` is not decoration: `pacing-core.js:resolveDimAbs` reads a percent target
- * as a share of the PARENT container's units, so the same number means two very
- * different things depending on this toggle. The resolved figure is shown beside it
- * so nobody has to hold that conversion in their head.
+ * `%`/`#` is not decoration: `pacing-core.js:resolveDimAbs` reads a percent target as a share of the
+ * PARENT container's units. The resolved figure is shown beside it, as in the reference.
  */
 function DimChildRow({
   child,
   container,
+  li,
   currency,
+  rate,
   liCoef,
+  dimOver,
+  group,
   onChange,
   onRemove,
 }: {
   child: PacingDimChild;
   container: PacingContainer;
+  li: LiBudgetBase;
   currency: string;
+  rate: number;
   liCoef: boolean;
+  /** This row's dimension resolves above the container's own target - its target is tinted. */
+  dimOver: boolean;
+  /** The line's value group this split is on, or null for a plain value. */
+  group: DimGroup | null;
   onChange: (next: PacingDimChild) => void;
   onRemove: () => void;
 }) {
   const resolved = resolveDimAbs(child, container);
-  const showResolved = child.target_mode === "percent" && (Number(child.target_value) || 0) > 0;
   const marginInvalid = coefMarginInvalid(liCoef, child.margin_percent);
+  const label = DIM_LABELS[child.dim_key] || child.dim_key;
+  const title = group ? `${label}: ${child.dim_value} = ${group.values.join(", ")}` : `${label}: ${child.dim_value}`;
+  // A budget means an ABSOLUTE target: the row flips to units, re-derived from the budget. Clearing
+  // drops both money fields and leaves the target alone (the reference's `setSpendNative`).
+  function setSpend(raw: string) {
+    const money = spendFromRaw(raw, rate, toUsd);
+    if (money.target_spend == null) {
+      onChange({ ...child, ...money });
+      return;
+    }
+    const units = unitsFromBudget(money.target_spend, li.planImpr, li.budgetUsd);
+    onChange({ ...child, ...money, target_mode: "absolute", ...(units != null ? { target_value: units } : {}) });
+  }
   return (
     <div className="pplan__dim-child">
-      <select
-        className="pplan__select pplan__input--dim-key"
-        value={child.dim_key}
-        onChange={(e) => onChange({ ...child, dim_key: e.target.value })}
-        aria-label="Sub-breakdown dimension"
-      >
-        {DIM_KEYS.map((k) => (
-          <option key={k} value={k}>{DIM_LABELS[k]}</option>
-        ))}
-      </select>
-      <input
-        type="text"
-        className="pplan__input pplan__input--dim-value"
-        value={child.dim_value}
-        placeholder="Value"
-        onChange={(e) => onChange({ ...child, dim_value: e.target.value })}
-        aria-label="Sub-breakdown value"
-      />
-      <NumericField
-        value={child.target_value == null ? "" : String(child.target_value)}
-        onChange={(v) => onChange({ ...child, target_value: parseEditableNumber(v) ?? null })}
-        ariaLabel="Sub-breakdown target"
+      <div className="pplan__dim-identity" title={title}>
+        <span className="pplan__dim-key">{label}</span>
+        <strong className="pplan__dim-value">
+          {child.dim_value}
+          {group && <span className="pplan__vg-count"> {valuesLabel(group.values.length)}</span>}
+        </strong>
+      </div>
+      <UnitsInput
+        value={child.target_value}
+        inputMode={child.target_mode === "percent" ? "decimal" : "numeric"}
+        onChange={(v) => onChange({ ...child, target_value: v })}
+        ariaLabel="Dim split target"
         placeholder="Target"
-        className="pplan__input pplan__input--num"
+        className={`pplan__input pplan__input--num${dimOver ? " pplan__input--over" : ""}`}
       />
       <select
         className="pplan__select pplan__input--dim-mode"
-        value={child.target_mode}
-        onChange={(e) => onChange({ ...child, target_mode: e.target.value as PacingDimChild["target_mode"] })}
-        aria-label="Sub-breakdown target mode"
+        value={child.target_mode || "absolute"}
+        onChange={(e) => onChange(dimChildWithMode(child, container, e.target.value as PacingDimChild["target_mode"]))}
+        aria-label="Dim split target mode"
       >
-        <option value="absolute">units</option>
+        <option value="absolute">#</option>
         <option value="percent">%</option>
       </select>
-      <span className="pplan__dim-resolved" aria-hidden={!showResolved}>
-        {showResolved ? `= ${fmtInt(Math.round(resolved))}` : ""}
-      </span>
-      {/* `native_budget` only - see the note on the date split's Spend field. */}
-      <NumericField
-        value={child.native_budget == null ? "" : String(child.native_budget)}
-        onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
+      <MoneyInput
+        value={spendShown(currency, child)}
+        rate={rate}
+        currency={currency}
+        onChange={setSpend}
         placeholder="Spend"
-        ariaLabel={`Sub-breakdown spend (${currency})`}
+        ariaLabel={`Dim split spend (${currency})`}
         className="pplan__input pplan__input--num"
       />
       <input
@@ -112,18 +155,283 @@ function DimChildRow({
         value={child.margin_percent ?? ""}
         placeholder="Margin %"
         onChange={(e) => onChange({ ...child, margin_percent: e.target.value === "" ? null : Number(e.target.value) })}
-        aria-label="Sub-breakdown margin percent"
+        aria-label="Dim split margin percent"
       />
+      {/* Units are integers: a 10% share of 84,211 reads 8,421, not 8,421.1. */}
+      <span className="pplan__dim-resolved" title="Resolved units">= {fmtInt(Math.round(resolved))}</span>
+      <button
+        type="button"
+        className={`pplan__notify-chip${child.notify_in_summary ? " pplan__notify-chip--on" : ""}`}
+        onClick={() => onChange({ ...child, notify_in_summary: !child.notify_in_summary })}
+        title={child.notify_in_summary ? "In Daily Summary — click to remove" : "Add this dim split to Daily Summary"}
+        aria-pressed={!!child.notify_in_summary}
+      >
+        {child.notify_in_summary ? "✓ Summary" : "Summary"}
+      </button>
       <button
         type="button"
         className="pplan__icon-btn"
         onClick={onRemove}
-        aria-label={`Remove sub-breakdown ${child.dim_key}: ${child.dim_value || "(no value)"}`}
-        title="Remove sub-breakdown"
+        aria-label={`Remove dim split ${label}: ${child.dim_value}`}
+        title="Remove dim split"
       >
         ×
       </button>
     </div>
+  );
+}
+
+/**
+ * A menu hanging from a button, portalled to <body> (the container card clips its overflow) and
+ * placed from the button's rect, flipping up near the bottom of the window. Outside click, Escape,
+ * scrolling the page or resizing it closes it - the reference's menu behaviour.
+ */
+function useAnchoredMenu(menuHeight: number, minWidth: number) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: minWidth });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const place = useCallback(() => {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const width = Math.min(Math.max(b.width, minWidth), window.innerWidth - 16);
+    const left = Math.max(8, Math.min(b.left, window.innerWidth - width - 8));
+    const below = b.bottom + 4;
+    const openUp = below + menuHeight > window.innerHeight - 8 && b.top - menuHeight - 4 > 8;
+    setPos({ top: openUp ? b.top - menuHeight - 4 : below, left, width });
+  }, [menuHeight, minWidth]);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // The drawer closes on Escape too; this one is the menu's.
+      e.stopPropagation();
+      setOpen(false);
+      btnRef.current?.focus({ preventScroll: true });
+    };
+    const onMove = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open]);
+
+  return { open, setOpen, pos, btnRef, menuRef };
+}
+
+/** Distribute by Month - the reference's `DistributeButton`. */
+function DistributeButton({ disabled, onDistribute }: { disabled: boolean; onDistribute: (mode: "proportional" | "equal") => void }) {
+  const menu = useAnchoredMenu(2 * 32 + 8, 180);
+  return (
+    <>
+      <button
+        ref={menu.btnRef}
+        type="button"
+        className="pplan__add-btn pplan__dist-btn"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={menu.open}
+        onClick={() => {
+          if (!disabled) menu.setOpen((v) => !v);
+        }}
+        title="Distribute by Month — split this container into monthly date children"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+        Distribute
+      </button>
+      {menu.open &&
+        createPortal(
+          <div ref={menu.menuRef} className="pplan-menu" role="menu" style={{ top: menu.pos.top, left: menu.pos.left, width: menu.pos.width }}>
+            {(["proportional", "equal"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="menuitem"
+                className="pplan-menu__item"
+                onClick={() => {
+                  menu.setOpen(false);
+                  onDistribute(mode);
+                }}
+              >
+                {mode === "proportional" ? "Proportional (by days)" : "Equal (fixed per month)"}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
+/**
+ * "+ Add dim split" - the reference's `AddDimChildButton`. Lists what the line has delivered (a
+ * value group once, under its name), minus what this container already splits on, and keeps two
+ * actions under the list: "Group values…" opens the group editor, "Type a value…" adds a split on a
+ * value that has not delivered yet - so a campaign that starts next week can be planned today.
+ */
+function AddDimSplitButton({
+  liId,
+  rawSplits,
+  groups,
+  existingValues,
+  onAdd,
+  onGroupValues,
+}: {
+  liId: string;
+  rawSplits: RawSplits | null | undefined;
+  groups: DimGroup[];
+  existingValues: Set<string>;
+  onAdd: (dimKey: string, value: string) => void;
+  onGroupValues: (anchor: HTMLElement | null) => void;
+}) {
+  const [typing, setTyping] = useState(false);
+  const [typedDim, setTypedDim] = useState<string>(GROUP_DIM_KEYS[0]);
+  const [typedValue, setTypedValue] = useState("");
+  const sections = (menuItems(rawSplits, liId, groups) as MenuSection[])
+    .map((d) => ({ ...d, items: d.items.filter((it) => !existingValues.has(splitKey(d.key, it.value, groups))) }))
+    .filter((d) => d.items.length > 0);
+  const itemCount = sections.reduce((n, d) => n + d.items.length, 0);
+  const menuH = Math.min(sections.length * 22 + itemCount * 32 + 8 + (typing ? 80 : 72), 320);
+  const menu = useAnchoredMenu(menuH, 320);
+
+  function close() {
+    menu.setOpen(false);
+    setTyping(false);
+    setTypedValue("");
+  }
+
+  // The typed value: empty, already split on here, or a member of a group (its rows read as the
+  // group, so a split on it could never deliver) adds nothing. A value spelled like a group is that
+  // group: its exact name is what gets added.
+  const typed = typedValue.trim();
+  const typedFold = foldValue(typed);
+  const typedGroup = groups.find((g) => g.dim_key === typedDim && foldValue(g.name) === typedFold) || null;
+  const typedMember = !typedGroup && groups.some((g) => g.dim_key === typedDim && g.values.some((v) => foldValue(v) === typedFold));
+  const canAddTyped = !!typed && !typedMember && !existingValues.has(splitKey(typedDim, typedGroup ? typedGroup.name : typed, groups));
+  function addTyped() {
+    if (!canAddTyped) return;
+    onAdd(typedDim, typedGroup ? typedGroup.name : typed);
+    close();
+  }
+
+  return (
+    <>
+      <button
+        ref={menu.btnRef}
+        type="button"
+        className="pplan__add-btn"
+        aria-haspopup="menu"
+        aria-expanded={menu.open}
+        onClick={() => (menu.open ? close() : menu.setOpen(true))}
+      >
+        + Add dim split
+      </button>
+      {menu.open &&
+        createPortal(
+          <div ref={menu.menuRef} className="pplan-menu pplan-menu--scroll" style={{ top: menu.pos.top, left: menu.pos.left, width: menu.pos.width }}>
+            {sections.map((d) => (
+              <div key={d.key}>
+                <div className="pplan-menu__hd">{d.label}</div>
+                {d.items.map((it) => (
+                  <button
+                    key={`${d.key}:${it.value}`}
+                    type="button"
+                    className="pplan-menu__item"
+                    onClick={() => {
+                      onAdd(d.key, it.value);
+                      close();
+                    }}
+                  >
+                    {it.value}
+                    {it.group && <span className="pplan__vg-count"> group · {valuesLabel(it.group.count)}</span>}
+                  </button>
+                ))}
+              </div>
+            ))}
+            <div className="pplan-menu__ft">
+              {typing ? (
+                <>
+                  <div className="pplan-menu__hd">Value not delivered yet</div>
+                  <div className="pplan-menu__form">
+                    <select className="pplan__select" aria-label="Dimension" value={typedDim} onChange={(e) => setTypedDim(e.target.value)}>
+                      {GROUP_DIM_KEYS.map((k) => (
+                        <option key={k} value={k}>{DIM_LABELS[k] || k}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      className="pplan__input"
+                      aria-label="Value"
+                      autoFocus
+                      maxLength={300}
+                      value={typedValue}
+                      onChange={(e) => setTypedValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addTyped();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="button button--primary button--sm"
+                      disabled={!canAddTyped}
+                      onClick={addTyped}
+                      title={typedMember ? "This value is in a value group of this line" : undefined}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="pplan-menu__item pplan-menu__item--action"
+                    onClick={() => {
+                      const anchor = menu.btnRef.current;
+                      close();
+                      onGroupValues(anchor);
+                    }}
+                  >
+                    Group values…
+                  </button>
+                  <button type="button" className="pplan-menu__item pplan-menu__item--action" onClick={() => setTyping(true)}>
+                    Type a value…
+                  </button>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
@@ -143,14 +451,23 @@ function coefMarginInvalid(liCoef: boolean, margin: number | null | undefined): 
 
 function DateChildRow({
   child,
+  li,
   currency,
+  rate,
   liCoef,
+  imprOver,
+  spendOver,
   onChange,
   onRemove,
 }: {
   child: PacingDateChild;
+  li: LiBudgetBase;
   currency: string;
+  rate: number;
   liCoef: boolean;
+  /** The date splits' units / spend add up past the container's own - every row's cell is tinted. */
+  imprOver: boolean;
+  spendOver: boolean;
   onChange: (next: PacingDateChild) => void;
   onRemove: () => void;
 }) {
@@ -179,23 +496,27 @@ function DateChildRow({
         aria-label="Date split end"
         onChange={(e) => onChange({ ...child, fe: e.target.value || null })}
       />
-      <NumericField
-        value={child.target_impressions == null ? "" : String(child.target_impressions)}
-        onChange={(v) => onChange({ ...child, target_impressions: parseEditableNumber(v) ?? null })}
-        placeholder="Units"
+      <UnitsBudgetInput
+        value={child.target_impressions}
+        onChange={(v) => onChange({ ...child, target_impressions: v })}
+        fromBudget={unitsFromBudget(Number(child.target_spend) || 0, li.planImpr, li.budgetUsd)}
         ariaLabel="Date split units"
-        className="pplan__input pplan__input--num"
+        className={`pplan__input pplan__input--num${imprOver ? " pplan__input--over" : ""}`}
       />
-      {/* Only `native_budget` is set, never `target_spend`: the contract amount is the money truth
-          and dash-gate re-materializes the USD cache from it at the CURRENT campaign rate on every
-          save (`currency-detect.mjs`'s nested `remat`). Writing a USD figure here as well would go
-          stale the first time the rate is edited. Same rule the container's own Spend field uses. */}
-      <NumericField
-        value={child.native_budget == null ? "" : String(child.native_budget)}
-        onChange={(v) => onChange({ ...child, native_budget: parseEditableNumber(v) ?? null })}
+      {/* Both money fields, as the reference writes them: the typed amount is the contract-currency
+          truth, `target_spend` its USD cache at the campaign rate (dash-gate re-derives the cache on
+          save anyway). The units follow the new budget. */}
+      <MoneyInput
+        value={spendShown(currency, child)}
+        rate={rate}
+        currency={currency}
+        onChange={(raw) => {
+          const money = spendFromRaw(raw, rate, toUsd);
+          onChange(money.target_spend == null ? { ...child, ...money } : withBudgetUnits({ ...child, ...money }, money.target_spend, li));
+        }}
         placeholder="Spend"
         ariaLabel={`Date split spend (${currency})`}
-        className="pplan__input pplan__input--num"
+        className={`pplan__input pplan__input--num${spendOver ? " pplan__input--over" : ""}`}
       />
       {/* The middle level of the coefficient's margin chain (dim child → DATE CHILD → container →
           line item, `PacingCore.buildMarginIndex`). Without this input the engine could resolve a
@@ -290,20 +611,41 @@ function DuplicateContainerDialog({
   );
 }
 
+// Containers start collapsed; the header still carries name / period / units / split count /
+// actions, so nothing needed for scanning is hidden. A container added one click ago opens.
 export function ContainerCard({
+  liId,
   container,
+  li,
   currency,
+  rate,
   liCoef,
+  rawSplits,
+  groups,
+  splitFacts,
+  onGroupValues,
   onChange,
   onRemove,
   onDuplicate,
   defaultOpen = false,
 }: {
+  liId: string;
   container: PacingContainer;
+  /** The owning line item's units and USD budget - what a budget is turned into units against. */
+  li: LiBudgetBase;
   currency: string;
+  /** The campaign rate (native → USD), 1 on a USD campaign. */
+  rate: number;
   /** Whether the OWNING line item is on coefficient cost. Only used to flag an out-of-range margin
    *  on a split before the save - the figures themselves are the same either way. */
   liCoef: boolean;
+  /** The values the pacing has delivered, as fetched - what "+ Add dim split" offers. */
+  rawSplits?: RawSplits | null;
+  /** The line's DRAFT value groups. */
+  groups: DimGroup[];
+  splitFacts?: SplitFacts | null;
+  /** "Group values…" from the add menu: open the line's group editor on a new group. */
+  onGroupValues: (anchor: HTMLElement | null) => void;
   onChange: (next: PacingContainer) => void;
   onRemove: () => void;
   onDuplicate: (dup: PacingContainer) => void;
@@ -316,6 +658,11 @@ export function ContainerCard({
   function setField<K extends keyof PacingContainer>(field: K, value: PacingContainer[K]) {
     onChange({ ...container, [field]: value });
   }
+  function setSpend(raw: string) {
+    const money = spendFromRaw(raw, rate, toUsd);
+    // Clearing leaves the units alone - there is nothing to prorate.
+    onChange(money.target_spend == null ? { ...container, ...money } : withBudgetUnits({ ...container, ...money }, money.target_spend, li));
+  }
   function setDateChild(idx: number, next: PacingDateChild) {
     onChange({ ...container, date_children: container.date_children.map((dc, i) => (i === idx ? next : dc)) });
   }
@@ -325,25 +672,56 @@ export function ContainerCard({
   function addDateChild() {
     onChange({ ...container, date_children: [...container.date_children, buildDateChild(container)] });
   }
-
   function setDimChild(idx: number, next: PacingDimChild) {
     onChange({ ...container, dim_children: container.dim_children.map((dx, i) => (i === idx ? next : dx)) });
   }
   function removeDimChild(idx: number) {
     onChange({ ...container, dim_children: container.dim_children.filter((_, i) => i !== idx) });
   }
-  function addDimChild() {
-    // Seeds on the first key with an empty value, exactly as the retired SPA's
-    // addDimChild did - the manager then picks the axis and types the value.
-    onChange({ ...container, dim_children: [...container.dim_children, buildDimChild(DIM_KEYS[0], "")] });
+  function addDimChild(dimKey: string, dimValue: string) {
+    onChange({ ...container, dim_children: [...container.dim_children, buildDimChild(dimKey, dimValue)] });
+  }
+  function doDistribute(mode: "proportional" | "equal") {
+    onChange(distributeByMonth(container, mode, rate, (usd, r) => getCurrency().usdToNative(usd, r)));
   }
 
-  const dateChildSum = container.date_children.reduce((s, dc) => s + (Number(dc.target_impressions) || 0), 0);
-  const dateChildOver = (Number(container.target_impressions) || 0) > 0 && dateChildSum > (Number(container.target_impressions) || 0);
-  // Date splits and sub-breakdowns are counted together: both are ways this container
-  // is cut up, and the header is telling the reader how much is folded away below it.
-  const splitCount = container.date_children.length + container.dim_children.length;
-  const dimOverKeys = dimKeysOverTarget(container);
+  const dateChildren = container.date_children || [];
+  const dimChildren = container.dim_children || [];
+  const dcOverlaps = detectDateChildOverlaps(container) as Array<{ a: { idx: number; name?: string | null }; b: { idx: number; name?: string | null }; start: string; end: string }>;
+  const dcSumImpr = dateChildren.reduce((sum, dc) => sum + (Number(dc.target_impressions) || 0), 0);
+  const dcSumSpend = dateChildren.reduce((sum, dc) => sum + (Number(dc.target_spend) || 0), 0);
+  const cTi = Number(container.target_impressions) || 0;
+  const cTs = Number(container.target_spend) || 0;
+  const imprOver = imprWarning(cTi, dcSumImpr);
+  const spendOver = spendWarning(cTs, dcSumSpend);
+
+  // Per dimension, never across: Audience and Geo splits cut the same units along independent axes,
+  // so their targets do not add up.
+  const dimSums = dimSumsByKey(dimChildren.map((dx) => ({ key: dx.dim_key, abs: resolveDimAbs(dx, container) }))) as Record<string, number>;
+  const dimOverSet = new Set<string>(dimOverKeys(cTi, dimSums));
+
+  // A value already split on here is not offered again; on a dimension the line groups, `Promo`
+  // hides `promo` too (the save's rule 7).
+  const existingDimValues = new Set(dimChildren.map((dx) => splitKey(dx.dim_key, dx.dim_value, groups) as string));
+  const groupOf = (dx: PacingDimChild) =>
+    groups.find((g) => g.dim_key === dx.dim_key && foldValue(g.name) === foldValue(dx.dim_value)) || null;
+
+  const splitCount = dateChildren.length + dimChildren.length;
+
+  // Container dim scope (spec 2026-08-14): splits that COVER the container make it a statement
+  // about all of its units, so its periods count only the declared values. Shown two ways: what it
+  // now counts, and what that drops.
+  const dimFilter = getPacingCore().containerDimFilter(container as unknown as Record<string, unknown>);
+  const scopeLabel = dimFilter
+    ? Object.keys(dimFilter).map((k) => `${DIM_LABELS[k] || k} · ${dimFilter[k].join(", ")}`).join("  ·  ")
+    : null;
+  const uncovered = useMemo(() => {
+    if (!dimFilter || !splitFacts?.liSplitDaily) return [];
+    // The facts are grouped by the SAVED value groups, the splits on screen by the DRAFT ones.
+    const daily = draftSplitDaily(splitFacts.liSplitDaily[liId], memberDailyOf(splitFacts.liSplitDaily)?.[liId], groups);
+    return uncoveredInWindow(daily, splitFacts.liDaily?.[liId] ?? {}, container, dimFilter) as Array<{ dim: string; value: string; im: number; pct: number }>;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeLabel, splitFacts, liId, container, groups]);
 
   return (
     <div className="pplan__container-card">
@@ -358,13 +736,18 @@ export function ContainerCard({
               {container.fs} – {container.fe}
             </span>
           )}
-          <span className="pplan__container-units">{fmtInt(container.target_impressions)} units</span>
+          {scopeLabel && (
+            <span className="pplan__container-scope" title="These splits cover the container, so its periods count only this delivery">
+              counts only {scopeLabel}
+            </span>
+          )}
+          <span className="pplan__container-units">{fmtInt(container.target_impressions || 0)} units</span>
           <span className="pplan__badge">
             {splitCount} split{splitCount === 1 ? "" : "s"}
           </span>
         </button>
         <div className="pplan__container-actions">
-          <button type="button" className="button button--ghost button--sm" onClick={() => setDuplicating(true)}>
+          <button type="button" className="button button--ghost button--sm" onClick={() => setDuplicating(true)} title="Duplicate this container">
             Duplicate
           </button>
           <button
@@ -384,42 +767,54 @@ export function ContainerCard({
           <div className="pplan__field-row">
             <label className="pplan__field pplan__field--grow">
               <span className="pplan__field-label">Name</span>
-              <input type="text" className="pplan__input" value={container.name} onChange={(e) => setField("name", e.target.value)} />
+              <input
+                type="text"
+                className="pplan__input"
+                value={container.name || ""}
+                placeholder="Container name"
+                onChange={(e) => setField("name", e.target.value)}
+              />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">Start</span>
+              <span className="pplan__field-label">Period start</span>
               <input type="date" className="pplan__input" value={container.fs} onChange={(e) => setField("fs", e.target.value)} />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">End</span>
+              <span className="pplan__field-label">Period end</span>
               <input type="date" className="pplan__input" value={container.fe} onChange={(e) => setField("fe", e.target.value)} />
             </label>
           </div>
           <div className="pplan__field-row">
             <label className="pplan__field">
               <span className="pplan__field-label">Units</span>
-              <NumericField
-                value={container.target_impressions == null ? "" : String(container.target_impressions)}
-                onChange={(v) => setField("target_impressions", parseEditableNumber(v) ?? null)}
+              <UnitsBudgetInput
+                value={container.target_impressions}
+                onChange={(v) => setField("target_impressions", v)}
+                fromBudget={unitsFromBudget(cTs, li.planImpr, li.budgetUsd)}
                 ariaLabel="Container units"
                 className="pplan__input pplan__input--num"
               />
             </label>
             <label className="pplan__field">
               <span className="pplan__field-label">Spend</span>
-              <NumericField
-                value={container.native_budget == null ? "" : String(container.native_budget)}
-                onChange={(v) => setField("native_budget", parseEditableNumber(v) ?? null)}
+              <MoneyInput
+                value={spendShown(currency, container)}
+                rate={rate}
+                currency={currency}
+                onChange={setSpend}
+                placeholder="0"
                 ariaLabel="Container spend"
                 className="pplan__input pplan__input--num"
               />
             </label>
             <label className="pplan__field">
-              <span className="pplan__field-label">Margin % (inherit if blank)</span>
+              <span className="pplan__field-label">Margin %</span>
               <input
                 type="number"
                 step="0.01"
-                className="pplan__input pplan__input--num"
+                className={`pplan__input pplan__input--num${containerMarginInvalid(liCoef, container) ? " pplan__input--invalid" : ""}`}
+                aria-invalid={containerMarginInvalid(liCoef, container) || undefined}
+                placeholder="inherit"
                 value={container.margin_percent ?? ""}
                 onChange={(e) => setField("margin_percent", e.target.value === "" ? null : Number(e.target.value))}
               />
@@ -427,53 +822,89 @@ export function ContainerCard({
           </div>
 
           <div className="pplan__subsection">
-            <div className="pplan__subsection-head">Date splits ({container.date_children.length})</div>
-            {container.date_children.map((dc, idx) => (
+            <div className="pplan__subsection-head">Date splits ({dateChildren.length})</div>
+            {dateChildren.map((dc, idx) => (
               <DateChildRow
-                key={dc.id}
+                key={dc.id || idx}
                 child={dc}
+                li={li}
                 currency={currency}
+                rate={rate}
                 liCoef={liCoef}
+                imprOver={imprOver}
+                spendOver={spendOver}
                 onChange={(next) => setDateChild(idx, next)}
                 onRemove={() => removeDateChild(idx)}
               />
             ))}
-            {dateChildOver && (
+            {imprOver && (
               <p className="pplan__hint pplan__hint--warn">
-                ⚠ Date splits sum to {fmtInt(dateChildSum)}, above this container's own target ({fmtInt(container.target_impressions)}).
+                ⚠ Date-children units sum ({fmtUnits(dcSumImpr)}) exceeds container target ({fmtUnits(cTi)})
               </p>
             )}
-            <button type="button" className="pplan__add-btn" onClick={addDateChild}>
-              + Add date split
-            </button>
+            {spendOver && (
+              <p className="pplan__hint pplan__hint--warn">
+                ⚠ Date-children spend sum ({fmtUnits(dcSumSpend)}) exceeds container target ({fmtUnits(cTs)})
+              </p>
+            )}
+            {dcOverlaps.map((ov, i) => (
+              <p key={`ov-${i}`} className="pplan__hint pplan__hint--info">
+                ⚠ Date-children overlap: {ov.a.name || `Split ${ov.a.idx + 1}`} & {ov.b.name || `Split ${ov.b.idx + 1}`}: {ov.start} – {ov.end}
+              </p>
+            ))}
+            <div className="pplan__split-actions">
+              <button type="button" className="pplan__add-btn" onClick={addDateChild}>
+                + Add date split
+              </button>
+              <DistributeButton disabled={!canDistribute(container)} onDistribute={doDistribute} />
+            </div>
           </div>
 
-          {/* §10. Date splits say WHEN this container's units land; sub-breakdowns say
-              WHAT they are. A container can carry both, and they cut the same units
-              along independent axes — which is why the warning below is per dimension
-              and never a sum across them. */}
+          {/* Date splits say WHEN this container's units land; dim splits say WHAT they are. Always
+              there, since a value can be typed before it delivers. */}
           <div className="pplan__subsection">
-            <div className="pplan__subsection-head">Sub-breakdowns ({container.dim_children.length})</div>
-            {container.dim_children.map((dx, idx) => (
+            <div className="pplan__subsection-head">Dim splits ({dimChildren.length})</div>
+            {dimChildren.map((dx, idx) => (
               <DimChildRow
-                key={dx.id}
+                key={dx.id || idx}
                 child={dx}
                 container={container}
+                li={li}
                 currency={currency}
+                rate={rate}
                 liCoef={liCoef}
+                dimOver={dimOverSet.has(dx.dim_key)}
+                group={groupOf(dx)}
                 onChange={(next) => setDimChild(idx, next)}
                 onRemove={() => removeDimChild(idx)}
               />
             ))}
-            {dimOverKeys.map((key) => (
-              <p key={key} className="pplan__hint pplan__hint--warn">
-                ⚠ {DIM_LABELS[key] || key} sub-breakdowns outrun this container's target
-                ({fmtInt(container.target_impressions)}).
+            {[...dimOverSet].map((k) => (
+              <p key={`dimover-${k}`} className="pplan__hint pplan__hint--warn">
+                ⚠ {DIM_LABELS[k] || k} splits resolve to {fmtUnits(Math.round(dimSums[k]))} — above the container target ({fmtUnits(cTi)})
               </p>
             ))}
-            <button type="button" className="pplan__add-btn" onClick={addDimChild}>
-              + Add sub-breakdown
-            </button>
+            {uncovered.slice(0, 4).map((u) => (
+              <p key={`uncov-${u.dim}-${u.value}`} className="pplan__hint pplan__hint--warn">
+                ⚠ {u.value} — {fmtUnits(Math.round(u.im))} delivered in this window ({u.pct.toFixed(1)}%), not covered by the{" "}
+                {DIM_LABELS[u.dim] || u.dim} splits
+              </p>
+            ))}
+            {uncovered.length > 4 && (
+              <p className="pplan__hint pplan__hint--warn">
+                ⚠ …and {uncovered.length - 4} more value{uncovered.length - 4 > 1 ? "s" : ""} not covered by the splits
+              </p>
+            )}
+            <div className="pplan__split-actions">
+              <AddDimSplitButton
+                liId={liId}
+                rawSplits={rawSplits}
+                groups={groups}
+                existingValues={existingDimValues}
+                onAdd={addDimChild}
+                onGroupValues={onGroupValues}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -493,8 +924,8 @@ export function ContainerCard({
         <Modal
           open
           onClose={() => setShowRemoveConfirm(false)}
-          title={`Remove container "${container.name || "Container"}"?`}
-          subtitle={`This removes the container and its ${splitCount} date split${splitCount === 1 ? "" : "s"}. This can't be undone.`}
+          title={`Remove container "${container.name || ""}"?`}
+          subtitle="This will remove the container and all its date / dim children. This can't be undone easily."
         >
           <div className="pplan__dialog-actions">
             <button type="button" className="button button--ghost button--sm" onClick={() => setShowRemoveConfirm(false)}>
@@ -515,6 +946,10 @@ export function ContainerCard({
       )}
     </div>
   );
+}
+
+function containerMarginInvalid(liCoef: boolean, container: PacingContainer): boolean {
+  return coefMarginInvalid(liCoef, container.margin_percent);
 }
 
 export function buildNewContainerId(): string {

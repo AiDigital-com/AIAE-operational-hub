@@ -21,8 +21,11 @@
  * `filter-spotlight-core.js`'s `classifyActive` (chips render as one flat row here instead of two
  * bordered tiers - a deliberate simplification, not an oversight: the tiering is cosmetic
  * grouping, not a filter behaviour - the spotlight's OWN Scope/Lens tags are a separate thing, see
- * `spotlight-core.ts`), and `PeriodPicker`/the Full-Flight/Period-Scope toggle (container
- * period-scope is out of scope - see `filters/eff-lis.ts`'s docblock).
+ * `spotlight-core.ts`).
+ *
+ * The Full Flight / Period Scope toggle and its period picker ARE ported (2026-10-14,
+ * `period-scope.tsx`): shown when the containers define a period or scope is already on, as the
+ * reference's `scopeVisible` is.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { derivePlatforms, formatPlatform } from "../journal/fact-dims";
@@ -30,6 +33,7 @@ import type { FactRow } from "../journal/fact-dims";
 import type { PacingLineItemPlanV1 } from "../types";
 import { formatRangeLabel } from "./custom-range-core";
 import { DateRangeControl } from "./date-range-control";
+import { PeriodScopeControl, type PeriodScopeControlProps } from "./period-scope";
 import { Spotlight } from "./spotlight";
 import type { DashboardFilters } from "./types";
 import type { DashboardFiltersPatch } from "./use-url-filters";
@@ -177,9 +181,14 @@ export interface FilterBarProps {
    *  `facts.asOf || campaign.endDate`). Optional - an unbounded calendar is still correct. */
   minDate?: string;
   maxDate?: string;
+  /** Period scope's toggle and picker. Absent (or not `visible`) draws neither - the reference
+   *  shows them only when the containers define a period or scope is already on. */
+  periodScope?: PeriodScopeControlProps & { visible: boolean };
+  /** Buttons at the right end of the row - the reference keeps the dashboard's settings gear there. */
+  actions?: React.ReactNode;
 }
 
-export function FilterBar({ filters, setFilters, liPlan, factsDaily, minDate, maxDate }: FilterBarProps) {
+export function FilterBar({ filters, setFilters, liPlan, factsDaily, minDate, maxDate, periodScope, actions }: FilterBarProps) {
   const channels = useMemo(() => deriveChannels(liPlan), [liPlan]);
   const labels = useMemo(() => deriveLabels(liPlan), [liPlan]);
   const platforms = useMemo(() => derivePlatforms(factsDaily), [factsDaily]);
@@ -312,7 +321,18 @@ export function FilterBar({ filters, setFilters, liPlan, factsDaily, minDate, ma
           )}
 
           <DateRangeControl filters={filters} setFilters={setFilters} minDate={minDate} maxDate={maxDate} />
+
+          {periodScope?.visible && (
+            <PeriodScopeControl
+              scoped={periodScope.scoped}
+              periods={periodScope.periods}
+              selectedKey={periodScope.selectedKey}
+              onToggle={periodScope.onToggle}
+              onSelect={periodScope.onSelect}
+            />
+          )}
         </div>
+        {actions && <div className="fb__actions">{actions}</div>}
       </div>
 
       {chips.length > 0 && (

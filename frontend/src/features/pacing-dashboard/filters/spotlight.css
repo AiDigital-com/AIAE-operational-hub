@@ -7,8 +7,10 @@
    line, up to 360px when there is room. */
 .spot {
   position: relative;
-  flex: 1 1 200px;
-  min-width: 200px;
+  /* It still grows to 360px when the row has room. The floor is 140px rather than 200px so the
+     period-scope toggle, its picker and the settings gear fit on the same row, as in the reference. */
+  flex: 1 1 140px;
+  min-width: 140px;
   max-width: 360px;
 }
 
@@ -23,6 +25,9 @@
 
 .spot__input {
   height: 34px;
+  /* The app-wide `input { min-height: 42px }` (app/styles.css) beats a bare height and made this box
+     taller than every other control on the row. */
+  min-height: 34px;
   width: 100%;
   padding: 0 11px 0 32px;
   border-radius: var(--radius);

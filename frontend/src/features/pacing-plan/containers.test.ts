@@ -3,6 +3,10 @@ import {
   buildDateChild,
   buildDefaultContainer,
   buildDimChild,
+  dimChildWithMode,
+  spendFromRaw,
+  unitsFromBudget,
+  withBudgetUnits,
   dimChildLabel,
   dimKeysOverTarget,
   DIM_KEYS,
@@ -34,12 +38,15 @@ describe("buildDefaultContainer", () => {
       fe: "2026-03-31",
       targetImpressions: 500000,
       nativeBudget: 20000,
+      budgetUsd: 22000,
     });
     expect(container.name).toBe("Mar 2026");
     expect(container.fs).toBe("2026-03-01");
     expect(container.fe).toBe("2026-03-31");
     expect(container.target_impressions).toBe(500000);
     expect(container.native_budget).toBe(20000);
+    // The reference copies the line item's USD budget into the USD cache.
+    expect(container.target_spend).toBe(22000);
     expect(container.date_children).toEqual([]);
     expect(container.dim_children).toEqual([]);
   });
@@ -50,8 +57,42 @@ describe("buildDefaultContainer", () => {
       fe: "2026-03-31",
       targetImpressions: 100,
       nativeBudget: null,
+      budgetUsd: null,
     });
-    expect(container.name).toBe("Container");
+    // The reference's name for the first container; later ones are "Container N" (the sheet's job).
+    expect(container.name).toBe("Default");
+    expect(container.target_spend).toBe(0);
+  });
+});
+
+describe("budget and units (the reference's setSpendNative / withBudgetUnits / setMode)", () => {
+  const toUsd = (native: number, rate: number) => native * rate;
+
+  it("turns a USD budget into units at the line item's own units per dollar", () => {
+    expect(unitsFromBudget(2500, 1_000_000, 10_000)).toBe(250_000);
+    // No line item budget: nothing to prorate against.
+    expect(unitsFromBudget(2500, 1_000_000, 0)).toBeNull();
+  });
+
+  it("keeps the typed amount as native and converts it for the USD cache", () => {
+    expect(spendFromRaw("1,250.5", 0.75, toUsd)).toEqual({ native_budget: 1250.5, target_spend: 937.875 });
+    expect(spendFromRaw("", 0.75, toUsd)).toEqual({ native_budget: null, target_spend: null });
+    expect(spendFromRaw("0", 0.75, toUsd)).toEqual({ native_budget: null, target_spend: null });
+  });
+
+  it("re-derives units only when the line item has a budget", () => {
+    const row = { target_impressions: 7 };
+    expect(withBudgetUnits(row, 500, { planImpr: 1000, budgetUsd: 100 }).target_impressions).toBe(5000);
+    expect(withBudgetUnits(row, 500, { planImpr: 1000, budgetUsd: 0 })).toBe(row);
+  });
+
+  it("converts a dim target between units and percent of its container", () => {
+    const child = { ...buildDimChild("geo", "TX"), target_value: 300_000 };
+    const pct = dimChildWithMode(child, { target_impressions: 1_200_000 }, "percent");
+    expect(pct.target_value).toBe(25);
+    expect(dimChildWithMode(pct, { target_impressions: 1_200_000 }, "absolute").target_value).toBe(300_000);
+    // No container target to measure against: the number is cleared, not reinterpreted.
+    expect(dimChildWithMode(child, { target_impressions: 0 }, "percent").target_value).toBeNull();
   });
 });
 
