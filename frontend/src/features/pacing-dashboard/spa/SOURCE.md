@@ -270,3 +270,12 @@ where a 3rd-party source is configured, and stores the receipts in `display.auto
 revision and would otherwise delete them. dash-gate's `settings-audit.js` keeps such a save out of
 Slack.
 
+## Updated 2026-10-14 — clear the paused state after Resume (reference `a51e361`)
+
+`metrics.js` and `line-item-columns.js` take the reference's change verbatim: a line's daily need
+and campM's paused-remaining goals read `PacingCore.isLiPausedNow` instead of `isLiPaused`, so a
+line resumed while the data date still sits inside its now-closed pause demands delivery again.
+Our CPI bucket in `metrics.js` reads it too. `chips/line-facts.js`, `lineitems/LineItemCard.jsx`
+and `lineitems/SplitRow.jsx` changed comments only. The behaviour itself lives in
+`../engine/vendor/pacing-core.js` (`isLiPausedNow` / `isLiAutoPaused`), re-copied the same day.
+

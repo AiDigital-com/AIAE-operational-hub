@@ -135,6 +135,17 @@ server's unfiltered `PacingRowV1.alerts` (2026-09-25 filters follow-up, item 3).
   grammar epoch bump 7→8→9, because this service's server sits at 2 and epochs 3–7 include the
   cutover it does not have. Saying 9 would advertise a capability it lacks.
 
+- Re-copied 2026-10-14 (`pacing-core.js`, `dashboard-metrics.js`): the reference's pause fix
+  (`a51e361`, «clear paused state after resume»), taken on the `paicing-azat` working tree on
+  branch `1.0.0`, on top of `33a7cbc`. A line paused and then resumed stayed «paused» for as long
+  as the data date sat inside the now-CLOSED interval - the badge stayed lit and its «Needed per
+  day» read 0 - because `isLiPausedNow` fell back to `isLiPaused`, which counts every interval.
+  `isLiPausedNow` now means an OPEN manual pause or an automatic schedule gap (`isLiAutoPaused`,
+  new); closed intervals stay in historical expected only. campM's daily need and its
+  paused-remaining goals read `isLiPausedNow` instead of `isLiPaused`, including our CPI bucket.
+  Named as a working tree rather than a commit; `diff -q` against `AIAE-paicing/shared/` is the
+  check that matters.
+
 This directory also holds six small sibling `.d.ts` files (`dashboard-metrics.d.ts`,
 `pacing-core.d.ts`, `metric-registry.d.ts`, `currency.d.ts`, `dashboard-metrics-glue.d.ts`,
 `alerts-core.d.ts`) - these are NOT vendored, we wrote and own them (see `../vendor-types.d.ts`'s

@@ -253,11 +253,8 @@ function LineItemCard({ liId, filters, setFilters }) {
 
   if (!p) return null;
 
-  // Manual-pause + auto out-of-schedule status, as of the same data-freshness
-  // date (facts.asOf) the rest of the card's metrics are computed against —
-  // keeps the badge consistent with the pacing bar / expected numbers above.
-  // Display marker uses isLiPausedNow (open manual interval = paused now, even
-  // if the pause started after the data date). Freeze/pace numbers stay on asOf.
+  // Current manual pause plus schedule gaps on the data date. Closed pauses
+  // remain in historical expected, but cannot keep the badge after Resume.
   const paused = PacingCore.isLiPausedNow(p, facts?.asOf);
 
   // ── Selection state ──

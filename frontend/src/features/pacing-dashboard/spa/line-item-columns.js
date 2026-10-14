@@ -71,7 +71,7 @@ export function lineDaysLeft(effPlan, asOf) {
  */
 export function neededPerDay(effPlan, asOf, scopeActualUnits) {
   const pr = PacingCore.prorate(effPlan, asOf);
-  if (PacingCore.isLiPaused(effPlan, asOf) || pr.st === 'not_started') return 0;
+  if (PacingCore.isLiPausedNow(effPlan, asOf) || pr.st === 'not_started') return 0;
   const left = Math.max(0, pr.fDays - pr.dP);
   if (left <= 0) return 0;
   const remaining = Math.max(0, (effPlan.planImpr || 0) - (scopeActualUnits || 0));
