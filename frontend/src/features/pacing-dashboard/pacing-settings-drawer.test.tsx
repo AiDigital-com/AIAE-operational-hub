@@ -129,6 +129,40 @@ describe("PacingSettingsDrawer", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("should write nothing when the plan's coefficient check fails, as the reference's one-request save does", async () => {
+    // Given: a coefficient line item whose container margin is out of range - the plan will refuse
+    // itself - and an unrelated edit on the Data tab.
+    const { onClose, onSaved } = renderDrawer({
+      planByLineItem: {
+        "111": aPacingLineItemPlanV1({
+          lineItemId: "111",
+          costCoef: true,
+          containers: [
+            {
+              id: "c1", name: "March 2026", fs: "2026-08-01", fe: "2026-08-31", target_impressions: 500_000,
+              target_spend: 1000, margin_percent: 150, date_children: [], dim_children: [],
+            },
+          ],
+        }),
+      },
+      data: { source: "platform_mart", coef_enabled: true },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /line item 111/i }));
+    await userEvent.clear(screen.getByRole("textbox", { name: /Units for line item 111/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: /Units for line item 111/ }), "900000");
+    await editDataSource();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: the reason is named and NOTHING is written - not the plan, and not the Data tab either.
+    expect(await screen.findByText(/Can’t save — LI 111: container “March 2026” must be ≥ 0 and < 100/)).toBeInTheDocument();
+    expect(planApi.savePacingPlan).not.toHaveBeenCalled();
+    expect(dashApi.savePacingDataSettings).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("should ask before closing on unsaved work", async () => {
     // Given: an edit in flight
     const { onClose } = renderDrawer();

@@ -23,6 +23,11 @@ export interface SettingsSectionHandle {
   save: () => Promise<SectionSaveResult>;
   /** Drop the draft back to what the server last said. */
   reset: () => void;
+  /** A check that must pass before ANY section is written - the reference saves every tab in one
+   *  request and aborts it whole on a coefficient error (`SettingsDrawer.jsx` `runSave`), so here a
+   *  section that would refuse its own save says so first and nothing is sent. Optional; only the
+   *  plan implements it. */
+  precheck?: () => SectionSaveResult;
   /** Add a widget to this section's DRAFT, for a screen that is not this one.
    *
    *  Only the widget section implements it. A breakdown with thousands of values has no donut worth
