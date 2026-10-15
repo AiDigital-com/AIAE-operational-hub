@@ -15,6 +15,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCam
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDeliveryStatsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingJournalEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
@@ -69,6 +70,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaign
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDeliveryStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetSourceInstruction;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
@@ -154,6 +156,9 @@ public class PacingDashboardContractMapper {
 				// own defaults for an absent namespace, and an empty map would be indistinguishable
 				// from a namespace that exists and happens to be empty.
 				.data(data.data())
+				// Null stays null: "never measured" is not "small", and the Data tab lets the switch on
+				// only while the measurement it has is under the cap.
+				.deliveryStats(data.deliveryStats() == null ? null : toV1(data.deliveryStats()))
 				.notify(data.notifySettings() == null ? null : toV1(data.notifySettings()))
 				.journal(toJournalV1(data.journal(), ownPacingUserId, unrestrictedScope));
 	}
@@ -191,7 +196,23 @@ public class PacingDashboardContractMapper {
 				// nulls on the wire, so "disconnect" would arrive as "leave it".
 				body.getSheet() == null
 						? null
-						: new PacingSheetSourceInstruction(body.getSheet().getEntry()));
+						: new PacingSheetSourceInstruction(body.getSheet().getEntry()),
+				body.getDeliveryTab());
+	}
+
+	/**
+	 * Builds the {@code deliveryStats} field of the {@code GET /api/v1/pacing/dashboards/{slug}}
+	 * response.
+	 *
+	 * @param stats what Pacing's last build measured of the Delivery tab
+	 * @return the generated {@link PacingDeliveryStatsV1}
+	 */
+	public PacingDeliveryStatsV1 toV1(PacingDeliveryStats stats) {
+		return new PacingDeliveryStatsV1()
+				.rows(stats.rows())
+				.cells(stats.cells())
+				.measuredAt(stats.measuredAt())
+				.autoOffAt(stats.autoOffAt());
 	}
 
 	/**

@@ -52,6 +52,9 @@ import java.util.Map;
  * @param primaryCvEnabled primary conversions' pacing-level switch (Pacing spec 2026-09-13 §1). A
  *                         flag only: which rows each line item counts is driven by that line's own
  *                         stored choice. Null leaves the stored switch untouched
+ * @param deliveryTab      whether a pivot-ready Delivery tab is written to the pacing's source sheet
+ *                         after each refresh. Pacing switches it off by itself when the tab would
+ *                         pass its cell cap. Null leaves the stored switch untouched
  */
 public record PacingDataSettings(
 		String source,
@@ -62,5 +65,6 @@ public record PacingDataSettings(
 		Boolean primaryCvEnabled,
 		List<Map<String, Object>> dimSources,
 		Map<String, Object> valueLabels,
-		PacingSheetSourceInstruction sheet) {
+		PacingSheetSourceInstruction sheet,
+		Boolean deliveryTab) {
 }

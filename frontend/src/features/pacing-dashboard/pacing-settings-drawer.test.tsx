@@ -330,7 +330,7 @@ describe("PacingSettingsDrawer", () => {
     // When: the switch is flipped on the Data tab - and NOTHING is saved
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
     // The cost switches sit in a collapsible section now, closed on every visit.
-    await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Advanced settings/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
 
@@ -349,7 +349,7 @@ describe("PacingSettingsDrawer", () => {
     expect(screen.queryByLabelText(/Net percent for line item 111/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
-    await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Advanced settings/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
 
