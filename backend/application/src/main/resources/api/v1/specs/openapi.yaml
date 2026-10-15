@@ -11865,8 +11865,12 @@ components:
     PacingDisplayUpdateV1:
       type: object
       description: >
-        A full display save (US-116/117): the whole `widgets` array, plus `displayRev` (the revision
-        this save was read at) so Pacing can detect a concurrent editor. `groups`/`layout` are optional.
+        A display save. A full save (US-116/117) carries the whole `widgets` array (`groups`/`layout`
+        optional) plus `displayRev`, the revision it was read at, so Pacing can detect a concurrent
+        editor. A patch that only touches the per-entry preference maps (`enabled`, `widgetRanges`,
+        `projectionModes`) - an on/off switch, a chart's saved period - omits `displayRev`: Pacing
+        merges those entry by entry against the stored row and needs none. Pacing refuses a full save
+        without one.
       properties:
         display:
           type: object
@@ -11883,9 +11887,11 @@ components:
         displayRev:
           type: integer
           format: int32
+          description: >
+            The revision this save was read at. Required for a full save; omitted for a
+            preference-map-only patch.
       required:
         - display
-        - displayRev
     PacingDisplayUpdateResultV1:
       type: object
       properties:

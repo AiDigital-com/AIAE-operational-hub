@@ -26,10 +26,13 @@ import { useMemo } from "react";
 import { cn } from "../../../shared/style/cn";
 // Moved JS from Pacing's SPA - typed by inference under `allowJs` (see ../spa/SOURCE.md).
 import ReportWidgetUntyped from "../spa/report/ReportWidget.jsx";
-import LineItemsTileUntyped from "../spa/lineitems/LineItemsTile.jsx";
+import LineItemsTileUntyped, { SectionBoundary as SectionBoundaryUntyped } from "../spa/lineitems/LineItemsTile.jsx";
+import LaunchPlanCardUntyped from "../spa/LaunchPlanCard.jsx";
+import * as LaunchPlanUntyped from "../spa/launch-plan.js";
+import { useDashboardStore } from "../spa/store.js";
 import { WidgetTileMenu } from "./tile-menu";
 import * as LayoutGridUntyped from "../spa/layout-grid.js";
-import * as StdCatalogUntyped from "../spa/std-catalog.js";
+import { tileSlot as tileSlotUntyped } from "../spa/tile-slots.js";
 import { tileEnabled } from "./widget-tiles";
 import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "../types";
 import "./widget-engine.css";
@@ -51,40 +54,48 @@ const { resolveLayout, compactVertical, widgetGridKind, H_PX, groupBounds, rowSt
     rowStretchIds: (tiles: Record<string, Tile>) => Set<string>;
   };
 /**
- * Where an unplaced tile wants to sit on the page's one slot scale.
- *
- * Pacing answers this from two halves - a functional block's `FLOW_SLOTS` entry, or the seed slot
- * behind a fixed Standard instance id. The Hub's board carries NO functional blocks (its alerts,
- * breakdown, journal and tables are fixed sections of the page, outside this grid), so only the
- * second half can ever answer, and `spa/tile-slots.js` is not used: its flow lookup reads
- * `FLOW_SLOTS`, which our `dash-blocks.js` does not carry - that constant arrived on the Pacing side
- * with the sections cutover we have deliberately not adopted.
+ * Where an unplaced tile wants to sit on the page's one slot scale: a functional block's
+ * `FLOW_SLOTS` entry (100 launchPlan · 400 alerts · 600 lineItems · 1100 journal), or the seed slot
+ * behind a fixed Standard instance id. Pacing's own function, moved.
  */
-const { seedSlotOf } = StdCatalogUntyped as unknown as {
-  seedSlotOf: (id: string) => number | null;
-};
+const tileSlot = tileSlotUntyped as unknown as (id: string) => number | null;
 /**
- * The ONE functional block this board carries (2026-10-05).
+ * The page's four code-rendered sections, as flow tiles on this board - Pacing's FLOW_REGISTRY, in
+ * its order. Each is full width and auto height, placed on the same slot scale as the widgets and
+ * moving with a saved arrangement like any other tile.
  *
- * Line Items used to be a fixed section of the page, below the whole grid — so it sat under the
- * charts, with Breakdown and the journal, and there was no way to read a line item's figures next
- * to the summary widgets they roll up from. It is a `flow` tile now: full width, auto height,
- * placed on the same slot scale as everything else, and it moves with a saved arrangement like any
- * other tile.
+ *   - Launch Plan, Pacing's «Launch recommendations», above the hero. On the board only while its own
+ *     `launchPlanMode` says so: before the flight starts, or a running flight with nothing delivered.
+ *   - Alerts, under the summary widgets. The page computes them (filters move them), and hands the
+ *     block in through `blocks`; with no alert to show it is not on the board at all.
+ *   - Line Items, between the summary widgets and the charts. Draws its own card, ⋯ in its header.
+ *   - Journal, last. Handed in through `blocks` like Alerts.
  *
- * 600 is Pacing's own slot for it — the scale reads 200 hero · 300 Finance · 600 lineItems ·
- * 700+ charts — so with no saved layout it lands exactly where Pacing puts it: under the summary
- * widgets, above the charts.
- *
- * The rest of the page's sections (alerts, breakdown, journal, the daily table) stay outside the
- * grid. Nothing else about this board assumes a widget: `resolveLayout` already takes a registry of
- * flow ids and `clampTile` already sizes the kind — the Hub simply passed neither.
+ * A tile that is not on the board is dropped BEFORE the rows are compacted, so it keeps no empty
+ * row behind; one switched off keeps its geometry, so switching it back on restores its place.
  */
+const LAUNCH_PLAN_ID = "launchPlan";
+const ALERTS_ID = "alerts";
 const LINE_ITEMS_ID = "lineItems";
-const FLOW_REGISTRY = [{ id: LINE_ITEMS_ID, kind: "flow" }];
-const FLOW_SLOTS: Record<string, number> = { [LINE_ITEMS_ID]: 600 };
-const tileSlot = (id: string) => (id in FLOW_SLOTS ? FLOW_SLOTS[id] : seedSlotOf(id));
+const JOURNAL_ID = "journal";
+const FLOW_REGISTRY = [LAUNCH_PLAN_ID, ALERTS_ID, LINE_ITEMS_ID, JOURNAL_ID].map((id) => ({ id, kind: "flow" }));
+const FLOW_IDS = new Set(FLOW_REGISTRY.map((r) => r.id));
+/** The name a section's ⋯ is announced by - the same words its Page sections card uses. */
+const FLOW_MENU_TITLES: Record<string, string> = {
+  [LAUNCH_PLAN_ID]: "Launch Plan",
+  [ALERTS_ID]: "Alerts",
+  [LINE_ITEMS_ID]: "Line Items",
+  [JOURNAL_ID]: "Journal",
+};
 const LineItemsTile = LineItemsTileUntyped as unknown as React.ComponentType<{ menu?: React.ReactNode }>;
+const SectionBoundary = SectionBoundaryUntyped as unknown as React.ComponentType<{
+  name: string;
+  children: React.ReactNode;
+}>;
+const LaunchPlanCard = LaunchPlanCardUntyped as unknown as React.ComponentType;
+const { launchPlanMode } = LaunchPlanUntyped as unknown as {
+  launchPlanMode: (campaign: unknown, rowCount: number, today?: string | null) => string | null;
+};
 const ReportWidget = ReportWidgetUntyped as unknown as React.ComponentType<{
   widget: PacingWidgetInstance;
   menu?: React.ReactNode;
@@ -103,8 +114,9 @@ export interface BoardActions {
   onEdit: (widgetId: string) => void;
   /** Copy it beside the original. Saves at once. */
   onDuplicate: (widgetId: string) => void;
-  /** Hide it from the board without removing it from the pacing. Saves at once. */
-  onTurnOff: (widgetId: string) => void;
+  /** Hide a tile - a widget or a page section - from the board without removing it from the pacing.
+   *  Saves at once, through the switch's own lane. */
+  onTurnOff: (tileId: string) => void;
   /** Remove it from this pacing. Saves at once. */
   onRemove: (widgetId: string) => void;
   /** Open the settings drawer on the Line Items block's own settings (Pacing `85d353c`). */
@@ -116,17 +128,29 @@ export interface BoardActions {
 export function ReportBoard({
   display,
   actions,
+  blocks,
 }: {
   display: PacingDisplayShape;
   actions?: BoardActions;
+  /** What the Alerts and Journal sections draw - built by the page, which holds what they need. A
+   *  section handed nothing is not on the board. */
+  blocks?: { alerts?: React.ReactNode; journal?: React.ReactNode };
 }) {
   const widgets = useMemo(() => display.widgets ?? [], [display.widgets]);
+  // The two the Launch Plan's own visibility reads (Pacing's FLOW_REGISTRY `visible`).
+  const campaign = useDashboardStore((s: { campaign: unknown }) => s.campaign);
+  const rowCount = useDashboardStore(
+    (s: { facts?: { factsDaily?: unknown[] } }) => s.facts?.factsDaily?.length || 0
+  ) as number;
+  const launchPlanShown = !!launchPlanMode(campaign, rowCount);
+  const alertsShown = blocks?.alerts != null;
+  const journalShown = blocks?.journal != null;
 
   // Placement, then the switched-off drop, then the row remap - in that order, because a saved
   // layout is geometry for the WHOLE widget set: dropping first would let a hidden tile's
   // neighbours slide into its cell and never slide back when it is switched on again.
   const entries = useMemo(() => {
-    const liveIds = new Set([...widgets.map((w) => w.id), LINE_ITEMS_ID]);
+    const liveIds = new Set([...widgets.map((w) => w.id), ...FLOW_IDS]);
     const widgetById = Object.fromEntries(widgets.map((w) => [w.id, w]));
     // The kind comes off the stored INSTANCE, never off a resolved library entry: the grid sizes a
     // tile before anything is resolved, and a kind that arrived late would clamp a KPI as a chart
@@ -144,7 +168,7 @@ export function ReportBoard({
     // before it ever reaches the profile branch `futurePlaceholder` guards, so a widget stored by a
     // newer build - the case the flag exists for - still throws without it.
     const kindOf = (id: string) => {
-      if (id === LINE_ITEMS_ID) return "flow";
+      if (FLOW_IDS.has(id)) return "flow";
       try {
         return widgetGridKind(widgetById[id], { futurePlaceholder: true });
       } catch {
@@ -155,12 +179,18 @@ export function ReportBoard({
       isOff: (id: string) => !tileEnabled(display, id),
     });
 
-    const shown = placed.filter((e) => tileEnabled(display, e.id));
+    // Data-hidden first, then switched off - Pacing's DashGrid order.
+    const dataShown = (id: string) =>
+      id === LAUNCH_PLAN_ID ? launchPlanShown
+        : id === ALERTS_ID ? alertsShown
+          : id === JOURNAL_ID ? journalShown
+            : true;
+    const shown = placed.filter((e) => dataShown(e.id) && tileEnabled(display, e.id));
     const compacted = compactVertical(Object.fromEntries(shown.map((e) => [e.id, e.tile])));
     return shown
       .map((e) => ({ ...e, tile: compacted[e.id] as Tile }))
       .sort((a, b) => a.tile.y - b.tile.y || a.tile.x - b.tile.x);
-  }, [display, widgets]);
+  }, [display, widgets, launchPlanShown, alertsShown, journalShown]);
 
   const stretch = useMemo(
     () => rowStretchIds(Object.fromEntries(entries.map((e) => [e.id, e.tile]))) as Set<string>,
@@ -212,19 +242,31 @@ export function ReportBoard({
       ))}
       {entries.map(({ id, tile }) => {
         const widget = widgets.find((w) => w.id === id);
-        // The one flow tile draws its own block and carries no widget and no stored height: `flow`
-        // is always full width and auto height (layout-grid's SIZES table). Its ⋯ carries the one
-        // action that is the block's own, Customize… (Pacing's DashGrid `flowMenuFor`).
-        if (!widget && id !== LINE_ITEMS_ID) return null;
+        if (!widget && !FLOW_IDS.has(id)) return null;
+        // A flow tile draws its own block and carries no widget and no stored height: `flow` is
+        // always full width and auto height (layout-grid's SIZES table). Line Items' ⋯ sits in its
+        // own card header; the other three have no frame to hold one, so theirs is a corner control
+        // on the cell (`.dash-cell--menu`, Pacing's DashGrid `flowMenuFor`).
+        const cornerMenu = FLOW_IDS.has(id) && id !== LINE_ITEMS_ID && actions
+          ? <SectionMenu id={id} actions={actions} />
+          : null;
         const explicitHeight = H_PX[String(tile.h)];
         return (
           <div
             key={id}
             data-tile-id={id}
-            className={cn("dash-cell", stretch.has(id) && "dash-cell--stretch")}
+            className={cn("dash-cell", cornerMenu && "dash-cell--menu", stretch.has(id) && "dash-cell--stretch")}
             style={{ gridColumn: `${tile.x + 1} / span ${tile.w}`, gridRow: `${tile.y + 1}` }}
           >
-            {id === LINE_ITEMS_ID ? (
+            {id === LAUNCH_PLAN_ID ? (
+              <SectionBoundary name="LaunchPlanCard">
+                <LaunchPlanCard />
+              </SectionBoundary>
+            ) : id === ALERTS_ID ? (
+              <SectionBoundary name="AlertsBlock">{blocks?.alerts}</SectionBoundary>
+            ) : id === JOURNAL_ID ? (
+              <SectionBoundary name="JournalPanel">{blocks?.journal}</SectionBoundary>
+            ) : id === LINE_ITEMS_ID ? (
               <LineItemsTile menu={actions ? <LineItemsMenu actions={actions} /> : null} />
             ) : (
               <ReportWidget
@@ -233,6 +275,7 @@ export function ReportBoard({
                 {...(explicitHeight === undefined ? {} : { heightPx: explicitHeight })}
               />
             )}
+            {cornerMenu}
           </div>
         );
       })}
@@ -241,9 +284,8 @@ export function ReportBoard({
 }
 
 /**
- * The Line Items block's ⋯. Pacing's flow-block menu carries Customize… and Turn off; only the first
- * is here. Turn off was never on this tile in this app, and a block switched off from here would have
- * no switch anywhere to bring it back - the widgets tab's Page sections card has no on/off.
+ * The Line Items block's ⋯: Pacing's flow-block menu, Customize… and Turn off. Turn off is undone
+ * from the switch on the Line Items card in Settings → Widgets → Page sections.
  */
 function LineItemsMenu({ actions }: { actions: BoardActions }) {
   return (
@@ -255,6 +297,29 @@ function LineItemsMenu({ actions }: { actions: BoardActions }) {
           label: "Customize…",
           disabled: !actions.onCustomizeLineItems,
           onSelect: () => actions.onCustomizeLineItems?.(),
+        },
+        {
+          key: "off",
+          label: "Turn off",
+          disabled: actions.saving,
+          onSelect: () => actions.onTurnOff(LINE_ITEMS_ID),
+        },
+      ]}
+    />
+  );
+}
+
+/** A page section's ⋯: the one action that is true for it, Turn off (Pacing's `flowMenuFor`). */
+function SectionMenu({ id, actions }: { id: string; actions: BoardActions }) {
+  return (
+    <WidgetTileMenu
+      label={`Block actions: ${FLOW_MENU_TITLES[id] ?? id}`}
+      items={[
+        {
+          key: "off",
+          label: "Turn off",
+          disabled: actions.saving,
+          onSelect: () => actions.onTurnOff(id),
         },
       ]}
     />

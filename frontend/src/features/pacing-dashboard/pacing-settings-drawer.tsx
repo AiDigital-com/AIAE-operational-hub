@@ -115,6 +115,14 @@ export interface PacingSettingsDrawerProps {
   customizeLineItemsRequest?: number | null;
   /** Called once that request has been consumed. */
   onCustomizeLineItemsOpened?: () => void;
+  /** A Layout-mode session is open on the page behind the drawer (Display's display-cas gate). */
+  layoutSessionOpen?: boolean;
+  /** Layout mode's "+ Add": open Display's Library screen. A new number per request. */
+  openLibraryRequest?: number | null;
+  /** Called once that request has been honoured. */
+  onLibraryOpened?: () => void;
+  /** Display's unsaved draft to preview on the page behind the drawer, or null. */
+  onPreviewChange?: (display: PacingDisplayShape | null) => void;
   /** Re-read the dashboard after a save that landed. */
   onSaved: () => void;
 }
@@ -165,9 +173,14 @@ export function PacingSettingsDrawer({
   onWidgetEditorOpened,
   customizeLineItemsRequest = null,
   onCustomizeLineItemsOpened,
+  layoutSessionOpen = false,
+  openLibraryRequest = null,
+  onLibraryOpened,
+  onPreviewChange,
   onSaved,
 }: PacingSettingsDrawerProps) {
-  const [tab, setTab] = useState<SettingsTabId>("plan");
+  // Display first, as in Pacing - the drawer's first tab.
+  const [tab, setTab] = useState<SettingsTabId>("widgets");
   const [dirty, setDirty] = useState<DirtyMap>(NOTHING_DIRTY);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Array<{ tab: SettingsTabId; message: string }>>([]);
@@ -447,6 +460,13 @@ export function PacingSettingsDrawer({
 
   const dirtyTabs = SETTINGS_TABS.filter((t) => dirty[t.id]).map((t) => t.id);
   const anyDirty = dirtyTabs.length > 0;
+  // Display's display-cas actions (the Library's block Add and layout Apply) wait for the WHOLE
+  // drawer to be clean, as Pacing's do; Display knows its own draft, this is everyone else's.
+  const othersDirty = dirtyTabs.some((id) => id !== "widgets");
+  // Layout mode's "+ Add" lands on Display, whichever tab was showing.
+  useEffect(() => {
+    if (openLibraryRequest != null) setTab("widgets");
+  }, [openLibraryRequest]);
 
   async function handleSave() {
     setSaving(true);
@@ -632,6 +652,15 @@ export function PacingSettingsDrawer({
             onWidgetEditorOpened={() => { setPendingWidgetId(null); onWidgetEditorOpened?.(); }}
             customizeLineItemsRequest={customizeLineItemsRequest}
             onCustomizeLineItemsOpened={onCustomizeLineItemsOpened}
+            drawerDirty={othersDirty}
+            layoutSessionOpen={layoutSessionOpen}
+            openLibraryRequest={openLibraryRequest}
+            onLibraryOpened={onLibraryOpened}
+            // A layout Apply replaced the arrangement: Pacing's drawer closes on it, discarding the
+            // (clean - the gate required it) draft rather than asking about it.
+            onCloseRequest={onClose}
+            onPreviewChange={onPreviewChange}
+            draftCm360Configured={(thirdParty?.length ?? 0) > 0}
             onDirtyChange={markWidgets}
           />
         </div>

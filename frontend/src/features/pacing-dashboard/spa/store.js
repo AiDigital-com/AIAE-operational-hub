@@ -26,14 +26,22 @@ import { createContext, createElement, useContext, useMemo } from 'react';
 // construction, and there is no second place to remember.
 import './pacing-spa.css';
 import './tailwind-subset.css';
+import './remix-icons.css';
+import './display-layout.css';
 
 const DashboardStateContext = createContext(null);
+
+// The state the page last rendered, for the reads the moved code makes OUTSIDE a render
+// (`useDashboardStore.getState()` below): a save reads the live revision at the moment it is
+// sent, not the one its component closed over. One dashboard is mounted at a time.
+let latestState = null;
 
 /**
  * Feeds the moved renderer. `value` is the whole state object those files select out of — assembled
  * once by the page from its query payload, so every field below has a single origin.
  */
 export function PacingStateProvider({ value, children }) {
+  latestState = value;
   return createElement(DashboardStateContext.Provider, { value }, children);
 }
 
@@ -71,7 +79,18 @@ export function bindDimensionHandoff(notify) {
   };
 }
 
-useDashboardStore.getState = () => ({ dimensionHandoff: handoff.axis, setDimensionHandoff });
+// Zustand's `getState()`, for the fields the moved code reads outside a render: the handoff
+// above, and the live display, its revision and the server's capabilities, which Layout mode,
+// the Library screen and the Groups section read at the moment they save.
+useDashboardStore.getState = () => ({
+  dimensionHandoff: handoff.axis,
+  setDimensionHandoff,
+  display: latestState?.display ?? {},
+  displayRev: latestState?.displayRev ?? 0,
+  capabilities: latestState?.capabilities ?? null,
+  libraryEntries: latestState?.libraryEntries ?? {},
+  campaign: latestState?.campaign ?? null,
+});
 
 /** The SPA's `useDashboard.js` exported this beside the store; the renderer uses it for the
  *  line items a widget is scoped to. */
@@ -111,6 +130,20 @@ export function useFilters() {
 export const api = {
   thirdPartyData: (slug) => currentApi().thirdPartyData(slug),
   thirdPartyStatus: (slug) => currentApi().thirdPartyStatus(slug),
+  // The Library screen, the Groups section, the card menu and Layout mode's Share: the reference's
+  // `api.library`, same names and same answer shapes (`{ entries }`, `{ ok, entry }`), and a failure
+  // thrown as the reference's apiFetch throws it (`err.status`, `err.message` = the server's code).
+  library: {
+    list: (params) => currentApi().library.list(params),
+    share: (body, capabilities) => currentApi().library.share(body, capabilities),
+    update: (id, body, capabilities) => currentApi().library.update(id, body, capabilities),
+    remove: (id, updatedAt, capabilities) => currentApi().library.remove(id, updatedAt, capabilities),
+    setVisibility: (id, visibility, capabilities) => currentApi().library.setVisibility(id, visibility, capabilities),
+    like: (id) => currentApi().library.like(id),
+    unlike: (id) => currentApi().library.unlike(id),
+  },
+  /** The viewer: `{ user_id, role }`, the two fields the owner-or-admin gates read. */
+  me: () => currentApi().me(),
 };
 
 let _api = null;
@@ -180,8 +213,11 @@ function bridgePlanKeys(payload) {
  * existed", not "nothing available", and `conversionTags` missing means the conversion rows were
  * never tagged, not that their tags were dropped.
  */
-export function usePacingState({ data, urlFilters, actions, journalHighlight, dimensionHandoff, periodScopeOverride }) {
-  return useMemo(() => {
+export function usePacingState({ data, urlFilters, actions, journalHighlight, dimensionHandoff, periodScopeOverride, displayOverride }) {
+  // Two memos: the payload-derived state (normalize, the facts aggregates — the expensive part)
+  // rebuilds only when the payload or the period changes; the cheap overlay below follows the
+  // drawer's draft, the journal highlight and the rest without paying for that again.
+  const base = useMemo(() => {
     const fetched = data ?? null;
     // Value groups (spec 2026-10-02): a line item can say that several delivered values of one
     // naming dimension read as one named value, so a dim split on that name is an ordinary split
@@ -247,17 +283,31 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight, di
       thirdParty: raw?.thirdParty ?? null,
       notify: raw?.notify ?? null,
       display: raw?.display ?? {},
-      journalHighlight: journalHighlight ?? null,
-      // The «See in Breakdown» axis (see `setDimensionHandoff` above).
-      dimensionHandoff: dimensionHandoff ?? null,
+      // Always the SAVED revision: it is what the next save compares against.
+      displayRev: Number(raw?.display?.rev ?? 0),
+      capabilities: raw?.capabilities ?? null,
+      // The library entries this pacing's linked tiles resolve through (merge.mjs), keyed by id.
+      libraryEntries: raw?.libraryEntries ?? {},
+      slug: raw?.campaign?.slug ?? null,
       // Period scope, resolved above. Every moved selector, widget and split row reads these three.
       selectedPeriodKey,
       periodScopeState: resolvedScope.state,
       splitScopedMode: !!scopeSource.periodScope,
       splitScopedPlans: selectedPeriodKey ? buildScopedPlansForPeriod(LP, selectedPeriodKey) : null,
-      urlFilters, actions,
     };
-  }, [data, urlFilters, actions, journalHighlight, dimensionHandoff, periodScopeOverride]);
+  }, [data, periodScopeOverride]);
+
+  return useMemo(() => ({
+    ...base,
+    // The settings drawer's unsaved draft while it is open (the reference drawer pushes its draft
+    // into the store the same way, so the board behind it previews the edit); the saved display
+    // otherwise.
+    display: displayOverride ?? base.display,
+    journalHighlight: journalHighlight ?? null,
+    // The «See in Breakdown» axis (see `setDimensionHandoff` above).
+    dimensionHandoff: dimensionHandoff ?? null,
+    urlFilters, actions,
+  }), [base, displayOverride, journalHighlight, dimensionHandoff, urlFilters, actions]);
 }
 
 // ── the SPA's `hooks/useDashboard.js`, the part the renderer uses ──────────────────────────────
@@ -281,8 +331,23 @@ import { makeCvCtx } from './primary-cv.js';
 import { groupIndexOf, groupedView } from './dim-value-groups.js';
 import { extractPeriods, resolvePeriodKey } from './periods.js';
 import { buildScopedPlansForPeriod } from './config.js';
+import { resolveWidgetMap } from './library-refs.js';
 
 export const useCampaign = () => useDashboardStore(selectCampaign);
+/** The reference's `useLibraryEntries`: the entries this pacing's linked tiles resolve through. */
+export const useLibraryEntries = () => useDashboardStore((s) => s.libraryEntries);
+
+/**
+ * The reference's `useResolvedWidgets`: every widget instance resolved against the library, as a Map
+ * keyed by INSTANCE id. `widgetsOverride` is for the one caller that does not read the stored list —
+ * the settings drawer's gallery renders its unsaved draft. Memoized on the two raw slices.
+ */
+export function useResolvedWidgets(widgetsOverride) {
+  const display = useDashboardStore(selectDisplay);
+  const entries = useDashboardStore((s) => s.libraryEntries);
+  const widgets = widgetsOverride || display?.widgets;
+  return useMemo(() => resolveWidgetMap(widgets, entries), [widgets, entries]);
+}
 export const useDisplay = () => useDashboardStore(selectDisplay);
 export const useFacts = () => useDashboardStore(selectFacts);
 export const useLiPlan = () => useDashboardStore(selectLiPlan);

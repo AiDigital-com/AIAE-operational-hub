@@ -783,6 +783,31 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldOmitTheRevisionOnAPreferenceOnlyPatchTest() {
+		// Given: an on/off switch - a patch of the per-entry `enabled` map, which Pacing merges entry
+		// by entry and needs no revision for. A JSON null would read as revision 0 and fail the check,
+		// so the field is left out, not sent empty.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{\"display\":{\"enabled\":{\"journal\":false}}}", true))
+				.andRespond(withSuccess("{\"ok\":true,\"display\":{\"rev\":4}}", MediaType.APPLICATION_JSON));
+
+		// When:
+		PacingDisplaySaveOutcome result = client.saveDisplay(
+				assertion, "nike-ss26", Map.of("enabled", Map.of("journal", false)), null, null);
+
+		// Then:
+		assertThat(result.ok()).isTrue();
+		server.verify();
+	}
+
+	@Test
 	void shouldPassLineItemsSettingsThroughUntouchedTest() {
 		// Given: the Line Items block's settings ride the opaque display map - an object to store, and
 		// null for "Reset to default", which dash-gate reads as "delete the stored key". A dropped null
@@ -930,6 +955,9 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andExpect(method(PUT))
+				// Pacing refuses a library PUT without the writer marker, as it refuses a POST.
+				.andExpect(content().json("{\"name\":\"Renamed\",\"updated_at\":\"t2\","
+						+ "\"writer\":{\"contextWidgetSpec\":2,\"contextWidgetUnification\":2}}"))
 				.andRespond(withSuccess(
 						"{\"ok\":true,\"entry\":{\"id\":\"e1\",\"kind\":\"widget\",\"name\":\"Renamed\","
 								+ "\"likes\":0,\"liked\":false,\"mine\":true,\"usage\":1}}",
@@ -1002,6 +1030,9 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		server.expect(requestTo(BASE_URL + "/api/library/e1"))
 				.andExpect(method(DELETE))
+				// ...and a DELETE.
+				.andExpect(content().json("{\"updated_at\":\"t2\","
+						+ "\"writer\":{\"contextWidgetSpec\":2,\"contextWidgetUnification\":2}}"))
 				.andRespond(withSuccess("{\"ok\":true,\"id\":\"e1\"}", MediaType.APPLICATION_JSON));
 
 		// When:

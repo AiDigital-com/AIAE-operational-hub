@@ -128,3 +128,9 @@
   font-weight: 800;
   color: var(--ink);
 }
+
+/* The filter bar while Layout mode is open: on screen, inert, dimmed, and NOT sticky - Layout mode's
+   own hint bar owns the sticky slot for the session (Pacing's `.lm-inert`, for this app's bar). */
+.pdash__fb-inert { opacity: .45; filter: saturate(.6); }
+.pdash__fb-inert * { pointer-events: none !important; }
+.pdash__fb-inert > .fb { position: static; box-shadow: none; }

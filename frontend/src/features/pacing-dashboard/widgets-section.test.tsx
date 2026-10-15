@@ -7,11 +7,9 @@ import type { PacingDisplayShape } from "./types";
 
 vi.mock("./api", () => ({ savePacingDisplay: vi.fn() }));
 
-// The library itself is a moved screen with its own tests; what is under test here is the DRAFT
-// the section holds and the one imperative action the mapping screen reaches it through.
-vi.mock("./pacing-dashboard-library", () => ({
-  PacingDashboardLibrary: () => null,
-}));
+// The Display tab itself is Pacing's moved screen; what is under test here is the DRAFT the section
+// holds for it and the one imperative action the mapping screen reaches it through.
+vi.mock("./spa/display/BlockLibrary.jsx", () => ({ default: () => null }));
 
 function mount(display: PacingDisplayShape) {
   const ref = createRef<SettingsSectionHandle>();
@@ -75,7 +73,7 @@ describe("PacingWidgetsSection.addWidget", () => {
   });
 
   it("still refuses past the cap, and does not mistake a dimensionless tile for a match", () => {
-    const widgets = Array.from({ length: 64 }, (_, i) => ({ id: `w${i}`, kind: "metric" }));
+    const widgets = Array.from({ length: 100 }, (_, i) => ({ id: `w${i}`, kind: "metric" }));
     const ref = mount({ widgets, groups: [], enabled: {} } as unknown as PacingDisplayShape);
     expect(ref.current?.addWidget?.(TABLE)).toBeNull();
   });

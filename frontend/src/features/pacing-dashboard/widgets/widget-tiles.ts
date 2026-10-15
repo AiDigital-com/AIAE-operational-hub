@@ -5,7 +5,7 @@
  * Everything here that Pacing also runs comes from `../vendor/dash-blocks.js` — the byte-identical
  * copy of `AIAE-paicing/shared/dash-blocks.js` (see `../vendor/SOURCE.md`) — rather than being
  * re-typed. Before this module there were three hand-written restatements of that file living in
- * `pacing-dashboard-library.tsx`: `newWidgetId`'s copy of `WIDGET_INSTANCE_RE`, `newGroupId`'s copy
+ * the retired `pacing-dashboard-library.tsx`: `newWidgetId`'s copy of `WIDGET_INSTANCE_RE`, `newGroupId`'s copy
  * of `GROUP_ID_RE`, and `removeWidget`'s copy of `sweepGroups`. Each was correct when written and
  * each would have gone quietly wrong the day Pacing changed its side, because nothing compares them.
  *
@@ -125,9 +125,8 @@ export function tileEnabled(display: { enabled?: unknown } | null | undefined, i
  * The `display.enabled` map with one tile flipped.
  *
  * ON DELETES the key rather than storing `true` — the same sparseness `enabledPatch` expresses for
- * the per-entry lane. We build a whole map rather than a patch because the Hub saves `enabled`
- * inside the drawer's one full-display save, under its `displayRev` CAS, instead of the SPA's
- * instant per-entry lane (see `widgets-section.tsx` for why that difference is safe here).
+ * the per-entry lane. A person's switch goes through that lane (`spa/display/useEnabledSwitch.js`); this whole
+ * map is for the page's own auto-add, which clears a stale off-entry beside the tile it stores.
  *
  * An id outside the domain is a caller bug and throws, exactly as `enabledPatch` does: pretending to
  * save a switch dash-gate would refuse is worse than failing here.
@@ -142,6 +141,40 @@ export function setTileEnabled(
   if (on) delete next[id];
   else next[id] = false;
   return next;
+}
+
+/**
+ * The page's code-rendered sections, in page order: Launch Plan, Alerts, Line Items, Journal — the
+ * vendored `FUNCTIONAL_BLOCK_IDS`, so a fifth one on Pacing's side arrives here with the next copy.
+ */
+export const PAGE_SECTION_IDS: readonly string[] = DashBlocks.FUNCTIONAL_BLOCK_IDS;
+
+/**
+ * The single-entry patch a switch sends: OFF stores `false`, ON sends `null`, which
+ * dash-gate's per-entry lane reads as "delete the key". Pacing's own `enabledPatch`; it throws on an
+ * id outside the domain.
+ */
+export function enabledPatch(id: string, on: boolean): Record<string, false | null> {
+  return DashBlocks.enabledPatch(id, on);
+}
+
+/**
+ * Resolves what a widget instance actually draws.
+ *
+ * A LINKED instance carries no spec - the library entry is the definition, and copying it into the
+ * instance is exactly what Pacing forbids, because the copy stops matching the moment the author
+ * edits theirs. So the drawable widget is the entry's definition wearing the instance's id.
+ * Null when the entry is gone.
+ */
+export function resolveWidget(
+  widget: PacingWidgetInstance,
+  libraryEntries: Record<string, unknown> | undefined
+): PacingWidgetInstance | null {
+  if (!widget.lib) return widget;
+  const entry = libraryEntries?.[widget.lib.key] as { definition?: unknown } | undefined;
+  const definition = entry?.definition as Partial<PacingWidgetInstance> | undefined;
+  if (!definition) return null;
+  return { ...definition, id: widget.id, lib: widget.lib } as PacingWidgetInstance;
 }
 
 /**
@@ -176,9 +209,8 @@ export function copyWidget(
  * The SPA's twin (`widget-ops.js:withWidgetRemoved`) deliberately leaves `enabled` alone, because
  * its client never sends that map in a widget-set patch — dash-gate sweeps the dead entry itself on
  * the one save that can prove the widget is gone. That server sweep still runs for us, and stays the
- * authority on what is stored. We drop the entry here anyway because this client DOES carry the map
- * in its patch, so leaving it would show a stale off-switch in the drawer's own draft until the next
- * server adoption.
+ * authority on what is stored. The drawer's save leaves the map out too, and ignores this half; the
+ * board's tile ⋯ → Delete sends the whole display, so it sends the map without the dead entry.
  *
  * Group membership goes through the vendored `sweepGroups` — the same rule dash-gate runs — so the
  * tile's frame cannot keep a ghost member, and the UI's answer to "which members survive a delete"

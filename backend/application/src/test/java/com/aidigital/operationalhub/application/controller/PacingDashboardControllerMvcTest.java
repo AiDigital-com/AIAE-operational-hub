@@ -87,10 +87,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -579,7 +578,7 @@ class PacingDashboardControllerMvcTest {
 		// Given:
 		stubCurrentUser();
 		PacingDisplaySaveOutcome outcome = PacingDisplaySaveOutcome.saved(Map.of("widgets", List.of()));
-		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), anyInt(), any());
+		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), any(), any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:
@@ -598,7 +597,7 @@ class PacingDashboardControllerMvcTest {
 		// that way down to the null: dropped, the key would be absent and the reset a silent no-op.
 		stubCurrentUser();
 		PacingDisplaySaveOutcome outcome = PacingDisplaySaveOutcome.saved(Map.of("widgets", List.of()));
-		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), anyInt(), any());
+		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), any(), any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When:
@@ -615,11 +614,30 @@ class PacingDashboardControllerMvcTest {
 	}
 
 	@Test
+	void shouldHandAPreferenceOnlyPatchToPacingWithNoRevisionTest() throws Exception {
+		// Given: an on/off switch sends no revision - Pacing merges the `enabled` entry against the
+		// stored row and needs none. It must reach the client as absent, not as revision 0.
+		stubCurrentUser();
+		PacingDisplaySaveOutcome outcome = PacingDisplaySaveOutcome.saved(Map.of("enabled", Map.of()));
+		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), any(), any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/settings", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"display\":{\"enabled\":{\"journal\":false}}}"))
+				.andExpect(status().isOk());
+
+		// Then:
+		verify(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), isNull(), any());
+	}
+
+	@Test
 	void shouldReturn409WithCurrentRevOnStaleSettingsConflictTest() throws Exception {
 		// Given: US-118 - a concurrent edit is reported, never silently overwritten
 		stubCurrentUser();
 		PacingDisplaySaveOutcome outcome = PacingDisplaySaveOutcome.staleSettings(7);
-		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), anyInt(), any());
+		doReturn(outcome).when(pacingClient).saveDisplay(any(), eq("nike-ss26"), any(), any(), any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:

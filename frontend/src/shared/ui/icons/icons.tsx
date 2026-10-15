@@ -254,6 +254,16 @@ export function ChevronLeftIcon({ className }: IconProps) {
   );
 }
 
+/** Four-way move glyph: the pacing dashboard's Layout mode (rearrange the tiles). */
+export function MoveIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M12 3v18M3 12h18" />
+      <path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+    </svg>
+  );
+}
+
 /** Chevron right glyph for sidebar agency rows. */
 export function ChevronRightIcon({ className }: IconProps) {
   return (

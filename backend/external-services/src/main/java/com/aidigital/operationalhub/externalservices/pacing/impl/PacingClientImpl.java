@@ -585,7 +585,7 @@ public class PacingClientImpl implements PacingClient {
 
 	@Override
 	public PacingDisplaySaveOutcome saveDisplay(
-			HubAssertion assertion, String slug, Map<String, Object> display, int displayRev,
+			HubAssertion assertion, String slug, Map<String, Object> display, Integer displayRev,
 			Map<String, Object> writer) {
 		String header = assertionSigner.sign(assertion);
 		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
@@ -682,7 +682,8 @@ public class PacingClientImpl implements PacingClient {
 			String expectedUpdatedAt) {
 		String header = assertionSigner.sign(assertion);
 		String path = LIBRARY_PATH + "/" + id;
-		LibraryUpdateRequest request = new LibraryUpdateRequest(name, description, definition, expectedUpdatedAt);
+		LibraryUpdateRequest request =
+				new LibraryUpdateRequest(name, description, definition, expectedUpdatedAt, V2_WRITER);
 		try {
 			LibraryEntryResponse response = restClient.put()
 					.uri(path)
@@ -708,7 +709,7 @@ public class PacingClientImpl implements PacingClient {
 	public PacingLibrarySaveOutcome deleteLibraryEntry(HubAssertion assertion, String id, String expectedUpdatedAt) {
 		String header = assertionSigner.sign(assertion);
 		String path = LIBRARY_PATH + "/" + id;
-		LibraryDeleteRequest request = new LibraryDeleteRequest(expectedUpdatedAt);
+		LibraryDeleteRequest request = new LibraryDeleteRequest(expectedUpdatedAt, V2_WRITER);
 		try {
 			LibraryDeleteResponse response = restClient.method(HttpMethod.DELETE)
 					.uri(path)

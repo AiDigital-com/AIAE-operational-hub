@@ -42,16 +42,19 @@ export interface SettingsSectionProps {
   onDirtyChange: (dirty: boolean) => void;
 }
 
-/** The sections the drawer shows, in tab order. */
+/**
+ * The sections the drawer shows, in tab order - Pacing's SettingsDrawer.jsx, names and order both
+ * (owner decision 2026-10-14). The ids are this app's own and stay as they were; only what a person
+ * reads changed. The moved code's own empty states point at «Settings → Data» and «Settings →
+ * Mapping» by name, which these labels keep true.
+ */
 export const SETTINGS_TABS = [
-  { id: "plan", label: "Plan" },
+  { id: "widgets", label: "Display" },
+  { id: "plan", label: "Pacing" },
+  { id: "documents", label: "Assets" },
   { id: "data", label: "Data" },
-  { id: "widgets", label: "Widgets" },
-  // Between Widgets and Alerts on purpose: it configures what a widget can draw, and the compare
-  // widget's own empty state points here by name ("Build the library in Settings → Mapping").
   { id: "mapping", label: "Mapping" },
-  { id: "alerts", label: "Alerts" },
-  { id: "documents", label: "Documents" },
+  { id: "alerts", label: "Notifications" },
 ] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TABS)[number]["id"];

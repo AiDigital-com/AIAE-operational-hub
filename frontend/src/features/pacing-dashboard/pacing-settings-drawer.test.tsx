@@ -16,6 +16,10 @@ import { PacingSettingsDrawer } from "./pacing-settings-drawer";
  * into one "save failed", and closing with unsaved work asks first.
  */
 
+// The Display tab is Pacing's moved screen and reads the dashboard state the page provides; the drawer's
+// own mechanics are what is under test here.
+vi.mock("./spa/display/BlockLibrary.jsx", () => ({ default: () => null }));
+
 vi.mock("./api", () => ({
   savePacingDataSettings: vi.fn(),
   savePacingCampaignLinks: vi.fn(),
@@ -248,7 +252,7 @@ describe("PacingSettingsDrawer", () => {
     await editDataSource();
 
     // When: the user looks at the plan and comes back
-    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
 
     // Then: the edit survived. One Save over three sections only works if the two the user is not
@@ -262,7 +266,7 @@ describe("PacingSettingsDrawer", () => {
     const { onSaved } = renderDrawer({ notify: aPacingNotifySettingsV1(), hasVideo: false });
 
     // When: only the Alerts tab is touched
-    await userEvent.click(screen.getByRole("button", { name: /^Alerts/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Notifications/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Send alerts to Slack" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -283,7 +287,7 @@ describe("PacingSettingsDrawer", () => {
     });
 
     // When: only the Documents tab is touched - a Media Plan URL is pasted
-    await userEvent.click(screen.getByRole("button", { name: /^Documents/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Assets/ }));
     await userEvent.type(
       screen.getByRole("textbox", { name: "Media Plan URL" }),
       "https://drive.google.com/mp"
@@ -304,7 +308,7 @@ describe("PacingSettingsDrawer", () => {
   it("should name the Documents section when its validation refuses the save (US-141)", async () => {
     // Given: a bad Asana URL - refused locally, before any request
     renderDrawer({ links: [], orderNumber: undefined });
-    await userEvent.click(screen.getByRole("button", { name: /^Documents/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Assets/ }));
     await userEvent.type(screen.getByRole("textbox", { name: "Asana URL" }), "https://example.com/x");
 
     // When:
@@ -312,7 +316,7 @@ describe("PacingSettingsDrawer", () => {
 
     // Then: the footer names the section and the sentence, and nothing was sent
     expect(
-      await screen.findByText(/Documents: The Asana link must point at an Asana project/)
+      await screen.findByText(/Assets: The Asana link must point at an Asana project/)
     ).toBeInTheDocument();
     expect(dashApi.savePacingCampaignLinks).not.toHaveBeenCalled();
   });
@@ -328,7 +332,7 @@ describe("PacingSettingsDrawer", () => {
     // The cost switches sit in a collapsible section now, closed on every visit.
     await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
-    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
 
     // Then: the control is there. The switch and the controls it governs live in two sections that
     // one Save commits together, so reading the STORED value here would mean save, watch the drawer
@@ -347,7 +351,7 @@ describe("PacingSettingsDrawer", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Data/ }));
     await userEvent.click(screen.getByRole("button", { name: /Client cost/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
-    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
 
     expect(await screen.findByLabelText(/Net percent for line item 111/)).toBeInTheDocument();
   });
@@ -415,7 +419,7 @@ describe("PacingSettingsDrawer", () => {
     renderDrawer({ initialTab: "documents", links: [], orderNumber: undefined });
 
     // Then: the Documents panel is the visible one
-    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "Assets" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("textbox", { name: "Asana URL" })).toBeVisible();
   });
 });

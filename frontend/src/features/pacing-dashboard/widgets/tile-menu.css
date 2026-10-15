@@ -61,3 +61,34 @@
 .wtm__menu button:disabled { color: var(--muted); cursor: not-allowed; }
 .wtm__menu .wtm__danger { color: var(--bad); }
 .wtm__menu .wtm__danger:hover:not(:disabled) { background: var(--bad-soft, var(--n-100)); }
+
+/* A page section's ⋯ (Launch Plan, Alerts, Journal) has no widget frame to sit in: it is a corner
+   control on the board cell, revealed on hover or keyboard focus and pinned while its own menu is
+   open - Pacing's `.dash-cell--menu > .wgm-wrap`, for this app's trigger. `.dash-cell--menu` itself
+   (the positioning context) comes with the moved spa/pacing-spa.css. Invisible means untouchable
+   too, so a tablet's emulated hover cannot open a menu nobody can see. Opaque and bordered here,
+   unlike a frame's ⋯: a block's header can carry text at its right edge (Launch Plan's explanation),
+   and the control must never read as text on text. */
+.dash-cell--menu > .wtm {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.dash-cell--menu:hover > .wtm,
+.dash-cell--menu:focus-within > .wtm,
+.dash-cell--menu > .wtm--open { opacity: 1; pointer-events: auto; }
+.dash-cell--menu > .wtm .wtm__kebab {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.dash-cell--menu > .wtm .wtm__kebab:hover,
+.dash-cell--menu > .wtm .wtm__kebab[aria-expanded="true"] { background: var(--n-100); color: var(--ink); }
+/* A block that drew nothing (Launch Plan with no line to recommend for) leaves the ⋯ alone in its
+   cell; hide the cell rather than keep an empty row and its gap - Pacing's twin rule, which keys on
+   its own wrapper class and so cannot see this one. */
+.dash-cell--menu:not(:has(> :not(.wtm))) { display: none; }

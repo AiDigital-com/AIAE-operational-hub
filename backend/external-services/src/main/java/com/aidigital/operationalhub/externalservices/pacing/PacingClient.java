@@ -300,14 +300,15 @@ public interface PacingClient {
 	 * @param assertion  who is calling and what they may see
 	 * @param slug       the pacing's dash_slug
 	 * @param display    the display patch to save; at minimum {@code { widgets: [...] } }
-	 * @param displayRev the revision this save was read at
+	 * @param displayRev the revision this save was read at, or {@code null} for a patch that only touches
+	 *                   the per-entry preference maps, which Pacing merges without a revision check
 	 * @param writer     the display grammar this client writes, echoed from the dashboard payload's
 	 *                   {@code capabilities}. Required whenever the patch touches a v2 widget;
 	 *                   omitting it earns a 409 that reads as "reload the editor"
 	 * @return the save outcome
 	 */
 	PacingDisplaySaveOutcome saveDisplay(
-			HubAssertion assertion, String slug, Map<String, Object> display, int displayRev,
+			HubAssertion assertion, String slug, Map<String, Object> display, Integer displayRev,
 			Map<String, Object> writer);
 
 	/**
