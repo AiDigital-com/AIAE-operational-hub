@@ -33,6 +33,20 @@ describe("buildPacingAlerts", () => {
     expect(li200.name).toBe("Video"); // LP["200"].description is null - falls back to channel
   });
 
+  it("names an alert's line item by its custom display name first, as the reference's AlertsBlock does", () => {
+    // Given: a custom name on one line item (Settings → Pacing, stored as `display.liNames`).
+    const data = toHubShape();
+    const withName = { ...data, display: { ...(data.display ?? {}), liNames: { "100": "Meta Prospecting" } } };
+
+    // When:
+    const alerts = buildPacingAlerts(withName as unknown as Parameters<typeof buildPacingAlerts>[0], DEFAULT_FILTERS);
+
+    // Then: the named line item reads by its name; the other keeps the description/channel fallback.
+    const marginAlerts = alerts.filter((a) => a.type === "margin_below_target");
+    expect(marginAlerts.find((a) => a.liId === "100")!.name).toBe("Meta Prospecting");
+    expect(marginAlerts.find((a) => a.liId === "200")!.name).toBe("Video");
+  });
+
   it("returns [] for a null/malformed payload, never throws", () => {
     expect(buildPacingAlerts(null, DEFAULT_FILTERS)).toEqual([]);
     expect(buildPacingAlerts(undefined, DEFAULT_FILTERS)).toEqual([]);

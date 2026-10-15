@@ -422,4 +422,45 @@ describe("PacingSettingsDrawer", () => {
     expect(screen.getByRole("button", { name: "Assets" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("textbox", { name: "Asana URL" })).toBeVisible();
   });
+
+  it("edits a line item's display name on the Pacing tab and saves it with Display, under the display revision", async () => {
+    // Given: a stored name, which the Pacing tab's field shows.
+    vi.mocked(dashApi.savePacingDisplay).mockResolvedValue({ status: "saved", display: {} });
+    const { onSaved } = renderDrawer({ display: { rev: 3, widgets: [], groups: [], liNames: { "111": "Search" } } });
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
+    const field = screen.getByLabelText("Display name for line item 111");
+    expect(field).toHaveValue("Search");
+
+    // When: the name is edited. The Display tab, not Pacing, is the one with unsaved work - the
+    // name is `display.liNames`, saved with the widgets where the reference's `buildConfig` puts it.
+    await userEvent.type(field, " Evergreen");
+    expect(screen.getByRole("button", { name: /^Display, unsaved changes/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Pacing, unsaved changes/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: one display save carrying the name, no plan save.
+    await waitFor(() => expect(dashApi.savePacingDisplay).toHaveBeenCalledTimes(1));
+    const [slug, patch, rev] = vi.mocked(dashApi.savePacingDisplay).mock.calls[0];
+    expect(slug).toBe("nike-ss26");
+    expect(rev).toBe(3);
+    expect((patch as { liNames: Record<string, string> }).liNames).toEqual({ "111": "Search Evergreen" });
+    expect(planApi.savePacingPlan).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("puts a line item's display name back on Reset, from the Display draft that holds it", async () => {
+    // Given:
+    renderDrawer({ display: { rev: 3, widgets: [], groups: [], liNames: { "111": "Search" } } });
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
+    const field = screen.getByLabelText("Display name for line item 111");
+    await userEvent.type(field, " Evergreen");
+    expect(field).toHaveValue("Search Evergreen");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    // Then: the field reads what the server holds again, and nothing is dirty.
+    expect(field).toHaveValue("Search");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
 });

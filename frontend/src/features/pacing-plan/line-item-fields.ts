@@ -54,6 +54,16 @@ export interface EditableLineItem {
    *  read as one named value, so one dim split carries a shared target for them. The line's own
    *  dictionary, edited in place and sent whole on every save, as the reference does. */
   dimGroups: DimGroup[];
+  /** Labels (the reference's Settings → Pacing "Labels" chips): free-text tags on the line item
+   *  itself, shown on its Line Items card and offered by the dashboard's labels filter. Held and
+   *  sent whole on every save, as the reference does (`labels: p.labels || []`). */
+  labels: string[];
+  /** The custom display name (`display.liNames[id]`) as the field shows it. NOT part of the plan's
+   *  payload or its dirty check: the Display section's draft owns and saves it. This copy exists so
+   *  the input is controlled by state updated in the same render as the keystroke - a value routed
+   *  through two sections' state lags a render and drops characters typed quickly. It is re-synced
+   *  from that draft whenever the draft reports (edit, Reset, re-seed). */
+  displayName: string;
   /** True for a line item added in this editing session (US-126) - not yet on the pacing, so its
    *  identity fields have nothing stored to fall back to and must be carried explicitly on save. */
   isNew: boolean;
@@ -85,6 +95,31 @@ export function sameCvChoice(a: readonly string[], b: readonly string[]): boolea
   const left = [...a].sort();
   const right = [...b].sort();
   return left.every((name, i) => name === right[i]);
+}
+
+/** The stored labels as the editor holds them: strings only, blanks dropped - the reference's
+ *  `[...(p.labels || [])]` plus the guard a typed-by-inference payload needs. */
+function labelList(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter((l): l is string => typeof l === "string" && l.length > 0);
+}
+
+/** A label as the reference's editor stores it: trimmed and lower-cased (`LabelsSection.addLabel`). */
+export function normalizeLabel(value: string): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/** The reference's two caps on a line item's labels (`LabelsSection`): ten per line item, forty
+ *  characters each (the input's `maxLength`). */
+export const MAX_LABELS_PER_LINE_ITEM = 10;
+export const MAX_LABEL_LENGTH = 40;
+
+/** Adds one label the way the reference's `addLabel` does: normalised, refused when blank, already
+ *  present or over the cap - in which case the list comes back unchanged. */
+export function withLabel(labels: readonly string[], value: string): string[] {
+  const v = normalizeLabel(value);
+  if (!v || labels.length >= MAX_LABELS_PER_LINE_ITEM || labels.includes(v)) return [...labels];
+  return [...labels, v];
 }
 
 /** Is this a real net ratio - i.e. a NET line item, not the identity? */
@@ -129,7 +164,7 @@ function groupList(list: unknown): DimGroup[] {
  * identical, see `PacingLineItemPlanV1.nativeBudget`'s own doc) - a fallback READ, never a currency
  * conversion.
  */
-export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
+export function seedFromPlan(plan: PacingLineItemPlanV1, displayName = ""): EditableLineItem {
   return {
     lineItemId: plan.lineItemId,
     channel: plan.channel ?? null,
@@ -150,6 +185,8 @@ export function seedFromPlan(plan: PacingLineItemPlanV1): EditableLineItem {
     primaryCv: cvList(plan.storedPrimaryConversions),
     primaryCvStored: cvList(plan.storedPrimaryConversions),
     dimGroups: groupList(plan.dimGroups),
+    labels: labelList(plan.labels),
+    displayName,
     isNew: false,
     campaignId: null,
     campaignName: null,
@@ -195,6 +232,8 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     primaryCv: [],
     primaryCvStored: [],
     dimGroups: [],
+    labels: [],
+    displayName: "",
     isNew: true,
     campaignId: candidate.campaignId ?? null,
     campaignName: candidate.campaignName ?? null,
@@ -236,6 +275,9 @@ export function toPlanUpdateLineItem(li: EditableLineItem, netFeatureOn: boolean
     // Always the whole dictionary, the reference's `dim_groups: p.dimGroups || []`: seeded from what
     // is stored, so an untouched line sends it back unchanged, and [] is a real "no groups".
     dimGroups: li.dimGroups.map((g) => ({ dim_key: g.dim_key, name: g.name, values: [...g.values] })),
+    // Always the whole list, the reference's `labels: p.labels || []`: seeded from what is stored,
+    // so an untouched line sends it back unchanged, and [] is a real "no labels".
+    labels: [...li.labels],
   };
   // Net cost mode: while the pacing switch is OFF nothing is sent - stored ratios stay inert and a
   // save from a pacing that never used the feature is byte-identical to what it always sent. With

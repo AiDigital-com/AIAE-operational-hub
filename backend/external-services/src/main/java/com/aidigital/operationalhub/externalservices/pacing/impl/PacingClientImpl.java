@@ -908,7 +908,8 @@ public class PacingClientImpl implements PacingClient {
 				li.lineItemId(), li.channel(), li.description(), li.campaignId(), li.campaignName(),
 				li.orderNumber(), li.rateType(), li.nativeBudget(), li.targetImpressions(), li.marginPercent(),
 				li.targetCtr(), li.targetVcr(), li.flightStart(), li.flightEnd(), li.costCoef(),
-				li.netRatio(), li.netRatioLocked(), li.primaryConversions(), li.containers(), li.dimGroups());
+				li.netRatio(), li.netRatioLocked(), li.primaryConversions(), li.containers(), li.dimGroups(),
+				li.labels());
 	}
 
 	@Override

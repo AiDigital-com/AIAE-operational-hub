@@ -400,6 +400,18 @@ export function PacingSettingsDrawer({
     ? probeErrorText(perfProbeErr.error, perfProbeErr.shareWith)
     : null;
 
+  // The custom line item names (`display.liNames`), as the DISPLAY section's draft has them. Edited
+  // on the Pacing tab, where the reference puts the field, but held and saved by Display - the
+  // reference's `buildConfig` writes `liNames` with the widgets under the display revision, so the
+  // draft that saves them is the one that holds them. Null until that section speaks; the stored
+  // payload stands in before then, the same fallback `liveSwitches` uses and for the same reason.
+  const [draftLiNames, setDraftLiNames] = useState<Record<string, string> | null>(null);
+  const liveLiNames = draftLiNames ?? ((display?.liNames as Record<string, string> | undefined) ?? {});
+  const setLineItemName = useCallback(
+    (lineItemId: string, value: string) => widgets.current?.setLineItemName?.(lineItemId, value),
+    []
+  );
+
   // The PLAN's draft, once that section has reported it: a line item added and not yet saved is a
   // line item a sheet can already be routed to, the way the reference's pickers read its draft.
   const [planDraftLis, setPlanDraftLis] = useState<PlanLineItemSummary[] | null>(null);
@@ -650,6 +662,8 @@ export function PacingSettingsDrawer({
             seedKey={seedKey}
             cvData={planCvData}
             onLineItemsChange={setPlanDraftLis}
+            liNames={liveLiNames}
+            onDisplayNameChange={setLineItemName}
             onDirtyChange={markPlan}
           />
         </div>
@@ -710,6 +724,7 @@ export function PacingSettingsDrawer({
             onCloseRequest={onClose}
             onPreviewChange={onPreviewChange}
             draftCm360Configured={(thirdParty?.length ?? 0) > 0}
+            onLiNamesChange={setDraftLiNames}
             onDirtyChange={markWidgets}
           />
         </div>

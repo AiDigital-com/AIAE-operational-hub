@@ -9969,6 +9969,22 @@ components:
           items:
             type: object
             additionalProperties: true
+        # Same `nullable: true` reason as `dimGroups` above: the generator must leave an omitted key
+        # null so it drops off the wire, rather than reaching Pacing as `labels: []` and clearing the
+        # stored tags of every line item a caller did not mention.
+        labels:
+          type: array
+          nullable: true
+          description: >
+            Free-text tags for this line item (the reference's Settings → Pacing "Labels" chips):
+            shown on its Line Items card, offered by the dashboard's labels filter and the journal's
+            `#label:` tag. The whole list, forwarded verbatim to Pacing as `labels`, which stores it
+            as it is - the editor's own rules (lower-case, at most 10 per line item, 40 characters
+            each) are the Hub's, as they were the reference's. The key is NOT plan-owned on Pacing's
+            side, so presence is the contract, as with `dimGroups`: OMIT the key (or send null) to keep
+            the stored labels; send a list, an empty one included, to REPLACE them.
+          items:
+            type: string
       required:
         - lineItemId
     PacingPlanUpdateV1:

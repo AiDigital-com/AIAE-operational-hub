@@ -39,6 +39,11 @@ export interface SettingsSectionHandle {
   /** Add line items to this section's DRAFT, for a screen that is not this one - the mapping
    *  pickers' «＋ Add line item…». Only the plan section implements it. */
   addLineItems?: (candidates: PacingDraftLineItemV1[]) => void;
+  /** Set a line item's custom display name in this section's DRAFT, for a screen that is not this
+   *  one - the plan section's «Display name» field. Only the widget section implements it: the name
+   *  lives in `display.liNames` and is saved with the widgets under the display revision, where the
+   *  reference's `buildConfig` puts it, so the draft that saves it is the one that must hold it. */
+  setLineItemName?: (lineItemId: string, value: string) => void;
 }
 
 export interface SettingsSectionProps {

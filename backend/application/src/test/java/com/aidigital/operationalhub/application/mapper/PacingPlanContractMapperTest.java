@@ -163,6 +163,35 @@ class PacingPlanContractMapperTest {
 	}
 
 	@Test
+	void shouldForwardLabelsVerbatimTest() {
+		// Given: a line item's tags - a straight copy, in the order given.
+		PacingLineItemPlanUpdateV1 li = new PacingLineItemPlanUpdateV1()
+				.lineItemId("599852")
+				.labels(List.of("video", "q4 push"));
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of(li));
+
+		// When:
+		List<PacingLineItemPlanUpdate> result = mapper.toPlanUpdateLineItems(body);
+
+		// Then:
+		assertThat(result.get(0).labels()).containsExactly("video", "q4 push");
+	}
+
+	@Test
+	void shouldKeepAbsentLabelsNullTest() {
+		// Given: a line item that does not mention its labels - null keeps the key off the wire, so
+		// Pacing preserves the stored tags; an empty list here would clear them.
+		PacingLineItemPlanUpdateV1 li = new PacingLineItemPlanUpdateV1().lineItemId("599852");
+		PacingPlanUpdateV1 body = new PacingPlanUpdateV1().lineItems(List.of(li));
+
+		// When:
+		List<PacingLineItemPlanUpdate> result = mapper.toPlanUpdateLineItems(body);
+
+		// Then:
+		assertThat(result.get(0).labels()).isNull();
+	}
+
+	@Test
 	void shouldMapAddableLineItemsReusingDraftLineItemMappingTest() {
 		// Given: `addable` entries are the same wire shape §8's draft line items already map - this
 		// mapper must not re-derive that mapping.

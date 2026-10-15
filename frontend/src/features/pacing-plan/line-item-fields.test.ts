@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { netPctToRatio, seedFromCandidate, seedFromPlan, toPlanUpdateLineItem } from "./line-item-fields";
+import { netPctToRatio, seedFromCandidate, seedFromPlan, toPlanUpdateLineItem, withLabel } from "./line-item-fields";
 import type { PacingDraftLineItemV1, PacingLineItemPlanV1 } from "./types";
 
 describe("seedFromPlan", () => {
@@ -180,5 +180,45 @@ describe("net cost mode (Pacing spec 2026-09-07)", () => {
     const li = seedFromPlan({ ...storedPlan, storedNetRatio: 0.800089 });
     expect(li.netPct).toBe("80.01");
     expect(toPlanUpdateLineItem(li, true).netRatio).toBe(0.800089);
+  });
+});
+
+describe("labels", () => {
+  it("seeds the stored labels and sends the whole list back on every save, as the reference does", () => {
+    // Given:
+    const plan: PacingLineItemPlanV1 = {
+      lineItemId: "111",
+      clientBudget: 5000,
+      plannedImpressions: 1_000_000,
+      containers: [],
+      labels: ["video", "q4 push"],
+    };
+
+    // When:
+    const li = seedFromPlan(plan);
+
+    // Then: seeded verbatim, and an untouched line item sends them back unchanged - `labels` is
+    // outside Pacing's PLAN_OWNED set, so a present list replaces, an absent key preserves.
+    expect(li.labels).toEqual(["video", "q4 push"]);
+    expect(toPlanUpdateLineItem(li, false).labels).toEqual(["video", "q4 push"]);
+  });
+
+  it("sends an explicit empty list for a line item with no labels, and for a newly added one", () => {
+    // Given:
+    const stored = seedFromPlan({ lineItemId: "111", clientBudget: 0, plannedImpressions: 0, containers: [] });
+    const added = seedFromCandidate({ lineItemId: "7", channel: "Display" });
+
+    // Then:
+    expect(toPlanUpdateLineItem(stored, false).labels).toEqual([]);
+    expect(toPlanUpdateLineItem(added, false).labels).toEqual([]);
+  });
+
+  it("adds a label the way the reference's editor does: lower-cased, trimmed, deduplicated, capped at ten", () => {
+    // When / Then:
+    expect(withLabel([], "  Video ")).toEqual(["video"]);
+    expect(withLabel(["video"], "VIDEO")).toEqual(["video"]);
+    expect(withLabel(["video"], "   ")).toEqual(["video"]);
+    const ten = Array.from({ length: 10 }, (_, i) => `l${i}`);
+    expect(withLabel(ten, "one more")).toEqual(ten);
   });
 });

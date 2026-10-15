@@ -83,6 +83,9 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   onPreviewChange?: (display: PacingDisplayShape | null) => void;
   /** Whether a CM360 source is configured, for the builder's CM pill. */
   draftCm360Configured?: boolean;
+  /** Reports the draft's custom line item names whenever they change, so the plan section's
+   *  «Display name» fields show what this draft holds (and what Reset put back). */
+  onLiNamesChange?: (liNames: Record<string, string>) => void;
 }
 
 /** The dimension a widget is cut by, from either of the two slots that can carry one. */
@@ -115,6 +118,7 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
       onCloseRequest,
       onPreviewChange,
       draftCm360Configured = false,
+      onLiNamesChange,
       onDirtyChange,
     },
     ref
@@ -170,6 +174,11 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
 
     const dirty = useMemo(() => normDisplay(draft) !== baseNorm, [draft, baseNorm]);
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+
+    // The names as this draft has them, for the plan section's fields. Keyed on the map's identity:
+    // every edit, reset and re-seed replaces it, so each is reported once.
+    const liNames = draft.liNames as Record<string, string> | undefined;
+    useEffect(() => { onLiNamesChange?.(liNames ?? {}); }, [liNames, onLiNamesChange]);
 
     // The live preview, debounced as Pacing's drawer debounces its store push: each push re-renders
     // the whole board behind the drawer. A clean draft previews nothing - the board shows the saved
@@ -253,6 +262,14 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
         const id = newWidgetId(widgets.map((w) => w?.id).filter(Boolean));
         setDraft({ ...current, widgets: [...widgets, { ...widget, id } as PacingWidgetInstance] });
         return id;
+      },
+      setLineItemName(lineItemId: string, value: string) {
+        // The reference's `handleCustomName`, verbatim: the key is written even when the value is
+        // blank, and readers treat a blank as "no custom name".
+        setDraft((d) => ({
+          ...d,
+          liNames: { ...((d.liNames as Record<string, string> | undefined) ?? {}), [lineItemId]: value },
+        }));
       },
       precheck() {
         if (!stateRef.current.dirty) return { ok: true as const };

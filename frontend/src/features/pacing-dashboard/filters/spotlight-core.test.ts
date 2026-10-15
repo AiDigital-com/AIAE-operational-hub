@@ -32,6 +32,11 @@ describe("buildFilterSources", () => {
   it("li source uses description as the display name", () => {
     expect(sources.some((s) => s.type === "li" && s.value === "100" && s.display === "100 — Hero video")).toBe(true);
   });
+  it("li source prefers the custom display name over the description, as the reference does", () => {
+    const named = buildFilterSources({ liPlan, factsDaily, liNames: { "100": "Hero cut", "200": "Banners" } });
+    expect(named.some((s) => s.type === "li" && s.value === "100" && s.display === "100 — Hero cut")).toBe(true);
+    expect(named.some((s) => s.type === "li" && s.value === "200" && s.display === "200 — Banners")).toBe(true);
+  });
   it("channel/label sources are raw (no slugify)", () => {
     expect(sources.some((s) => s.type === "channel" && s.value === "Video")).toBe(true);
     expect(sources.some((s) => s.type === "label" && s.value === "Q3 upsell")).toBe(true);
