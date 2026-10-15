@@ -735,6 +735,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           setFilters={setFilters}
           liPlan={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
           factsDaily={data.factsDaily}
+          // The display the board draws (the drawer's preview included), so a name typed in Settings
+          // is searchable before it is saved, as it is in the reference's store-fed spotlight.
+          liNames={(shownDisplay?.liNames as Record<string, string> | undefined) ?? null}
           minDate={calendarMin}
           maxDate={calendarMax}
           periodScope={{

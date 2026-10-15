@@ -176,6 +176,9 @@ export interface FilterBarProps {
   setFilters: (patch: DashboardFiltersPatch) => void;
   liPlan: Record<string, PacingLineItemPlanV1> | null | undefined;
   factsDaily: readonly FactRow[] | null | undefined;
+  /** The custom display names by line item id (`display.liNames`), for the spotlight's line item
+   *  entries - the reference's `buildFilterSources` reads them off the store's display. */
+  liNames?: Record<string, string> | null;
   /** Bounds the Custom calendar's pickable days - the campaign's own flight window / data edge.
    *  Mirrors the reference's `minDate`/`maxDate` (`FilterBar.jsx:476-477`: `campaign.startDate`,
    *  `facts.asOf || campaign.endDate`). Optional - an unbounded calendar is still correct. */
@@ -188,7 +191,7 @@ export interface FilterBarProps {
   actions?: React.ReactNode;
 }
 
-export function FilterBar({ filters, setFilters, liPlan, factsDaily, minDate, maxDate, periodScope, actions }: FilterBarProps) {
+export function FilterBar({ filters, setFilters, liPlan, factsDaily, liNames, minDate, maxDate, periodScope, actions }: FilterBarProps) {
   const channels = useMemo(() => deriveChannels(liPlan), [liPlan]);
   const labels = useMemo(() => deriveLabels(liPlan), [liPlan]);
   const platforms = useMemo(() => derivePlatforms(factsDaily), [factsDaily]);
@@ -296,7 +299,7 @@ export function FilterBar({ filters, setFilters, liPlan, factsDaily, minDate, ma
       <div className={`fb${hasFilters ? " fb--active" : ""}${stuck ? " fb--stuck" : ""}`}>
       <div className="fb__row">
         <div className="fb__controls">
-          <Spotlight filters={filters} onApply={setFilters} liPlan={liPlan} factsDaily={factsDaily} />
+          <Spotlight filters={filters} onApply={setFilters} liPlan={liPlan} factsDaily={factsDaily} liNames={liNames} />
 
           {channels.length > 0 && (
             <MultiSelect

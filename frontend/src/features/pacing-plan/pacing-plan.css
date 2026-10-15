@@ -86,6 +86,18 @@
   font-weight: 800;
   color: var(--ink);
 }
+/* The custom display name in the collapsed header - the reference's `.sp-li-row-name`: the one
+   element in the row with give, muted, cut with an ellipsis rather than wrapping the row. */
+.pplan__li-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .pplan__chevron {
   display: inline-block;
   transition: transform 0.15s ease;
@@ -116,6 +128,107 @@
 .pplan__field--grow {
   flex: 2;
   min-width: 200px;
+}
+/* The one field that takes the whole row (the display name): a short input beside nothing reads as
+   a column that forgot its neighbours. */
+.pplan__field--full {
+  flex: 1 1 100%;
+}
+
+/* ── Labels (the reference's `.sp-labels` family, in this app's tokens) ───────────────────────
+   A row of its own under the targets: the chip row wraps to any height, so no stacked-label field
+   can share a baseline with it. The title reuses the field label above it so the two read alike. */
+.pplan__labels {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* The reference's `.sp-add-split-btn--inline`: the same dashed affordance as «+ Add container»,
+   sized to its words rather than stretched across the row. */
+.pplan__add-btn--inline {
+  padding: 4px 10px;
+}
+.pplan__labels-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: text;
+}
+.pplan__labels-control:focus-within {
+  border-color: var(--border-strong);
+}
+.pplan__label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: var(--pill);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.pplan__label-x {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin-left: 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pplan__label-x:hover {
+  color: var(--bad);
+}
+.pplan__label-input {
+  flex: 1 1 120px;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 3px 4px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.pplan__label-input::placeholder {
+  color: var(--muted);
+}
+/* In the flow, not floated over the next field: the card clips at its rounded edge
+   (`overflow: hidden` on .pplan__li-card), so a list hanging below the control would be cut off on
+   the last line item of the sheet. A short block that opens while there is text in the input costs
+   a few lines of height and is never clipped. */
+.pplan__label-suggest {
+  margin-top: 2px;
+  max-height: 120px;
+  overflow-y: auto;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+.pplan__label-sug-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+.pplan__label-sug-item:hover {
+  background: var(--n-100);
+  color: var(--ink);
 }
 .pplan__field-label {
   font-size: 11px;

@@ -26,7 +26,8 @@ import java.util.List;
  * to parse and validate (container existence, the target-impressions bound against the line item's
  * plan). {@code dimGroups} rides the same way, and its null is meaningful: an absent key in the
  * request (the generated DTO leaves it null) must stay null here, so Pacing keeps its stored value
- * groups instead of receiving an empty list that would clear them.
+ * groups instead of receiving an empty list that would clear them. {@code labels} follows the same
+ * rule for the same reason.
  */
 @Component
 @RequiredArgsConstructor
@@ -78,7 +79,8 @@ public class PacingPlanContractMapper {
 				li.getNetRatioLocked(),
 				li.getPrimaryConversions(),
 				li.getContainers(),
-				li.getDimGroups());
+				li.getDimGroups(),
+				li.getLabels());
 	}
 
 	/**

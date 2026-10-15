@@ -202,7 +202,7 @@ class PacingDashboardControllerMvcTest {
 		stubCurrentUser();
 		List<PacingLineItemPlanUpdate> lineItems = List.of(
 				new PacingLineItemPlanUpdate("111", null, null, null, null, null, "CPM", 5000.0, 1_000_000.0,
-						20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of(), null));
+						20.0, null, null, "2026-01-01", "2026-01-31", null, null, null, null, List.of(), null, null));
 		doReturn(lineItems).when(planMapper).toPlanUpdateLineItems(any());
 		PacingPlanRateUpdate rateUpdate = new PacingPlanRateUpdate(null, null);
 		doReturn(rateUpdate).when(planMapper).toPlanRateUpdate(any());

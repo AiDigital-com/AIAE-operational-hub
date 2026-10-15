@@ -34,7 +34,10 @@ function renderSheet(
   // The values the pacing has delivered (`availableSplits`) - what "+ Add dim split" lists.
   rawSplits: Record<string, Record<string, string[]>> | null = null,
   // The campaign's currency and exchange rate, as the drawer hands them down.
-  money: { currency: string; rate: number; rateLocked?: boolean; nsRate?: number | null } = { currency: "USD", rate: 1 }
+  money: { currency: string; rate: number; rateLocked?: boolean; nsRate?: number | null } = { currency: "USD", rate: 1 },
+  // The custom display names, as the drawer hands them down from the Display section's draft, and
+  // where a keystroke in the «Display name» field goes.
+  names: { liNames?: Record<string, string>; onDisplayNameChange?: (id: string, value: string) => void } = {}
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
@@ -44,6 +47,8 @@ function renderSheet(
       <>
         <PacingPlanSection
           ref={ref}
+          liNames={names.liNames}
+          onDisplayNameChange={names.onDisplayNameChange}
           slug="nike-ss26"
           currency={money.currency}
           rate={money.rate}
@@ -741,5 +746,61 @@ describe("PacingPlanSection - exchange rate", () => {
 
     expect(screen.getByRole("textbox", { name: /Budget for line item 111/ })).toHaveValue("10,000");
     expect(screen.getByText("= $7,500 USD")).toBeInTheDocument();
+  });
+
+  it("shows the custom display name in the header and hands a keystroke to the Display draft rather than keeping it", async () => {
+    // Given: a name the Display section's draft already holds.
+    const user = userEvent.setup();
+    const onDisplayNameChange = vi.fn();
+    renderSheet(
+      { "111": aPacingLineItemPlanV1({ lineItemId: "111" }) },
+      vi.fn(),
+      false,
+      null,
+      { currency: "USD", rate: 1 },
+      { liNames: { "111": "Search Evergreen" }, onDisplayNameChange }
+    );
+
+    // Then: the collapsed header says it beside the id, the reference's `sp-li-row-name`.
+    const head = screen.getByRole("button", { name: /LI 111/ });
+    expect(within(head).getByText("Search Evergreen")).toBeInTheDocument();
+    const field = screen.getByLabelText("Display name for line item 111");
+    expect(field).toHaveValue("Search Evergreen");
+
+    // When:
+    await user.type(field, "!");
+
+    // Then: reported, not stored here - the name lives in `display.liNames` and the Display section
+    // saves it under the display revision. The plan itself is not dirty on a name edit.
+    expect(onDisplayNameChange).toHaveBeenLastCalledWith("111", "Search Evergreen!");
+    expect(savePacingPlan).not.toHaveBeenCalled();
+  });
+
+  it("adds and removes labels on the line item and sends the whole list with the plan", async () => {
+    // Given: one stored label, and a second line item whose label feeds the suggestions.
+    const user = userEvent.setup();
+    vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
+    renderSheet({
+      "111": aPacingLineItemPlanV1({ lineItemId: "111", labels: ["video"] }),
+      "222": aPacingLineItemPlanV1({ lineItemId: "222", labels: ["q4 push"] }),
+    });
+    await screen.findByText("LI 111");
+    expect(screen.getByText("video")).toBeInTheDocument();
+
+    // When: a typed label is added on Enter (lower-cased, as the reference stores it), a suggestion
+    // from the other line item is taken, and the stored one is removed.
+    const input = screen.getByLabelText("Add label for line item 111");
+    await user.type(input, "Brand Push{Enter}");
+    await user.type(input, "q4");
+    await user.click(screen.getByRole("option", { name: "q4 push" }));
+    await user.click(screen.getByRole("button", { name: "Remove label video" }));
+    await user.click(screen.getByRole("button", { name: "Save plan" }));
+
+    // Then: the line item's whole label list rides with the plan, the untouched one's unchanged.
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalledTimes(1));
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    const byId = Object.fromEntries(lineItems.map((li) => [li.lineItemId, li]));
+    expect(byId["111"].labels).toEqual(["brand push", "q4 push"]);
+    expect(byId["222"].labels).toEqual(["q4 push"]);
   });
 });

@@ -79,9 +79,12 @@ export interface SpotlightProps {
   onApply: (patch: DashboardFiltersPatch) => void;
   liPlan: Record<string, PacingLineItemPlanV1> | null | undefined;
   factsDaily: readonly FactRow[] | null | undefined;
+  /** The custom display names by line item id (`display.liNames`) - a line item is searched and
+   *  listed by its name when it has one. */
+  liNames?: Record<string, string> | null;
 }
 
-export function Spotlight({ filters, onApply, liPlan, factsDaily }: SpotlightProps) {
+export function Spotlight({ filters, onApply, liPlan, factsDaily, liNames }: SpotlightProps) {
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const [focused, setFocused] = useState(false);
@@ -92,9 +95,9 @@ export function Spotlight({ filters, onApply, liPlan, factsDaily }: SpotlightPro
   // (see that file's docblock), the same way `build-metrics.ts`'s `toEngineRaw` treats it.
   const spotlightLiPlan = liPlan as unknown as Record<string, SpotlightLiPlan | null | undefined> | null | undefined;
   const sources = useMemo(
-    () => buildFilterSources({ liPlan: spotlightLiPlan, factsDaily }),
+    () => buildFilterSources({ liPlan: spotlightLiPlan, factsDaily, liNames }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [liPlan, factsDaily]
+    [liPlan, factsDaily, liNames]
   );
   const q = query.trim();
   const results = useMemo(() => searchFilterSources(sources, query), [sources, query]);

@@ -16,8 +16,10 @@
  *
  * Differences from the reference, all forced by the Hub's contract shape rather than a behaviour
  * change:
- *   - No separate `display.liNames` map - `PacingLineItemPlanV1.description` already IS the line
- *     item's display name (`types.ts`'s own docblock: "the closest thing to a display name").
+ *   - A line item reads by its custom display name (`display.liNames[id]`, Settings → Pacing)
+ *     when it has one, as in the reference; with none, by `PacingLineItemPlanV1.description`
+ *     (`types.ts`'s own docblock: "the closest thing to a display name"), where the reference
+ *     shows the bare id.
  *   - `liPlan[id].ch` -> `liPlan[id].channel` (the Hub's own field name).
  *   - `facts.factsDaily` -> a flat `factsDaily` array (the Hub passes it as its own prop, not
  *     nested under a `facts` object).
@@ -126,16 +128,18 @@ export function tierOf(source: Pick<FilterSource, "type" | "value">, splitKeys: 
 export interface BuildFilterSourcesInput {
   liPlan?: Record<string, SpotlightLiPlan | null | undefined> | null;
   factsDaily?: readonly FactRow[] | null;
+  /** The custom display names by line item id (`display.liNames`), when the pacing has any. */
+  liNames?: Record<string, string> | null;
 }
 
 /** Builds the full, tier-tagged source list the spotlight searches/browses: every line item,
  *  channel, label, platform and breakdown-dim value this pacing carries. Ported from the
  *  reference's `buildFilterSources` - see this file's docblock for the input-shape differences. */
-export function buildFilterSources({ liPlan, factsDaily }: BuildFilterSourcesInput = {}): FilterSource[] {
+export function buildFilterSources({ liPlan, factsDaily, liNames }: BuildFilterSourcesInput = {}): FilterSource[] {
   const items: Array<Omit<FilterSource, "tier">> = [];
 
   for (const [id, plan] of Object.entries(liPlan ?? {})) {
-    const name = plan?.description ?? "";
+    const name = liNames?.[id] || plan?.description || "";
     items.push({ type: "li", value: id, display: name ? `${id} — ${name}` : id });
   }
 

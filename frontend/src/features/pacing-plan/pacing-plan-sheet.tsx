@@ -1,8 +1,10 @@
 /**
  * The Pacing Settings plan editor (§9 of the migration plan, US-125/126/127): per line item, edit
- * budget, target impressions, target margin, target CTR/VCR, rate type, flight and date-based
- * containers; add a line item from the campaign or by id; remove a line item with a confirmation
- * naming what is lost. One Save button, one request - the same single write path Pacing's own
+ * budget, target impressions, target margin, target CTR/VCR, rate type, flight, date-based
+ * containers and labels (free-text tags on the line item, the reference's Settings → Pacing chips);
+ * add a line item from the campaign or by id; remove a line item with a confirmation naming what is
+ * lost. The «Display name» field is the one edit here that is NOT the plan's: it is
+ * `display.liNames`, held and saved by the Display section (see `PacingPlanSectionProps.liNames`). One Save button, one request - the same single write path Pacing's own
  * settings-save endpoint has always used - now fired by the settings drawer's single Save, beside the
  * data and widget sections, the way the retired SPA's one drawer footer saved all of its tabs.
  *
@@ -36,11 +38,14 @@ import { detectContainerOverlaps } from "../pacing-dashboard/spa/containers.js";
 import { chipKey, GroupEditor, ValueGroupsBlock } from "./value-groups";
 import { useSavePacingPlan } from "./hooks";
 import {
+  MAX_LABEL_LENGTH,
   netPctToRatio,
   netRatioToPct,
+  normalizeLabel,
   seedFromCandidate,
   seedFromPlan,
   toPlanUpdateLineItem,
+  withLabel,
   type DimGroup,
   type EditableLineItem,
 } from "./line-item-fields";
@@ -53,14 +58,22 @@ const RATE_TYPES = ["CPM", "CPC", "CPV", "CPI", "Flat"];
  *  fresh prop identity - on every render of the sheet. */
 const EMPTY_ACTIONS: CvAction[] = [];
 
-function seedAll(planByLineItem: Record<string, PacingLineItemPlanV1>): Record<string, EditableLineItem> {
+function seedAll(
+  planByLineItem: Record<string, PacingLineItemPlanV1>,
+  liNames: Record<string, string> | undefined
+): Record<string, EditableLineItem> {
   const out: Record<string, EditableLineItem> = {};
-  for (const [id, plan] of Object.entries(planByLineItem)) out[id] = seedFromPlan(plan);
+  for (const [id, plan] of Object.entries(planByLineItem)) out[id] = seedFromPlan(plan, liNames?.[id] ?? "");
   return out;
 }
 
 interface LineItemCardProps {
   li: EditableLineItem;
+  /** A keystroke in the «Display name» field, for the Display section's draft, which owns and saves
+   *  the name - see `PacingPlanSectionProps.onDisplayNameChange`. */
+  onDisplayNameChange: (value: string) => void;
+  /** Every label on every line item of this draft, sorted - the suggestions under the label input. */
+  allLabels: string[];
   currency: string;
   /** The campaign rate (native → USD), 1 on a USD campaign - container budgets are converted with it. */
   rate: number;
@@ -148,8 +161,133 @@ function FitLiDialog({
   );
 }
 
+/** The maximum number of suggestions under the label input (the reference's `.slice(0, 8)`). */
+const LABEL_SUGGESTIONS = 8;
+
+/**
+ * The reference's `LabelsSection` (Settings → Pacing, `PacingTab.jsx`): chips for the labels a line
+ * item carries, an input that adds one on Enter, and suggestions from the labels the other line
+ * items already use. With no labels the whole thing collapses to one «+ Add label» affordance, as
+ * there - an empty title, chip row and input cost ~90px per line item for nothing.
+ */
+function LabelsSection({ liId, labels, allLabels, onChange }: {
+  liId: string;
+  labels: string[];
+  allLabels: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [inputVal, setInputVal] = useState("");
+  const [showSug, setShowSug] = useState(false);
+  // Transient view state; an unsubmitted draft dies with it (the reference's own rule).
+  const [adding, setAdding] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const needle = normalizeLabel(inputVal);
+  const suggestions = allLabels
+    .filter((l) => l.includes(needle) && !labels.includes(l))
+    .slice(0, LABEL_SUGGESTIONS);
+
+  function addLabel(value: string) {
+    const next = withLabel(labels, value);
+    if (next.length === labels.length) return;
+    onChange(next);
+    setInputVal("");
+    setShowSug(false);
+  }
+  function removeLabel(label: string) {
+    onChange(labels.filter((l) => l !== label));
+  }
+
+  if (labels.length === 0 && !adding) {
+    return (
+      <div className="pplan__labels">
+        <span className="pplan__field-label">Labels</span>
+        <button type="button" className="pplan__add-btn pplan__add-btn--inline" onClick={() => setAdding(true)}>
+          + Add label
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pplan__labels">
+      <span className="pplan__field-label">Labels</span>
+      {/* The whole control is one click target for the input, as in the reference: a chip row that
+          wraps still reads as one field. */}
+      <div
+        className="pplan__labels-control"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) inputRef.current?.focus();
+        }}
+      >
+        {labels.map((l) => (
+          <span key={l} className="pplan__label-chip">
+            {l}
+            <button
+              type="button"
+              className="pplan__label-x"
+              onClick={() => removeLabel(l)}
+              aria-label={`Remove label ${l}`}
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          aria-label={`Add label for line item ${liId}`}
+          className="pplan__label-input"
+          value={inputVal}
+          maxLength={MAX_LABEL_LENGTH}
+          placeholder="Add label…"
+          autoFocus={adding && labels.length === 0}
+          onChange={(e) => {
+            setInputVal(e.target.value);
+            setShowSug(e.target.value.trim().length > 0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addLabel(inputVal);
+            }
+          }}
+          onBlur={() =>
+            setTimeout(() => {
+              setShowSug(false);
+              // Collapse back when the affordance was opened and nothing was kept.
+              if (labels.length === 0 && !inputVal.trim()) setAdding(false);
+            }, 150)
+          }
+        />
+      </div>
+      {showSug && suggestions.length > 0 && (
+        <div className="pplan__label-suggest" role="listbox" aria-label="Label suggestions">
+          {suggestions.map((sug) => (
+            <button
+              key={sug}
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="pplan__label-sug-item"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                addLabel(sug);
+              }}
+            >
+              {sug}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LineItemCard({
   li,
+  onDisplayNameChange,
+  allLabels,
   currency,
   rate,
   netFeatureOn,
@@ -285,6 +423,9 @@ function LineItemCard({
         <span className="pplan__li-id">LI {li.lineItemId}</span>
         <span className="pplan__badge">{li.channel || "Unknown"}</span>
         <span className="pplan__badge">{li.rateType}</span>
+        {/* The custom name beside the id, as the reference's collapsed row shows it (`sp-li-row-name`):
+            a collapsed card must still say which line item it is in the words a person uses. */}
+        <span className="pplan__li-name" title={li.displayName || undefined}>{li.displayName}</span>
         {li.isNew && <span className="pplan__badge pplan__badge--new">New</span>}
         {/* A collapsed card must still say that it is the one holding the save back. A top-row badge,
             never an edge accent; its title carries the same sentence the body spells out. */}
@@ -306,6 +447,28 @@ function LineItemCard({
 
       {open && (
         <div className="pplan__li-body">
+          {/* The reference's first field (`sp-plan-name`): what the dashboard calls this line item
+              instead of «LI <id>». Lives in `display.liNames`, so it is the Display section's draft
+              that holds and saves it - this input only edits it. */}
+          <div className="pplan__field-row">
+            <label className="pplan__field pplan__field--full">
+              <span className="pplan__field-label">Display name</span>
+              <input
+                type="text"
+                className="pplan__input"
+                value={li.displayName}
+                maxLength={80}
+                placeholder="Custom display name"
+                aria-label={`Display name for line item ${li.lineItemId}`}
+                onChange={(e) => {
+                  // This state first, so the controlled input keeps up with the keystroke; the
+                  // Display draft second, which is what will be saved and reported back.
+                  field("displayName", e.target.value);
+                  onDisplayNameChange(e.target.value);
+                }}
+              />
+            </label>
+          </div>
           <div className="pplan__field-row">
             <label className="pplan__field">
               <span className="pplan__field-label">Flight start</span>
@@ -454,6 +617,16 @@ function LineItemCard({
               </div>
             )}
           </div>
+
+          {/* Labels sit in the reference's Performance targets row as a third column. Here they take
+              a row of their own: the chip row wraps to any height, and a field beside it would lose
+              the baseline the stacked-label fields above share. */}
+          <LabelsSection
+            liId={li.lineItemId}
+            labels={li.labels}
+            allLabels={allLabels}
+            onChange={(next) => field("labels", next)}
+          />
 
           {/* Its own full-width row, never sharing one with the stacked-label fields above: a bare
               checkbox dropped beside them would sit on a different baseline from every neighbour,
@@ -726,6 +899,13 @@ export interface PacingPlanSectionProps extends SettingsSectionProps {
   /** Reports the line items as this DRAFT has them - added and not yet saved included - so the
    *  mapping pickers offer the same list the reference's draft-backed pickers do. */
   onLineItemsChange?: (items: PlanLineItemSummary[]) => void;
+  /** The custom display names (`display.liNames`), as the Display section's DRAFT has them. The
+   *  reference edits a line item's name on its Pacing tab but stores it in `display`, saved with the
+   *  widgets under the display revision - so here the Display section owns the draft and the save,
+   *  and this section only shows the field and reports a keystroke through `onDisplayNameChange`.
+   *  Reset and re-seed follow that draft, never a copy kept here. */
+  liNames?: Record<string, string>;
+  onDisplayNameChange?: (lineItemId: string, value: string) => void;
 }
 
 /** One draft line item, as a screen that only lists or picks line items needs it. */
@@ -737,7 +917,7 @@ export interface PlanLineItemSummary {
 }
 
 export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
-  function PacingPlanSection({ slug, currency, rate, rateLocked, nsRate, netFeatureOn, coefEnabled, primaryCvEnabled, conversions, rawSplits, splitFacts, widgets, planByLineItem, seedKey, cvData, onLineItemsChange, onDirtyChange }, ref) {
+  function PacingPlanSection({ slug, currency, rate, rateLocked, nsRate, netFeatureOn, coefEnabled, primaryCvEnabled, conversions, rawSplits, splitFacts, widgets, planByLineItem, seedKey, cvData, onLineItemsChange, liNames, onDisplayNameChange, onDirtyChange }, ref) {
     const toast = useOptionalToast();
     const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
     const [base, setBase] = useState<Record<string, EditableLineItem>>({});
@@ -748,11 +928,15 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     const [rateState, setRateState] = useState<RateState>(() => initRateState(rate, rateLocked));
     const [rateBase, setRateBase] = useState<RateState>(() => initRateState(rate, rateLocked));
     const savePlan = useSavePacingPlan(slug);
+    // Read by the seed effect without being a dependency of it: the names re-seed with the plan on
+    // open, and follow the Display draft between opens through the sync effect below.
+    const liNamesRef = useRef(liNames);
+    liNamesRef.current = liNames;
 
     // Re-hydrate from the latest server data every time the drawer opens - never carry a stale edit
     // across a close/reopen, and never show an edit still in flight from a previous session.
     useEffect(() => {
-      const seeded = seedAll(planByLineItem);
+      const seeded = seedAll(planByLineItem, liNamesRef.current);
       setLineItems(seeded);
       setBase(seeded);
       setRateState(initRateState(rate, rateLocked));
@@ -764,6 +948,23 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
       // would clobber in-progress edits on every unrelated background refetch).
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seedKey, slug]);
+
+    // The Display draft is the truth for the names: whenever it reports (an edit echoed back, its
+    // Reset, its re-seed), every card's copy follows it. A keystroke here lands in this state first
+    // and in that draft in the same batch, so what comes back is never older than what is shown.
+    useEffect(() => {
+      setLineItems((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const id of Object.keys(prev)) {
+          const name = liNames?.[id] ?? "";
+          if (prev[id].displayName === name) continue;
+          next[id] = { ...prev[id], displayName: name };
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, [liNames]);
 
     const ids = useMemo(() => Object.keys(lineItems).sort(), [lineItems]);
     const existingIds = useMemo(() => new Set(ids), [ids]);
@@ -807,6 +1008,13 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
       () => coefEnabled || ids.some((id) => lineItems[id]?.costCoef === true),
       [coefEnabled, ids, lineItems]
     );
+    // Every label in the draft, sorted - the reference's `allLabels` (stored plans plus the local
+    // ones; here the draft IS both). Feeds the suggestions under each line item's label input.
+    const allLabels = useMemo(() => {
+      const all = new Set<string>();
+      for (const id of ids) for (const l of lineItems[id]?.labels ?? []) all.add(l);
+      return [...all].sort();
+    }, [ids, lineItems]);
 
     // Compared as the payload that would be SENT, not as the editor's own state: seeding builds
     // fresh objects, so an identity check would call an untouched plan dirty the moment it loads.
@@ -972,6 +1180,8 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
           <LineItemCard
             key={id}
             li={lineItems[id]}
+            onDisplayNameChange={(value) => onDisplayNameChange?.(id, value)}
+            allLabels={allLabels}
             currency={currency}
             rate={rateState.rate}
             rawSplits={rawSplits}

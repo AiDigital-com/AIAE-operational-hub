@@ -56,6 +56,11 @@ import java.util.Map;
  *                          Null leaves the stored groups alone (the key is omitted from the wire -
  *                          {@code dim_groups} is not in Pacing's {@code PLAN_OWNED} set); any list,
  *                          an empty one included, replaces them
+ * @param labels            free-text tags for this line item (the reference's Settings → Pacing
+ *                          "Labels"), forwarded verbatim as {@code labels}; Pacing stores the list as
+ *                          it is. Null leaves the stored labels alone (the key is omitted from the
+ *                          wire - {@code labels} is not in Pacing's {@code PLAN_OWNED} set either);
+ *                          any list, an empty one included, replaces them
  */
 public record PacingLineItemPlanUpdate(
 		String lineItemId,
@@ -77,5 +82,6 @@ public record PacingLineItemPlanUpdate(
 		Boolean netRatioLocked,
 		List<String> primaryConversions,
 		List<Map<String, Object>> containers,
-		List<Map<String, Object>> dimGroups) {
+		List<Map<String, Object>> dimGroups,
+		List<String> labels) {
 }

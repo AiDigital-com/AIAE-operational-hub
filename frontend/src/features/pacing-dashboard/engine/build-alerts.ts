@@ -41,10 +41,11 @@
  *
  * OUTPUT shaping mirrors `dash-gate/lib/health.mjs`'s own `row.alerts` construction (the function
  * this view no longer reads), not the retired SPA's rendering: `type`/`severity`/`text` straight off
- * the detector, `value`/`label` off `AlertsCore.displayParts`, `name` off the line item's OWN
- * description/channel (`LP[id].desc || LP[id].ch`) - matching health.mjs's `liCfgById[id].
- * description || liCfgById[id].channel`, because the Hub's contract carries no `display.liNames`
- * override map (the retired SPA's own source for that field) to prefer over it.
+ * the detector, `value`/`label` off `AlertsCore.displayParts`, `name` the way `AlertsBlock.jsx`'s
+ * own `liLabel` names a line item: the custom display name (`display.liNames[id]`, edited on
+ * Settings → Pacing) first, then the line item's OWN description/channel (`LP[id].desc ||
+ * LP[id].ch`, health.mjs's `liCfgById[id].description || liCfgById[id].channel`). The payload's
+ * opaque `display` carries `liNames` whole, so the override map is read straight off it.
  */
 import { createPacingEngine, getAlertsCore, getPacingCore } from "./engine-loader";
 import { toEngineRaw } from "./build-metrics";
@@ -99,10 +100,22 @@ function toEngineAlertsConfig(cfg: PacingAlertsConfigV1 | undefined): Record<str
   };
 }
 
-/** This line item's own display name for an alert, matching `health.mjs`'s `liCfgById[id].
- *  description || liCfgById[id].channel || null` exactly (see this file's own docblock). */
-function liLabel(plan: NormalizedLiPlan | undefined): string | undefined {
-  return plan?.desc || plan?.ch || undefined;
+/** A line item's name for an alert - the reference's `liLabel(id, liNames, plan)`: the custom
+ *  display name first, then the line item's own description/channel (`health.mjs`'s `liCfgById[id].
+ *  description || liCfgById[id].channel || null`; see this file's own docblock). */
+function liLabel(id: string, liNames: Record<string, string>, plan: NormalizedLiPlan | undefined): string | undefined {
+  return liNames[id] || plan?.desc || plan?.ch || undefined;
+}
+
+/** The custom display names off the payload's opaque `display` - a map of id to name, or nothing. */
+function liNamesOf(display: unknown): Record<string, string> {
+  const raw = display && typeof display === "object" ? (display as { liNames?: unknown }).liNames : undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [id, name] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof name === "string" && name) out[id] = name;
+  }
+  return out;
 }
 
 /** `alertsDailyInput`'s period window (`AlertsBlock.jsx`): only the selected period's days. */
@@ -195,7 +208,8 @@ export function buildPacingAlerts(
     // `Record<string, unknown>`, not `LiPlanMap`: `AlertsCore.buildState` (untyped, like every
     // vendored engine call below `Record<string, unknown>`) reads a `.name` field per line item that
     // `NormalizedLiPlan` does not declare - see this file's own docblock.
-    const scopedLiPlan: Record<string, unknown> = scopeObjectByIds(LP, effLIs, (plan) => ({ ...plan, name: liLabel(plan) }));
+    const liNames = liNamesOf(data.display);
+    const scopedLiPlan: Record<string, unknown> = scopeObjectByIds(LP, effLIs, (plan, id) => ({ ...plan, name: liLabel(id, liNames, plan) }));
     // UNCLIPPED, matching the reference's `alertsDailyInput` (`AlertsBlock.jsx`) exactly: it scopes
     // by `effLIs`, drops conversion-only days (not applicable here - see this file's docblock), and
     // windows by the selected period ONLY when Period Scope is on (`windowToPeriod`). No
@@ -271,7 +285,7 @@ export function buildPacingAlerts(
         value: parts.value ?? undefined,
         label: parts.label,
         liId,
-        name: liId != null ? liLabel(LP[liId]) : undefined,
+        name: liId != null ? liLabel(liId, liNames, LP[liId]) : undefined,
       };
     });
   } catch (err) {
