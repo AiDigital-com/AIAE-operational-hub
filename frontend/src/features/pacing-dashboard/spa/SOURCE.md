@@ -359,3 +359,60 @@ through `liM`. Brought in line, deliberately:
 
 Covered by `lineitems/line-item-settings.test.tsx`.
 
+
+## Updated 2026-10-14 — Settings → Display and Layout mode, moved whole
+
+The Hub's own widgets tab (`pacing-dashboard-library.tsx`, `widget-editor.tsx`, `widget-preview.tsx`)
+is GONE. In its place is Pacing's Display tab and Pacing's Layout mode, moved as code, so the two
+behave the way the reference does rather than the way a rewrite remembered it. Owner decisions
+(2026-10-14): the arrangement History is not taken, library entries have no visibility (all are
+visible to everyone), groups are made in Layout mode only.
+
+**Moved** (import specifiers rewritten, nothing else unless listed below):
+
+- `display/`: `BlockLibrary.jsx` (the tab: Page sections, the gallery, the Library and its door),
+  `WidgetGallery.jsx`, `LibraryScreen.jsx`, `GroupsSection.jsx`, `ShareEntryDialog.jsx`,
+  `WidgetLinkMenu.jsx`, `BlockThumb.jsx`, `Switch.jsx`, `current-tiles.js` (from
+  `pages/Dashboard/components/Settings/Widgets/`) and `useEnabledSwitch.js` (from `hooks/`).
+- `layout/`: `LayoutMode.jsx`, `DragOverlay.jsx` (from `pages/Dashboard/components/Layout/`).
+- `library-reconcile.js`, `layout-preview.js`, `layout-ops.js`, `layout-motion.js` (from
+  `lib/dashboard/`), `builder/widget-drafts.js`. `LaunchPlanCard.jsx` and `launch-plan.js` earlier
+  the same day. `display-norm.js` (moved before) had a stale import path and had never been loaded;
+  fixed to `./line-item-columns.js`.
+- `display-layout.css`: the rules those files need that `pacing-spa.css` did not carry, extracted
+  from the reference's `index.css` and `DisplaySettings.css` (header in the file).
+
+**Changed inside moved files**, each for an owner decision:
+- `display/BlockLibrary.jsx`: the History button and screen are removed.
+- `display/ShareEntryDialog.jsx`, `display/WidgetLinkMenu.jsx`: the Visibility pills are not drawn
+  (the choice stays `team`); `display/LibraryScreen.jsx`: the card menu's visibility flip is removed.
+- `LaunchPlanCard.jsx`: `UNIT_SHORT` gained `CPI: 'installs'` (ours - the reference has no CPI).
+
+**This app's own seam**, ordinary code beside the moved files:
+- `tile-registry.jsx`: `DeferredMount`/`SectionSkeleton` verbatim, and `FLOW_REGISTRY` - Launch Plan
+  and Line Items are moved code; Alerts and the journal are this app's components, built by the page
+  and handed in on the state seam as `sections`, because the registry's components take no props.
+- `store.js`: `getState()` answers the live `display`, `displayRev`, `capabilities`; the state carries
+  `libraryEntries`, `slug`, `sections` and the drawer's draft preview (`displayOverride`); hooks
+  `useLibraryEntries`, `useResolvedWidgets`; `api.library.*` and `api.me` delegate to the page. The
+  payload-derived half of `usePacingState` is memoized apart from the cheap overlay.
+- `../spa-library-api.ts`: `api.library`/`api.me` over this app's client - camelCase rows mapped to
+  Pacing's snake_case ones (`standard` = a `std:` key, `owner_id` = the `mine` flag as `ME`), refusals
+  thrown the way Pacing's apiFetch throws them.
+- `../pacing-dashboard.tsx` `widgetActions.saveSettings`: every display write the moved code makes;
+  `display_rev` goes out exactly as the caller sends it (absent on a per-entry patch - the Hub's
+  contract made it optional for this), the answer is adopted into the cached payload unless a newer
+  one already was. `mergeLibraryEntries` merges into the payload's `libraryEntries`.
+- `../widgets-section.tsx`: the reference drawer's display half - the draft, `normDisplay` dirty, the
+  `buildConfig` display patch (no `enabled`/`groups`/`layout`), the save/reset epochs, the deep-opens,
+  the display-cas gate and re-base, and the 200 ms draft preview on the board.
+- `../pacing-dashboard.tsx`: Layout mode's button beside the gear (900 px and up), the board swapped
+  for `LayoutMode` while it is open, the filter bar inert meanwhile, "+ Add" opening Display's
+  Library. The four page sections are flow tiles of `../widgets/report-board.tsx` on the reference's
+  slots (Launch Plan 100, Alerts 400, Line Items 600, Journal 1100), with the corner ⋯ (Turn off).
+- `../spa-toast-bridge.tsx`: the moved code's `toast()` reached nothing (its sink was never mounted);
+  it now surfaces as this app's toasts. `remix-icons.css`: the seven Remix glyphs the moved code asks
+  for by class, drawn as masks - Pacing loads the whole font from a CDN; nothing here did, so they
+  were blank (the Line Items «Customize» chevrons among them).
+
+Covered by `../page-sections.test.tsx`; the drawer and section tests stub the moved tab.

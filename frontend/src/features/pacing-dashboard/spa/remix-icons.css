@@ -1,0 +1,23 @@
+/* The Remix icon classes the moved code asks for by name (`<i className="ri-heart-line" />`).
+   Pacing loads the whole Remix icon font from a CDN in its index.html; this app does not load it, so
+   these glyphs drew nothing (the Line Items «Customize» chevrons among them). Rather than a font
+   and an outside host for seven glyphs, each class draws its icon here as a mask over currentColor,
+   sized like a font glyph (1em, on the text baseline), in this app's own line style (shared/ui/icons).
+   A class not listed draws nothing, as before - add it here when moved code starts using it. */
+.ri-arrow-down-s-line::before, .ri-arrow-right-s-line::before, .ri-arrow-up-line::before, .ri-arrow-down-line::before, .ri-heart-line::before, .ri-heart-fill::before, .ri-settings-3-line::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  -webkit-mask: var(--ri-icon) center / contain no-repeat;
+  mask: var(--ri-icon) center / contain no-repeat;
+}
+.ri-arrow-down-s-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%209l6%206%206-6%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-arrow-right-s-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%2018l6-6-6-6%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-arrow-up-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%2019V5%22%2F%3E%3Cpath%20d%3D%22M5%2012l7-7%207%207%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-arrow-down-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%205v14%22%2F%3E%3Cpath%20d%3D%22M19%2012l-7%207-7-7%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-heart-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%2020.5s-7.5-4.6-9.3-9.2C1.4%208%203.4%204.5%207%204.5c2%200%203.6%201.1%205%203%201.4-1.9%203-3%205-3%203.6%200%205.6%203.5%204.3%206.8-1.8%204.6-9.3%209.2-9.3%209.2z%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-heart-fill { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22black%22%3E%3Cpath%20d%3D%22M12%2020.5s-7.5-4.6-9.3-9.2C1.4%208%203.4%204.5%207%204.5c2%200%203.6%201.1%205%203%201.4-1.9%203-3%205-3%203.6%200%205.6%203.5%204.3%206.8-1.8%204.6-9.3%209.2-9.3%209.2z%22%2F%3E%3C%2Fsvg%3E"); }
+.ri-settings-3-line { --ri-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2013.5a1.7%201.7%200%200%200%20.3%201.9%202%202%200%201%201-2.8%202.8%201.7%201.7%200%200%200-2.9%201.2%202%202%200%201%201-4%200%201.7%201.7%200%200%200-2.9-1.2%202%202%200%201%201-2.8-2.8%201.7%201.7%200%200%200-1.2-2.9%202%202%200%201%201%200-4%201.7%201.7%200%200%200%201.2-2.9%202%202%200%201%201%202.8-2.8%201.7%201.7%200%200%200%202.9-1.2%202%202%200%201%201%204%200%201.7%201.7%200%200%200%202.9%201.2%202%202%200%201%201%202.8%202.8%201.7%201.7%200%200%200-.3%201.9%201.7%201.7%200%200%200%201.5%201%202%202%200%201%201%200%204%201.7%201.7%200%200%200-1.5%201z%22%2F%3E%3C%2Fsvg%3E"); }

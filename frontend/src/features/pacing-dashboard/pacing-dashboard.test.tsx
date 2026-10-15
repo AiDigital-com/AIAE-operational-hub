@@ -156,15 +156,15 @@ describe("PacingDashboard", () => {
     await screen.findByText(/back to pacings/i);
 
     // Then: nothing of the panel is on the page…
-    expect(screen.queryByText(/this pacing's widgets/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^page sections$/i)).not.toBeInTheDocument();
 
     // When: the gear is pressed and the Widgets tab chosen… The gear sits at the end of the filter
     // row (as in the reference), which renders once the dashboard payload has arrived.
     await userEvent.click(await screen.findByRole("button", { name: /^settings$/i }));
-    await userEvent.click(screen.getByRole("button", { name: /^widgets$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^display$/i }));
 
     // Then: …it opens, and as a dialog rather than another section of the page.
-    expect(await screen.findByText(/this pacing's widgets/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^page sections$/i)).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -309,7 +309,11 @@ describe("PacingDashboard", () => {
     await waitFor(() => expect(document.querySelector(".dash-grid table")).toBeTruthy());
     // The plan carries no channel of its own, so "Connected TV" can only have come from `types`.
     expect(document.body.textContent).toContain("Connected TV");
-    expect(document.querySelector(".dash-grid")?.textContent).not.toContain("Unknown");
+    // The widgets and the Line Items block, not the Alerts tile beside them on the board: an alert
+    // names its line by the alerts engine's own channel, which does not read `types` - a separate,
+    // known gap, not what this case is about.
+    const tiles = [...document.querySelectorAll('.dash-grid [data-tile-id]:not([data-tile-id="alerts"])')];
+    expect(tiles.map((t) => t.textContent).join(" ")).not.toContain("Unknown");
   });
 
   it("should place tiles on the 12-column grid, not stack them", async () => {
@@ -347,12 +351,11 @@ describe("PacingDashboard", () => {
     const right = grid.querySelector<HTMLElement>('[data-tile-id="w_bbb222"]');
     expect(left?.style.gridColumn).toBe("1 / span 6");
     expect(right?.style.gridColumn).toBe("7 / span 6");
-    // Row 2, not row 1: the Line Items block is a tile of this board now (2026-10-05) and it is a
-    // `flow` kind — always full width, and anchored on the slot scale ahead of a widget the saved
-    // layout places but the catalogue gives no slot. Both charts still SHARE their row, which is
-    // what this case is about; which row that is belongs to the case below.
-    expect(left?.style.gridRow).toBe("2");
-    expect(right?.style.gridRow).toBe("2");
+    // The same row - which one is not this case's business: the page sections are tiles of this
+    // board (Alerts, Line Items, Journal), each a full-width `flow` row anchored on the slot scale
+    // ahead of a widget the saved layout places but the catalogue gives no slot.
+    expect(left?.style.gridRow).toBeTruthy();
+    expect(right?.style.gridRow).toBe(left?.style.gridRow);
   });
 
   it("should place the Line Items block as a full-width tile of the board", async () => {

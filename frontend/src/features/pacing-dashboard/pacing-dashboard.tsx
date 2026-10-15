@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatError } from "../../shared/format/error";
 import { cn } from "../../shared/style/cn";
-import { ChevronLeftIcon, RefreshIcon, SettingsIcon } from "../../shared/ui/icons/icons";
+import { ChevronLeftIcon, MoveIcon, RefreshIcon, SettingsIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 // Date helper shared with the Overview/Pacing tab so the same figures read identically.
 import { fmtDate } from "../pacing/mock/format";
@@ -24,9 +24,37 @@ import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
 import { computeHasVideo } from "./alerts-panel";
 import { JournalPanel } from "./journal/journal-panel";
-import type { PacingDataShape, PacingDisplayShape, PacingWidgetInstance } from "./types";
+import type { PacingDashboardV1, PacingDataShape, PacingDisplayShape, PacingWidgetInstance } from "./types";
+import { pacingLibraryApi, referenceError, referenceMe } from "./spa-library-api";
+import { SpaToastBridge } from "./spa-toast-bridge";
+// Moved JS from Pacing's SPA - Layout mode (see spa/SOURCE.md).
+import LayoutModeUntyped from "./spa/layout/LayoutMode.jsx";
+import { SectionBoundary as SectionBoundaryUntyped } from "./spa/lineitems/LineItemsTile.jsx";
+
+/** Re-typed at the boundary: `allowJs` infers each prop from its default. */
+const LayoutMode = LayoutModeUntyped as unknown as React.ComponentType<{
+  onExit: () => void;
+  onDirtyChange: (dirty: boolean) => void;
+  editable: boolean;
+  onOpenLibrary: () => void;
+  onOpenSettings: (() => void) | null;
+}>;
+const SectionBoundary = SectionBoundaryUntyped as unknown as React.ComponentType<{
+  name: string;
+  children: React.ReactNode;
+}>;
+
+/** Pacing's own rule: Layout mode is offered from 900 px up (grid editing on a phone is a
+ *  non-goal); a saved layout still renders responsively everywhere. */
+const LAYOUT_MIN_WIDTH = "(min-width: 900px)";
+const layoutWidthQuery = () =>
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia(LAYOUT_MIN_WIDTH)
+    : null;
 import { ReportBoard } from "./widgets/report-board";
 import { planAutoAdd } from "./widgets/auto-add";
+// Moved JS from Pacing's SPA - the refusal wording every switch shares.
+import { saveErrorDetailText } from "./spa/save-error.js";
 // Moved JS from Pacing's SPA - typed by inference under `allowJs` (see spa/SOURCE.md).
 import {
   PacingStateProvider,
@@ -39,8 +67,7 @@ import {
 import { resolvePeriodKey } from "./spa/periods.js";
 import { PeriodScopeBanner, type ScopePeriod } from "./filters/period-scope";
 import { SEED_ID_BY_KEY } from "./spa/std-catalog.js";
-import { WIDGET_CAP, copyWidget, setTileEnabled, tileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
-import { resolveWidget } from "./pacing-dashboard-library";
+import { WIDGET_CAP, copyWidget, enabledPatch, resolveWidget, setTileEnabled, tileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
 import { createPacingEngine } from "./engine/engine-loader";
 import { toEngineRaw } from "./engine/build-metrics";
 import { buildPacingMetrics } from "./engine/build-metrics";
@@ -117,6 +144,30 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   /** The Line Items tile's ⋯ → Customize…: a new number per request, cleared by the drawer once it
    *  has opened that block's settings card. */
   const [customizeLineItems, setCustomizeLineItems] = useState<number | null>(null);
+  /** Layout mode's "+ Add": open the drawer on Display's Library. A new number per request. */
+  const [openLibraryRequest, setOpenLibraryRequest] = useState<number | null>(null);
+
+  // Layout mode (Pacing's DashboardView): the board swapped for its editor. Offered from 900 px up;
+  // crossing below that closes only a CLEAN session - an in-progress rearrangement survives the
+  // resize, and the hint bar's Save/Cancel stays usable at any width.
+  const [layoutMode, setLayoutMode] = useState(false);
+  const layoutDirtyRef = useRef(false);
+  const [canEditLayout, setCanEditLayout] = useState(() => layoutWidthQuery()?.matches ?? false);
+  useEffect(() => {
+    const mq = layoutWidthQuery();
+    if (!mq) return undefined;
+    const onChange = () => {
+      setCanEditLayout(mq.matches);
+      if (!mq.matches && !layoutDirtyRef.current) setLayoutMode(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  // A pacing switched away from mid-session leaves nothing behind for the next one.
+  useEffect(() => {
+    setLayoutMode(false);
+    layoutDirtyRef.current = false;
+  }, [slug]);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
   // rather than re-arming itself on the next status fetch.
@@ -177,6 +228,10 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   }, [data]);
 
   const display = useMemo(() => (data?.display ?? {}) as PacingDisplayShape, [data]);
+  // Settings → Display's unsaved draft, previewed on the board behind the open drawer (Pacing's
+  // drawer pushes it into the store the same way). Only while the drawer is open: a closed drawer
+  // has discarded or saved it, and the board must show what is stored.
+  const [displayPreview, setDisplayPreview] = useState<PacingDisplayShape | null>(null);
 
   // The «See in Breakdown» axis (spa/store.js `setDimensionHandoff`), mirrored here only so the
   // tiles re-render when it changes. A pacing switched away from leaves nothing behind for the next.
@@ -225,27 +280,63 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const widgetActions = useMemo(
     () => ({
       /**
-       * The renderer's only write: a tile's saved period and a Projection control's mode. Both are
-       * per-viewer preference maps, which dash-gate merges per entry rather than replacing - so this
-       * sends the patch alone and carries no `displayRev`, exactly as the per-entry lane expects. A
-       * failure is reported, never swallowed: the control would otherwise spring back with no reason
-       * given.
+       * The reference store's `saveSettings(slug, config)`, for every display write the moved code
+       * makes: a tile's saved period and a Projection control's mode, an on/off switch, the Library's
+       * block Add and layout Apply, the Groups section, and Layout mode's Save.
+       *
+       * `config.display_rev` goes out exactly as the caller sent it, as the reference store sends
+       * it: present on a save built from a snapshot (Layout mode, the Library, the board's
+       * Duplicate/Delete), absent on a per-entry preference patch, which dash-gate merges against the
+       * stored row and checks no revision for. The answer is adopted into the cached payload as the
+       * reference store adopts it (`adoptDisplayAnswer`): display and revision, unless an answer
+       * already adopted is newer - two quick switch saves can come back out of order. A refusal is
+       * thrown the way the reference's apiFetch throws it (`err.message` = the code).
+       *
+       * The slug the moved code passes is IGNORED: it reads it from `useParams()`, which answers
+       * nothing under this app's `/campaigns/:campaignId/pacing` route.
        */
-      saveSettings: async (_slug: string, patch: { display?: Record<string, unknown> }) => {
-        if (!slug || !patch?.display) return;
+      saveSettings: async (
+        _slug: string,
+        config: { display?: Record<string, unknown>; display_rev?: number; display_writer?: Record<string, unknown> }
+      ) => {
+        if (!slug || !config?.display) return { ok: true };
+        const key = ["pacing", "dashboard", slug];
+        const live = queryClient.getQueryData<PacingDashboardV1>(key);
         const outcome = await savePacingDisplay(
           slug,
-          patch.display,
-          Number((data?.display as PacingDisplayShape | undefined)?.rev ?? 0),
-          data?.capabilities as Record<string, unknown> | undefined
+          config.display,
+          config.display_rev != null ? Number(config.display_rev) : undefined,
+          (config.display_writer ?? live?.capabilities) as Record<string, unknown> | undefined
         );
-        if (outcome.status === "conflict") {
-          throw new Error("This pacing's layout changed elsewhere. Reload before changing it again.");
-        }
-        queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+        if (outcome.status === "conflict") throw referenceError(outcome.conflict.reason, 409);
+        const gotRev = Number((outcome.display as PacingDisplayShape).rev ?? NaN);
+        queryClient.setQueryData<PacingDashboardV1>(key, (old) => {
+          if (!old) return old;
+          const knownRev = Number((old.display as PacingDisplayShape | undefined)?.rev ?? 0);
+          if (Number.isFinite(gotRev) && gotRev < knownRev) return old;
+          return { ...old, display: outcome.display as PacingDashboardV1["display"] };
+        });
+        return { ok: true, display: outcome.display, capabilities: live?.capabilities };
+      },
+      /**
+       * The reference store's `mergeLibraryEntries`: a tile just linked from the Library, or an entry
+       * just shared, resolves at once instead of drawing "entry unavailable" until the next load.
+       * Merged, never replaced - replacing would drop another linked tile's definition.
+       */
+      mergeLibraryEntries: (entries: Record<string, unknown> | null | undefined) => {
+        if (!slug || !entries) return;
+        const userEntries = Object.fromEntries(
+          Object.entries(entries).filter(([id]) => !id.startsWith("std:"))
+        );
+        if (!Object.keys(userEntries).length) return;
+        queryClient.setQueryData<PacingDashboardV1>(["pacing", "dashboard", slug], (old) =>
+          old
+            ? { ...old, libraryEntries: { ...((old.libraryEntries ?? {}) as Record<string, unknown>), ...userEntries } }
+            : old
+        );
       },
     }),
-    [slug, data, queryClient]
+    [slug, queryClient]
   );
   /**
    * The two calls a CM360 widget makes. Both were stubbed to `null` until 2026-10-09, while the
@@ -282,8 +373,10 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
       // slug these pass failures through: the widget treats an error and no rows the same way.
       thirdPartyData: () => (slug ? getPacingThirdPartyData(slug) : Promise.resolve(null)),
       thirdPartyStatus: () => (slug ? getPacingThirdPartyStatus(slug) : Promise.resolve(null)),
+      library: pacingLibraryApi,
+      me: async () => referenceMe(isAdmin),
     });
-  }, [slug]);
+  }, [slug, isAdmin]);
 
   /**
    * What a tile's ⋯ menu does. These SAVE AT ONCE, under the payload's own `displayRev`: the board
@@ -295,31 +388,49 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
    * this app keeps drafts.
    */
   const [boardSaving, setBoardSaving] = useState(false);
+  // A tile's Turn off - a widget's or a page section's - is the switch's own write, alone, through
+  // the same queued saver the Settings switches use (Pacing's DashGrid `turnOff` goes through
+  // `useEnabledSwitch` the same way), not `commit` below.
+  const [switchSaving, setSwitchSaving] = useState(false);
+  const turnOff = useCallback(
+    async (tileId: string) => {
+      setSwitchSaving(true);
+      try {
+        await widgetActions.saveSettings(slug ?? "", { display: { enabled: enabledPatch(tileId, false) } });
+      } catch (error) {
+        setRefreshError(saveErrorDetailText(error, "Could not turn it off"));
+      } finally {
+        setSwitchSaving(false);
+      }
+    },
+    [slug, widgetActions]
+  );
   const boardActions = useMemo(() => {
     const widgetsOf = () => (display.widgets ?? []);
     const commit = async (patch: Record<string, unknown>) => {
       if (!slug) return;
       setBoardSaving(true);
       try {
-        const outcome = await savePacingDisplay(
-          slug,
-          { ...display, ...patch },
-          Number(display.rev ?? 0),
-          data?.capabilities as Record<string, unknown> | undefined
-        );
-        if (outcome.status === "conflict") {
-          setRefreshError("This pacing's layout changed elsewhere. Reload before changing it again.");
-          return;
-        }
+        // Through the shared saver's queue, under the revision this board drew - a concurrent editor
+        // still earns a 409 rather than losing their work.
+        await widgetActions.saveSettings(slug, {
+          display: { ...display, ...patch },
+          display_rev: Number(display.rev ?? 0),
+        });
         queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
       } catch (error) {
-        setRefreshError(formatError(error));
+        const code = (error as { message?: string })?.message;
+        setRefreshError(
+          code === "stale_settings"
+            ? "This pacing's layout changed elsewhere. Reload before changing it again."
+            : saveErrorDetailText(error, formatError(error))
+        );
       } finally {
         setBoardSaving(false);
       }
     };
     return {
-      saving: boardSaving,
+      saving: boardSaving || switchSaving,
       onEdit: (widgetId: string) => {
         setSettingsTab("widgets");
         setSettingsOpen(true);
@@ -341,12 +452,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
         next.splice(list.findIndex((w) => w.id === widgetId) + 1, 0, copy);
         void commit({ widgets: next });
       },
-      onTurnOff: (widgetId: string) =>
-        void commit({ enabled: setTileEnabled(display.enabled, widgetId, false) }),
+      onTurnOff: (tileId: string) => void turnOff(tileId),
       onRemove: (widgetId: string) =>
         void commit(withWidgetRemoved(widgetsOf(), display.groups ?? [], display.enabled, widgetId)),
     };
-  }, [slug, display, data, queryClient, boardSaving]);
+  }, [slug, display, data, queryClient, boardSaving, switchSaving, turnOff, widgetActions]);
 
   // Period scope (the reference's `toggleScopeMode` / `selectPeriod`). The saved setting comes with
   // the payload; this is the optimistic copy while a change is being saved, so the switch answers at
@@ -355,7 +465,9 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     useState<{ periodScope: boolean; periodScopeKey: string | null } | null>(null);
   useEffect(() => setPeriodScopeOverride(null), [data]);
 
+  const shownDisplay = settingsOpen && displayPreview ? displayPreview : display;
   const pacingState = usePacingState({
+    displayOverride: settingsOpen ? displayPreview : null,
     data,
     urlFilters,
     actions: widgetActions,
@@ -374,13 +486,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   // moved under a filter. `buildPacingAlerts` (`./engine/build-alerts.ts`) is the browser port of
   // the retired SPA's own `computeDashboardAlerts`, sharing `buildPacingMetrics`'s engine and its
   // `effLIs` Scope split - a Scope filter changes the alert set, a Lens filter does not, same as the
-  // KPI strip below. Under period scope they judge the selected period, as the reference does. Falls back to `row.alerts` while the dashboard query has not resolved yet (no
-  // engine input to compute from), so the block does not flash empty then fill in on every open.
+  // KPI strip below. Under period scope they judge the selected period, as the reference does. They
+  // draw as a tile of the board, which appears with the payload, so there is nothing to show before it.
   const alerts = useMemo(
-    () => (data
-      ? buildPacingAlerts(data, filters, undefined, { scoped, periodKey: selectedPeriodKey })
-      : (row.alerts ?? [])),
-    [data, filters, row.alerts, scoped, selectedPeriodKey]
+    () => (data ? buildPacingAlerts(data, filters, undefined, { scoped, periodKey: selectedPeriodKey }) : []),
+    [data, filters, scoped, selectedPeriodKey]
   );
 
   /** Saves a period-scope change and shows it at once; a failed save puts the stored state back. */
@@ -487,6 +597,35 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     })();
   }, [slug, data, display, pacingState, queryClient]);
 
+  // The page's two sections that are this app's own components, built here where their inputs are:
+  // the board draws them as tiles, and Layout mode's registry (`spa/tile-registry.jsx`) reads them
+  // off the state seam as `sections`, because Pacing's registry components take no props.
+  const sections = useMemo(
+    () => (data
+      ? {
+          // Was: every alert's full sentence, joined with " · ", one line per severity. On a
+          // 180-line-item pacing that is a hundred and thirty sentences in a single unbroken
+          // paragraph. AlertsBlock lays them out the way the retired SPA did — numbers first, cards
+          // for what is critical, the tail collapsed. Nothing to say, no tile.
+          alerts: alerts.length ? <AlertsBlock alerts={alerts} /> : null,
+          journal: (
+            <JournalPanel
+              slug={slug ?? ""}
+              journal={data.journal}
+              flightStart={row.flightStart}
+              flightEnd={row.flightEnd}
+              planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
+              factsDaily={data.factsDaily}
+              onHighlightDate={setJournalHighlight}
+              setFilters={setFilters}
+            />
+          ),
+        }
+      : undefined),
+    [data, alerts, slug, row.flightStart, row.flightEnd, setFilters]
+  );
+  const providedState = useMemo(() => ({ ...pacingState, sections: sections ?? null }), [pacingState, sections]);
+
   async function handleRefresh() {
     setRefreshError(null);
     try {
@@ -516,6 +655,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
 
   return (
     <section className="pdash">
+      <SpaToastBridge />
       {onBack && (
         <button type="button" className="pdash__back" onClick={onBack}>
           <ChevronLeftIcon /> Back to pacings
@@ -585,7 +725,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           header, above the KPI strip and the alert rows (owner ask, 2026-09-25) - everything from
           here down, including the KPI strip's Pace/Margin, reads `metrics`, which already reflects
           the current `filters` above. */}
+      {/* While Layout mode is open the bar stays on screen but inert, and carries neither action: the
+          Layout button is the mode we are already in, and the Settings gear lives on Layout mode's
+          own hint bar for the session (Pacing's DashboardView). */}
       {dashboardQuery.isSuccess && data && (
+        <div className={layoutMode ? "pdash__fb-inert" : undefined} {...(layoutMode ? { inert: "" } : {})}>
         <FilterBar
           filters={filters}
           setFilters={setFilters}
@@ -602,27 +746,44 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onSelect: handlePeriodSelect,
           }}
           actions={
-            // The dashboard's settings, at the right end of the filter row as in the reference
-            // (it used to sit in the header beside Refresh data).
-            <button
-              type="button"
-              className="fb-icon-btn"
-              onClick={() => {
-                setSettingsTab(null);
-                setSettingsOpen(true);
-              }}
-              aria-haspopup="dialog"
-              aria-expanded={settingsOpen}
-              aria-label="Settings"
-              title="Pacing settings"
-            >
-              <SettingsIcon />
-            </button>
+            layoutMode ? null : (
+              <>
+                {/* Layout mode, beside the gear as in the reference. */}
+                {canEditLayout && (
+                  <button
+                    type="button"
+                    className="fb-icon-btn"
+                    onClick={() => setLayoutMode(true)}
+                    aria-label="Layout mode"
+                    title="Layout — rearrange dashboard sections and tiles"
+                  >
+                    <MoveIcon />
+                  </button>
+                )}
+                {/* The dashboard's settings, at the right end of the filter row as in the
+                    reference (it used to sit in the header beside Refresh data). */}
+                <button
+                  type="button"
+                  className="fb-icon-btn"
+                  onClick={() => {
+                    setSettingsTab(null);
+                    setSettingsOpen(true);
+                  }}
+                  aria-haspopup="dialog"
+                  aria-expanded={settingsOpen}
+                  aria-label="Settings"
+                  title="Pacing settings"
+                >
+                  <SettingsIcon />
+                </button>
+              </>
+            )
           }
         />
+        </div>
       )}
 
-      {dashboardQuery.isSuccess && data && (
+      {dashboardQuery.isSuccess && data && !layoutMode && (
         <PeriodScopeBanner
           scoped={scoped}
           state={pacingState.periodScopeState ?? null}
@@ -640,11 +801,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           while Finance beside it showed the client-side CPM, neither labelled as either. One set of
           figures, computed one way. */}
 
-      {/* Was: every alert's full sentence, joined with " · ", one line per severity.
-          On a 180-line-item pacing that is a hundred and thirty sentences in a
-          single unbroken paragraph. AlertsBlock lays them out the way the retired
-          SPA did — numbers first, cards for what is critical, the tail collapsed. */}
-      <AlertsBlock alerts={alerts} />
 
       {dashboardQuery.isPending && <LoadingBlock label="Loading dashboard" />}
       {dashboardQuery.isError && <p className="form-error">{formatError(dashboardQuery.error)}</p>}
@@ -653,7 +809,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
         /* Everything that draws a widget sits under this: the board, and the settings drawer, whose
            library cards render the SAME renderer at thumbnail size. One provider, so a card and the
            tile it stands for read the same figures by construction. */
-        <PacingStateProvider value={pacingState}>
+        <PacingStateProvider value={providedState}>
           {/* Display-driven (§6 fix, US-114/115): walks `display.widgets[]` -> each widget's own
               spec.views - never a fixed, hardcoded set of charts. Adding/removing a widget in the
               library panel below changes exactly what renders here. */}
@@ -661,7 +817,34 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               whole `display` rather than a filtered widget list: the switched-off drop happens AFTER
               placement inside it, so a hidden tile's neighbours do not slide into its cell and
               refuse to slide back when it is switched on again. */}
-          <ReportBoard display={display} actions={boardActions} />
+          {/* The page's four sections are tiles of this board, as in Pacing: Launch Plan, Alerts, Line
+              Items and the journal, each on its own slot and each with its switch. Alerts and the
+              journal are built here, where their inputs are, and handed in. */}
+          {layoutMode ? (
+            <SectionBoundary name="LayoutMode">
+              <LayoutMode
+                onExit={() => {
+                  layoutDirtyRef.current = false;
+                  setLayoutMode(false);
+                }}
+                onDirtyChange={(dirty) => {
+                  layoutDirtyRef.current = dirty;
+                }}
+                editable={canEditLayout}
+                onOpenLibrary={() => {
+                  setSettingsTab("widgets");
+                  setSettingsOpen(true);
+                  setOpenLibraryRequest((n) => (n ?? 0) + 1);
+                }}
+                onOpenSettings={() => {
+                  setSettingsTab(null);
+                  setSettingsOpen(true);
+                }}
+              />
+            </SectionBoundary>
+          ) : (
+            <ReportBoard display={shownDisplay} actions={boardActions} blocks={sections} />
+          )}
 
           {/* §6's Line Items block is NOT here any more (2026-10-05): it is a tile of the board
               above, placed on Pacing's own slot scale between the summary widgets and the charts
@@ -709,19 +892,13 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             onWidgetEditorOpened={() => setEditWidgetId(null)}
             customizeLineItemsRequest={customizeLineItems}
             onCustomizeLineItemsOpened={() => setCustomizeLineItems(null)}
+            onPreviewChange={setDisplayPreview}
+            layoutSessionOpen={layoutMode}
+            openLibraryRequest={openLibraryRequest}
+            onLibraryOpened={() => setOpenLibraryRequest(null)}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
           />
 
-          <JournalPanel
-            slug={slug ?? ""}
-            journal={data.journal}
-            flightStart={row.flightStart}
-            flightEnd={row.flightEnd}
-            planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
-            factsDaily={data.factsDaily}
-            onHighlightDate={setJournalHighlight}
-            setFilters={setFilters}
-          />
         </PacingStateProvider>
       )}
     </section>

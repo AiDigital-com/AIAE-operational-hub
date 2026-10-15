@@ -317,7 +317,10 @@ export async function triggerPacingRefresh(pacingId: string): Promise<PacingRefr
 export async function savePacingDisplay(
   slug: string,
   display: Record<string, unknown>,
-  displayRev: number,
+  /** The revision this save was read at. Omitted for a patch of the per-entry preference maps only
+   *  (an on/off switch, a chart's saved period): Pacing merges those against the stored row and
+   *  needs none. Required for a full save, which Pacing refuses without one. */
+  displayRev: number | undefined,
   /** The `capabilities` object from this pacing's dashboard payload, passed back
    *  unchanged. Pacing refuses a save that changes a v2 widget without it, and the
    *  refusal reads to a user as "the editor needs to reload" — so a missing one

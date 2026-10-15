@@ -3,7 +3,7 @@
 // so host tests import plain .js (same pattern as settings-norm.js — Slice 5 rule:
 // no .jsx imports in tests). DisplayTab re-exports both for its consumers.
 
-import { isDefault as lineItemsIsDefault, normLineItems } from '../dashboard/line-item-columns.js';
+import { isDefault as lineItemsIsDefault, normLineItems } from './line-item-columns.js';
 
 /** `display.lineItems` for the fingerprint (Line Items settings spec 2026-10-01): absent,
  *  null and the default object are ONE setting (today's render), so none of them can dirty

@@ -82,6 +82,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 /**
+ * The toast API, or null outside {@link ToastProvider} - for a bridge that forwards someone else's
+ * notifications and has nothing to do when there is nowhere to show them.
+ */
+export function useOptionalToast(): ToastApi | null {
+  return useContext(ToastContext);
+}
+
+/**
  * Returns the toast API. Throws when used outside {@link ToastProvider}.
  */
 export function useToast(): ToastApi {

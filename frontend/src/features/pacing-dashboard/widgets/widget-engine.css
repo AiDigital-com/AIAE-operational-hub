@@ -82,7 +82,7 @@
   border-radius: var(--radius-lg);
   padding: 14px;
 }
-/* Same four tints `pacing-dashboard-library.css`'s `.pdl__group--*` already defines, out of the
+/* Same four tints the retired `pacing-dashboard-library.css` defined (`.pdl__group--*`), out of the
    closed GROUP_TINTS palette (`shared/dash-blocks.js`: slate/blue/teal/amber/violet/rose) - the two
    surfaces must agree on how a group reads, never invent a second palette. */
 .wgt-group--slate { background: var(--n-100); }

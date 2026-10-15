@@ -1,71 +1,58 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentType } from "react";
 import { savePacingDisplay } from "./api";
-import { PacingDashboardLibrary } from "./pacing-dashboard-library";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
-import type { PacingDisplayShape, PacingWidgetGroup, PacingWidgetInstance } from "./types";
+import type { PacingDisplayShape, PacingWidgetInstance } from "./types";
 import { newWidgetId } from "./vendor/layout-materialize.mjs";
-// Moved JS from Pacing's SPA (see ./spa/SOURCE.md): the Line Items settings catalogue's door.
-import * as LineItemColumnsUntyped from "./spa/line-item-columns.js";
+// Moved JS from Pacing's SPA (see ./spa/SOURCE.md): the Display tab itself, and the two helpers its
+// drawer used to judge a draft - the same ones, so "unsaved" means here what it means there.
+import BlockLibraryUntyped from "./spa/display/BlockLibrary.jsx";
+import { cloneDisplay as cloneDisplayUntyped, normDisplay as normDisplayUntyped } from "./spa/display-norm.js";
+import { preserveEnabled as preserveEnabledUntyped } from "./spa/display-blocks.js";
+import { WIDGET_CAP as SPA_WIDGET_CAP } from "./spa/widget-ops.js";
 
-const { isDefault: lineItemsIsDefault, normLineItems } = LineItemColumnsUntyped as unknown as {
-  isDefault: (value: unknown) => boolean;
-  normLineItems: (value: unknown) => { ok: boolean; value?: unknown };
-};
-
-/**
- * `display.lineItems` as the dirty check sees it - Pacing's `display-norm.js` `normLineItemsKey`:
- * absent, null and the default object are ONE setting (today's render), so none of them can dirty
- * the drawer against another; any other readable value compares in canonical key order.
- */
-function lineItemsKey(value: unknown): unknown {
-  if (lineItemsIsDefault(value)) return null;
-  const r = normLineItems(value);
-  return r.ok ? r.value : value;
-}
-
-/** Pacing's own ceiling on stored widgets (`widgets-validate` LIMITS.widgets). Named here rather
- *  than guessed: a 65th widget is refused by the save, and refusing it at the click is the
- *  difference between a sentence and a failed Save three tabs away. */
-const WIDGET_CAP = 64;
+/** Re-typed at the boundary: `allowJs` infers each prop from its default. The real contract is the
+ *  reference drawer's (`SettingsDrawer.jsx` → `DisplayTab.jsx` → `BlockLibrary.jsx`). */
+const BlockLibrary = BlockLibraryUntyped as unknown as ComponentType<Record<string, unknown>>;
+const cloneDisplay = cloneDisplayUntyped as unknown as (d: PacingDisplayShape) => PacingDisplayShape;
+const normDisplay = normDisplayUntyped as unknown as (d: PacingDisplayShape) => string;
+const preserveEnabled = preserveEnabledUntyped as unknown as (
+  draft: PacingDisplayShape,
+  live: PacingDisplayShape
+) => PacingDisplayShape;
+/** Pacing's own widget cap (`widget-ops.js`, the same 100 `widgets-validate.mjs` enforces). */
+const WIDGET_CAP = SPA_WIDGET_CAP as number;
 
 /**
- * The widget library as a section of the settings drawer.
+ * Settings → Display, as a section of this app's drawer: Pacing's own Display tab (`BlockLibrary`,
+ * moved), hosted the way Pacing's settings drawer hosts it.
  *
- * It exists to hold a DRAFT. The library panel persisted every action the moment it happened -
- * add a widget, one request; drop it into a group, another - which is a different promise from the
- * one the drawer now makes, where a single Save commits every section and Reset abandons them.
- * Two save models on one screen would have been the worse outcome: a user who pressed Cancel after
- * adding three widgets would find all three still there.
+ * Everything the tab does is the moved code's. What lives here is the half of Pacing's drawer the
+ * tab leans on - written again because this app's drawer is its own, but to the same contract:
  *
- * Nothing inside the library changes. It already renders from a `display` and reports the next one
- * through `onSave`, so pointing that at local state instead of the network is the whole conversion -
- * which is also why its own logic (linked vs copied instances, group bookkeeping) is untouched here.
+ *   - THE DRAFT. The tab edits a copy of the display (`onChange`, a value or an updater) and the
+ *     drawer's one Save commits it. Dirty is Pacing's `normDisplay` comparison, so switching a tile,
+ *     which the tab saves at once on its own, never marks the drawer dirty.
+ *   - THE SAVE carries what Pacing's `buildConfig` carries and nothing more: `liNames`,
+ *     `showDescription`, `lineItems`, `widgets`, `widgetRanges`, under the live revision and the
+ *     writer marker. `enabled`, `groups`, `layout`, `layoutFrom` and `autoAdded` are deliberately
+ *     absent, as there: switches save themselves, and the arrangement is Layout mode's and the
+ *     Library's to write, so a draft taken at open time can never roll them back.
+ *   - THE SIGNALS the tab expects: the save epoch and the submitted snapshot (so a just-saved new
+ *     widget stops being a disposable newborn), the reset epoch, the deep-opens (a tile's Edit…, a
+ *     block's Customize…, Layout mode's "+ Add"), and the display-cas gate with its re-base: the
+ *     Library's block Add and layout Apply save the LIVE arrangement at once, so they are allowed
+ *     only while the whole drawer is clean and no Layout-mode session is open, and afterwards the
+ *     draft starts again from what they saved.
+ *   - THE PREVIEW: Pacing's drawer pushes the draft into the store 200 ms after an edit, so the
+ *     dashboard behind the drawer shows it before Save; here the draft goes to the page the same way
+ *     (`onPreviewChange`), with the live on/off map in it.
+ *
+ * Not taken: the arrangement History. Its door in the tab is gone (see `spa/SOURCE.md`).
  */
-
-interface DisplayDraft {
-  widgets: PacingWidgetInstance[];
-  groups: PacingWidgetGroup[];
-  /** The tile on/off map. It rides in this draft - and therefore in the drawer's one Save, inside
-   *  the full display patch - rather than saving the instant a switch is flipped, which is what the
-   *  retired SPA did.
-   *
-   *  That difference is safe here and is not safe there, for a reason worth keeping: the SPA's
-   *  switch sits on the dashboard TILE, outside the drawer, so a drawer draft holding an `enabled`
-   *  map frozen at open time would silently rewind a switch flipped behind it - which is why its
-   *  `display-blocks.js` re-reads the live map on every draft push and its widget-set saves omit the
-   *  key entirely. The Hub has no tile menu: the switch IS in the drawer, the draft is seeded from
-   *  the same payload the save's `displayRev` is taken from, and dash-gate's CAS refuses the save
-   *  outright if anything changed meanwhile. There is no window in which this map can go stale
-   *  without the save failing loudly. */
-  enabled: Record<string, boolean>;
-  /** The Line Items block's settings (Pacing `85d353c`): columns, sort, default view, rows. An
-   *  object, `null` for a pending «Reset to default» (the save sends it and dash-gate deletes the
-   *  stored key), or undefined - never touched and never stored, and then the save omits it. */
-  lineItems: unknown;
-}
 
 export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   slug: string;
+  /** The LIVE display from the dashboard payload. */
   display: PacingDisplayShape;
   /** Echoed back on save; Pacing refuses a v2 widget change without it. */
   capabilities: Record<string, unknown> | undefined;
@@ -82,6 +69,20 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   customizeLineItemsRequest?: number | null;
   /** Called once that request is consumed. */
   onCustomizeLineItemsOpened?: () => void;
+  /** Another section of the drawer holds unsaved work - the display-cas actions wait for it. */
+  drawerDirty?: boolean;
+  /** A Layout-mode session is open behind the drawer - the display-cas actions wait for it too. */
+  layoutSessionOpen?: boolean;
+  /** Layout mode's "+ Add": open the Library screen. A new number per request. */
+  openLibraryRequest?: number | null;
+  /** Called once that request is consumed. */
+  onLibraryOpened?: () => void;
+  /** A layout Apply replaced the arrangement: the drawer closes, as Pacing's does. */
+  onCloseRequest?: () => void;
+  /** The draft to preview behind the drawer, or null for "show what is saved". */
+  onPreviewChange?: (display: PacingDisplayShape | null) => void;
+  /** Whether a CM360 source is configured, for the builder's CM pill. */
+  draftCm360Configured?: boolean;
 }
 
 /** The dimension a widget is cut by, from either of the two slots that can carry one. */
@@ -92,12 +93,9 @@ function axisOf(widget: Record<string, unknown> | null | undefined): string | nu
   return typeof dim === "string" && dim ? dim : null;
 }
 
-const seedOf = (display: PacingDisplayShape): DisplayDraft => ({
-  widgets: display.widgets ?? [],
-  groups: display.groups ?? [],
-  enabled: display.enabled ?? {},
-  lineItems: display.lineItems,
-});
+const CAS_LAYOUT_SESSION = "Finish the layout session first — Save or Cancel it, then come back";
+const CAS_DIRTY = "Save or discard the drawer’s unsaved changes first";
+const PREVIEW_DEBOUNCE_MS = 200;
 
 export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidgetsSectionProps>(
   function PacingWidgetsSection(
@@ -105,96 +103,183 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
       slug,
       display,
       capabilities,
-      isAdmin,
-      libraryEntries,
       seedKey,
       initialWidgetId,
       onWidgetEditorOpened,
       customizeLineItemsRequest,
       onCustomizeLineItemsOpened,
+      drawerDirty = false,
+      layoutSessionOpen = false,
+      openLibraryRequest = null,
+      onLibraryOpened,
+      onCloseRequest,
+      onPreviewChange,
+      draftCm360Configured = false,
       onDirtyChange,
     },
     ref
   ) {
-    const [draft, setDraft] = useState<DisplayDraft>(() => seedOf(display));
-    const [base, setBase] = useState<DisplayDraft>(() => seedOf(display));
+    const [draft, setDraft] = useState<PacingDisplayShape>(() => cloneDisplay(display));
+    // What Reset restores and what dirty compares against: the display as it stood when the drawer
+    // opened, or as the last save / re-base left it.
+    const origRef = useRef<PacingDisplayShape>(cloneDisplay(display));
+    const [baseNorm, setBaseNorm] = useState(() => normDisplay(display));
 
-    useEffect(() => {
-      const seeded = seedOf(display);
+    const reseed = useCallback((d: PacingDisplayShape) => {
+      const seeded = cloneDisplay(d);
+      origRef.current = cloneDisplay(d);
       setDraft(seeded);
-      setBase(seeded);
+      setBaseNorm(normDisplay(seeded));
+    }, []);
+
+    const displayRef = useRef(display);
+    displayRef.current = display;
+    useEffect(() => {
+      reseed(displayRef.current);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seedKey, slug]);
 
-    // Tiles that land in the stored display behind an open draft - the page's auto-add
-    // (widgets/auto-add.ts) minting «Delivery vs CM360» right after this drawer saved a CM360
-    // source. The save below sends `widgets` whole under the LIVE revision, so a draft that never
-    // learned of them would delete them with no 409 to stop it. They join the draft AND its
-    // baseline, so a draft that was clean stays clean. Only ids the baseline never held: a tile the
-    // user deleted in this draft was in the baseline, so it stays deleted.
-    const baseRef = useRef(base);
-    baseRef.current = base;
+    // Tiles that land in the stored display behind an open draft - the page's auto-add minting
+    // «Delivery vs CM360» right after this drawer saved a CM360 source. The save sends `widgets`
+    // whole, so a draft that never learned of them would delete them. They join the draft AND its
+    // baseline, so a clean draft stays clean (Pacing's drawer does the same for the auto-add).
     useEffect(() => {
-      const known = new Set(baseRef.current.widgets.map((w) => w.id));
+      const known = new Set((origRef.current.widgets ?? []).map((w) => w.id));
       const arrived = (display.widgets ?? []).filter((w) => !known.has(w.id));
       if (!arrived.length) return;
-      const join = (list: PacingWidgetInstance[]) => {
-        const have = new Set(list.map((w) => w.id));
-        return [...list, ...arrived.filter((w) => !have.has(w.id))];
+      const join = (list: PacingWidgetInstance[] | undefined) => {
+        const have = new Set((list ?? []).map((w) => w.id));
+        return [...(list ?? []), ...arrived.filter((w) => !have.has(w.id)).map((w) => structuredClone(w))];
       };
-      setBase((b) => ({ ...b, widgets: join(b.widgets) }));
+      origRef.current = { ...origRef.current, widgets: join(origRef.current.widgets) };
+      setBaseNorm(normDisplay(origRef.current));
       setDraft((d) => ({ ...d, widgets: join(d.widgets) }));
     }, [display.widgets]);
 
-    // By value, not by identity: the library rebuilds both arrays on every action, so an identity
-    // check would call an untouched layout dirty as soon as anything re-rendered.
-    const dirty = useMemo(() => {
-      const comparable = (d: DisplayDraft) => JSON.stringify({ ...d, lineItems: lineItemsKey(d.lineItems) });
-      return comparable(draft) !== comparable(base);
-    }, [draft, base]);
+    // The display-cas re-base (Pacing's `rebaseFromStore`): after a block Add or a layout Apply the
+    // draft starts again from what that save stored. The save adopts its answer into the payload,
+    // so the re-base waits for the display prop that carries it.
+    const rebasePending = useRef<null | "add" | "apply">(null);
+    useEffect(() => {
+      const action = rebasePending.current;
+      if (!action) return;
+      rebasePending.current = null;
+      reseed(display);
+      if (action === "apply") onCloseRequest?.();
+    }, [display, reseed, onCloseRequest]);
+
+    const dirty = useMemo(() => normDisplay(draft) !== baseNorm, [draft, baseNorm]);
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
-    const stateRef = useRef({ draft, dirty });
-    stateRef.current = { draft, dirty };
+    // The live preview, debounced as Pacing's drawer debounces its store push: each push re-renders
+    // the whole board behind the drawer. A clean draft previews nothing - the board shows the saved
+    // display, and a save made elsewhere is never masked by a stale copy.
+    useEffect(() => {
+      if (!onPreviewChange) return undefined;
+      if (!dirty) {
+        onPreviewChange(null);
+        return undefined;
+      }
+      const timer = window.setTimeout(
+        () => onPreviewChange(preserveEnabled(draft, displayRef.current)),
+        PREVIEW_DEBOUNCE_MS
+      );
+      return () => window.clearTimeout(timer);
+    }, [draft, dirty, onPreviewChange]);
+    useEffect(() => () => onPreviewChange?.(null), [onPreviewChange]);
+
+    // Accepts a value OR an updater (Pacing's handleDisplayChange): two same-tick commits compose.
+    const handleChange = useCallback(
+      (next: PacingDisplayShape | ((cur: PacingDisplayShape) => PacingDisplayShape)) =>
+        setDraft((cur) => (typeof next === "function" ? next(cur) : next)),
+      []
+    );
+
+    // An uncommitted invalid formula, and a widget draft the builder cannot store yet: both block
+    // Save, as in Pacing's drawer.
+    const [draftInvalid, setDraftInvalid] = useState(false);
+    const [widgetDraftInvalid, setWidgetDraftInvalid] = useState<string | null>(null);
+
+    // The signals the tab reads after a save and a reset.
+    const [savedEpoch, setSavedEpoch] = useState(0);
+    const savedDisplayRef = useRef<PacingDisplayShape | null>(null);
+    const submittedDisplayRef = useRef<PacingDisplayShape | null>(null);
+    const [resetEpoch, setResetEpoch] = useState(0);
+
+    // The deep-opens. A tile's ⋯ → Customize… asks an open widget editor to close first (through its
+    // own dirty/invalid guard) and then opens the Line Items card - Pacing's openBlockRequest and
+    // editorRequest pair.
+    const [openBlock, setOpenBlock] = useState<{ id: string; nonce: number } | null>(null);
+    const [editorRequest, setEditorRequest] = useState<{ close: true; nonce: number } | null>(null);
+    useEffect(() => {
+      if (customizeLineItemsRequest == null) return;
+      setOpenBlock({ id: "lineItems", nonce: customizeLineItemsRequest });
+      setEditorRequest({ close: true, nonce: customizeLineItemsRequest });
+    }, [customizeLineItemsRequest]);
+    const openLibrary = useMemo(
+      () => (openLibraryRequest == null ? null : { nonce: openLibraryRequest }),
+      [openLibraryRequest]
+    );
+
+    const casEnabled = !dirty && !drawerDirty && !layoutSessionOpen;
+    const casReason = layoutSessionOpen ? CAS_LAYOUT_SESSION : !casEnabled ? CAS_DIRTY : null;
+    const handleCasSaved = useCallback((action: "add" | "apply") => {
+      rebasePending.current = action;
+    }, []);
+
+    const stateRef = useRef({ draft, dirty, draftInvalid, widgetDraftInvalid });
+    stateRef.current = { draft, dirty, draftInvalid, widgetDraftInvalid };
+
+    const invalidMessage = () => {
+      const s = stateRef.current;
+      if (s.draftInvalid) return "A formula in the open widget is not valid yet. Fix it or discard it before saving.";
+      if (s.widgetDraftInvalid) return `The open widget cannot be saved yet: ${s.widgetDraftInvalid}.`;
+      return null;
+    };
 
     useImperativeHandle(ref, () => ({
       addWidget(widget: Record<string, unknown>) {
         const current = stateRef.current.draft;
+        const widgets = current.widgets ?? [];
         // A tile already reading this axis is the one the caller wants, not a reason for a second
-        // copy of it. The mapping screen's "Create a table of the top 20" is a button a person
-        // presses again when they come back to the column, and without this each press minted
-        // another identical table until the cap.
+        // copy of it (the mapping screen's "Create a table of the top 20" is pressed again whenever
+        // someone comes back to the column).
         const axis = axisOf(widget);
         const existing = axis
-          ? current.widgets.find((w) => axisOf(w as unknown as Record<string, unknown>) === axis)
+          ? widgets.find((w) => axisOf(w as unknown as Record<string, unknown>) === axis)
           : undefined;
         if (existing?.id) return String(existing.id);
-        if (current.widgets.length >= WIDGET_CAP) return null;
-        const id = newWidgetId(current.widgets.map((w) => w?.id).filter(Boolean));
-        setDraft({ ...current, widgets: [...current.widgets, { ...widget, id } as PacingWidgetInstance] });
+        if (widgets.length >= WIDGET_CAP) return null;
+        const id = newWidgetId(widgets.map((w) => w?.id).filter(Boolean));
+        setDraft({ ...current, widgets: [...widgets, { ...widget, id } as PacingWidgetInstance] });
         return id;
+      },
+      precheck() {
+        if (!stateRef.current.dirty) return { ok: true as const };
+        const message = invalidMessage();
+        return message ? { ok: false as const, message } : { ok: true as const };
       },
       async save() {
         const { draft: current, dirty: isDirty } = stateRef.current;
         if (!isDirty) return { ok: true as const };
-        // The revision comes off the payload this draft was seeded from, so a layout edited
-        // elsewhere since then is what earns the 409 below rather than being overwritten.
-        const next: Record<string, unknown> = {
-          ...display,
-          widgets: current.widgets,
-          groups: current.groups,
-          enabled: current.enabled,
+        const message = invalidMessage();
+        if (message) return { ok: false as const, message };
+        // Pacing's buildConfig, the display half - and only it (see the header).
+        const patch: Record<string, unknown> = {
+          liNames: current.liNames,
+          showDescription: !!current.showDescription,
+          ...(current.lineItems !== undefined ? { lineItems: current.lineItems } : null),
+          widgets: current.widgets ?? [],
+          widgetRanges: current.widgetRanges ?? {},
         };
-        // Sent when the draft holds the key (null = the reset, which deletes the stored key);
-        // omitted when it never held one - Pacing's SettingsDrawer.jsx buildConfig rule.
-        if (current.lineItems !== undefined) next.lineItems = current.lineItems;
-        else delete next.lineItems;
+        submittedDisplayRef.current = cloneDisplay(patch as PacingDisplayShape);
         try {
-          const outcome = await savePacingDisplay(slug, next, display.rev ?? 0, capabilities);
+          // The LIVE revision, read at save time: our own saves from anywhere else (a switch, Layout
+          // mode behind the drawer) must not make this one fight them.
+          const outcome = await savePacingDisplay(slug, patch, Number(displayRef.current.rev ?? 0), capabilities);
           if (outcome.status === "conflict") {
             // Not "save failed": one of these says someone else edited this pacing, the other says
-            // this browser is running a build Pacing no longer accepts. Both are fixed by reloading
-            // and neither is fixed by pressing Save again, which a generic message would invite.
+            // this browser is running a build Pacing no longer accepts. Both are fixed by reloading.
             return {
               ok: false as const,
               message:
@@ -203,43 +288,61 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
                   : "The editor needs to reload before saving again.",
             };
           }
-          setBase(current);
+          origRef.current = cloneDisplay(current);
+          setBaseNorm(normDisplay(current));
+          savedDisplayRef.current = cloneDisplay((outcome.display as PacingDisplayShape) ?? current);
+          setSavedEpoch((n) => n + 1);
           return { ok: true as const };
         } catch (error) {
           return { ok: false as const, message: error instanceof Error ? error.message : String(error) };
         }
       },
       reset() {
-        setDraft(base);
+        setDraft(cloneDisplay(origRef.current));
+        setResetEpoch((n) => n + 1);
       },
     }));
 
-    // The library reads its widgets and groups off `display`, so it has to see the DRAFT - otherwise
-    // an added widget would vanish from the list on the next render, saved or not.
-    const draftDisplay = useMemo(
-      () => ({ ...display, widgets: draft.widgets, groups: draft.groups, enabled: draft.enabled }),
-      [display, draft]
+    const handleShowDescription = useCallback(
+      () => setDraft((d) => ({ ...d, showDescription: !d.showDescription })),
+      []
+    );
+    const handleLineItems = useCallback(
+      (next: unknown) => setDraft((d) => ({ ...d, lineItems: next })),
+      []
     );
 
     return (
-      <PacingDashboardLibrary
-        display={draftDisplay}
-        // The drawer's footer owns both now: one "Unsaved changes" line and one error, for every
-        // section, is the point of having one Save.
-        saving={false}
-        saveError={null}
-        onSave={(patch) =>
-          setDraft((d) => ({ ...d, widgets: patch.widgets, groups: patch.groups, enabled: patch.enabled }))
-        }
-        isAdmin={isAdmin}
-        libraryEntries={libraryEntries}
-        initialWidgetId={initialWidgetId}
-        onWidgetEditorOpened={onWidgetEditorOpened}
-        lineItems={draft.lineItems}
-        onLineItemsChange={(next) => setDraft((d) => ({ ...d, lineItems: next }))}
-        customizeLineItemsRequest={customizeLineItemsRequest}
-        onCustomizeLineItemsOpened={onCustomizeLineItemsOpened}
-      />
+      <div className="sp-display">
+        <BlockLibrary
+          display={draft}
+          onChange={handleChange}
+          onDraftInvalidChange={setDraftInvalid}
+          onWidgetDraftInvalidChange={setWidgetDraftInvalid}
+          showDescription={!!draft.showDescription}
+          onShowDescriptionToggle={handleShowDescription}
+          lineItems={draft.lineItems}
+          onLineItemsChange={handleLineItems}
+          openBlockId={openBlock}
+          onBlockOpened={() => {
+            setOpenBlock(null);
+            onCustomizeLineItemsOpened?.();
+          }}
+          editorRequest={editorRequest}
+          openWidgetId={initialWidgetId ?? null}
+          onOpened={onWidgetEditorOpened}
+          draftCm360Configured={draftCm360Configured}
+          openLibrary={openLibrary}
+          onLibraryOpened={onLibraryOpened}
+          savedEpoch={savedEpoch}
+          savedDisplay={savedDisplayRef.current}
+          submittedDisplayRef={submittedDisplayRef}
+          resetEpoch={resetEpoch}
+          casEnabled={casEnabled}
+          casReason={casReason}
+          onCasSaved={handleCasSaved}
+        />
+      </div>
     );
   }
 );

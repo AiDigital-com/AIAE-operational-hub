@@ -67,7 +67,7 @@ export function WidgetTileMenu({ label, items }: { label: string; items: TileMen
   }, [open]);
 
   return (
-    <span className="wtm" ref={wrapRef} onClick={(event) => event.stopPropagation()}>
+    <span className={cn("wtm", open && "wtm--open")} ref={wrapRef} onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         className="wtm__kebab"
