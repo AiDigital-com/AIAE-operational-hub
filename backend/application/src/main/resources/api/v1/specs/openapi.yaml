@@ -10258,6 +10258,14 @@ components:
             refuses to call it operative unless at least one line item actually has conversion data,
             and publishes that answer back as `primary_cv_operative`. Omit to leave the stored switch
             alone.
+        deliveryTab:
+          type: boolean
+          description: >
+            Delivery tab in source sheet (Pacing spec 2026-07-16): adds a pivot-ready Delivery tab -
+            date × line item × naming dimensions × creative, with conversions - to the pacing's source
+            spreadsheet after each refresh. Heavy: Pacing caps it at 3,000,000 cells and switches it
+            off by itself above that, reporting the measurement as `deliveryStats` on the dashboard
+            payload. Takes effect on the next refresh. Omit to leave the stored switch alone.
         dimSources:
           $ref: '#/components/schemas/PacingDimSourcesV1'
         sheet:
@@ -11696,6 +11704,8 @@ components:
             2026-05-19 BigQuery-direct migration and has never had these settings written; a client
             then shows Pacing's own defaults (raw `platform_mart`, every extra off).
           additionalProperties: true
+        deliveryStats:
+          $ref: '#/components/schemas/PacingDeliveryStatsV1'
         notify:
           $ref: '#/components/schemas/PacingNotifySettingsV1'
         journal:
@@ -11708,6 +11718,34 @@ components:
         - factsDaily
         - display
         - journal
+    PacingDeliveryStatsV1:
+      type: object
+      nullable: true
+      description: >
+        What the last build measured of this pacing's Delivery tab (`data.delivery_tab`), so the Data
+        tab can refuse to switch it on when it would not fit. ABSENT means it was never measured -
+        the state of every pacing that has never had the tab on - which is not the same as small.
+      properties:
+        rows:
+          type: integer
+          format: int64
+          nullable: true
+          description: Rows the last built Delivery tab held.
+        cells:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Rows × columns of the last built Delivery tab. Above 3,000,000 the tab is not written and
+            the switch turns itself off.
+        measuredAt:
+          type: string
+          nullable: true
+          description: When the measurement was taken (ISO timestamp).
+        autoOffAt:
+          type: string
+          nullable: true
+          description: When the cap last switched the tab off; null once a person switches it back on.
     PacingRefreshStatusV1:
       type: object
       description: >

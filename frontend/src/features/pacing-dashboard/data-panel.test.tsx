@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { PacingDataSection } from "./data-panel";
 import type { SettingsSectionHandle } from "./settings-section";
-import type { PacingDataShape } from "./types";
+import type { PacingDataShape, PacingDeliveryStatsV1 } from "./types";
 
 vi.mock("./api", () => ({
   savePacingDataSettings: vi.fn(),
@@ -30,7 +30,7 @@ async function openSection(name: RegExp) {
   await userEvent.click(screen.getByRole("button", { name }));
 }
 
-function renderPanel(data: PacingDataShape | undefined) {
+function renderPanel(data: PacingDataShape | undefined, deliveryStats: PacingDeliveryStatsV1 | null = null) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = vi.fn();
   function Harness() {
@@ -42,6 +42,7 @@ function renderPanel(data: PacingDataShape | undefined) {
           ref={ref}
           slug="nike-ss26"
           data={data}
+          deliveryStats={deliveryStats}
           seedKey={1}
           onDirtyChange={() => {}}
           onSwitchesChange={() => {}}
@@ -152,7 +153,7 @@ describe("PacingDataSection", () => {
   it("should send the coefficient switch on its own, without dragging the net switch along", async () => {
     // Given: a pacing with neither mode on
     renderPanel({ source: "platform_mart" });
-    await openSection(/Client cost/);
+    await openSection(/Advanced settings/);
 
     // When: only the coefficient switch moves
     await userEvent.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
@@ -167,7 +168,7 @@ describe("PacingDataSection", () => {
   it("should show the stored coefficient switch and send false when it is turned off", async () => {
     // Given: a pacing already using coefficient margin mode
     renderPanel({ source: "platform_mart", coef_enabled: true });
-    await openSection(/Client cost/);
+    await openSection(/Advanced settings/);
     expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeChecked();
 
     // When:
@@ -184,7 +185,7 @@ describe("PacingDataSection", () => {
     // Given: the one fact that makes this switch different from Net cost mode beside it. It is a
     // visibility gate, so a user turning it off must not expect the figures to change back.
     renderPanel({ source: "platform_mart" });
-    await openSection(/Client cost/);
+    await openSection(/Advanced settings/);
 
     // Then: and it says so without naming the switch below it - an option's hint joins its
     // checkbox's accessible name, so borrowing "Net cost mode" here would give this panel two
@@ -193,6 +194,81 @@ describe("PacingDataSection", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Net cost mode/ })).toBeInTheDocument();
+  });
+
+  it("should ask before turning the Delivery tab on, and send it only once confirmed", async () => {
+    // Given: a pacing without the tab
+    renderPanel({ source: "platform_mart" });
+    await openSection(/Advanced settings/);
+
+    // When: the switch is ticked
+    await userEvent.click(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ }));
+
+    // Then: it asks first and changes nothing until answered - the tab is heavy for the whole system
+    expect(screen.getByRole("dialog", { name: "Enable the Delivery tab?" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ })).not.toBeChecked();
+
+    // When: confirmed and saved
+    await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: one key, nothing else dragged along
+    await waitFor(() => expect(api.savePacingDataSettings).toHaveBeenCalledTimes(1));
+    expect(api.savePacingDataSettings).toHaveBeenCalledWith("nike-ss26", { deliveryTab: true });
+  });
+
+  it("should leave the Delivery tab off when the question is cancelled", async () => {
+    // Given:
+    renderPanel({ source: "platform_mart" });
+    await openSection(/Advanced settings/);
+
+    // When:
+    await userEvent.click(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then:
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ })).not.toBeChecked();
+    expect(api.savePacingDataSettings).not.toHaveBeenCalled();
+  });
+
+  it("should turn the Delivery tab off without asking, and send false", async () => {
+    // Given: a pacing with the tab on
+    renderPanel({ source: "platform_mart", delivery_tab: true });
+    await openSection(/Advanced settings/);
+
+    // When:
+    await userEvent.click(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then:
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(api.savePacingDataSettings).toHaveBeenCalledTimes(1));
+    expect(api.savePacingDataSettings).toHaveBeenCalledWith("nike-ss26", { deliveryTab: false });
+  });
+
+  it("should refuse the Delivery tab when the last measurement was over the cap, and say why", async () => {
+    // Given: the last build measured more cells than Pacing will write
+    renderPanel(
+      { source: "platform_mart" },
+      { rows: 120000, cells: 3600000, measuredAt: "2026-10-14T11:20:00.000Z", autoOffAt: "2026-10-14T11:20:00.000Z" },
+    );
+    await openSection(/Advanced settings/);
+
+    // Then: the switch is greyed and the reason replaces the description
+    expect(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ })).toBeDisabled();
+    expect(screen.getByText(/Too large for this pacing: 3,600,000 cells against the 3,000,000 limit/))
+      .toBeInTheDocument();
+  });
+
+  it("should keep an over-cap Delivery tab that is still on switchable off", async () => {
+    // Given: the tab on, and over the cap - the only way out must not be a database edit
+    renderPanel({ source: "platform_mart", delivery_tab: true }, { rows: 120000, cells: 3600000 });
+    await openSection(/Advanced settings/);
+
+    // Then:
+    expect(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ })).toBeEnabled();
   });
 
   it("should not call the endpoint at all when nothing changed", async () => {
@@ -265,7 +341,7 @@ describe("PacingDataSection", () => {
     );
 
     // The switches live in a collapsible section now, closed on every visit.
-    await openSection(/Client cost/);
+    await openSection(/Advanced settings/);
 
     // When: the switch is turned on and saved
     await user.click(screen.getByRole("checkbox", { name: /Coefficient margin mode/ }));
@@ -283,7 +359,7 @@ describe("PacingDataSection", () => {
     // tested - so which of the two lands first is not something to assume.
     await waitFor(() => {
       if (!screen.queryByRole("checkbox", { name: /Coefficient margin mode/ })) {
-        fireEvent.click(screen.getByRole("button", { name: /Client cost/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Advanced settings/ }));
       }
       expect(screen.getByRole("checkbox", { name: /Coefficient margin mode/ })).toBeChecked();
     });
@@ -317,7 +393,7 @@ describe("PacingDataSection", () => {
     );
 
     // The switches live in a collapsible section now, closed on every visit.
-    await openSection(/Client cost/);
+    await openSection(/Advanced settings/);
     await user.click(screen.getByRole("checkbox", { name: /Net cost mode/ }));
     act(() => pushPayload({ source: "platform_mart_adjustments_view", coef_enabled: false }));
 

@@ -46,6 +46,9 @@ final class DataNamespaceWire {
 		if (settings.primaryCvEnabled() != null) {
 			out.put("primary_cv_enabled", settings.primaryCvEnabled());
 		}
+		if (settings.deliveryTab() != null) {
+			out.put("delivery_tab", settings.deliveryTab());
+		}
 		if (settings.dimSources() != null) {
 			out.put("dim_sources", settings.dimSources());
 		}

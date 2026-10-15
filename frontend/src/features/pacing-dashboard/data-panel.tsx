@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentType } from "react";
 import { formatError } from "../../shared/format/error";
 import { fmtDate } from "../pacing/mock/format";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -10,15 +10,33 @@ import {
 // deliberately blind to campaign ORDER, and a save here TRIGGERS a pull - so a list that differed
 // only in the order boxes were ticked would re-fetch CM360 for nothing.
 import { normThirdParty, reportLabel } from "./spa/third-party-norm.js";
+// The reference's own ceiling rule and dialog, moved in, so the switch and the sentence under it
+// say what Pacing's build will actually do.
+import { deliveryGate as deliveryGateUntyped } from "./spa/delivery-gate.js";
+import ConfirmModalUntyped from "./spa/ConfirmModal.jsx";
 import { useSavePacingDataSettings } from "./hooks";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
 import { SheetSources, type LoadedDimSource } from "./sheet-source-panel";
 import type {
   PacingDataSettingsUpdateV1,
   PacingDataShape,
+  PacingDeliveryStatsV1,
   PacingDimSource,
   PacingSheetDimSource,
 } from "./types";
+
+/** The gate reads `cells` and `measuredAt` defensively (a non-number or empty value is "not
+ *  measured"), so the nulls the contract allows are within what it handles. */
+const deliveryGate = deliveryGateUntyped as unknown as (
+  stats: PacingDeliveryStatsV1 | null,
+) => { disabled: boolean; reason: string | null };
+const ConfirmModal = ConfirmModalUntyped as unknown as ComponentType<{
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}>;
 import "./data-panel.css";
 
 /**
@@ -36,7 +54,7 @@ import "./data-panel.css";
  * for a list. The diff below is what keeps `dim_sources` out of a save that only moved the radio, and
  * it is also this section's dirty flag: an empty patch is a section with nothing to save.
  *
- * The namespace carries more than this panel shows (a sheet binding, a delivery-tab flag). Those keys
+ * The namespace carries more than this panel shows (a sheet binding). Those keys
  * are safe precisely because they are never sent: a key absent from the request is a key Pacing
  * leaves alone.
  */
@@ -109,6 +127,7 @@ interface DataDraft {
   coefEnabled: boolean;
   netEnabled: boolean;
   primaryCvEnabled: boolean;
+  deliveryTab: boolean;
   devices: boolean;
 }
 
@@ -131,6 +150,7 @@ function seed(data: PacingDataShape | undefined): DataDraft {
     coefEnabled: data?.coef_enabled === true,
     netEnabled: data?.net_enabled === true,
     primaryCvEnabled: data?.primary_cv_enabled === true,
+    deliveryTab: data?.delivery_tab === true,
     devices: devicesOn(dimSources),
   };
 }
@@ -157,6 +177,7 @@ function diff(
   if (draft.coefEnabled !== base.coefEnabled) body.coefEnabled = draft.coefEnabled;
   if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
   if (draft.primaryCvEnabled !== base.primaryCvEnabled) body.primaryCvEnabled = draft.primaryCvEnabled;
+  if (draft.deliveryTab !== base.deliveryTab) body.deliveryTab = draft.deliveryTab;
   const sheetsMoved = !!sheets && sheetsKey(sheets) !== sheetsKey(storedSheets ?? []);
   if (draft.devices !== base.devices || sheetsMoved) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
@@ -184,6 +205,9 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   slug: string;
   /** This pacing's stored `data` namespace, straight off the dashboard payload. */
   data: PacingDataShape | undefined;
+  /** What the last build measured of the Delivery tab, straight off the dashboard payload. Null when
+   *  it was never measured. Read-only: it greys the switch when the tab would pass Pacing's cap. */
+  deliveryStats?: PacingDeliveryStatsV1 | null;
   /** How many line items currently carry a stored net ratio (from `planByLineItem`'s
    *  `storedNetRatio`). Read-only - it only steers the hint under the Net cost mode switch,
    *  and is never sent. */
@@ -323,7 +347,7 @@ function newThirdPartyId(): string {
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
   function PacingDataSection(
     {
-      slug, data, netRatioCount, seedKey, thirdParty, sheetSources, storedSheetSources,
+      slug, data, deliveryStats, netRatioCount, seedKey, thirdParty, sheetSources, storedSheetSources,
       valueLabels = null, storedValueLabels = null, dimSourcesLoaded, widgets, onReadSource,
       onSheetSourcesChange, liDaily, lineItems = [], perfSheet = null, storedPerfSheet = null, perfTouched = false,
       onPerfSheetChange, perfProbe = null, perfProbing = false, perfProbeMessage = null,
@@ -337,7 +361,11 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     const [extrasOpen, setExtrasOpen] = useState(false);
     // Closed on every visit, like its neighbour: most pacings connect nothing here.
     const [tpOpen, setTpOpen] = useState(false);
-    const [costOpen, setCostOpen] = useState(false);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    // Delivery tab: the question asked before it goes on, and whether the last build's measurement
+    // leaves room for it at all.
+    const [confirmDelivery, setConfirmDelivery] = useState(false);
+    const deliveryGateState = deliveryGate(deliveryStats ?? null);
     const save = useSavePacingDataSettings(slug);
 
     // ── CM360 source ──────────────────────────────────────────────────────────────────────────
@@ -428,6 +456,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
       // Collapsed on every visit, as the retired tab was: the source is what this section is for,
       // and the extras are three settings nobody opens it to change.
       setExtrasOpen(false);
+      setConfirmDelivery(false);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seedKey, slug]);
 
@@ -736,21 +765,44 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
         </section>
 
         <section className="pdata__section">
-          {/* Collapsible for its neighbours' reason: three switches most pacings never touch, each
-              needing a paragraph to explain itself. Closed, the tab reads as what it is about. */}
+          {/* Collapsible for its neighbours' reason: four switches most pacings never touch, each
+              needing a paragraph to explain itself. Closed, the tab reads as what it is about.
+              Named and ordered as the reference's "Advanced settings", Delivery tab first. */}
           <button
             type="button"
             className="pdata__collapse"
-            aria-expanded={costOpen}
-            onClick={() => setCostOpen((value) => !value)}
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((value) => !value)}
           >
             <svg className="pdata__chevron" viewBox="0 0 10 10" aria-hidden="true">
               <path d="M3 1l4 4-4 4" stroke="currentColor" strokeWidth="2" fill="none" />
             </svg>
-            <span className="pdata__heading">Client cost</span>
+            <span className="pdata__heading">Advanced settings</span>
           </button>
-          {costOpen && (
+          {advancedOpen && (
           <div className="pdata__options">
+            {/* The ceiling blocks turning it ON. A tab that is somehow still on above the ceiling
+                stays switchable OFF, or the only way out would be a database edit. Turning it off
+                is never questioned; turning it on asks first, because it is the one setting here
+                that can cost the whole system a night. */}
+            <label className="pdata__check">
+              <input
+                type="checkbox"
+                checked={draft.deliveryTab}
+                disabled={deliveryGateState.disabled && !draft.deliveryTab}
+                onChange={(event) => {
+                  if (!event.target.checked) { set({ deliveryTab: false }); return; }
+                  setConfirmDelivery(true);
+                }}
+              />
+              <span className="pdata__option-text">
+                <span className="pdata__option-name">Delivery tab in source sheet</span>
+                <span className="pdata__hint">
+                  {deliveryGateState.reason
+                    ?? "Adds a pivot-ready Delivery tab with naming dimensions, creatives and conversions to the source sheet after refresh."}
+                </span>
+              </span>
+            </label>
             <label className="pdata__check">
               <input
                 type="checkbox"
@@ -874,6 +926,19 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             </div>
           )}
         </section>
+
+        {confirmDelivery && (
+          <ConfirmModal
+            title="Enable the Delivery tab?"
+            message={"This tab mirrors every date × line item × dimension × creative row into the source "
+              + "spreadsheet, which is heavy for the system. Turn it on only if you really need it. "
+              + "Limit: 3,000,000 cells — about 90,000 rows. Above that the tab stops updating and the "
+              + "setting turns itself off."}
+            confirmLabel="Enable"
+            onConfirm={() => { setConfirmDelivery(false); set({ deliveryTab: true }); }}
+            onCancel={() => setConfirmDelivery(false)}
+          />
+        )}
       </>
     );
   }

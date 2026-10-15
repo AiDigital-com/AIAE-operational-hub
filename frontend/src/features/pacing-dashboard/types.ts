@@ -19,6 +19,7 @@ export type PacingLibraryConflictV1 = components["schemas"]["PacingLibraryConfli
 export type PacingLikeResultV1 = components["schemas"]["PacingLikeResultV1"];
 export type PacingDataSourceV1 = components["schemas"]["PacingDataSourceV1"];
 export type PacingDataSettingsUpdateV1 = components["schemas"]["PacingDataSettingsUpdateV1"];
+export type PacingDeliveryStatsV1 = components["schemas"]["PacingDeliveryStatsV1"];
 export type PacingNotifySettingsV1 = components["schemas"]["PacingNotifySettingsV1"];
 export type PacingAlertsConfigV1 = components["schemas"]["PacingAlertsConfigV1"];
 export type PacingSummaryProjectionV1 = components["schemas"]["PacingSummaryProjectionV1"];
@@ -109,7 +110,7 @@ export interface PacingSheetDimSource extends PacingDimSource {
 }
 
 /** The part of the opaque `data` namespace the Data panel reads and writes. Every other key it may
- *  carry (`delivery_tab`, `sheet`, and whatever Pacing adds next) is preserved by not being sent: the
+ *  carry (whatever Pacing adds next) is preserved by not being sent: the
  *  save is a per-key merge on Pacing's side, so a key this type does not name is a key this screen
  *  cannot disturb. */
 export interface PacingDataShape {
@@ -129,6 +130,8 @@ export interface PacingDataShape {
    *  one line item has conversion data. COMPUTED on every read by `merge.mjs`'s `publicDataConfig`
    *  and never stored, so it is read-only here. */
   primary_cv_operative?: boolean;
+  /** Delivery tab in source sheet. Pacing turns it off by itself when the tab passes its cell cap. */
+  delivery_tab?: boolean;
   dim_sources?: PacingDimSource[];
   /** The sheet that replaces delivery, when one is bound. */
   sheet?: PacingPerfSheet | null;

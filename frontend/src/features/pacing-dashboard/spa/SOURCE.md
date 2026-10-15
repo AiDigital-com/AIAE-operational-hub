@@ -416,3 +416,12 @@ visible to everyone), groups are made in Layout mode only.
   were blank (the Line Items «Customize» chevrons among them).
 
 Covered by `../page-sections.test.tsx`; the drawer and section tests stub the moved tab.
+
+## Updated 2026-10-15 — Delivery tab in source sheet
+
+`delivery-gate.js` moved in byte-identical from `workspace/src/lib/settings/` (the same in the
+reference): the cell ceiling and the sentence under the switch. `../data-panel.tsx` uses it with
+`ConfirmModal.jsx` for the reference's «Delivery tab in source sheet» switch, now the first row of
+the section renamed from «Client cost» to the reference's «Advanced settings». The Hub's contract
+gained `deliveryTab` on the data-settings save and `deliveryStats` on the dashboard payload;
+dash-gate already stored, built and mirrored the tab.

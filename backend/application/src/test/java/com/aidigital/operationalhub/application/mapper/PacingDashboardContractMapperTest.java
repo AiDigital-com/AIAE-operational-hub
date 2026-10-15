@@ -41,6 +41,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetTab
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDeliveryStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
@@ -104,7 +105,7 @@ class PacingDashboardContractMapperTest {
 				Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
 				Map.of("campaign", Map.of("mA", 42.5)), null,
 				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
-				List.of(journal));
+				List.of(journal), null);
 
 		// When: the caller authored this journal entry themselves ("pu-1"), on a restricted scope.
 		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
@@ -191,7 +192,7 @@ class PacingDashboardContractMapperTest {
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
 				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
-				Map.of(), Map.of(), null, Map.of(), null, List.of());
+				Map.of(), Map.of(), null, Map.of(), null, List.of(), null);
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
@@ -242,6 +243,48 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.fetchCreatives()).isNull();
 		assertThat(result.fetchConversions()).isNull();
 		assertThat(result.dimSources()).isNull();
+		assertThat(result.deliveryTab()).isNull();
+	}
+
+	@Test
+	void shouldCarryTheDeliveryTabSwitchTest() {
+		// Given: switching the Delivery tab off is a value to write, not an absent one.
+		PacingDataSettingsUpdateV1 body = new PacingDataSettingsUpdateV1().deliveryTab(false);
+
+		// When:
+		PacingDataSettings result = mapper.toDataSettings(body);
+
+		// Then:
+		assertThat(result.deliveryTab()).isFalse();
+		assertThat(result.source()).isNull();
+	}
+
+	@Test
+	void shouldMapDeliveryStatsAndKeepAnUnmeasuredOneNullTest() {
+		// Given: one payload with a measurement and one without.
+		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
+				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
+				"", List.of(), null, null, null, null, null);
+		PacingDeliveryStats stats = new PacingDeliveryStats(120000L, 3600000L, "2026-10-14T11:20:00.000Z", null);
+		PacingDashboardData measured = new PacingDashboardData(
+				campaign, Map.of(), List.of(), "2026-08-05",
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
+				Map.of(), Map.of(), null, Map.of(), null, List.of(), stats);
+		PacingDashboardData unmeasured = new PacingDashboardData(
+				campaign, Map.of(), List.of(), "2026-08-05",
+				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
+				Map.of(), Map.of(), null, Map.of(), null, List.of(), null);
+
+		// When:
+		PacingDashboardV1 withStats = mapper.toV1(measured, "pu-1", false);
+		PacingDashboardV1 withoutStats = mapper.toV1(unmeasured, "pu-1", false);
+
+		// Then: "never measured" stays null rather than reading as a zero-cell tab.
+		assertThat(withStats.getDeliveryStats().getRows()).isEqualTo(120000L);
+		assertThat(withStats.getDeliveryStats().getCells()).isEqualTo(3600000L);
+		assertThat(withStats.getDeliveryStats().getMeasuredAt()).isEqualTo("2026-10-14T11:20:00.000Z");
+		assertThat(withStats.getDeliveryStats().getAutoOffAt()).isNull();
+		assertThat(withoutStats.getDeliveryStats()).isNull();
 	}
 
 	@Test
@@ -387,7 +430,7 @@ class PacingDashboardContractMapperTest {
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
 				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
-				null, List.of());
+				null, List.of(), null);
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data, null, false);
@@ -450,7 +493,7 @@ class PacingDashboardContractMapperTest {
 				// types / availableSplits / availableMetrics / conversionTags - the four the moved
 				// widget renderer reads; unset here because these cases are about the other fields.
 				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
-				null, List.of());
+				null, List.of(), null);
 
 		// When:
 		PacingDashboardV1 result = mapper.toV1(data, null, false);
@@ -546,7 +589,7 @@ class PacingDashboardContractMapperTest {
 				Map.of(), List.of(), "2026-08-05",
 				null, null, null, null, null, null, null,
 				thirdParty, mappingsV3,
-				null, null, null, null, null, null, null, List.of());
+				null, null, null, null, null, null, null, List.of(), null);
 	}
 
 	@Test

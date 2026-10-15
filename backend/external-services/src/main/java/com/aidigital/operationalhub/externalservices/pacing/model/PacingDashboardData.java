@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * A pacing's full dashboard payload, as {@code GET /api/dashboards/:slug/data} returns it (§6 of the
  * migration plan, US-114/115). Restricted to the fields the Pacing Dashboard screen needs; Pacing's
- * real response also carries {@code third_party}, {@code mappings_v3}, {@code deliveryStats} and
+ * real response also carries {@code third_party}, {@code mappings_v3} and
  * {@code sourceFacts} - none of those are read here yet; the first two belong to the CM360 lane,
  * which is being rewritten. {@code types}, {@code availableSplits}, {@code availableMetrics} and
  * {@code conversionTags} WERE on that list until Pacing's own widget renderer moved into this app:
@@ -92,6 +92,9 @@ import java.util.Map;
  *                        means its rows were never tagged - which the Conversion Action cut has to
  *                        tell apart from {@code dropped}, where they were and got shed for size
  * @param journal        free-text notes on this pacing
+ * @param deliveryStats  what the last build measured of the Delivery tab - the Data tab greys its
+ *                       switch when the tab would pass Pacing's cell cap. Null when it was never
+ *                       measured, which is every pacing that has never had the tab on
  */
 public record PacingDashboardData(
 		PacingDashboardCampaign campaign,
@@ -114,5 +117,6 @@ public record PacingDashboardData(
 		Map<String, Object> libraryEntries,
 		Map<String, Object> data,
 		@JsonProperty("notify") PacingNotifySettings notifySettings,
-		List<PacingJournalEntry> journal) {
+		List<PacingJournalEntry> journal,
+		PacingDeliveryStats deliveryStats) {
 }

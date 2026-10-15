@@ -870,6 +870,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
             conversions={data.conversions as Array<Record<string, unknown>> | undefined}
             data={data.data as PacingDataShape | undefined}
+            deliveryStats={data.deliveryStats}
             dimSourcesLoaded={data.dimSources as Record<string, Record<string, unknown>> | undefined}
             liDaily={sheetCoverageLiDaily}
             display={display}

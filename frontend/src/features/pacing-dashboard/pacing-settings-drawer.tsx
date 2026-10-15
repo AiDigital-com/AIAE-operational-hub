@@ -17,6 +17,7 @@ import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from ".
 import type {
   PacingCampaignLinkV1,
   PacingDataShape,
+  PacingDeliveryStatsV1,
   PacingDisplayShape,
   PacingNotifySettingsV1,
   PacingSheetDimColumn,
@@ -67,6 +68,8 @@ export interface PacingSettingsDrawerProps {
    *  them to offer a line item the actions it actually has - there is no other list of them. */
   conversions: Array<Record<string, unknown>> | undefined;
   data: PacingDataShape | undefined;
+  /** What the last build measured of the Delivery tab, straight off the dashboard payload. */
+  deliveryStats?: PacingDeliveryStatsV1 | null;
   display: PacingDisplayShape;
   capabilities: Record<string, unknown> | undefined;
   isAdmin: boolean;
@@ -151,6 +154,7 @@ export function PacingSettingsDrawer({
   dimSourcesLoaded,
   conversions,
   data,
+  deliveryStats,
   display,
   capabilities,
   isAdmin,
@@ -611,6 +615,7 @@ export function PacingSettingsDrawer({
             ref={dataSection}
             slug={slug}
             data={data}
+            deliveryStats={deliveryStats}
             netRatioCount={netRatioCount}
             seedKey={seedKey}
             thirdParty={thirdParty}
