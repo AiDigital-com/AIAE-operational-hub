@@ -194,7 +194,7 @@ describe("PacingPlanSection", () => {
     // Given:
     const user = userEvent.setup();
     const candidate = aPacingDraftLineItemV1({ lineItemId: "7", channel: "Video", currency: "USD" });
-    vi.mocked(getAddablePacingLineItems).mockResolvedValue({ ok: true, addable: [candidate], alreadyAdded: [] });
+    vi.mocked(getAddablePacingLineItems).mockResolvedValue({ ok: true, io: "3854", addable: [candidate], alreadyAdded: [] });
     vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
     renderSheet({ "111": aPacingLineItemPlanV1({ lineItemId: "111" }) });
     await screen.findByText("LI 111");
@@ -203,7 +203,7 @@ describe("PacingPlanSection", () => {
     await user.click(screen.getByRole("button", { name: "+ Add line item" }));
     await screen.findByText("LI 7");
     await user.click(screen.getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Add selected" }));
+    await user.click(screen.getByRole("button", { name: "Add selected (1)" }));
 
     // Then: the new line item joins the editor, marked as new, and gets saved along with the rest.
     await screen.findByText("New");

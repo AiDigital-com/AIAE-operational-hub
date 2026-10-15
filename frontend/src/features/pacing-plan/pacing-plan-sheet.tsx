@@ -24,7 +24,8 @@ import { NumericField } from "../pacing-create/numeric-field";
 import { fmtInt, parseEditableNumber } from "../pacing-create/format";
 import { fmtUnits, MoneyInput } from "./plan-number-inputs";
 import { AddLineItemPanel } from "./add-line-item-panel";
-import { actionsByLi, unmatched, type CvAction } from "./cv-actions";
+import { actionsByLi, seedDifferText, seedPrimaryCv, unmatched, type CvAction } from "./cv-actions";
+import { useOptionalToast } from "../../shared/ui/toast/toast";
 import { coefConfigBlocksSave, coefErrorMessage, collectCoefErrors, planWarningSentence } from "./coef-precheck";
 import { getCurrency } from "../pacing-dashboard/engine/engine-loader";
 import { ContainerCard, type RawSplits, type SplitFacts } from "./container-editor";
@@ -718,10 +719,26 @@ export interface PacingPlanSectionProps extends SettingsSectionProps {
   planByLineItem: Record<string, PacingLineItemPlanV1>;
   /** Bumped by the drawer on open, so a reopened section never shows an abandoned edit. */
   seedKey: number;
+  /** The pacing's `data` namespace as the Data section's DRAFT has it (fetches, sheet bindings). A
+   *  newly added line item's primary conversions are seeded against it, as the reference seeds them
+   *  against its draft data. */
+  cvData?: Record<string, unknown>;
+  /** Reports the line items as this DRAFT has them - added and not yet saved included - so the
+   *  mapping pickers offer the same list the reference's draft-backed pickers do. */
+  onLineItemsChange?: (items: PlanLineItemSummary[]) => void;
+}
+
+/** One draft line item, as a screen that only lists or picks line items needs it. */
+export interface PlanLineItemSummary {
+  id: string;
+  rateType: string;
+  flightStart: string;
+  flightEnd: string;
 }
 
 export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSectionProps>(
-  function PacingPlanSection({ slug, currency, rate, rateLocked, nsRate, netFeatureOn, coefEnabled, primaryCvEnabled, conversions, rawSplits, splitFacts, widgets, planByLineItem, seedKey, onDirtyChange }, ref) {
+  function PacingPlanSection({ slug, currency, rate, rateLocked, nsRate, netFeatureOn, coefEnabled, primaryCvEnabled, conversions, rawSplits, splitFacts, widgets, planByLineItem, seedKey, cvData, onLineItemsChange, onDirtyChange }, ref) {
+    const toast = useOptionalToast();
     const [lineItems, setLineItems] = useState<Record<string, EditableLineItem>>({});
     const [base, setBase] = useState<Record<string, EditableLineItem>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -750,6 +767,22 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
 
     const ids = useMemo(() => Object.keys(lineItems).sort(), [lineItems]);
     const existingIds = useMemo(() => new Set(ids), [ids]);
+
+    // What the draft holds, for the screens that pick from it. Keyed on the four fields they read, so
+    // typing a budget does not re-render the mapping tab.
+    const summaryKey = ids.map((id) => {
+      const li = lineItems[id];
+      return `${id}|${li.rateType}|${li.flightStart}|${li.flightEnd}`;
+    }).join(",");
+    useEffect(() => {
+      onLineItemsChange?.(ids.map((id) => ({
+        id,
+        rateType: lineItems[id].rateType,
+        flightStart: lineItems[id].flightStart,
+        flightEnd: lineItems[id].flightEnd,
+      })));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [summaryKey, onLineItemsChange]);
 
     // Whether the coefficient controls are on screen - the pacing switch OR a line item that already
     // carries the flag, which is the retired SPA's rule (`SettingsDrawer.jsx`: `localCoefEnabled ||
@@ -786,8 +819,8 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     );
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
-    const stateRef = useRef({ ids, lineItems, dirty, netFeatureOn, rateState, rateChanged });
-    stateRef.current = { ids, lineItems, dirty, netFeatureOn, rateState, rateChanged };
+    const stateRef = useRef({ ids, lineItems, dirty, netFeatureOn, rateState, rateChanged, primaryCvEnabled, cvData });
+    stateRef.current = { ids, lineItems, dirty, netFeatureOn, rateState, rateChanged, primaryCvEnabled, cvData };
 
     useImperativeHandle(ref, () => ({
       precheck() {
@@ -822,6 +855,9 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
         setLineItems(base);
         setRateState(rateBase);
         setAddingLi(false);
+      },
+      addLineItems(candidates) {
+        addCandidates(candidates);
       },
     }));
 
@@ -872,9 +908,25 @@ export const PacingPlanSection = forwardRef<SettingsSectionHandle, PacingPlanSec
     }
 
     function addCandidates(candidates: PacingDraftLineItemV1[]) {
+      // Primary conversions (Pacing spec 2026-09-13 §8): each new line item starts with the choice
+      // most line items on its source share - the reference's handleAddLiConfirm. Decided here, from
+      // the draft as it stands, so the updater below stays pure. With the switch off the seed is the
+      // empty choice a candidate always had.
+      const { lineItems: current, primaryCvEnabled: cvOn, cvData: data } = stateRef.current;
+      const seeded = candidates.map((candidate) => seedFromCandidate(candidate));
+      let differ = 0;
+      if (cvOn) {
+        const draftData = { ...(data ?? {}), primary_cv_enabled: true };
+        for (const li of seeded) {
+          const { seed, reason } = seedPrimaryCv(current, draftData, li.lineItemId);
+          if (seed) li.primaryCv = seed;
+          if (reason === "differ") differ += 1;
+        }
+      }
+      if (differ > 0) toast?.showSuccess(seedDifferText(differ));
       setLineItems((prev) => {
         const next = { ...prev };
-        for (const candidate of candidates) next[candidate.lineItemId] = seedFromCandidate(candidate);
+        for (const li of seeded) next[li.lineItemId] = li;
         return next;
       });
       setExpanded((prev) => new Set([...prev, ...candidates.map((c) => c.lineItemId)]));

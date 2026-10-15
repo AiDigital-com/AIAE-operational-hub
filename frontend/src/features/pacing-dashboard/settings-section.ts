@@ -12,6 +12,7 @@
  * change on every keystroke and nothing renders on them - lifting those would re-render the
  * whole drawer on every character typed into a line item's budget.
  */
+import type { PacingDraftLineItemV1 } from "../pacing-plan/types";
 
 /** What one section's save came to. A failure carries the sentence to show, because only the
  *  section knows what its own 409 means ("the editor needs to reload" is not "save failed"). */
@@ -35,6 +36,9 @@ export interface SettingsSectionHandle {
    *  here, behind one Save with everything else. Returns the new widget's id, or null when the cap
    *  is reached, so the caller can say which happened. */
   addWidget?: (widget: Record<string, unknown>) => string | null;
+  /** Add line items to this section's DRAFT, for a screen that is not this one - the mapping
+   *  pickers' «＋ Add line item…». Only the plan section implements it. */
+  addLineItems?: (candidates: PacingDraftLineItemV1[]) => void;
 }
 
 export interface SettingsSectionProps {

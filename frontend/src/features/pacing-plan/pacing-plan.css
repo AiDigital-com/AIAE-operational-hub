@@ -287,6 +287,13 @@
   gap: 10px;
   background: var(--n-100);
 }
+/* In a dialog the dialog is the frame: no dashed box, no tint, no second padding. */
+.pplan__add-li--bare {
+  border: 0;
+  padding: 0;
+  margin-bottom: 0;
+  background: none;
+}
 .pplan__add-li-head {
   display: flex;
   align-items: center;
@@ -311,6 +318,37 @@
   color: var(--primary);
   border-color: var(--primary);
 }
+/* Tabs on the left, "Refresh list" on the right of the same row - an action, not a third tab. */
+.pplan__add-li-tabrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* "N can be added · M cannot" with Select all / Clear on the same line. */
+.pplan__add-li-listhd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+/* An action offered as text (Refresh list, Select all, "Add one by ID" inside a sentence): it keeps
+   the surrounding font and baseline and carries no box of its own. */
+.pplan__link-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--primary);
+  cursor: pointer;
+}
+.pplan__link-btn:hover {
+  text-decoration: underline;
+}
 .pplan__add-li-list {
   list-style: none;
   margin: 0;
@@ -328,19 +366,66 @@
 }
 .pplan__add-li-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
   cursor: pointer;
   font-size: 12px;
 }
+/* The box sits on the card's first line, not in the middle of a two-line card. */
+.pplan__add-li-check > input {
+  margin: 2px 0 0;
+  flex: none;
+}
 .pplan__add-li-check--disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
-.pplan__add-li-note {
+.pplan__add-li-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.pplan__add-li-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pplan__add-li-top .pplan__hint {
+  margin: 0;
+}
+.pplan__add-li-rate {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.pplan__add-li-plan {
   margin-left: auto;
-  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.pplan__add-li-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+.pplan__add-li-flight {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pplan__add-li-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Dialogs (Duplicate container / Remove confirmations) ── */

@@ -11,6 +11,8 @@
  * let a user store a choice that matches nothing.
  */
 
+import PrimaryCvRuleUntyped from "@shared/primary-cv-rule";
+
 export interface CvAction {
   name: string;
   conversions: number;
@@ -47,4 +49,62 @@ export function actionsByLi(rows: ReadonlyArray<Record<string, unknown>> | undef
 export function unmatched(choice: ReadonlyArray<string>, actions: ReadonlyArray<CvAction>): string[] {
   const have = new Set(actions.map((a) => a.name));
   return choice.filter((name) => !have.has(name));
+}
+
+/** The vendored rule, typed at this one boundary: only the four readers the seed below needs. */
+const CvRule = PrimaryCvRuleUntyped as unknown as {
+  isEnabled: (data: Record<string, unknown>) => boolean;
+  liHasConversionData: (liId: string, data: Record<string, unknown>) => boolean;
+  sourceKeyOf: (liId: string, data: Record<string, unknown>) => string;
+  canonNames: (list: ReadonlyArray<string>) => string[];
+};
+
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The choice a newly added line item starts with - the reference's `seedSelection`
+ * (`primary-cv-state.js`), verbatim in behaviour: the choice most line items on the same source
+ * share. A tie, or other line items that chose differently with no majority, seeds nothing and says
+ * `differ`; a pacing with the switch off, a line item with no conversion data, or nobody having
+ * chosen yet seeds nothing and says `none`.
+ *
+ * @param plans    the plan's draft line items, by id, before the new one joins them
+ * @param data     the pacing's DRAFT `data` namespace (switch, fetches, sheet bindings)
+ * @param newLiId  the line item being added
+ */
+export function seedPrimaryCv(
+  plans: Readonly<Record<string, { primaryCv?: ReadonlyArray<string> }>>,
+  data: Record<string, unknown>,
+  newLiId: string,
+): { seed: string[] | null; reason: "seeded" | "differ" | "none" } {
+  const none = { seed: null, reason: "none" as const };
+  const target = String(newLiId);
+  if (!CvRule.isEnabled(data) || !CvRule.liHasConversionData(target, data)) return none;
+  const source = CvRule.sourceKeyOf(target, data);
+  const tally = new Map<string, { list: string[]; count: number }>();
+  let anyChoice = false;
+  for (const id of Object.keys(plans)) {
+    if (id === target || CvRule.sourceKeyOf(id, data) !== source) continue;
+    const list = CvRule.canonNames(plans[id]?.primaryCv ?? []).sort(byName);
+    if (list.length > 0) anyChoice = true;
+    const key = JSON.stringify(list);
+    const entry = tally.get(key);
+    if (entry) entry.count += 1;
+    else tally.set(key, { list, count: 1 });
+  }
+  let best: { list: string[]; count: number } | null = null;
+  let tie = false;
+  for (const entry of tally.values()) {
+    if (!best || entry.count > best.count) { best = entry; tie = false; }
+    else if (entry.count === best.count) tie = true;
+  }
+  if (best && !tie && best.list.length > 0) return { seed: best.list.slice(), reason: "seeded" };
+  return anyChoice ? { seed: null, reason: "differ" } : none;
+}
+
+/** What the reference says when line items it could not agree on leave the new one without a choice. */
+export function seedDifferText(count: number): string {
+  return count === 1
+    ? "The new line item has no primary conversions: line items differ"
+    : `${count} new line items have no primary conversions: line items differ`;
 }
