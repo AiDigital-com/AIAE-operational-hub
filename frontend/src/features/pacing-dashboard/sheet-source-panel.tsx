@@ -24,6 +24,10 @@ import "./additional-mapping.css";
 import "./performance-source.css";
 import "./sheet-source-panel.css";
 
+/** «＋ Add line item…» in a line-item picker: opens the Add line item panel, and calls `onAdded`
+ *  with the ids it added so the picker the person was on takes the first one (the moved `LiSelect`). */
+export type AddLineItemRequest = (onAdded: (ids: string[]) => void) => void;
+
 /** A tab that replaces delivery. Typed at this one boundary, like its neighbours. */
 const PerformanceSourceEditor = PerformanceSourceEditorJs as unknown as ComponentType<{
   sheet: Record<string, unknown> | null;
@@ -36,7 +40,7 @@ const PerformanceSourceEditor = PerformanceSourceEditorJs as unknown as Componen
    *  here; the reference passes `sheetProbeMessage`, a string or null.) */
   probeErrorText?: string | null;
   onRetryProbe?: (() => void) | null;
-  onAddLineItem?: (() => void) | null;
+  onAddLineItem?: AddLineItemRequest | null;
   initialTab?: unknown;
 }>;
 
@@ -202,7 +206,7 @@ const AdditionalMappingEditor = AdditionalMappingEditorJs as unknown as Componen
   onCreateWidget?: (source: PacingSheetDimSource, dim: PacingSheetDimColumn) => void;
   onRemoveWidgetsForDim?: (dimKey: string) => void;
   onRestoreWidgetsForDim?: (snapshot: unknown) => void;
-  onAddLineItem?: (() => void) | null;
+  onAddLineItem?: AddLineItemRequest | null;
 }>;
 
 /** One stored source's read status, as `merge.mjs` publishes it beside the dashboard. */
@@ -257,6 +261,8 @@ export interface SheetSourcesProps {
   /** Starts the CM360 flow, which this panel does not own - the chooser offers all three kinds
    *  together because that is the question being asked, and hands the answer back. */
   onAddCm360?: () => void;
+  /** Gives every line-item picker in the editors the reference's «＋ Add line item…». */
+  onAddLineItem?: AddLineItemRequest | null;
   /** The sheet that replaces delivery, as the drawer currently has it, and what to do when it
    *  changes. Null means none is bound; the chooser's second answer opens its editor. */
   perfSheet?: Record<string, unknown> | null;
@@ -296,7 +302,7 @@ export function SheetSources({
   slug, sources, stored = [], loaded, lineItems = [], widgets, liDaily, openIndex = null, initialView,
   onRead, onOpenBreakdown, onCreateWidget, onAddCm360, perfSheet = null, onPerfSheetChange,
   perfProbe = null, perfProbing = false, perfProbeMessage = null,
-  onPerfConnect, onPerfDisconnect, onPerfRetryProbe, onChange,
+  onPerfConnect, onPerfDisconnect, onPerfRetryProbe, onAddLineItem = null, onChange,
 }: SheetSourcesProps) {
   const [view, setView] = useState<View>(
     initialView === "perf"
@@ -369,6 +375,7 @@ export function SheetSources({
             probing={perfProbing}
             probeErrorText={perfProbeMessage}
             onRetryProbe={onPerfRetryProbe}
+            onAddLineItem={onAddLineItem}
             onChange={(next) => onPerfSheetChange?.(next)}
           />
         ) : (
@@ -425,6 +432,7 @@ export function SheetSources({
           onChange={(next) => replaceAt(view.index, next)}
           onOpenBreakdown={onOpenBreakdown}
           onCreateWidget={onCreateWidget}
+          onAddLineItem={onAddLineItem}
         />
       </div>
     );

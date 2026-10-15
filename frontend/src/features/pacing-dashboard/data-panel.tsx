@@ -16,7 +16,7 @@ import { deliveryGate as deliveryGateUntyped } from "./spa/delivery-gate.js";
 import ConfirmModalUntyped from "./spa/ConfirmModal.jsx";
 import { useSavePacingDataSettings } from "./hooks";
 import type { SettingsSectionHandle, SettingsSectionProps } from "./settings-section";
-import { SheetSources, type LoadedDimSource } from "./sheet-source-panel";
+import { SheetSources, type AddLineItemRequest, type LoadedDimSource } from "./sheet-source-panel";
 import type {
   PacingDataSettingsUpdateV1,
   PacingDataShape,
@@ -238,6 +238,8 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   /** Hands the edited list up: the DRAWER owns this draft, because the Mapping tab edits the same
    *  list and one Save over two tabs cannot have two owners. */
   onSheetSourcesChange?: (next: PacingSheetDimSource[]) => void;
+  /** «＋ Add line item…» in the sheet editors' line-item pickers - the same pickers Mapping shows. */
+  onAddLineItem?: AddLineItemRequest | null;
   /** The sheet that replaces delivery: what is on screen, what is stored, and whether this session
    *  said anything about it at all - the three states the save has to tell apart. */
   /** Delivery per line item per day - the denominator of the coverage line under each source. */
@@ -276,6 +278,9 @@ export interface PacingModeSwitches {
   coefEnabled: boolean;
   netEnabled: boolean;
   primaryCvEnabled: boolean;
+  /** Not a mode switch: whether conversions are fetched, which decides whether a newly added line
+   *  item has conversion data to seed its primary conversions from (the reference reads its draft). */
+  fetchConversions: boolean;
 }
 
 /** One CM360 source: a report, and the campaigns picked inside it. */
@@ -351,7 +356,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
       valueLabels = null, storedValueLabels = null, dimSourcesLoaded, widgets, onReadSource,
       onSheetSourcesChange, liDaily, lineItems = [], perfSheet = null, storedPerfSheet = null, perfTouched = false,
       onPerfSheetChange, perfProbe = null, perfProbing = false, perfProbeMessage = null,
-      onPerfConnect, onPerfDisconnect, onPerfRetryProbe, visible,
+      onPerfConnect, onPerfDisconnect, onPerfRetryProbe, onAddLineItem = null, visible,
       onDirtyChange, onSwitchesChange,
     },
     ref,
@@ -520,9 +525,10 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
           coefEnabled: draft.coefEnabled,
           netEnabled: draft.netEnabled,
           primaryCvEnabled: draft.primaryCvEnabled,
+          fetchConversions: draft.fetchConversions,
         });
       },
-      [draft.coefEnabled, draft.netEnabled, draft.primaryCvEnabled, onSwitchesChange]
+      [draft.coefEnabled, draft.netEnabled, draft.primaryCvEnabled, draft.fetchConversions, onSwitchesChange]
     );
 
     // The freshest patch, without re-rendering the drawer on every click: the handle below closes
@@ -758,6 +764,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             onPerfConnect={onPerfConnect}
             onPerfDisconnect={onPerfDisconnect}
             onPerfRetryProbe={onPerfRetryProbe}
+            onAddLineItem={onAddLineItem}
             onChange={(next) => onSheetSourcesChange?.(next)}
           />
             </>

@@ -20,7 +20,7 @@ import {
 // alias ORDER (aliases are a set) and to object key order, and it excludes the audit stamps the
 // server writes - so the drawer does not call itself dirty over something nobody edited.
 import { normMappingsV3 } from "./spa/mapping-v3-norm.js";
-import { SheetSources } from "./sheet-source-panel";
+import { SheetSources, type AddLineItemRequest } from "./sheet-source-panel";
 // Display names, MOVED from the retired SPA rather than rewritten - renaming a conversion action is
 // the same job on both sides, and a second version of it would be a second set of rules about what a
 // name may be.
@@ -266,6 +266,8 @@ export interface PacingMappingSectionProps extends SettingsSectionProps {
   perfProbeMessage?: string | null;
   onPerfSheetChange?: (next: Record<string, unknown> | null) => void;
   onPerfRetryProbe?: () => void;
+  /** «＋ Add line item…» in the editors' line-item pickers, as the reference's Mapping tab offers it. */
+  onAddLineItem?: AddLineItemRequest | null;
   /** Called after a source was re-read, so the host can refetch the figures that just changed. */
   onReadSource?: () => void;
 }
@@ -783,7 +785,7 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
       sheetSources = [], storedSheetSources = [], dimSourcesLoaded, lineItems = [], widgets,
       valueLabels, onSheetSourcesChange, onValueLabelsChange, onCreateDimWidget, onOpenDimBreakdown, onReadSource,
       perfSheet = null, perfProbe = null, perfProbing = false, perfProbeMessage = null,
-      onPerfSheetChange, onPerfRetryProbe,
+      onPerfSheetChange, onPerfRetryProbe, onAddLineItem = null,
       onDirtyChange,
     },
     ref,
@@ -1437,6 +1439,7 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
               perfProbeMessage={perfProbeMessage}
               onPerfSheetChange={onPerfSheetChange}
               onPerfRetryProbe={onPerfRetryProbe}
+              onAddLineItem={onAddLineItem}
               onChange={(next) => onSheetSourcesChange?.(next)}
             />
           </section>
@@ -1460,6 +1463,7 @@ export const PacingMappingSection = forwardRef<SettingsSectionHandle, PacingMapp
               onCreateWidget={onCreateDimWidget}
               onOpenBreakdown={onOpenDimBreakdown}
               onRead={() => onReadSource?.()}
+              onAddLineItem={onAddLineItem}
               onChange={(next) => onSheetSourcesChange?.(next)}
             />
           </section>

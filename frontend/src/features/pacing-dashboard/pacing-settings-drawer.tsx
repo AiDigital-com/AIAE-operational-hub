@@ -3,7 +3,9 @@ import { cn } from "../../shared/style/cn";
 import { CloseIcon } from "../../shared/ui/icons/icons";
 import { Modal } from "../../shared/ui/modal/modal";
 import { Sheet } from "../../shared/ui/sheet/sheet";
-import { PacingPlanSection } from "../pacing-plan/pacing-plan-sheet";
+import { PacingPlanSection, type PlanLineItemSummary } from "../pacing-plan/pacing-plan-sheet";
+import { AddLineItemPanel } from "../pacing-plan/add-line-item-panel";
+import type { PacingDraftLineItemV1 } from "../pacing-plan/types";
 import type { SplitFacts } from "../pacing-plan/container-editor";
 import { PacingAlertsSection } from "./alerts-panel";
 import { topNCompositeFor } from "./widgets/top-n-widget.js";
@@ -11,6 +13,7 @@ import { probeErrorText } from "./spa/sheet-source-norm.js";
 import { probePacingSheet } from "./api";
 import { PacingMappingSection } from "./mapping-panel";
 import { PacingDataSection, type PacingModeSwitches } from "./data-panel";
+import type { AddLineItemRequest } from "./sheet-source-panel";
 import { PacingDocumentsSection } from "./documents/documents-panel";
 import { PacingWidgetsSection } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
@@ -207,6 +210,7 @@ export function PacingSettingsDrawer({
     coefEnabled: data?.coef_enabled === true,
     netEnabled: data?.net_enabled === true,
     primaryCvEnabled: data?.primary_cv_enabled === true,
+    fetchConversions: data?.fetch_conversions === true,
   };
   // Read by the open effect below without being a dependency of it - see its comment.
   const initialTabRef = useRef(initialTab);
@@ -342,6 +346,18 @@ export function PacingSettingsDrawer({
     { spreadsheet_id?: string } | null;
   const perfSheetId = perfSheet?.spreadsheet_id ?? "";
 
+  // The `data` namespace as the Data tab's DRAFT has it, for seeding a new line item's primary
+  // conversions: whether conversions are fetched, and which sheet tabs map conversion actions.
+  const planCvData = useMemo(
+    () => ({
+      ...(data ?? {}),
+      primary_cv_enabled: liveSwitches.primaryCvEnabled,
+      fetch_conversions: liveSwitches.fetchConversions,
+      sheet: perfSheet,
+    }) as Record<string, unknown>,
+    [data, liveSwitches.primaryCvEnabled, liveSwitches.fetchConversions, perfSheet]
+  );
+
   // Probe lazily, and only while the drawer is open on a tab that shows it - the reference's own
   // gate. Re-connecting the SAME spreadsheet keeps the bindings; a different one starts clean
   // rather than silently pairing tab ids across two files.
@@ -384,27 +400,47 @@ export function PacingSettingsDrawer({
     ? probeErrorText(perfProbeErr.error, perfProbeErr.shareWith)
     : null;
 
+  // The PLAN's draft, once that section has reported it: a line item added and not yet saved is a
+  // line item a sheet can already be routed to, the way the reference's pickers read its draft.
+  const [planDraftLis, setPlanDraftLis] = useState<PlanLineItemSummary[] | null>(null);
   const sheetLineItems = useMemo(
-    () =>
-      Object.keys(planByLineItem).map((id) => {
-        const plan = planByLineItem[id] as unknown as { name?: unknown; rateType?: unknown };
+    () => {
+      const draftById = new Map((planDraftLis ?? []).map((li) => [li.id, li]));
+      const lineItemIds = planDraftLis ? planDraftLis.map((li) => li.id) : Object.keys(planByLineItem);
+      return lineItemIds.map((id) => {
+        const plan = planByLineItem[id] as unknown as { name?: unknown; rateType?: unknown } | undefined;
+        const draft = draftById.get(id);
         const name = typeof plan?.name === "string" && plan.name.trim() ? plan.name.trim() : "";
         // The rate type is part of the label, not decoration: on a sheet whose names differ only by
         // their tail, "LI 695345 · CPV" is what tells a person which of two line items they are
         // routing to. The reference labels them the same way.
-        const rate = typeof plan?.rateType === "string" && plan.rateType ? plan.rateType : "CPM";
+        const storedRate = typeof plan?.rateType === "string" && plan.rateType ? plan.rateType : "CPM";
+        const rate = draft?.rateType || storedRate;
         // The flight travels with the id: coverage is measured over the days a line item was
         // actually running, so a source that stops early is not flattered by the days after it.
-        const flight = plan as unknown as { flightStart?: unknown; flightEnd?: unknown };
-        return {
-          id,
-          label: `LI ${id}${name ? ` · ${name}` : ""} · ${rate}`,
-          fs: typeof flight?.flightStart === "string" ? flight.flightStart : null,
-          fe: typeof flight?.flightEnd === "string" ? flight.flightEnd : null,
-        };
-      }),
-    [planByLineItem]
+        const flight = plan as unknown as { flightStart?: unknown; flightEnd?: unknown } | undefined;
+        const fs = draft?.flightStart || (typeof flight?.flightStart === "string" ? flight.flightStart : null);
+        const fe = draft?.flightEnd || (typeof flight?.flightEnd === "string" ? flight.flightEnd : null);
+        return { id, label: `LI ${id}${name ? ` · ${name}` : ""} · ${rate}`, fs: fs || null, fe: fe || null };
+      });
+    },
+    [planByLineItem, planDraftLis]
   );
+
+  // «＋ Add line item…» from a mapping picker: the Add line item panel over the drawer, adding into
+  // the plan's draft, and the picker that asked takes the first id added - the reference's
+  // openAddLiFromMapping / handleAddLiConfirm.
+  const [addLiRequest, setAddLiRequest] = useState<{ onAdded: (ids: string[]) => void } | null>(null);
+  const openAddLiFromMapping = useCallback<AddLineItemRequest>((onAdded) => setAddLiRequest({ onAdded }), []);
+  const addLiExistingIds = useMemo(
+    () => new Set(planDraftLis ? planDraftLis.map((li) => li.id) : Object.keys(planByLineItem)),
+    [planDraftLis, planByLineItem]
+  );
+  function confirmAddLi(candidates: PacingDraftLineItemV1[]) {
+    plan.current?.addLineItems?.(candidates);
+    addLiRequest?.onAdded(candidates.map((c) => c.lineItemId).sort());
+    setAddLiRequest(null);
+  }
 
   const netRatioCount = useMemo(
     () =>
@@ -430,7 +466,11 @@ export function PacingSettingsDrawer({
   // once-per-opening; `initialTab` is read, never depended on, so a changing prop cannot yank the
   // user off the tab they are on mid-session.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Closing the drawer drops a question it left open, as the reference's does.
+      setAddLiRequest(null);
+      return;
+    }
     setSeedKey((n) => n + 1);
     setDirty(NOTHING_DIRTY);
     setErrors([]);
@@ -452,7 +492,8 @@ export function PacingSettingsDrawer({
       setSwitches((s) => (s
         && s.coefEnabled === v.coefEnabled
         && s.netEnabled === v.netEnabled
-        && s.primaryCvEnabled === v.primaryCvEnabled ? s : v)),
+        && s.primaryCvEnabled === v.primaryCvEnabled
+        && s.fetchConversions === v.fetchConversions ? s : v)),
     []
   );
   const markWidgets = useCallback((v: boolean) => setDirty((d) => (d.widgets === v ? d : { ...d, widgets: v })), []);
@@ -607,6 +648,8 @@ export function PacingSettingsDrawer({
             conversions={conversions}
             planByLineItem={planByLineItem}
             seedKey={seedKey}
+            cvData={planCvData}
+            onLineItemsChange={setPlanDraftLis}
             onDirtyChange={markPlan}
           />
         </div>
@@ -642,6 +685,7 @@ export function PacingSettingsDrawer({
             visible={tab === "data"}
             onDirtyChange={markData}
             onSwitchesChange={markSwitches}
+            onAddLineItem={openAddLiFromMapping}
           />
         </div>
         <div className={cn("psettings__panel", tab !== "widgets" && "psettings__panel--hidden")}>
@@ -698,6 +742,7 @@ export function PacingSettingsDrawer({
             onPerfSheetChange={setPerfDraft}
             onPerfRetryProbe={() => { probedIdRef.current = null; if (perfSheetId) void runPerfProbe(perfSheetId); }}
             onReadSource={onSaved}
+            onAddLineItem={openAddLiFromMapping}
             onDirtyChange={markMapping}
           />
         </div>
@@ -722,6 +767,19 @@ export function PacingSettingsDrawer({
           />
         </div>
       </Sheet>
+
+      <Modal open={addLiRequest !== null} onClose={() => setAddLiRequest(null)} title="Add line item">
+        {addLiRequest && (
+          <AddLineItemPanel
+            bare
+            slug={slug}
+            currency={currency}
+            existingIds={addLiExistingIds}
+            onAdd={confirmAddLi}
+            onClose={() => setAddLiRequest(null)}
+          />
+        )}
+      </Modal>
 
       <Modal open={confirmClose} onClose={() => setConfirmClose(false)} title="Discard unsaved changes?">
         <p>
