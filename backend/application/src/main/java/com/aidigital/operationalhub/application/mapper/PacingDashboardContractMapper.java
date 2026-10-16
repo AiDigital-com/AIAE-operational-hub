@@ -226,9 +226,26 @@ public class PacingDashboardContractMapper {
 	public PacingNotifySettingsV1 toV1(PacingNotifySettings settings) {
 		return new PacingNotifySettingsV1()
 				.alerts(toV1(settings.alerts()))
-				.metrics(new PacingNotifyMetricsV1().vcr(settings.metrics().vcr()))
+				.metrics(new PacingNotifyMetricsV1().vcr(settings.metrics() != null && settings.metrics().vcr()))
 				.hidePaused(settings.hidePaused())
-				.summaryProjection(PacingSummaryProjectionV1.fromValue(settings.summaryProjection()));
+				.summaryProjection(summaryProjectionOf(settings.summaryProjection()));
+	}
+
+	/**
+	 * Reads the stored {@code summary_projection} the way Pacing itself does: {@code plan} is plan,
+	 * anything else - including absent - is {@code reforecast}. The key was added to the notify block
+	 * after many pacings were created, so a config that predates it carries no value at all; both
+	 * sides of Pacing (its notify validator and its Slack summary) treat that as the default rather
+	 * than as an error, and the {@code metrics} block above is read with the same rule ({@code vcr}
+	 * absent is off).
+	 *
+	 * @param stored the raw stored value, possibly null
+	 * @return the contract enum, never null
+	 */
+	PacingSummaryProjectionV1 summaryProjectionOf(String stored) {
+		return PacingSummaryProjectionV1.PLAN.getValue().equals(stored)
+				? PacingSummaryProjectionV1.PLAN
+				: PacingSummaryProjectionV1.REFORECAST;
 	}
 
 	/**

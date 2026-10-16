@@ -370,6 +370,39 @@ class PacingDashboardContractMapperTest {
 	}
 
 	@Test
+	void shouldDefaultAbsentNotifyKeysLikePacingDoesTest() {
+		// Given: a notify block written before summary_projection and metrics existed - 236 of the
+		// 1337 production pacings carry one. Pacing reads both as their defaults, never as an error.
+		PacingNotifySettings settings = new PacingNotifySettings(
+				new PacingAlertsConfig(
+						false,
+						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
+						new PacingAlertRuleGapDays(true, true, 1),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 0.7),
+						new PacingAlertRuleFactor(true, true, 2.0),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleBand(true, true, -5, 5),
+						new PacingAlertRuleGapPp(true, true, 3),
+						new PacingAlertRuleSpend(true, true, 90, 100),
+						new PacingAlertRuleBase(true, true),
+						new PacingAlertRuleDays(true, true, 2),
+						new PacingAlertRuleThresholdPct(true, true, 10)),
+				null,
+				false,
+				null);
+
+		// When:
+		PacingNotifySettingsV1 result = mapper.toV1(settings);
+
+		// Then:
+		assertThat(result.getMetrics().getVcr()).isFalse();
+		assertThat(result.getHidePaused()).isFalse();
+		assertThat(result.getSummaryProjection()).isEqualTo(PacingSummaryProjectionV1.REFORECAST);
+	}
+
+	@Test
 	void shouldMapFullNotifySettingsFromV1Test() {
 		// Given: §14 - the reverse direction, as the notify-settings save endpoint reads it.
 		PacingNotifySettingsV1 body = new PacingNotifySettingsV1()
