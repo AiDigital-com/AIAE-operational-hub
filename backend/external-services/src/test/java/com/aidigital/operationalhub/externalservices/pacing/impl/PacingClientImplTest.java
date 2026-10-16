@@ -2480,6 +2480,29 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldSendLensContextUnderItsSnakeCaseKeyWhenSavingDataSettingsTest() {
+		// Given: "Apply dashboard filters to creatives and conversions" turned on - the one key, under
+		// the name dash-gate stores (`lens_context`), and nothing else dragged along.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, null, null, null, null, null, null, true);
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(content().json("{\"data\":{\"lens_context\":true}}", true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When:
+		client.saveDataSettings(assertion, "nike-ss26", settings);
+
+		// Then:
+		server.verify();
+	}
+
+	@Test
 	void shouldSendDeliveryTabUnderItsSnakeCaseKeyWhenSavingDataSettingsTest() {
 		// Given: the Data panel switching the Delivery tab on, and nothing else.
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
@@ -2488,7 +2511,7 @@ class PacingClientImplTest {
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, null, null, null, null, null, true);
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, null, null, null, null, null, null, true, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json("{\"data\":{\"delivery_tab\":true}}", true))
 				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
@@ -2535,7 +2558,7 @@ class PacingClientImplTest {
 		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		PacingDataSettings settings = new PacingDataSettings(null, null, null, true, null, null, null, null, null, null);
+		PacingDataSettings settings = new PacingDataSettings(null, null, null, true, null, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2563,7 +2586,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(request -> {
 					String body = ((MockClientHttpRequest) request).getBodyAsString();
@@ -2596,7 +2619,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
 				null, false, null, null, null, null, List.of(Map.of("id", "devices", "loader", "bq_mart")),
-				null, null, null);
+				null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json(
 						"{\"data\":{\"fetch_creatives\":false,"
@@ -2690,7 +2713,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings =
-				new PacingDataSettings(null, true, null, null, null, null, null, null, null, null);
+				new PacingDataSettings(null, true, null, null, null, null, null, null, null, null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json("{\"data\":{\"fetch_creatives\":true}}", true))
 				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
@@ -2713,7 +2736,7 @@ class PacingClientImplTest {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
-				null, null, null, null, null, null, null, null, new PacingSheetSourceInstruction(null), null);
+				null, null, null, null, null, null, null, null, new PacingSheetSourceInstruction(null), null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json("{\"data\":{\"sheet\":null}}", true))
 				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
@@ -2736,7 +2759,7 @@ class PacingClientImplTest {
 		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
 		PacingDataSettings settings = new PacingDataSettings(
 				null, null, null, null, null, null, null, null,
-				new PacingSheetSourceInstruction(Map.of("spreadsheet_id", "abc", "tabs", List.of())), null);
+				new PacingSheetSourceInstruction(Map.of("spreadsheet_id", "abc", "tabs", List.of())), null, null);
 		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
 				.andExpect(content().json("{\"data\":{\"sheet\":{\"spreadsheet_id\":\"abc\",\"tabs\":[]}}}", true))
 				.andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
@@ -2763,7 +2786,7 @@ class PacingClientImplTest {
 						.body("{\"ok\":false,\"error\":\"bad_dim_sources\",\"detail\":\"devices: unknown catalog\"}")
 						.contentType(MediaType.APPLICATION_JSON));
 		PacingDataSettings settings =
-				new PacingDataSettings(null, null, null, null, null, null, List.of(Map.of("id", "devices")), null, null, null);
+				new PacingDataSettings(null, null, null, null, null, null, List.of(Map.of("id", "devices")), null, null, null, null);
 
 		// When-Then:
 		assertThatThrownBy(() -> client.saveDataSettings(assertion, "nike-ss26", settings))

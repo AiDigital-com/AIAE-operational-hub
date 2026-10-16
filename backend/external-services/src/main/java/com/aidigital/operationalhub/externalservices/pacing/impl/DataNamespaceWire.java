@@ -49,6 +49,9 @@ final class DataNamespaceWire {
 		if (settings.deliveryTab() != null) {
 			out.put("delivery_tab", settings.deliveryTab());
 		}
+		if (settings.lensContext() != null) {
+			out.put("lens_context", settings.lensContext());
+		}
 		if (settings.dimSources() != null) {
 			out.put("dim_sources", settings.dimSources());
 		}

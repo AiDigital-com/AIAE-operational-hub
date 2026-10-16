@@ -345,7 +345,7 @@ class PacingDashboardControllerMvcTest {
 		// Given: the Data panel moving this pacing onto the manual-adjustments view.
 		stubCurrentUser();
 		PacingDataSettings settings =
-				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null, null);
+				new PacingDataSettings("platform_mart_adjustments_view", null, null, null, null, null, null, null, null, null, null);
 		doReturn(settings).when(mapper).toDataSettings(any());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
@@ -362,7 +362,7 @@ class PacingDashboardControllerMvcTest {
 	void shouldForwardPacingsDimensionSourceRejectionAsBadRequestTest() throws Exception {
 		// Given: Pacing refuses a malformed dimension source rather than dropping it, naming which one.
 		stubCurrentUser();
-		doReturn(new PacingDataSettings(null, null, null, null, null, null, List.of(), null, null, null)).when(mapper).toDataSettings(any());
+		doReturn(new PacingDataSettings(null, null, null, null, null, null, List.of(), null, null, null, null)).when(mapper).toDataSettings(any());
 		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
 				"bad_dim_sources", "devices: unknown catalog"))
 				.when(pacingClient).saveDataSettings(any(), any(), any());

@@ -55,6 +55,11 @@ import java.util.Map;
  * @param deliveryTab      whether a pivot-ready Delivery tab is written to the pacing's source sheet
  *                         after each refresh. Pacing switches it off by itself when the tab would
  *                         pass its cell cap. Null leaves the stored switch untouched
+ * @param lensContext      "Apply dashboard filters to creatives and conversions" (Pacing spec
+ *                         2026-09-09, stored as {@code lens_context}): while on, the next refresh
+ *                         fetches creative and conversion rows per platform, tactic, audience and
+ *                         naming tag so the dashboard filters apply to them. Takes effect on the
+ *                         next refresh. Null leaves the stored switch untouched
  */
 public record PacingDataSettings(
 		String source,
@@ -66,5 +71,6 @@ public record PacingDataSettings(
 		List<Map<String, Object>> dimSources,
 		Map<String, Object> valueLabels,
 		PacingSheetSourceInstruction sheet,
-		Boolean deliveryTab) {
+		Boolean deliveryTab,
+		Boolean lensContext) {
 }

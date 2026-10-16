@@ -10282,6 +10282,16 @@ components:
             spreadsheet after each refresh. Heavy: Pacing caps it at 3,000,000 cells and switches it
             off by itself above that, reporting the measurement as `deliveryStats` on the dashboard
             payload. Takes effect on the next refresh. Omit to leave the stored switch alone.
+        lensContext:
+          type: boolean
+          description: >
+            "Apply dashboard filters to creatives and conversions" (Pacing spec 2026-09-09, stored as
+            `lens_context`). Off, creative and conversion rows are fetched at date × line item ×
+            creative, so the dashboard's platform and dimension filters cannot apply to them and the
+            Creative / Conversion breakdowns say so. On, the next refresh fetches them per platform,
+            tactic, audience and naming tag so the filters apply - several times more data: slower
+            refreshes, a heavier page and a larger source spreadsheet. Takes effect on the next
+            refresh. Omit to leave the stored switch alone.
         dimSources:
           $ref: '#/components/schemas/PacingDimSourcesV1'
         sheet:
