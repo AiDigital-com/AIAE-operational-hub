@@ -874,6 +874,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             conversions={data.conversions as Array<Record<string, unknown>> | undefined}
             data={data.data as PacingDataShape | undefined}
             deliveryStats={data.deliveryStats}
+            conversionTags={data.conversionTags ?? null}
             dimSourcesLoaded={data.dimSources as Record<string, Record<string, unknown>> | undefined}
             liDaily={sheetCoverageLiDaily}
             display={display}

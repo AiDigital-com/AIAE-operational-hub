@@ -30,7 +30,11 @@ async function openSection(name: RegExp) {
   await userEvent.click(screen.getByRole("button", { name }));
 }
 
-function renderPanel(data: PacingDataShape | undefined, deliveryStats: PacingDeliveryStatsV1 | null = null) {
+function renderPanel(
+  data: PacingDataShape | undefined,
+  deliveryStats: PacingDeliveryStatsV1 | null = null,
+  conversionTags: "own" | "dropped" | null = null
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = vi.fn();
   function Harness() {
@@ -43,6 +47,7 @@ function renderPanel(data: PacingDataShape | undefined, deliveryStats: PacingDel
           slug="nike-ss26"
           data={data}
           deliveryStats={deliveryStats}
+          conversionTags={conversionTags}
           seedKey={1}
           onDirtyChange={() => {}}
           onSwitchesChange={() => {}}
@@ -120,7 +125,7 @@ describe("PacingDataSection", () => {
 
     // When:
     await userEvent.click(screen.getByRole("button", { name: /Additional data/ }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /Devices dimension/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /Fetch device types/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // Then: the list is a whole-array replace, so the entry this panel does not own rides along -
@@ -269,6 +274,99 @@ describe("PacingDataSection", () => {
 
     // Then:
     expect(screen.getByRole("checkbox", { name: /Delivery tab in source sheet/ })).toBeEnabled();
+  });
+
+  // "Apply dashboard filters to creatives and conversions" - the reference's third box under
+  // Additional data (DataTab.jsx), stored as `lens_context`.
+  const LENS = /Apply dashboard filters to creatives and conversions/;
+
+  it("should keep Apply-filters disabled until creatives or conversions are fetched, and say why", async () => {
+    // Given: neither extra is fetched
+    renderPanel({ source: "platform_mart" });
+    await openSection(/Additional data/);
+
+    // Then: nothing to apply the filters to
+    expect(screen.getByRole("checkbox", { name: LENS })).toBeDisabled();
+    expect(screen.getByText("Needs creative assets or conversions above.")).toBeInTheDocument();
+
+    // When: creatives are ticked in the same sitting
+    await userEvent.click(screen.getByRole("checkbox", { name: /Fetch DSP creative assets/ }));
+
+    // Then: the box opens up, with the cost spelled out
+    expect(screen.getByRole("checkbox", { name: LENS })).toBeEnabled();
+    expect(screen.getByText(/Several times more data/)).toBeInTheDocument();
+  });
+
+  it("should ask before applying the filters, and send lens_context only once confirmed", async () => {
+    // Given: a pacing fetching conversions
+    renderPanel({ source: "platform_mart", fetch_conversions: true });
+    await openSection(/Additional data/);
+
+    // When: the box is ticked
+    await userEvent.click(screen.getByRole("checkbox", { name: LENS }));
+
+    // Then: it asks first and changes nothing until answered - the fetch multiplies several times over
+    expect(screen.getByRole("dialog", { name: "Apply dashboard filters to creatives and conversions?" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: LENS })).not.toBeChecked();
+
+    // When: confirmed and saved
+    await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: one key, nothing else dragged along
+    await waitFor(() => expect(api.savePacingDataSettings).toHaveBeenCalledTimes(1));
+    expect(api.savePacingDataSettings).toHaveBeenCalledWith("nike-ss26", { lensContext: true });
+  });
+
+  it("should leave Apply-filters off when the question is cancelled", async () => {
+    // Given:
+    renderPanel({ source: "platform_mart", fetch_creatives: true });
+    await openSection(/Additional data/);
+
+    // When:
+    await userEvent.click(screen.getByRole("checkbox", { name: LENS }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then:
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: LENS })).not.toBeChecked();
+    expect(api.savePacingDataSettings).not.toHaveBeenCalled();
+  });
+
+  it("should turn Apply-filters off without asking, even with no fetch left to gate it, and send false", async () => {
+    // Given: the flag on while neither fetch is - a setting that is on must stay switchable off
+    renderPanel({ source: "platform_mart", lens_context: true });
+    await openSection(/Additional data/);
+    expect(screen.getByRole("checkbox", { name: LENS })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: LENS })).toBeChecked();
+
+    // When:
+    await userEvent.click(screen.getByRole("checkbox", { name: LENS }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then:
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(api.savePacingDataSettings).toHaveBeenCalledTimes(1));
+    expect(api.savePacingDataSettings).toHaveBeenCalledWith("nike-ss26", { lensContext: false });
+  });
+
+  it("should say that Primary conversions tag conversions on their own, unless the tags were dropped", async () => {
+    // Given: Primary conversions on, with a conversions file carrying its own tags
+    renderPanel({ source: "platform_mart", fetch_conversions: true, primary_cv_enabled: true }, null, "own");
+    await openSection(/Additional data/);
+
+    // Then: the hint says the box only changes creatives
+    expect(screen.getByText(/this box only changes creatives/)).toBeInTheDocument();
+  });
+
+  it("should not say so when the conversion tags were dropped for size", async () => {
+    // Given: the tags were shed, so a refresh under this box re-fetches conversions too
+    renderPanel({ source: "platform_mart", fetch_conversions: true, primary_cv_enabled: true }, null, "dropped");
+    await openSection(/Additional data/);
+
+    // Then:
+    expect(screen.queryByText(/this box only changes creatives/)).not.toBeInTheDocument();
   });
 
   it("should not call the endpoint at all when nothing changed", async () => {

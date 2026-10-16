@@ -73,6 +73,9 @@ export interface PacingSettingsDrawerProps {
   data: PacingDataShape | undefined;
   /** What the last build measured of the Delivery tab, straight off the dashboard payload. */
   deliveryStats?: PacingDeliveryStatsV1 | null;
+  /** The loaded conversions file's tag state, straight off the dashboard payload (the Data tab's
+   *  hint under "Apply dashboard filters" reads it). */
+  conversionTags?: "own" | "dropped" | null;
   display: PacingDisplayShape;
   capabilities: Record<string, unknown> | undefined;
   isAdmin: boolean;
@@ -158,6 +161,7 @@ export function PacingSettingsDrawer({
   conversions,
   data,
   deliveryStats,
+  conversionTags,
   display,
   capabilities,
   isAdmin,
@@ -673,6 +677,7 @@ export function PacingSettingsDrawer({
             slug={slug}
             data={data}
             deliveryStats={deliveryStats}
+            conversionTags={conversionTags}
             netRatioCount={netRatioCount}
             seedKey={seedKey}
             thirdParty={thirdParty}

@@ -39,6 +39,10 @@ const ConfirmModal = ConfirmModalUntyped as unknown as ComponentType<{
 }>;
 import "./data-panel.css";
 
+/** The reference's `LENS_WITH_PRIMARY_CV` (`lib/settings/primary-cv-state.js`), verbatim: the sentence
+ *  appended to the Apply-filters hint while Primary conversions is on. */
+const LENS_WITH_PRIMARY_CV = " With Primary conversions on, conversions get their own tags at each refresh, so this box only changes creatives.";
+
 /**
  * Where a pacing's delivery is read from, and which optional extras are fetched with it - the Data tab
  * the retired SPA carried (`DataTab.jsx`), rebuilt on the Hub's own primitives.
@@ -128,6 +132,9 @@ interface DataDraft {
   netEnabled: boolean;
   primaryCvEnabled: boolean;
   deliveryTab: boolean;
+  /** "Apply dashboard filters to creatives and conversions" - `data.lens_context` (Pacing spec
+   *  2026-09-09). Decides what the next refresh fetches, never a figure already on screen. */
+  lensContext: boolean;
   devices: boolean;
 }
 
@@ -151,6 +158,7 @@ function seed(data: PacingDataShape | undefined): DataDraft {
     netEnabled: data?.net_enabled === true,
     primaryCvEnabled: data?.primary_cv_enabled === true,
     deliveryTab: data?.delivery_tab === true,
+    lensContext: data?.lens_context === true,
     devices: devicesOn(dimSources),
   };
 }
@@ -178,6 +186,7 @@ function diff(
   if (draft.netEnabled !== base.netEnabled) body.netEnabled = draft.netEnabled;
   if (draft.primaryCvEnabled !== base.primaryCvEnabled) body.primaryCvEnabled = draft.primaryCvEnabled;
   if (draft.deliveryTab !== base.deliveryTab) body.deliveryTab = draft.deliveryTab;
+  if (draft.lensContext !== base.lensContext) body.lensContext = draft.lensContext;
   const sheetsMoved = !!sheets && sheetsKey(sheets) !== sheetsKey(storedSheets ?? []);
   if (draft.devices !== base.devices || sheetsMoved) {
     // Wrapped, and the wrapper is the signal: sending the field at all means "replace the list", so it
@@ -208,6 +217,11 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
   /** What the last build measured of the Delivery tab, straight off the dashboard payload. Null when
    *  it was never measured. Read-only: it greys the switch when the tab would pass Pacing's cap. */
   deliveryStats?: PacingDeliveryStatsV1 | null;
+  /** The loaded conversions file's tag state, straight off the dashboard payload: `own` when its
+   *  rows carry their own dimension tags, `dropped` when the build shed them for size, null/absent
+   *  on a file that predates tags. Read-only: it only steers the hint under "Apply dashboard
+   *  filters" while Primary conversions is on (the reference's `conversionTags`). */
+  conversionTags?: "own" | "dropped" | null;
   /** How many line items currently carry a stored net ratio (from `planByLineItem`'s
    *  `storedNetRatio`). Read-only - it only steers the hint under the Net cost mode switch,
    *  and is never sent. */
@@ -352,7 +366,7 @@ function newThirdPartyId(): string {
 export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSectionProps>(
   function PacingDataSection(
     {
-      slug, data, deliveryStats, netRatioCount, seedKey, thirdParty, sheetSources, storedSheetSources,
+      slug, data, deliveryStats, conversionTags = null, netRatioCount, seedKey, thirdParty, sheetSources, storedSheetSources,
       valueLabels = null, storedValueLabels = null, dimSourcesLoaded, widgets, onReadSource,
       onSheetSourcesChange, liDaily, lineItems = [], perfSheet = null, storedPerfSheet = null, perfTouched = false,
       onPerfSheetChange, perfProbe = null, perfProbing = false, perfProbeMessage = null,
@@ -371,6 +385,12 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     // leaves room for it at all.
     const [confirmDelivery, setConfirmDelivery] = useState(false);
     const deliveryGateState = deliveryGate(deliveryStats ?? null);
+    // Apply-filters-to-creatives is the other setting that multiplies data several times over, so
+    // it asks the same way (the reference's `confirmLens`, spec 2026-09-09 §3.4). Off with nothing
+    // to apply it to, the box is disabled; a setting that is on must stay switchable off, whatever
+    // the fetches say (the Delivery rule).
+    const [confirmLens, setConfirmLens] = useState(false);
+    const lensGateDisabled = !draft.fetchCreatives && !draft.fetchConversions && !draft.lensContext;
     const save = useSavePacingDataSettings(slug);
 
     // ── CM360 source ──────────────────────────────────────────────────────────────────────────
@@ -914,8 +934,31 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
                 <span className="pdata__option-text">
                   <span className="pdata__option-name">Fetch conversions</span>
                   <span className="pdata__hint">
-                    Adds Conversion Action to breakdowns, read from the conversions table paired with
-                    the source above.
+                    Adds Conversion Action to breakdowns, using the selected BigQuery source.
+                  </span>
+                </span>
+              </label>
+              {/* The reference's third box (DataTab.jsx). Turning it OFF is never questioned; turning
+                  it ON asks first, because it multiplies the creative data several times over. */}
+              <label className="pdata__check">
+                <input
+                  type="checkbox"
+                  checked={draft.lensContext}
+                  disabled={lensGateDisabled}
+                  onChange={(event) => {
+                    if (!event.target.checked) { set({ lensContext: false }); return; }
+                    setConfirmLens(true);
+                  }}
+                />
+                <span className="pdata__option-text">
+                  <span className="pdata__option-name">Apply dashboard filters to creatives and conversions</span>
+                  <span className="pdata__hint">
+                    {lensGateDisabled
+                      ? "Needs creative assets or conversions above."
+                      : "Creative and conversion breakdowns follow the platform and dimension filters. Several times more data: slower refreshes, a heavier page and a larger source spreadsheet."
+                        // Not when the tags were dropped for size: those rows take the creative join
+                        // again, so the box changes conversions too (spec §1).
+                        + (draft.primaryCvEnabled && conversionTags !== "dropped" ? LENS_WITH_PRIMARY_CV : "")}
                   </span>
                 </span>
               </label>
@@ -926,8 +969,11 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
                   onChange={(event) => set({ devices: event.target.checked })}
                 />
                 <span className="pdata__option-text">
-                  <span className="pdata__option-name">Devices dimension</span>
-                  <span className="pdata__hint">Adds Device (from DSP) as a breakdown axis.</span>
+                  <span className="pdata__option-name">Fetch device types</span>
+                  <span className="pdata__hint">
+                    Adds Device to breakdowns, charts and tables. Coverage varies by DSP; missing
+                    device delivery appears as Not covered.
+                  </span>
                 </span>
               </label>
             </div>
@@ -944,6 +990,18 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
             confirmLabel="Enable"
             onConfirm={() => { setConfirmDelivery(false); set({ deliveryTab: true }); }}
             onCancel={() => setConfirmDelivery(false)}
+          />
+        )}
+        {confirmLens && (
+          <ConfirmModal
+            title="Apply dashboard filters to creatives and conversions?"
+            message={"Creative rows will be fetched per platform, tactic, audience and naming tag so the filters "
+              + "can apply to them. This multiplies the creative data several times over: slower refreshes, "
+              + "a heavier dashboard and a larger source spreadsheet. Turn it on only if you need filtered "
+              + "creative and conversion breakdowns."}
+            confirmLabel="Enable"
+            onConfirm={() => { setConfirmLens(false); set({ lensContext: true }); }}
+            onCancel={() => setConfirmLens(false)}
           />
         )}
       </>

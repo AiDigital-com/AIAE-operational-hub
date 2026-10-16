@@ -197,7 +197,8 @@ public class PacingDashboardContractMapper {
 				body.getSheet() == null
 						? null
 						: new PacingSheetSourceInstruction(body.getSheet().getEntry()),
-				body.getDeliveryTab());
+				body.getDeliveryTab(),
+				body.getLensContext());
 	}
 
 	/**
