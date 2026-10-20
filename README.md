@@ -101,6 +101,7 @@ The sync reads active employees and agency lead rows from BigQuery, resolves org
 | --- | --- |
 | Employee identity | Deduplicated by `work_email`; rows without work email are ignored. |
 | Title | Classified by title markers: senior director/director/team lead/trainee/senior manager/junior manager/manager. Unknown titles become member + `UNKNOWN` grade and are flagged. |
+| Department | A Director title counts only under the root department `app.netsuite-sync.director-root-department` (default `Media & Performance Optimization`, matched on the first `>` segment of the Rippling path). A Director anywhere else is a member with the title's grade and no role. |
 | Manager chain | Members walk the `manager` display-name chain until the nearest Team Lead. Directors do not get a team. Team Leads lead their own team. |
 | Rippling `teams` string | Parsed into pod tokens (`HOUSE`, `EAST`, `WEST`, etc.), grade cohorts, team lead fragments (`Department: FirstName`), and noise. Used as cross-check and fallback, not as the primary tree. |
 | Team name | Built as `<department leaf>: <team lead first name>`, for example `Media Optimization: Galina`. Duplicate names are disambiguated with the email local part and flagged. |
@@ -115,7 +116,7 @@ The Hub does not trust a single source column as "the team". It builds the mappi
 | Step | Input | Output | Notes |
 | --- | --- | --- | --- |
 | 1. Load employees | BigQuery Rippling employees table | Active employee list | Rows are deduplicated by `work_email`; employees without work email are skipped. |
-| 2. Classify each employee | `title` | `OrgRole` + `Grade` | Team Lead, Director, Senior/Middle/Junior/etc. are inferred from title text. Unknown titles are flagged. |
+| 2. Classify each employee | `title`, `department` | `OrgRole` + `Grade` | Team Lead, Director, Senior/Middle/Junior/etc. are inferred from title text. Director holds only inside the MPO root department; elsewhere it is a member. Unknown titles are flagged. |
 | 3. Resolve each member's Team Lead | `manager` chain | `teamLeadEmail` per employee | The primary path walks manager names upward until the nearest employee classified as Team Lead. Directors terminate the chain. |
 | 4. Cross-check/fallback with `teams` | Rippling `teams` string | Data-quality flags, optional fallback Team Lead | Tokens like `Media Optimization: Galina` are parsed. They can resolve a Team Lead only when the manager chain cannot, and only on a unique first-name match. |
 | 5. Build Hub teams | Team Lead employee rows | `hub_teams` rows | Team name is `<department leaf>: <team lead first name>`, e.g. `Media Optimization: Galina`. Duplicate names are disambiguated and flagged. |

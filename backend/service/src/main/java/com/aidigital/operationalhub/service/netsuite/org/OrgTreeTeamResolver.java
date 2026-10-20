@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.netsuite.org;
 
 import com.aidigital.operationalhub.domain.enums.Grade;
+import com.aidigital.operationalhub.service.netsuite.config.NetSuiteSyncProperties;
 import com.aidigital.operationalhub.service.netsuite.model.RipplingEmployee;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -23,10 +24,21 @@ import java.util.stream.Collectors;
  * <p>Manager resolution is strictly by name: the {@code manager} column is a full display name, and
  * emails do not follow any predictable pattern relative to names, so matching must never fall back to
  * email.
+ *
+ * <p>A Director title counts only inside the configured root department
+ * ({@link NetSuiteSyncProperties#getDirectorRootDepartment()}, the MPO tree). Elsewhere the same title
+ * is read as a plain member, so a «Growth Director» neither gets the unrestricted role nor terminates a
+ * member's manager-chain walk.
  */
 @Component
 @RequiredArgsConstructor
 public class OrgTreeTeamResolver {
+
+	/**
+	 * Separator of a Rippling department path ({@code "Media & Performance Optimization > Media
+	 * Optimization"}); the segment before the first one is the root department.
+	 */
+	static final String DEPARTMENT_PATH_SEPARATOR = ">";
 
 	/**
 	 * Maximum manager-chain hops walked before giving up (cycle/runaway guard).
@@ -50,6 +62,7 @@ public class OrgTreeTeamResolver {
 	private final TitleClassifier titleClassifier;
 	private final TeamsStringParser teamsStringParser;
 	private final NameNormalizer nameNormalizer;
+	private final NetSuiteSyncProperties properties;
 
 	/**
 	 * Resolves every employee to a role, grade, and team, and derives one team per Team Lead.
@@ -128,7 +141,7 @@ public class OrgTreeTeamResolver {
 	}
 
 	/**
-	 * Classifies every employee's title.
+	 * Classifies every employee's title, with the department gate applied to Directors.
 	 *
 	 * @param employees the deduplicated employees
 	 * @return the classification keyed by work email
@@ -136,9 +149,53 @@ public class OrgTreeTeamResolver {
 	Map<String, TitleClassification> classifyAll(List<RipplingEmployee> employees) {
 		Map<String, TitleClassification> result = new HashMap<>();
 		for (RipplingEmployee employee : employees) {
-			result.put(employee.workEmail(), titleClassifier.classify(employee.title()));
+			result.put(employee.workEmail(), classifyWithDepartmentGate(employee));
 		}
 		return result;
+	}
+
+	/**
+	 * Classifies one employee: the title decides the grade, and a Director title decides the
+	 * {@link OrgRole#DIRECTOR} role only inside the configured root department. Outside it the employee
+	 * is a {@link OrgRole#MEMBER} with the title's grade kept as it is (a Growth Director is still graded
+	 * Director on {@code hub_users}; they just hold no Pacing role for it).
+	 *
+	 * @param employee the employee
+	 * @return the classification after the department gate
+	 */
+	TitleClassification classifyWithDepartmentGate(RipplingEmployee employee) {
+		TitleClassification byTitle = titleClassifier.classify(employee.title());
+		if (byTitle.orgRole() != OrgRole.DIRECTOR || isInDirectorRootDepartment(employee.department())) {
+			return byTitle;
+		}
+		return new TitleClassification(OrgRole.MEMBER, byTitle.grade(), byTitle.titleUnrecognized());
+	}
+
+	/**
+	 * Tells whether a Rippling department path sits under the configured root department: its first
+	 * {@code >}-segment equals the root, case-insensitively, whitespace collapsed. A blank department or
+	 * a blank configuration never qualifies, so a misconfiguration fails closed.
+	 *
+	 * @param department the raw {@code department} value, possibly {@code null}
+	 * @return {@code true} when the department is the root or one of its sub-departments
+	 */
+	boolean isInDirectorRootDepartment(String department) {
+		String configuredRoot = collapseWhitespace(properties.getDirectorRootDepartment());
+		if (department == null || configuredRoot.isEmpty()) {
+			return false;
+		}
+		String root = collapseWhitespace(department.split(DEPARTMENT_PATH_SEPARATOR)[0]);
+		return !root.isEmpty() && root.equalsIgnoreCase(configuredRoot);
+	}
+
+	/**
+	 * Trims a string and collapses inner whitespace runs to one space.
+	 *
+	 * @param value the raw value, possibly {@code null}
+	 * @return the normalized value, or an empty string for {@code null}
+	 */
+	String collapseWhitespace(String value) {
+		return value == null ? "" : value.trim().replaceAll("\\s+", " ");
 	}
 
 	/**
