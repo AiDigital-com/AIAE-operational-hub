@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.netsuite.org;
 
 import com.aidigital.operationalhub.domain.enums.Grade;
+import com.aidigital.operationalhub.service.netsuite.config.NetSuiteSyncProperties;
 import com.aidigital.operationalhub.service.netsuite.model.RipplingEmployee;
 import org.junit.jupiter.api.Test;
 
@@ -20,8 +21,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class OrgTreeTeamResolverTest {
 
-	private final OrgTreeTeamResolver resolver =
-			new OrgTreeTeamResolver(new TitleClassifier(), new TeamsStringParser(), new NameNormalizer());
+	/** The Rippling department path of an MPO Director, as the sync reads it. */
+	private static final String MPO_MEDIA_OPTIMIZATION = "Media & Performance Optimization > Media Optimization";
+
+	private final OrgTreeTeamResolver resolver = new OrgTreeTeamResolver(
+			new TitleClassifier(), new TeamsStringParser(), new NameNormalizer(), new NetSuiteSyncProperties());
 
 	@Test
 	void shouldSplitTwoTeamLeadsWithTheSameFirstNameByManagerNameTest() {
@@ -126,7 +130,7 @@ class OrgTreeTeamResolverTest {
 	@Test
 	void shouldAssignDirectorRoleWithNoTeamTest() {
 		// Given: edge case 5 - a Director, whose email does not resemble their name
-		RipplingEmployee egor = new RipplingEmployee("Egor Nekrasov", "Media Optimization",
+		RipplingEmployee egor = new RipplingEmployee("Egor Nekrasov", MPO_MEDIA_OPTIMIZATION,
 				"george.smith@aidigital.com", "WEST, MPO Directors", "Media Optimization Director",
 				"Anastasia Lagosha");
 
@@ -145,7 +149,7 @@ class OrgTreeTeamResolverTest {
 	void shouldAssignSeniorDirectorWithNoPodAndNoTeamTest() {
 		// Given: edge case 6 - a Senior Director with no pod token and an unresolved (root) manager;
 		// trailing whitespace in the title must be trimmed
-		RipplingEmployee anastasia = new RipplingEmployee("Anastasia Lagosha", "Media Optimization",
+		RipplingEmployee anastasia = new RipplingEmployee("Anastasia Lagosha", MPO_MEDIA_OPTIMIZATION,
 				"anastacia@aidigital.com", "MPO Senior Directors", "Senior Director, Media Optimization  ",
 				"Anna Nizkaya");
 
@@ -428,7 +432,7 @@ class OrgTreeTeamResolverTest {
 	void shouldFlagManagerChainHitDirectorBeforeAnyTeamLeadTest() {
 		// Given: R7 - the manager chain reaches a Director with no Team Lead in between and no team token
 		// to fall back on
-		RipplingEmployee director = new RipplingEmployee("Some Director", "Media Optimization",
+		RipplingEmployee director = new RipplingEmployee("Some Director", MPO_MEDIA_OPTIMIZATION,
 				"some.director@aidigital.com", "MPO Directors", "Media Optimization Director", null);
 		RipplingEmployee member = new RipplingEmployee("Reports To Director", "Media Optimization",
 				"reports.to.director@aidigital.com", "", "Media Optimization Manager", "Some Director");
@@ -509,6 +513,81 @@ class OrgTreeTeamResolverTest {
 		assertThat(resolved.teamLeadEmail()).isNull();
 		assertThat(resolved.flags()).contains(DataQualityFlag.NO_TEAM_SIGNAL);
 		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.UNRESOLVED_TEAM);
+	}
+
+	@Test
+	void shouldReadDirectorOutsideRootDepartmentAsMemberTest() {
+		// Given: a Growth Director - the title says Director, the department is not the MPO tree
+		RipplingEmployee growth = new RipplingEmployee("Grace Chatterton", "Growth",
+				"grace.chatterton@aidigital.com", "", "Growth Director", "Kelly Cunningham");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(growth));
+
+		// Then: a member with the title's grade, no team and no unrestricted role to come
+		ResolvedEmployee resolved = byEmail(result).get("grace.chatterton@aidigital.com");
+		assertThat(resolved.orgRole()).isEqualTo(OrgRole.MEMBER);
+		assertThat(resolved.grade()).isEqualTo(Grade.DIRECTOR);
+		assertThat(resolved.teamLeadEmail()).isNull();
+		assertThat(result.teams()).isEmpty();
+	}
+
+	@Test
+	void shouldKeepDirectorOfTheRootDepartmentItselfTest() {
+		// Given: a Director filed directly under the root, with no sub-department in the path, and a
+		// sub-department written with uneven spacing
+		RipplingEmployee atRoot = new RipplingEmployee("Root Director", "Media & Performance Optimization",
+				"root.director@aidigital.com", "MPO Senior Directors", "MPO Senior Director of Service Design",
+				"Anna Nizkaya");
+		RipplingEmployee inSub = new RipplingEmployee("Sub Director", "Media &  Performance Optimization >MPO Integration",
+				"sub.director@aidigital.com", "MPO Directors", "MPO Integrations Director", "Root Director");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(atRoot, inSub));
+
+		// Then:
+		Map<String, ResolvedEmployee> byEmail = byEmail(result);
+		assertThat(byEmail.get("root.director@aidigital.com").orgRole()).isEqualTo(OrgRole.DIRECTOR);
+		assertThat(byEmail.get("root.director@aidigital.com").grade()).isEqualTo(Grade.SENIOR_DIRECTOR);
+		assertThat(byEmail.get("sub.director@aidigital.com").orgRole()).isEqualTo(OrgRole.DIRECTOR);
+	}
+
+	@Test
+	void shouldWalkPastDirectorOutsideRootDepartmentWhenResolvingMemberTest() {
+		// Given: a member whose manager is a Growth Director - no longer a Director for the walk, so the
+		// chain continues upward and runs out at a rootless VP instead of stopping on the Director
+		RipplingEmployee vp = new RipplingEmployee("Kelly Cunningham", "Growth",
+				"kelly.cunningham@aidigital.com", "", "Regional VP of Growth", null);
+		RipplingEmployee growthDirector = new RipplingEmployee("Grace Chatterton", "Growth",
+				"grace.chatterton@aidigital.com", "", "Growth Director", "Kelly Cunningham");
+		RipplingEmployee associate = new RipplingEmployee("Growth Associate", "Growth > Business Development",
+				"growth.associate@aidigital.com", "", "Growth Associate", "Grace Chatterton");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(vp, growthDirector, associate));
+
+		// Then:
+		ResolvedEmployee resolved = byEmail(result).get("growth.associate@aidigital.com");
+		assertThat(resolved.teamLeadEmail()).isNull();
+		assertThat(resolved.flags()).contains(DataQualityFlag.NO_TEAM_SIGNAL);
+		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR);
+	}
+
+	@Test
+	void shouldFailClosedWhenRootDepartmentIsBlankOrMissingTest() {
+		// Given: a resolver configured with a blank root, and an MPO Director with no department at all
+		NetSuiteSyncProperties blankRoot = new NetSuiteSyncProperties();
+		blankRoot.setDirectorRootDepartment("  ");
+		OrgTreeTeamResolver blankRootResolver = new OrgTreeTeamResolver(
+				new TitleClassifier(), new TeamsStringParser(), new NameNormalizer(), blankRoot);
+
+		// When:
+		boolean blankConfiguration = blankRootResolver.isInDirectorRootDepartment(MPO_MEDIA_OPTIMIZATION);
+		boolean blankDepartment = resolver.isInDirectorRootDepartment(null);
+
+		// Then: neither side of the comparison being blank ever grants the role
+		assertThat(blankConfiguration).isFalse();
+		assertThat(blankDepartment).isFalse();
 	}
 
 	private Map<String, ResolvedEmployee> byEmail(OrgResolution resolution) {
