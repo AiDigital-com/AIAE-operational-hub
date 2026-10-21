@@ -5,6 +5,7 @@ import { campaignDisplayName } from "../../shared/format/names";
 import { cn } from "../../shared/style/cn";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { displayStatusLabel, resolveStatusStyle } from "../../shared/ui/status-badge/status-badge";
+import { CampaignPeople } from "./campaign-people";
 import { useCampaign } from "./hooks";
 import type { CampaignV1 } from "./types";
 import "./campaign-workspace.css";
@@ -167,21 +168,30 @@ export function CampaignWorkspace() {
       </div>
 
       <header className="campaign-ws__hero">
-        <h1 className="campaign-ws__title">{name}</h1>
-        {eyebrow && <div className="campaign-ws__hero-sub">{eyebrow}</div>}
-        <div className="campaign-ws__pills">
-          {campaign.status && (
-            <span className="campaign-ws__pill">
-              <span className="campaign-ws__pill-led" style={{ background: statusStyle.color }} />
-              {displayStatusLabel(campaign.status).toUpperCase()}
-            </span>
-          )}
-          {(campaign.start_date || campaign.end_date) && (
-            <span className="campaign-ws__pill campaign-ws__pill--date">
-              {formatDate(campaign.start_date)} — {formatDate(campaign.end_date)}
-            </span>
-          )}
+        <div className="campaign-ws__hero-main">
+          <h1 className="campaign-ws__title">{name}</h1>
+          {eyebrow && <div className="campaign-ws__hero-sub">{eyebrow}</div>}
+          <div className="campaign-ws__pills">
+            {campaign.status && (
+              <span className="campaign-ws__pill">
+                <span className="campaign-ws__pill-led" style={{ background: statusStyle.color }} />
+                {displayStatusLabel(campaign.status).toUpperCase()}
+              </span>
+            )}
+            {(campaign.start_date || campaign.end_date) && (
+              <span className="campaign-ws__pill campaign-ws__pill--date">
+                {formatDate(campaign.start_date)} — {formatDate(campaign.end_date)}
+              </span>
+            )}
+          </div>
         </div>
+        {/* Top-right, the owner's placement (2026-10-20): who this campaign is shared with, and
+            "Add people" for whoever may share it. */}
+        {numericId !== undefined && Number.isFinite(numericId) && (
+          <div className="campaign-ws__hero-aside">
+            <CampaignPeople campaignId={numericId} />
+          </div>
+        )}
       </header>
 
       <nav className="campaign-ws__tabs" aria-label="Campaign sections">

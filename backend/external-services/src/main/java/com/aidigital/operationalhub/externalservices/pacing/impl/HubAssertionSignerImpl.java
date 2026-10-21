@@ -46,6 +46,11 @@ public class HubAssertionSignerImpl implements HubAssertionSigner {
 		scope.put("kind", assertion.scopeKind());
 		if (!HubAssertion.KIND_ALL.equals(assertion.scopeKind())) {
 			scope.put("ids", assertion.scopeIds());
+			// Campaign sharing: sent only when there is something to send, so an assertion without
+			// shares is byte-identical to what the Node reference signs (see the cross-language tests).
+			if (!assertion.campaignIds().isEmpty()) {
+				scope.put("campaign_ids", assertion.campaignIds());
+			}
 		}
 		long exp = clock.millis() + Duration.ofSeconds(properties.getAssertionTtlSeconds()).toMillis();
 		Payload payload = new Payload(assertion.email(), scope, assertion.canCreate(), exp);

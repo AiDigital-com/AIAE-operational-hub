@@ -3,6 +3,7 @@ package com.aidigital.operationalhub.service.rbac.impl;
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
+import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -56,6 +57,9 @@ class PacingScopeResolverImplTest {
 
 	@Mock
 	private HubUserService hubUserService;
+
+	@Mock
+	private HubCampaignShareService hubCampaignShareService;
 
 	@InjectMocks
 	private PacingScopeResolverImpl resolver;
@@ -115,6 +119,21 @@ class PacingScopeResolverImplTest {
 		assertThat(entitlement.scope().ids())
 				.containsExactlyInAnyOrder(ACTING_PACING_USER_ID, MEMBER_PACING_USER_ID);
 		assertThat(entitlement.canCreate()).isTrue();
+	}
+
+	@Test
+	void shouldCarrySharedCampaignsBesideAnOwnersScopeTest() {
+		// Given: no team yet, but one campaign shared with the person
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID)).thenReturn(access(false, List.of()));
+		when(hubCampaignShareService.findCampaignIdsByUserId(any())).thenReturn(List.of(19813L));
+
+		// When:
+		PacingEntitlement entitlement = resolver.resolveForCurrentUser(user());
+
+		// Then: still owners (never "all"), with the share as text ids Pacing filters campaign_ids by
+		assertThat(entitlement.scope().kind()).isEqualTo(PacingScope.KIND_OWNERS);
+		assertThat(entitlement.scope().ids()).isEmpty();
+		assertThat(entitlement.scope().campaignIds()).containsExactly("19813");
 	}
 
 	@Test

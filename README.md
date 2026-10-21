@@ -73,6 +73,7 @@ The product is intentionally operational rather than marketing-facing: it is a w
 | First login | Clerk JWT claims | `hub_users` row is auto-provisioned from Clerk user id, email, and name. New users are active but have no access roles. |
 | Admin access | PostgreSQL `hub_role_assignments` | `ADMIN` grants full visibility and RBAC/team management. NetSuite sync preserves existing admin assignments. |
 | Team visibility | PostgreSQL `hub_teams`, `hub_team_agencies`, role assignments | Team-scoped roles see agencies linked to their team. |
+| Campaign sharing | PostgreSQL `hub_campaign_shares` | "Add people" in the campaign header. A share gives one user, from any team, that campaign and every pacing under it (the shared campaign ids travel to Pacing as `campaign_ids` beside the `owners` scope), until removed. Who may share: anyone whose own scope covers the campaign - admin, an `ALL`-scoped role, or a `TEAM` role whose team owns the campaign's agency. A recipient cannot share onward; Client Services cannot share. The sync never touches shares. |
 | Own/team roles | NetSuite/Rippling sync | Employees are classified by title and manager chain, then reconciled into Hub roles and team assignments. |
 
 Seeded roles and scopes:

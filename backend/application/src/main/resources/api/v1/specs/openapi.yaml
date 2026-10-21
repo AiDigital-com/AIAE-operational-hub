@@ -24,6 +24,10 @@ tags:
     description: Read-only access to clients sourced from BigQuery, filtered by RBAC scope.
   - name: campaigns
     description: Read-only access to campaigns sourced from BigQuery, optionally filtered by client or agency.
+  - name: campaignShare
+    description: >-
+      Campaign sharing - "Add people" on a campaign. A share gives a Hub user from any team the campaign
+      and every pacing under it, until it is removed.
   - name: teams
     description: Admin-only management of Hub teams.
   - name: pacing
@@ -581,6 +585,172 @@ paths:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '500':
           description: Exception occurred while reading the campaign from BigQuery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/shares:
+    get:
+      tags:
+        - campaignShare
+      operationId: listCampaignShares
+      description: >
+        Who the campaign is shared with, and whether the caller may change that. The campaign must be
+        visible to the caller - by their own scope or through a share.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The campaign's shares.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignShareListV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    post:
+      tags:
+        - campaignShare
+      operationId: createCampaignShare
+      description: >
+        Shares the campaign with a Hub user. Only someone whose OWN scope covers the campaign may share
+        it - an admin, a Director, or a member of the team that owns the campaign's agency; a person who
+        sees it only through a share, or Client Services, is refused. Sharing again with the same person
+        returns the existing share.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignShareCreateV1'
+      responses:
+        '201':
+          description: The campaign is shared with the user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignShareV1'
+        '400':
+          description: The campaign cannot be shared with the caller themselves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The caller may not share this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign or the Hub user was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/shares/candidates:
+    get:
+      tags:
+        - campaignShare
+      operationId: listCampaignShareCandidates
+      description: >
+        The Hub users the campaign could be shared with - everyone except the caller and those it is
+        already shared with - narrowed by a name or email fragment and capped at twenty, by name.
+        Requires the right to share.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: q
+          in: query
+          required: false
+          description: A case-insensitive fragment of the person's name or email.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: The matching candidates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignShareCandidateListV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The caller may not share this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/shares/{hubUserId}:
+    delete:
+      tags:
+        - campaignShare
+      operationId: deleteCampaignShare
+      description: >
+        Removes a user's share of the campaign. Takes effect at once; removing one that does not exist
+        is a no-op. Requires the right to share.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: hubUserId
+          in: path
+          required: true
+          description: The recipient's hub_users.id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: The share is gone.
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The caller may not share this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
           content:
             application/json:
               schema:
@@ -5833,6 +6003,97 @@ components:
         maximum: 100
         default: 20
   schemas:
+    CampaignShareV1:
+      type: object
+      description: One person a campaign is shared with.
+      properties:
+        hubUserId:
+          type: integer
+          format: int64
+          description: The recipient's hub_users.id.
+        fullName:
+          type: string
+          description: The recipient's display name.
+        email:
+          type: string
+          description: The recipient's email.
+        roleName:
+          type: string
+          nullable: true
+          description: The recipient's current Hub role, by display name; absent when they hold none.
+        teamName:
+          type: string
+          nullable: true
+          description: The team the recipient's role is scoped to; absent when it is not team-scoped.
+        grantedByName:
+          type: string
+          nullable: true
+          description: Who shared it, by display name.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was shared.
+      required:
+        - hubUserId
+    CampaignShareListV1:
+      type: object
+      description: A campaign's shares and the caller's right to change them.
+      properties:
+        canShare:
+          type: boolean
+          description: Whether the caller may add or remove people on this campaign.
+        shares:
+          type: array
+          description: The people the campaign is shared with, oldest first.
+          items:
+            $ref: '#/components/schemas/CampaignShareV1'
+      required:
+        - canShare
+        - shares
+    CampaignShareCreateV1:
+      type: object
+      description: The person to share the campaign with.
+      properties:
+        hubUserId:
+          type: integer
+          format: int64
+          description: The recipient's hub_users.id - from the candidates list.
+      required:
+        - hubUserId
+    CampaignShareCandidateV1:
+      type: object
+      description: A Hub user the campaign could be shared with.
+      properties:
+        hubUserId:
+          type: integer
+          format: int64
+          description: The user's hub_users.id.
+        fullName:
+          type: string
+          description: The user's display name.
+        email:
+          type: string
+          description: The user's email.
+        roleName:
+          type: string
+          nullable: true
+          description: The user's current Hub role, by display name; absent when they hold none.
+        teamName:
+          type: string
+          nullable: true
+          description: The team the user's role is scoped to; absent when it is not team-scoped.
+      required:
+        - hubUserId
+    CampaignShareCandidateListV1:
+      type: object
+      description: The users matching an "Add people" search.
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignShareCandidateV1'
+      required:
+        - candidates
     SyncSummaryV1:
       type: object
       description: Summary of a NetSuite/Rippling sync run.

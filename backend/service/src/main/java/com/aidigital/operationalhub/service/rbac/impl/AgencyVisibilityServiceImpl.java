@@ -1,5 +1,6 @@
 package com.aidigital.operationalhub.service.rbac.impl;
 
+import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.rbac.AgencyVisibilityService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
@@ -17,7 +18,9 @@ import java.util.Objects;
 
 /**
  * Default {@link AgencyVisibilityService}. Reads the user's effective access and translates their
- * TEAM-scoped roles into visible agency ids via {@link HubTeamAgencyService}.
+ * TEAM-scoped roles into visible agency ids via {@link HubTeamAgencyService}, then adds the campaigns
+ * shared with them ({@link HubCampaignShareService}) - which reach a restricted user regardless of
+ * team, and are moot for an unrestricted one.
  */
 @Service
 @RequiredArgsConstructor
@@ -25,6 +28,7 @@ public class AgencyVisibilityServiceImpl implements AgencyVisibilityService {
 
 	private final RbacQueryService rbacQueryService;
 	private final HubTeamAgencyService hubTeamAgencyService;
+	private final HubCampaignShareService hubCampaignShareService;
 
 	/**
 	 * {@inheritDoc}
@@ -47,7 +51,9 @@ public class AgencyVisibilityServiceImpl implements AgencyVisibilityService {
 				.filter(Objects::nonNull)
 				.distinct()
 				.toList();
-		return AgencyVisibility.restrictedTo(hubTeamAgencyService.findAgencyIdsByTeamIdIn(teamIds));
+		return AgencyVisibility.restrictedTo(
+				hubTeamAgencyService.findAgencyIdsByTeamIdIn(teamIds),
+				hubCampaignShareService.findCampaignIdsByUserId(user.id()));
 	}
 
 	/**

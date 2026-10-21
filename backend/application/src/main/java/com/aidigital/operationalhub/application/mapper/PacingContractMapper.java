@@ -51,7 +51,8 @@ public class PacingContractMapper {
 	 */
 	public HubAssertion toAssertion(CurrentUserModel user, PacingEntitlement entitlement) {
 		PacingScope scope = entitlement.scope();
-		return new HubAssertion(user.email(), scope.kind(), scope.ids(), entitlement.canCreate());
+		return new HubAssertion(
+				user.email(), scope.kind(), scope.ids(), scope.campaignIds(), entitlement.canCreate());
 	}
 
 	/**

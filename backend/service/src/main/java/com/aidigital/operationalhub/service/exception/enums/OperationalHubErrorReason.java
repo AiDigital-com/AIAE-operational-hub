@@ -366,7 +366,17 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	 * mutually exclusive selectors, or neither. The contract requires exactly one of
 	 * {@code lineItemIds} / {@code insertionOrderId}.
 	 */
-	OPH_065("OPH_065", "Send exactly one selector: lineItemIds or insertionOrderId.");
+	OPH_065("OPH_065", "Send exactly one selector: lineItemIds or insertionOrderId."),
+
+	/**
+	 * Campaign sharing: the person to share with is not a Hub user.
+	 */
+	OPH_066("OPH_066", "Unknown Hub user: %s."),
+
+	/**
+	 * Campaign sharing: a campaign cannot be shared with the person sharing it.
+	 */
+	OPH_067("OPH_067", "You already have access to this campaign - pick someone else.");
 
 	private final String code;
 	private final String description;

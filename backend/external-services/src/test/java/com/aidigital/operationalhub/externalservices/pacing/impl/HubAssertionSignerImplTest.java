@@ -74,6 +74,22 @@ class HubAssertionSignerImplTest {
 	}
 
 	@Test
+	void shouldSendSharedCampaignsAsCampaignIdsOnlyWhenThereAreAnyTest() {
+		// Given: campaign sharing adds campaign_ids beside an owners scope - and nothing at all otherwise,
+		// so an assertion without shares still signs byte-for-byte what the Node reference signs.
+		HubAssertionSignerImpl signer = signerFixedAt(1_000_000L);
+		HubAssertion withShares = new HubAssertion(
+				"me@aidigital.com", HubAssertion.KIND_OWNERS, List.of("u1"), List.of("19813"), true);
+		HubAssertion withoutShares = new HubAssertion("me@aidigital.com", HubAssertion.KIND_OWNERS, List.of("u1"), true);
+
+		// When / Then:
+		assertPayloadDecodesTo(signer.sign(withShares), "{\"email\":\"me@aidigital.com\",\"scope\":{\"kind\":\"owners\","
+				+ "\"ids\":[\"u1\"],\"campaign_ids\":[\"19813\"]},\"can_create\":true,\"exp\":1000000}");
+		assertPayloadDecodesTo(signer.sign(withoutShares), "{\"email\":\"me@aidigital.com\",\"scope\":{\"kind\":\"owners\","
+				+ "\"ids\":[\"u1\"]},\"can_create\":true,\"exp\":1000000}");
+	}
+
+	@Test
 	void shouldSerializeCanCreateAsSnakeCaseTest() {
 		// Given:
 		HubAssertionSignerImpl signer = signerFixedAt(1_000_000L);
