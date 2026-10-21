@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.service.rbac.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubUser;
+import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
@@ -45,6 +46,10 @@ import java.util.Set;
  * Deploying this resolver before that sync has run resolves every {@code owners} scope to an empty id
  * list, so nobody sees anything until the sync catches up. See {@code docs/local-development.md} in
  * the Pacing repo for the matching note on the id-shape contract itself.
+ *
+ * <p><b>Campaign sharing (2026-10-20).</b> Every restricted scope also carries the NetSuite campaigns
+ * shared with the person ({@link HubCampaignShareService}) as {@code campaignIds}; Pacing admits a
+ * pacing under any of them like a team-mate's. An unrestricted scope needs none.
  */
 @Slf4j
 @Service
@@ -54,6 +59,7 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 	private final RbacQueryService rbacQueryService;
 	private final HubRoleAssignmentService hubRoleAssignmentService;
 	private final HubUserService hubUserService;
+	private final HubCampaignShareService hubCampaignShareService;
 
 	@Override
 	public PacingEntitlement resolveForCurrentUser(CurrentUserModel user) {
@@ -79,8 +85,9 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 		// `campaigns` scope to filter by, but that is the OTHER end of the pipe: this resolver still has
 		// no source for the ids themselves, so a `campaigns` scope built here would just be a guess.
 		// Client Services is entitled to nothing rather than guess.
+		List<String> sharedCampaignIds = sharedCampaignIds(user);
 		if (access.roleCodes().contains(RbacRoleCode.CLIENT_SERVICES.getCode())) {
-			return new PacingEntitlement(PacingScope.owners(List.of()), canCreate);
+			return new PacingEntitlement(PacingScope.owners(List.of(), sharedCampaignIds), canCreate);
 		}
 
 		List<Long> teamIds = access.assignments().stream()
@@ -91,7 +98,7 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 				.toList();
 
 		if (teamIds.isEmpty()) {
-			return new PacingEntitlement(PacingScope.owners(List.of()), canCreate);
+			return new PacingEntitlement(PacingScope.owners(List.of(), sharedCampaignIds), canCreate);
 		}
 
 		Set<Long> memberUserIds = new LinkedHashSet<>();
@@ -128,7 +135,20 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 					user.email(), skipped, members.size());
 		}
 
-		return new PacingEntitlement(PacingScope.owners(List.copyOf(pacingUserIds)), canCreate);
+		return new PacingEntitlement(
+				PacingScope.owners(List.copyOf(pacingUserIds), sharedCampaignIds), canCreate);
+	}
+
+	/**
+	 * The NetSuite campaigns shared with the user, as the text ids the Pacing scope carries.
+	 *
+	 * @param user the current user
+	 * @return the shared campaign ids as text; empty when nothing is shared
+	 */
+	List<String> sharedCampaignIds(CurrentUserModel user) {
+		return hubCampaignShareService.findCampaignIdsByUserId(user.id()).stream()
+				.map(String::valueOf)
+				.toList();
 	}
 
 	/**

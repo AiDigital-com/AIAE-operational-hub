@@ -22,6 +22,7 @@
 	<include file="/db/changelog/schema/0015-agency-owner-overrides.xml"/>
 	<include file="/db/changelog/schema/0016-team-agency-multi-team.xml"/>
 	<include file="/db/changelog/schema/0017-pacing-user-id.xml"/>
+	<include file="/db/changelog/schema/0018-campaign-shares.xml"/>
 	<include file="/db/changelog/data/0001-rbac-dictionaries.xml"/>
 	<include file="/db/changelog/data/0002-agency-owner-overrides.xml"/>
 

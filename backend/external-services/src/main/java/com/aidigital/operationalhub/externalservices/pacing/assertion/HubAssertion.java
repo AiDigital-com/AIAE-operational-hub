@@ -17,10 +17,13 @@ import java.util.List;
  * @param scopeIds   owner Pacing user_ids, UUIDs as text ({@value #KIND_OWNERS}) or NetSuite campaign
  *                   ids ({@value #KIND_CAMPAIGNS}) the scope is restricted to; ignored for
  *                   {@value #KIND_ALL}
+ * @param campaignIds the NetSuite campaign ids shared with the user (campaign sharing), sent as
+ *                    {@code campaign_ids} beside an {@value #KIND_OWNERS} scope; empty when none
  * @param canCreate  whether the user may create a pacing
  * @since 1.0
  */
-public record HubAssertion(String email, String scopeKind, List<String> scopeIds, boolean canCreate) {
+public record HubAssertion(
+		String email, String scopeKind, List<String> scopeIds, List<String> campaignIds, boolean canCreate) {
 
 	/**
 	 * No filtering: sees every pacing.
@@ -39,5 +42,18 @@ public record HubAssertion(String email, String scopeKind, List<String> scopeIds
 
 	public HubAssertion {
 		scopeIds = scopeIds == null ? List.of() : List.copyOf(scopeIds);
+		campaignIds = campaignIds == null ? List.of() : List.copyOf(campaignIds);
+	}
+
+	/**
+	 * An assertion with no shared campaigns - the shape every caller before campaign sharing built.
+	 *
+	 * @param email     the asserted user's email address
+	 * @param scopeKind the scope kind
+	 * @param scopeIds  the ids the scope is restricted to
+	 * @param canCreate whether the user may create a pacing
+	 */
+	public HubAssertion(String email, String scopeKind, List<String> scopeIds, boolean canCreate) {
+		this(email, scopeKind, scopeIds, List.of(), canCreate);
 	}
 }

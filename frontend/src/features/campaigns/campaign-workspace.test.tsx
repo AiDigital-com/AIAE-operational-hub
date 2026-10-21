@@ -11,6 +11,13 @@ import { CampaignTabRedirect, CampaignWorkspace } from "./campaign-workspace";
 vi.mock("./api", () => ({
   getCampaign: vi.fn(),
 }));
+// The hero's "people" control has its own tests; here it only needs to answer rather than throw.
+vi.mock("./shares-api", () => ({
+  listCampaignShares: vi.fn().mockResolvedValue({ canShare: false, shares: [] }),
+  listShareCandidates: vi.fn().mockResolvedValue([]),
+  createCampaignShare: vi.fn(),
+  deleteCampaignShare: vi.fn(),
+}));
 
 interface WorkspaceState {
   campaign?: CampaignV1;

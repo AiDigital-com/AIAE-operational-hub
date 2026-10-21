@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+		xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+	<!-- Campaign sharing: "Add people" on a campaign gives someone from another team the campaign and
+	     every pacing under it. The share is Hub-owned state (the Hub is what decides visibility); Pacing
+	     only receives the shared campaign ids inside the signed scope. -->
+
+	<changeSet id="create-table-hub_campaign_shares" author="claude">
+		<preConditions onFail="MARK_RAN">
+			<not>
+				<tableExists tableName="hub_campaign_shares"/>
+			</not>
+		</preConditions>
+		<sqlFile path="sql/createTableHubCampaignShares.sql" relativeToChangelogFile="true"/>
+	</changeSet>
+
+</databaseChangeLog>

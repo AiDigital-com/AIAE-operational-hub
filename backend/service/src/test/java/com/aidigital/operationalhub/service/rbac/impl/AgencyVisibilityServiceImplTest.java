@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.rbac.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
+import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
 import com.aidigital.operationalhub.service.rbac.model.AgencyVisibility;
@@ -22,6 +23,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.instancio.Select.field;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
@@ -39,6 +41,9 @@ class AgencyVisibilityServiceImplTest {
 
 	@Mock
 	private HubTeamAgencyService hubTeamAgencyService;
+
+	@Mock
+	private HubCampaignShareService hubCampaignShareService;
 
 	@InjectMocks
 	private AgencyVisibilityServiceImpl service;
@@ -84,6 +89,39 @@ class AgencyVisibilityServiceImplTest {
 		assertThat(visibility.seesAll()).isFalse();
 		assertThat(visibility.agencyIds()).containsExactlyInAnyOrder(500L, 501L);
 		assertThat(visibility.seesNothing()).isFalse();
+	}
+
+	@Test
+	void shouldAddSharedCampaignsToARestrictedUserTest() {
+		// Given: a team-scoped role plus one campaign shared from another team
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID))
+				.thenReturn(access(false, List.of(assignment("MPO_MANAGER", "TEAM", TEAM_ID))));
+		when(hubTeamAgencyService.findAgencyIdsByTeamIdIn(List.of(TEAM_ID))).thenReturn(List.of(500L));
+		when(hubCampaignShareService.findCampaignIdsByUserId(any())).thenReturn(List.of(19813L));
+
+		// When:
+		AgencyVisibility visibility = service.resolveForCurrentUser(user());
+
+		// Then: the share widens what is visible, not what is owned
+		assertThat(visibility.campaignIds()).containsExactly(19813L);
+		assertThat(visibility.ownsAgency(500L)).isTrue();
+		assertThat(visibility.ownsAgency(501L)).isFalse();
+		assertThat(visibility.seesNothing()).isFalse();
+	}
+
+	@Test
+	void shouldSeeOnlySharedCampaignsWhenTheUserHasNoRoleTest() {
+		// Given: no role at all, one share
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID)).thenReturn(access(false, List.of()));
+		when(hubCampaignShareService.findCampaignIdsByUserId(any())).thenReturn(List.of(19813L));
+
+		// When:
+		AgencyVisibility visibility = service.resolveForCurrentUser(user());
+
+		// Then:
+		assertThat(visibility.seesNothing()).isFalse();
+		assertThat(visibility.agencyIds()).isEmpty();
+		assertThat(visibility.campaignIds()).containsExactly(19813L);
 	}
 
 	@Test

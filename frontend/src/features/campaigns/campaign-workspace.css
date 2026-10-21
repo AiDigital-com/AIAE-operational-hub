@@ -29,6 +29,20 @@
 /* ── hero ── */
 .campaign-ws__hero {
   margin-bottom: 30px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.campaign-ws__hero-main {
+  min-width: 0;
+  flex: 1;
+}
+/* Sits on the title's cap line, not the hero's centre: the hero grows with pills and the eyebrow,
+   and "Add people" belongs with the name, not floating beside a date. */
+.campaign-ws__hero-aside {
+  flex: none;
+  padding-top: 12px;
 }
 .campaign-ws__title {
   margin: 0;
@@ -119,5 +133,12 @@
 @media (max-width: 720px) {
   .campaign-ws__title {
     font-size: 36px;
+  }
+  .campaign-ws__hero {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .campaign-ws__hero-aside {
+    padding-top: 0;
   }
 }

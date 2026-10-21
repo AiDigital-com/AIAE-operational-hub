@@ -531,4 +531,23 @@ class BqRequestTest {
 				.build()
 				.sql();
 	}
+
+	@Test
+	void shouldOrTheTwoSidesOfWhereInEitherAndDropAnEmptySideTest() {
+		// Given / When: both sides, one side, no side
+		String both = new BqRequest.Builder().from("t").select("id")
+				.whereInEither("agency_id", List.of(1L, 2L), "campaign_id", List.of(9L)).build().sql();
+		String onlyAgencies = new BqRequest.Builder().from("t").select("id")
+				.whereInEither("agency_id", List.of(1L, 2L), "campaign_id", List.of()).build().sql();
+		String onlyCampaigns = new BqRequest.Builder().from("t").select("id")
+				.whereInEither("agency_id", List.of(), "campaign_id", List.of(9L)).build().sql();
+		String neither = new BqRequest.Builder().from("t").select("id")
+				.whereInEither("agency_id", List.of(), "campaign_id", null).build().sql();
+
+		// Then: a row matches when EITHER column is in its set; an empty side never narrows the other
+		assertThat(both).contains("WHERE (`agency_id` IN (1, 2) OR `campaign_id` IN (9))");
+		assertThat(onlyAgencies).contains("WHERE `agency_id` IN (1, 2)").doesNotContain("OR");
+		assertThat(onlyCampaigns).contains("WHERE `campaign_id` IN (9)").doesNotContain("OR");
+		assertThat(neither).doesNotContain("WHERE");
+	}
 }

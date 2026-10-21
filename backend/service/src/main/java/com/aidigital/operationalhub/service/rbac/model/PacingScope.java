@@ -18,12 +18,18 @@ import java.util.List;
  * com.aidigital.operationalhub.service.rbac.impl.PacingScopeResolverImpl} for the full reasoning and
  * the resulting deploy-order dependency.
  *
- * @param kind the scope kind
- * @param ids  the owner Pacing user_ids or campaign ids the scope is restricted to; empty for
- *             {@code all}
+ * <p>{@code campaignIds} is the campaign-sharing addition (2026-10-20): the NetSuite campaigns shared
+ * with this person inside the Hub, carried beside an {@value #KIND_OWNERS} scope as
+ * {@code campaign_ids}. Pacing admits a pacing under any of them exactly as it admits a team-mate's.
+ * Always empty for {@value #KIND_ALL}, which already sees everything.
+ *
+ * @param kind        the scope kind
+ * @param ids         the owner Pacing user_ids or campaign ids the scope is restricted to; empty for
+ *                    {@code all}
+ * @param campaignIds the NetSuite campaign ids shared with the user, as text; empty when none
  * @since 1.0
  */
-public record PacingScope(String kind, List<String> ids) {
+public record PacingScope(String kind, List<String> ids, List<String> campaignIds) {
 
 	/**
 	 * No filtering: sees every pacing.
@@ -42,6 +48,17 @@ public record PacingScope(String kind, List<String> ids) {
 
 	public PacingScope {
 		ids = ids == null ? List.of() : List.copyOf(ids);
+		campaignIds = campaignIds == null ? List.of() : List.copyOf(campaignIds);
+	}
+
+	/**
+	 * A scope with no shared campaigns - the shape every caller before campaign sharing built.
+	 *
+	 * @param kind the scope kind
+	 * @param ids  the owner Pacing user_ids or campaign ids the scope is restricted to
+	 */
+	public PacingScope(String kind, List<String> ids) {
+		this(kind, ids, List.of());
 	}
 
 	/**
@@ -51,6 +68,19 @@ public record PacingScope(String kind, List<String> ids) {
 	 */
 	public static PacingScope all() {
 		return new PacingScope(KIND_ALL, List.of());
+	}
+
+	/**
+	 * Builds a {@value #KIND_OWNERS} scope restricted to the given owners, widened by the campaigns
+	 * shared with the user.
+	 *
+	 * @param ownerUserIds      the Pacing user_ids (UUIDs, as text) the scope is restricted to; may be
+	 *                          empty
+	 * @param sharedCampaignIds the NetSuite campaign ids shared with the user, as text; may be empty
+	 * @return the owners scope
+	 */
+	public static PacingScope owners(List<String> ownerUserIds, List<String> sharedCampaignIds) {
+		return new PacingScope(KIND_OWNERS, ownerUserIds, sharedCampaignIds);
 	}
 
 	/**

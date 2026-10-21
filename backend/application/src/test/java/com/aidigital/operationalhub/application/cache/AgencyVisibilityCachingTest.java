@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.application.cache;
 
 import com.aidigital.operationalhub.application.config.CacheConfig;
+import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.rbac.AgencyVisibilityService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
@@ -54,9 +55,15 @@ class AgencyVisibilityCachingTest {
 		}
 
 		@Bean
+		HubCampaignShareService hubCampaignShareService() {
+			return Mockito.mock(HubCampaignShareService.class);
+		}
+
+		@Bean
 		AgencyVisibilityService agencyVisibilityService(
-				RbacQueryService rbacQueryService, HubTeamAgencyService hubTeamAgencyService) {
-			return new AgencyVisibilityServiceImpl(rbacQueryService, hubTeamAgencyService);
+				RbacQueryService rbacQueryService, HubTeamAgencyService hubTeamAgencyService,
+				HubCampaignShareService hubCampaignShareService) {
+			return new AgencyVisibilityServiceImpl(rbacQueryService, hubTeamAgencyService, hubCampaignShareService);
 		}
 	}
 

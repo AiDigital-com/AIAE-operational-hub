@@ -330,10 +330,47 @@ public record BqRequest(String sql) {
 		 */
 		public Builder whereIn(String column, List<Long> ids) {
 			if (ids != null && !ids.isEmpty()) {
-				String values = ids.stream().map(String::valueOf).collect(Collectors.joining(", "));
-				predicates.add(BqSql.col(column) + " IN (" + values + ")");
+				predicates.add(inPredicate(column, ids));
 			}
 			return this;
+		}
+
+		/**
+		 * Adds a {@code (`a` IN (...) OR `b` IN (...))} predicate over two numeric id sets - a row
+		 * matches when EITHER column is in its set. A side whose set is empty is left out, so with one
+		 * empty set this renders exactly what {@link #whereIn(String, List)} does for the other, and with
+		 * both empty it is a no-op. Used for visibility that is the union of two grants (a team's agencies
+		 * OR the campaigns shared with the person).
+		 *
+		 * @param columnA the first column
+		 * @param idsA    the ids the first column may be in
+		 * @param columnB the second column
+		 * @param idsB    the ids the second column may be in
+		 * @return this builder
+		 */
+		public Builder whereInEither(String columnA, List<Long> idsA, String columnB, List<Long> idsB) {
+			boolean hasA = idsA != null && !idsA.isEmpty();
+			boolean hasB = idsB != null && !idsB.isEmpty();
+			if (hasA && hasB) {
+				predicates.add("(" + inPredicate(columnA, idsA) + " OR " + inPredicate(columnB, idsB) + ")");
+			} else if (hasA) {
+				predicates.add(inPredicate(columnA, idsA));
+			} else if (hasB) {
+				predicates.add(inPredicate(columnB, idsB));
+			}
+			return this;
+		}
+
+		/**
+		 * Renders {@code `column` IN (id, id, ...)} over a non-empty numeric id list.
+		 *
+		 * @param column the column
+		 * @param ids    the ids, at least one
+		 * @return the predicate text
+		 */
+		String inPredicate(String column, List<Long> ids) {
+			String values = ids.stream().map(String::valueOf).collect(Collectors.joining(", "));
+			return BqSql.col(column) + " IN (" + values + ")";
 		}
 
 		/**

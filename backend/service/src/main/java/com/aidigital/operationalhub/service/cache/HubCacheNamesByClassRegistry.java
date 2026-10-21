@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.cache;
 
 import com.aidigital.operationalhub.cachemanagement.registry.CacheNamesByClassRegistry;
+import com.aidigital.operationalhub.domain.entity.HubCampaignShare;
 import com.aidigital.operationalhub.domain.entity.HubDashboard;
 import com.aidigital.operationalhub.domain.entity.HubRole;
 import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
@@ -50,6 +51,8 @@ public class HubCacheNamesByClassRegistry implements CacheNamesByClassRegistry {
 					ENTITY + "HubRoleAssignment",
 					AgencyVisibilityService.AGENCY_VISIBILITY_CACHE),
 			HubTeamAgency.class, List.of(
+					AgencyVisibilityService.AGENCY_VISIBILITY_CACHE),
+			HubCampaignShare.class, List.of(
 					AgencyVisibilityService.AGENCY_VISIBILITY_CACHE),
 			HubDashboard.class, List.of(
 					ENTITY + "HubDashboard"));

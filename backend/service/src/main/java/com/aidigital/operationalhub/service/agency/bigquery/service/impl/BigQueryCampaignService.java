@@ -102,7 +102,9 @@ public class BigQueryCampaignService implements CampaignService {
 				.withTotalCount(CAMPAIGN_ID)
 				.countDistinct(CAMPAIGN_ID)
 				.whereNotNull(CAMPAIGN_ID)
-				.whereIn(AGENCY_ID, visibility.agencyIds())
+				// A campaign is visible through its agency (the team's book) OR because it was shared with
+				// this person (campaign sharing); an unrestricted visibility carries neither and filters nothing.
+				.whereInEither(AGENCY_ID, visibility.agencyIds(), CAMPAIGN_ID, visibility.campaignIds())
 				.groupBy(CAMPAIGN_ID)
 				.orderBy(sortExpression(criteria.sort()))
 				.sortBy(criteria.sort())
@@ -195,7 +197,7 @@ public class BigQueryCampaignService implements CampaignService {
 				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
 				.selectAnyValue(AGENCY, ALIAS_AGENCY_NAME)
 				.whereNotNull(CAMPAIGN_ID)
-				.whereIn(AGENCY_ID, visibility.agencyIds())
+				.whereInEither(AGENCY_ID, visibility.agencyIds(), CAMPAIGN_ID, visibility.campaignIds())
 				.groupBy(CAMPAIGN_ID)
 				.limitOffset(1, 0);
 		query.filter(CAMPAIGN_ID, true, idFilter);
@@ -239,7 +241,7 @@ public class BigQueryCampaignService implements CampaignService {
 				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
 				.selectAnyValue(AGENCY, ALIAS_AGENCY_NAME)
 				.whereNotNull(CAMPAIGN_ID)
-				.whereIn(AGENCY_ID, visibility.agencyIds())
+				.whereInEither(AGENCY_ID, visibility.agencyIds(), CAMPAIGN_ID, visibility.campaignIds())
 				.whereIn(CAMPAIGN_ID, campaignIds)
 				.groupBy(CAMPAIGN_ID)
 				.limitOffset(campaignIds.size(), 0);
