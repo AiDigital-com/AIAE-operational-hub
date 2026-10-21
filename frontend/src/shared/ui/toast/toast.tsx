@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import "./toast.css";
 
 type ToastVariant = "error" | "success";
@@ -32,6 +32,17 @@ const ToastContext = createContext<ToastApi | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
+  // Pending auto-dismiss timers, cleared on unmount: a timer that outlives the provider would set state
+  // on an unmounted tree (and, in tests, fire after the DOM environment is gone).
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    };
+  }, []);
 
   const dismiss = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -50,7 +61,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           : [...current, { id, message, variant }]
       );
       if (variant === "success") {
-        setTimeout(() => dismiss(id), SUCCESS_AUTO_DISMISS_MS);
+        const timer = setTimeout(() => {
+          timers.current.delete(timer);
+          dismiss(id);
+        }, SUCCESS_AUTO_DISMISS_MS);
+        timers.current.add(timer);
       }
     },
     [dismiss]

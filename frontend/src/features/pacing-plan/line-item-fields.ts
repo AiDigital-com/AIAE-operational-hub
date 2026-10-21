@@ -14,6 +14,13 @@ export interface EditableLineItem {
   rateType: string;
   targetImpressions: string;
   nativeBudget: string;
+  /** The line item's budget in USD - the reference's `plan.budget`. Seeded from what Pacing STORED
+   *  (`clientBudget` = `target_spend`, already rounded to cents) and re-derived from `nativeBudget`
+   *  only when the user types a budget or applies Fit, exactly where the reference moves it. A new
+   *  container copies this figure, so it must not be re-converted from the contract currency on
+   *  every render: on a CAD pacing the unrounded conversion made Distribute's monthly CAD shares
+   *  sum one cent over the budget. Never sent - dash-gate re-derives the USD figure on save. */
+  budgetUsd: number | null;
   marginTargetPct: string;
   targetCtr: string;
   targetVcr: string;
@@ -171,6 +178,7 @@ export function seedFromPlan(plan: PacingLineItemPlanV1, displayName = ""): Edit
     rateType: plan.rateType || "CPM",
     targetImpressions: numToStr(plan.plannedImpressions),
     nativeBudget: numToStr(plan.nativeBudget ?? plan.clientBudget),
+    budgetUsd: plan.clientBudget ?? null,
     marginTargetPct: numToStr(plan.marginTargetPct),
     targetCtr: numToStr(plan.ctrTargetPct),
     targetVcr: numToStr(plan.vcrTargetPct),
@@ -212,6 +220,8 @@ export function seedFromCandidate(candidate: PacingDraftLineItemV1): EditableLin
     rateType: candidate.rateType || "CPM",
     targetImpressions: numToStr(candidate.targetImpressions ?? candidate.plannedUnits),
     nativeBudget: numToStr(candidate.nativeBudget ?? candidate.budgetTotal),
+    // `budgetTotal` is already USD (server-converted) - the reference's add-li-map.js `budget`.
+    budgetUsd: candidate.budgetTotal ?? null,
     marginTargetPct: numToStr(candidate.marginPercent) || ADDED_LI_MARGIN_FALLBACK_PCT,
     targetCtr: numToStr(candidate.targetCtr),
     targetVcr: numToStr(candidate.targetVcr),
