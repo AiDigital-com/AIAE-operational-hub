@@ -322,10 +322,17 @@ function LineItemCard({
   function removeContainerAt(idx: number) {
     onChange({ ...li, containers: li.containers.filter((_, i) => i !== idx) });
   }
-  // The line item's budget in USD - the reference's `plan.budget`, which its budget field keeps at
-  // `currencyToUsd(native, rate)` on every edit. Containers turn their own budgets into units against it.
+  // The line item's budget in USD - the reference's `plan.budget`: the STORED figure until the budget
+  // field is edited (`setBudgetNative`), never re-converted on render (see `EditableLineItem.budgetUsd`).
+  // Containers turn their own budgets into units against it, and a new container copies it.
   const liNative = parseEditableNumber(li.nativeBudget) ?? null;
-  const liBudgetUsd = liNative == null ? null : getCurrency().currencyToUsd(liNative, rate);
+  const liBudgetUsd = li.budgetUsd;
+  // The reference's `setBudgetNative`: the typed contract-currency amount, and the USD figure
+  // re-derived from it at the campaign rate.
+  function setBudgetNative(raw: string) {
+    const native = parseEditableNumber(raw) ?? 0;
+    onChange({ ...li, nativeBudget: raw, budgetUsd: getCurrency().currencyToUsd(native, rate) });
+  }
   const liBase = { planImpr: parseEditableNumber(li.targetImpressions) || 0, budgetUsd: liBudgetUsd || 0 };
 
   function addContainer() {
@@ -392,6 +399,7 @@ function LineItemCard({
     if (proposal.needsBudget) {
       const usd = Math.round(Number(proposal.sumTs) * 100) / 100;
       next.nativeBudget = String(Math.round(getCurrency().usdToNative(usd, rate) * 100) / 100);
+      next.budgetUsd = usd;
     }
     if (proposal.needsFs) next.flightStart = proposal.earliestFs;
     if (proposal.needsFe) next.flightEnd = proposal.latestFe;
@@ -509,7 +517,7 @@ function LineItemCard({
                 value={li.nativeBudget}
                 rate={rate}
                 currency={currency}
-                onChange={(raw) => field("nativeBudget", raw.replace(/,/g, ""))}
+                onChange={(raw) => setBudgetNative(raw.replace(/,/g, ""))}
                 placeholder="0"
                 ariaLabel={`Budget for line item ${li.lineItemId}`}
                 className="pplan__input pplan__input--num"

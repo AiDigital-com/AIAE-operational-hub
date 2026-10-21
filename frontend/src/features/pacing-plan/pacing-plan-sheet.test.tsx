@@ -385,6 +385,43 @@ describe("PacingPlanSheet — sub-breakdowns", () => {
     expect(screen.getAllByDisplayValue("2,500")).toHaveLength(2);
   });
 
+  it("distributes a CAD container's spend so the monthly CAD shares add up to the budget exactly", async () => {
+    // The reported pacing (Innovation Federal Credit Union, LI 694437): CA$8,000 stored as $5,636.03.
+    // The container must copy the STORED USD figure, as the reference does: re-converting CA$8,000
+    // at the rate gives $5,636.0254…, and the monthly CAD shares then summed to 8,000.01.
+    const user = userEvent.setup();
+    vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });
+    renderSheet(
+      {
+        "111": aPacingLineItemPlanV1({
+          lineItemId: "111",
+          plannedImpressions: 1_000_000,
+          clientBudget: 5636.03,
+          nativeBudget: 8000,
+          flightStart: "2026-06-09",
+          flightEnd: "2026-08-03",
+        }),
+      },
+      vi.fn(),
+      false,
+      null,
+      { currency: "CAD", rate: 0.704503184354393 }
+    );
+
+    await openContainer(user);
+    await user.click(screen.getByRole("button", { name: /Distribute/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Proportional (by days)" }));
+    await user.click(screen.getByRole("button", { name: /Save plan/i }));
+
+    await waitFor(() => expect(savePacingPlan).toHaveBeenCalled());
+    const [, lineItems] = vi.mocked(savePacingPlan).mock.calls[0] as [string, PacingLineItemPlanUpdateV1[]];
+    const container = (lineItems[0].containers ?? [])[0] as { target_spend: number; date_children: Array<{ native_budget: number }> };
+    expect(container.target_spend).toBe(5636.03);
+    const cad = container.date_children.map((dc) => dc.native_budget);
+    expect(cad).toEqual([3142.85, 4428.58, 428.57]);
+    expect(Math.round(cad.reduce((sum, v) => sum + v, 0) * 100) / 100).toBe(8000);
+  });
+
   it("offers to fit the line item to containers that outgrow it, and applies only what has to grow", async () => {
     const user = userEvent.setup();
     vi.mocked(savePacingPlan).mockResolvedValue({ saved: true });

@@ -106,6 +106,29 @@ describe("ToastProvider", () => {
     }
   });
 
+  it("should drop a confirmation's pending timer when the provider unmounts", () => {
+    // Given: a success on screen, its auto-dismiss timer pending
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(
+        <ToastProvider>
+          <Harness />
+        </ToastProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "ok" }));
+      expect(vi.getTimerCount()).toBe(1);
+
+      // When: the provider goes away before the six seconds are up
+      unmount();
+
+      // Then: nothing is left to fire into an unmounted tree - in CI such a timer outlived its test file
+      // and crashed the run with "window is not defined"
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("should not stack a second copy of an error already on screen", async () => {
     // Given: a failing action that has been retried
     vi.useFakeTimers();
