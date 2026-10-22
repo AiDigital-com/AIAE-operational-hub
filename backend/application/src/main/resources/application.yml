@@ -138,7 +138,10 @@ app:
       # only the local profile may default it, to the value dash-gate's own local template ships.
       assertion-secret: ${PACING_ASSERTION_SECRET:}
       connect-timeout-ms: ${PACING_CONNECT_TIMEOUT_MS:3000}
-      read-timeout-ms: ${PACING_READ_TIMEOUT_MS:5000}
+      # 10s, not 5s: validate and the pacing list reach BigQuery through Pacing, and a freshly
+      # started Pacing pod answers its first BigQuery calls in 5-6s - the create screen then
+      # read as "Pacing is unreachable" (DEV, 2026-10-22).
+      read-timeout-ms: ${PACING_READ_TIMEOUT_MS:10000}
       # The three sheet-source calls open a Google spreadsheet and read it, which a 72,000-row tab
       # does not finish inside the general ceiling above. The retired SPA allowed them 185s.
       sheet-read-timeout-ms: ${PACING_SHEET_READ_TIMEOUT_MS:185000}

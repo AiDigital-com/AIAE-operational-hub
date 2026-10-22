@@ -17,7 +17,7 @@ import org.springframework.validation.annotation.Validated;
  *       base-url: ${PACING_BASE_URL:http://localhost:3000}
  *       assertion-secret: ${PACING_ASSERTION_SECRET:}
  *       connect-timeout-ms: ${PACING_CONNECT_TIMEOUT_MS:3000}
- *       read-timeout-ms: ${PACING_READ_TIMEOUT_MS:5000}
+ *       read-timeout-ms: ${PACING_READ_TIMEOUT_MS:10000}
  *       assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}
  * </pre>
  *
@@ -46,16 +46,16 @@ public class PacingProperties {
 	private String assertionSecret = "";
 
 	private long connectTimeoutMs = 3000;
-	private long readTimeoutMs = 5000;
+	private long readTimeoutMs = 10000;
 
 	/**
 	 * Read timeout for the three sheet-source calls, in milliseconds.
 	 *
 	 * <p>Far longer than {@link #readTimeoutMs}, because these three do something no other Pacing call
 	 * does: they open a Google spreadsheet and read it. A 72,000-row tab takes seconds to fetch, and a
-	 * token refresh in front of it takes seconds more - which is why the general 5s ceiling turned a
-	 * working read into "the Pacing service is unreachable". The retired SPA allowed these same calls
-	 * 185s; this is that number, not a guess.
+	 * token refresh in front of it takes seconds more - which is why the general ceiling (5s at the
+	 * time) turned a working read into "the Pacing service is unreachable". The retired SPA allowed
+	 * these same calls 185s; this is that number, not a guess.
 	 */
 	private long sheetReadTimeoutMs = 185000;
 
