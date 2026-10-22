@@ -29,7 +29,7 @@ import ReportWidgetUntyped from "../spa/report/ReportWidget.jsx";
 import LineItemsTileUntyped, { SectionBoundary as SectionBoundaryUntyped } from "../spa/lineitems/LineItemsTile.jsx";
 import LaunchPlanCardUntyped from "../spa/LaunchPlanCard.jsx";
 import * as LaunchPlanUntyped from "../spa/launch-plan.js";
-import { useDashboardStore } from "../spa/store.js";
+import { useDashboardStore, useResolvedWidgets } from "../spa/store.js";
 import { WidgetTileMenu } from "./tile-menu";
 import * as LayoutGridUntyped from "../spa/layout-grid.js";
 import { tileSlot as tileSlotUntyped } from "../spa/tile-slots.js";
@@ -137,6 +137,16 @@ export function ReportBoard({
   blocks?: { alerts?: React.ReactNode; journal?: React.ReactNode };
 }) {
   const widgets = useMemo(() => display.widgets ?? [], [display.widgets]);
+  // What each tile DRAWS, which for a library-linked instance is not what it stores: `lib` carries
+  // no spec of its own - the entry IS the definition - so handing the raw instance to ReportWidget
+  // gives it a widget with no cells, which it reports as "None of these metrics apply to this
+  // pacing" under an "Untitled widget" heading. Pacing's own grid (DashGrid) resolves here; this
+  // board is its replacement and did not, so every linked tile rendered empty while the payload
+  // carried the definition all along (merge.mjs ships them as `libraryEntries`).
+  //
+  // Pacing's own hook, not a second resolution: an instance with no `lib` comes back as the SAME
+  // object, so a pacing that never touched the Library renders exactly what it stored.
+  const resolved = useResolvedWidgets(widgets) as Map<string, { widget?: PacingWidgetInstance | null }>;
   // The two the Launch Plan's own visibility reads (Pacing's FLOW_REGISTRY `visible`).
   const campaign = useDashboardStore((s: { campaign: unknown }) => s.campaign);
   const rowCount = useDashboardStore(
@@ -241,7 +251,10 @@ export function ReportBoard({
         </div>
       ))}
       {entries.map(({ id, tile }) => {
-        const widget = widgets.find((w) => w.id === id);
+        // The raw instance is the FALLBACK, not the source: a ref whose entry is gone resolves to
+        // null, and dropping the tile for that would turn a visibly empty widget into a silently
+        // absent one - a worse failure, and a change this fix has no reason to make.
+        const widget = resolved.get(id)?.widget ?? widgets.find((w) => w.id === id);
         if (!widget && !FLOW_IDS.has(id)) return null;
         // A flow tile draws its own block and carries no widget and no stored height: `flow` is
         // always full width and auto height (layout-grid's SIZES table). Line Items' ⋯ sits in its
