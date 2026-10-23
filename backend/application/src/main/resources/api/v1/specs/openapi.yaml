@@ -5585,6 +5585,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/admin/slack-summaries:
+    get:
+      tags:
+        - pacingAdmin
+      operationId: getSlackSummarySwitch
+      description: >
+        Whether Pacing currently sends the daily Slack summaries (admin only) -
+        GET /api/admin/slack-summaries on the Pacing side. One switch for everybody: off means no
+        owner and no delegate gets a summary after any refresh, nightly or manual; on means
+        everything as before. Seeds the switch on the Pacing admin screen.
+      responses:
+        '200':
+          description: The switch as Pacing has it stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingSlackSummarySwitchV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+    put:
+      tags:
+        - pacingAdmin
+      operationId: updateSlackSummarySwitch
+      description: >
+        Switches the daily Slack summaries on or off for everybody (admin only) -
+        PUT /api/admin/slack-summaries on the Pacing side. Takes effect from the next refresh: a
+        summary already sent is not taken back. Switching off writes nothing to Pacing's send log,
+        so the first refresh after switching back on sends as usual. Operational messages to the
+        engineering channels are not summaries and are not affected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingSlackSummarySwitchUpdateV1'
+      responses:
+        '200':
+          description: The switch was saved; the body is what Pacing now has stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingSlackSummarySwitchV1'
+        '400':
+          description: The body did not carry `enabled` as a boolean.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The authorization token not correct or user is not an administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/library:
     get:
       tags:
@@ -12116,6 +12192,33 @@ components:
         - filled
         - alreadyHad
         - skippedNoNumbers
+    PacingSlackSummarySwitchV1:
+      type: object
+      description: >
+        The daily Slack summaries switch, as Pacing has it stored (one row for the whole service).
+      properties:
+        enabled:
+          type: boolean
+          description: True when summaries are sent after a refresh; false when nobody gets one.
+        updatedAt:
+          type: string
+          nullable: true
+          description: ISO-8601 timestamp of the last switch; null while nobody has ever pressed it.
+        updatedBy:
+          type: string
+          nullable: true
+          description: Email of the admin who last pressed it; null while nobody has ever pressed it.
+      required:
+        - enabled
+    PacingSlackSummarySwitchUpdateV1:
+      type: object
+      description: Turns the daily Slack summaries on (true) or off (false) for everybody.
+      properties:
+        enabled:
+          type: boolean
+          description: The new state of the switch.
+      required:
+        - enabled
     PacingReferenceSyncResultV1:
       type: object
       description: >

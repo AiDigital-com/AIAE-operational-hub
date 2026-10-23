@@ -14,6 +14,7 @@ import type {
   PacingReferenceSyncResultV1,
   PacingRetryAfterV1,
   PacingRevalidateResultV1,
+  PacingSlackSummarySwitchV1,
   RefreshAllOutcome,
 } from "./types";
 
@@ -93,6 +94,30 @@ export async function revalidatePacing(pacingId: string): Promise<PacingRevalida
   const result = await apiClient.POST("/api/v1/pacing/admin/pacings/{pacingId}/revalidate", {
     params: { path: { pacingId } },
   });
+  if (result.error || !result.response.ok || !result.data) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Whether Pacing currently sends the daily Slack summaries - one switch for everybody, owners and
+ * delegates alike.
+ */
+export async function getSlackSummarySwitch(): Promise<PacingSlackSummarySwitchV1> {
+  const result = await apiClient.GET("/api/v1/pacing/admin/slack-summaries", {});
+  if (result.error || !result.response.ok || !result.data) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
+}
+
+/**
+ * Switches the daily Slack summaries on or off for everybody. Takes effect from the next refresh; a
+ * summary already sent is not taken back. The 200 carries what Pacing now has stored.
+ */
+export async function updateSlackSummarySwitch(enabled: boolean): Promise<PacingSlackSummarySwitchV1> {
+  const result = await apiClient.PUT("/api/v1/pacing/admin/slack-summaries", { body: { enabled } });
   if (result.error || !result.response.ok || !result.data) {
     throw new ApiError(formatError(result.error), result.response.status);
   }

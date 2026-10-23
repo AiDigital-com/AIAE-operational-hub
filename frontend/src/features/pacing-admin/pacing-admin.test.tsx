@@ -17,6 +17,8 @@ vi.mock("./api", () => ({
   refreshAllDashboards: vi.fn(),
   backfillOrderNumbers: vi.fn(),
   syncReferenceData: vi.fn(),
+  getSlackSummarySwitch: vi.fn(),
+  updateSlackSummarySwitch: vi.fn(),
 }));
 
 // StatusControl (pacing-plan) is reused as-is and has its own test coverage - stubbed here to keep
@@ -40,6 +42,7 @@ function renderAdmin() {
 describe("PacingAdmin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(adminApi.getSlackSummarySwitch).mockResolvedValue({ enabled: true, updatedAt: null, updatedBy: null });
   });
 
   it("renders name, slug, owner, status, flight and created for every pacing", async () => {
@@ -322,5 +325,52 @@ describe("PacingAdmin", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sync reference data" }));
 
     expect(await screen.findByText(/failed for: nsmapping/)).toBeInTheDocument();
+  });
+  it("shows the daily Slack summaries switch as Pacing has it stored", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+
+    // When:
+    renderAdmin();
+    const toggle = await screen.findByRole("switch", { name: "Daily Slack summaries" });
+
+    // Then:
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/owners and delegates get their summary/i)).toBeInTheDocument();
+  });
+
+  it("switches the summaries off, then says since when and by whom", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    vi.mocked(adminApi.updateSlackSummarySwitch).mockResolvedValue({
+      enabled: false,
+      updatedAt: "2026-10-23T10:00:00.000Z",
+      updatedBy: "admin@aidigital.com",
+    });
+    renderAdmin();
+    const toggle = await screen.findByRole("switch", { name: "Daily Slack summaries" });
+
+    // When:
+    await userEvent.click(toggle);
+
+    // Then:
+    expect(adminApi.updateSlackSummarySwitch).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    expect(screen.getByText(/off since oct 23, 2026 \(admin@aidigital\.com\)/i)).toBeInTheDocument();
+  });
+
+  it("leaves the switch where it was when the save fails", async () => {
+    // Given:
+    vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [] }));
+    vi.mocked(adminApi.updateSlackSummarySwitch).mockRejectedValue(new Error("boom"));
+    renderAdmin();
+    const toggle = await screen.findByRole("switch", { name: "Daily Slack summaries" });
+
+    // When:
+    await userEvent.click(toggle);
+
+    // Then:
+    expect(await screen.findByText("Could not switch the daily Slack summaries.")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
   });
 });

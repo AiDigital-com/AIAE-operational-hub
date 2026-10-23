@@ -2,8 +2,10 @@ package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.exception.GlobalExceptionHandler;
 import com.aidigital.operationalhub.application.exception.mapper.GlobalExceptionResponseHelperImpl;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSlackSummarySwitchV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
@@ -14,6 +16,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenc
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSlackSummarySwitch;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.RbacAuthorizationService;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -33,12 +37,15 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -62,6 +69,9 @@ class PacingAdminControllerTest {
 
 	@Mock
 	private PacingClient pacingClient;
+
+	@Mock
+	private PacingSummarySwitchClient summarySwitchClient;
 
 	@Mock
 	private PacingContractMapper mapper;
@@ -377,5 +387,71 @@ class PacingAdminControllerTest {
 		mockMvc.perform(post("/api/v1/pacing/admin/pacings/p1/revalidate"))
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.code").value("OPH_051"));
+	}
+
+	@Test
+	void shouldReturnTheSlackSummarySwitchTest() throws Exception {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		PacingSlackSummarySwitch stored = new PacingSlackSummarySwitch(true, null, null);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(stored).when(summarySwitchClient).getSwitch(assertion);
+		doReturn(new PacingSlackSummarySwitchV1().enabled(true)).when(mapper).toSlackSummarySwitchV1(stored);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/pacing/admin/slack-summaries"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.enabled").value(true));
+		verify(rbacAuthorizationService).requireAdmin(user);
+	}
+
+	@Test
+	void shouldSwitchSlackSummariesOffTest() throws Exception {
+		// Given:
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		PacingEntitlement entitlement = new PacingEntitlement(PacingScope.all(), true);
+		HubAssertion assertion = new HubAssertion(user.email(), PacingScope.KIND_ALL, List.of(), true);
+		PacingSlackSummarySwitch saved = new PacingSlackSummarySwitch(false, "2026-10-23T10:00:00.000Z", user.email());
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
+		doReturn(assertion).when(mapper).toAssertion(user, entitlement);
+		doReturn(saved).when(summarySwitchClient).updateSwitch(assertion, false);
+		doReturn(new PacingSlackSummarySwitchV1().enabled(false).updatedBy(user.email()))
+				.when(mapper).toSlackSummarySwitchV1(saved);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(put("/api/v1/pacing/admin/slack-summaries")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"enabled\":false}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.enabled").value(false))
+				.andExpect(jsonPath("$.updatedBy").value(user.email()));
+		verify(summarySwitchClient).updateSwitch(assertion, false);
+	}
+
+	@Test
+	void shouldRefuseSlackSummarySwitchForNonAdminWithoutCallingPacingTest() throws Exception {
+		// Given: same rule as every admin action - refused before Pacing is ever called.
+		CurrentUserModel user = Instancio.create(CurrentUserModel.class);
+		doReturn(user).when(currentUserService).resolveCurrentUser();
+		doThrow(new AccessDeniedException("User is not an administrator."))
+				.when(rbacAuthorizationService).requireAdmin(user);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(put("/api/v1/pacing/admin/slack-summaries")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"enabled\":false}"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("OPH_015"));
+		verify(summarySwitchClient, never()).updateSwitch(any(), anyBoolean());
 	}
 }

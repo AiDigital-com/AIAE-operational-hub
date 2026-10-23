@@ -1,5 +1,15 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { backfillOrderNumbers, syncReferenceData, deletePacing, refreshAllDashboards, revalidatePacing } from "./api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  backfillOrderNumbers,
+  deletePacing,
+  getSlackSummarySwitch,
+  refreshAllDashboards,
+  revalidatePacing,
+  syncReferenceData,
+  updateSlackSummarySwitch,
+} from "./api";
+
+const SLACK_SUMMARY_SWITCH_KEY = ["pacing", "admin", "slack-summaries"] as const;
 
 /**
  * Deletes a pacing. On success invalidates every "pacing"-prefixed query - the admin table itself
@@ -60,6 +70,25 @@ export function useRevalidatePacing() {
     mutationFn: (pacingId: string) => revalidatePacing(pacingId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing"] });
+    },
+  });
+}
+
+/** The daily Slack summaries switch, as Pacing has it stored. */
+export function useSlackSummarySwitch() {
+  return useQuery({ queryKey: SLACK_SUMMARY_SWITCH_KEY, queryFn: getSlackSummarySwitch });
+}
+
+/**
+ * Switches the daily Slack summaries on or off. On success the cached switch is replaced with what
+ * Pacing echoed back, so the toggle and its "who / when" line move together without a refetch.
+ */
+export function useUpdateSlackSummarySwitch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => updateSlackSummarySwitch(enabled),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(SLACK_SUMMARY_SWITCH_KEY, saved);
     },
   });
 }
