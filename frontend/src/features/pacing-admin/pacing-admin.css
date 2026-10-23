@@ -15,6 +15,15 @@
   color: var(--ink);
 }
 
+/* ── daily Slack summaries switch: one toggle row on a surface card, above the pacing list ── */
+.pacing-admin__settings {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  margin-bottom: 18px;
+}
+
 /* ── toolbar: search comes first, refresh-all sits at the end of the same row ── */
 .pacing-admin__toolbar {
   display: flex;

@@ -26,6 +26,7 @@ import { useToast } from "../../shared/ui/toast/toast";
 import { useBackfillOrderNumbers, useRefreshAllDashboards, useSyncReferenceData } from "./hooks";
 import type { PacingOrderNumberBackfillResultV1, PacingReferenceSyncResultV1 } from "./types";
 import { BulkDeletePacingModal, DeletePacingModal } from "./pacing-admin-delete-modals";
+import { SlackSummarySwitch } from "./pacing-admin-summary-switch";
 import "./pacing-admin.css";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -168,6 +169,8 @@ export function PacingAdmin() {
       <div className="pacing-admin__head">
         <h1 className="pacing-admin__title">Pacing administration</h1>
       </div>
+
+      <SlackSummarySwitch />
 
       {overview.isPending && <LoadingBlock label="Loading pacings" />}
       {overview.isError && <p className="form-error">{formatError(overview.error)}</p>}

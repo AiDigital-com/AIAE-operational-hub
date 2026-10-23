@@ -8,6 +8,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLin
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRowV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingScopeV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSlackSummarySwitchV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffSummaryV1;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
@@ -21,6 +22,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffCo
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffSummary;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRecentDay;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSlackSummarySwitch;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
@@ -280,5 +282,24 @@ class PacingContractMapperTest {
 		assertThat(response.getScope().getKind()).isEqualTo(PacingScopeV1.KindEnum.OWNERS);
 		assertThat(response.getScope().getIds()).containsExactly("a@x.com");
 		assertThat(response.getScope().getCanCreate()).isTrue();
+	}
+
+	@Test
+	void shouldMapTheSlackSummarySwitchTest() {
+		// Given: a switch nobody has pressed yet, and one an admin turned off
+		PacingSlackSummarySwitch seeded = new PacingSlackSummarySwitch(true, null, null);
+		PacingSlackSummarySwitch off = new PacingSlackSummarySwitch(false, "2026-10-23T10:00:00.000Z", "a@x.com");
+
+		// When:
+		PacingSlackSummarySwitchV1 seededV1 = mapper.toSlackSummarySwitchV1(seeded);
+		PacingSlackSummarySwitchV1 offV1 = mapper.toSlackSummarySwitchV1(off);
+
+		// Then:
+		assertThat(seededV1.getEnabled()).isTrue();
+		assertThat(seededV1.getUpdatedAt()).isNull();
+		assertThat(seededV1.getUpdatedBy()).isNull();
+		assertThat(offV1.getEnabled()).isFalse();
+		assertThat(offV1.getUpdatedAt()).isEqualTo("2026-10-23T10:00:00.000Z");
+		assertThat(offV1.getUpdatedBy()).isEqualTo("a@x.com");
 	}
 }

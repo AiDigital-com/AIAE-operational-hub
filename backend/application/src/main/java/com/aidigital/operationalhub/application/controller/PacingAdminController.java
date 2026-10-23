@@ -9,13 +9,17 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRef
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRevalidateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSlackSummarySwitchUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSlackSummarySwitchV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingOrderNumberBackfillResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingReferenceSyncResult;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRevalidateResult;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSlackSummarySwitch;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.RbacAuthorizationService;
@@ -31,7 +35,8 @@ import org.springframework.web.bind.annotation.RestController;
  * screen that is not in the migration plan (the plan's seventeen sections skip it entirely) but is
  * carried over from the retired Pacing front end's own Admin screen and row menu: deleting a
  * mistakenly created pacing, re-running the nightly Daily Build off-schedule, and re-pulling one
- * pacing's configuration from the NetSuite master.
+ * pacing's configuration from the NetSuite master. Also holds the daily Slack summaries switch
+ * (2026-10-23), which Pacing keeps on its own client, {@link PacingSummarySwitchClient}.
  *
  * <p>Implements the OpenAPI-generated {@link PacingAdminApi}. Unlike {@link PacingController}, every
  * method here first calls {@link RbacAuthorizationService#requireAdmin} - the Hub does not merely hide
@@ -49,6 +54,7 @@ public class PacingAdminController implements PacingAdminApi {
 	private final PacingScopeResolver pacingScopeResolver;
 	private final RbacAuthorizationService rbacAuthorizationService;
 	private final PacingClient pacingClient;
+	private final PacingSummarySwitchClient summarySwitchClient;
 	private final PacingContractMapper mapper;
 
 	@Override
@@ -128,6 +134,21 @@ public class PacingAdminController implements PacingAdminApi {
 				.changed(result.changed())
 				.changes(result.changes())
 				.warnings(result.warnings()));
+	}
+
+	@Override
+	public ResponseEntity<PacingSlackSummarySwitchV1> getSlackSummarySwitch() {
+		HubAssertion assertion = signCurrentUserAsAdmin();
+		return ResponseEntity.ok(mapper.toSlackSummarySwitchV1(summarySwitchClient.getSwitch(assertion)));
+	}
+
+	@Override
+	public ResponseEntity<PacingSlackSummarySwitchV1> updateSlackSummarySwitch(
+			PacingSlackSummarySwitchUpdateV1 pacingSlackSummarySwitchUpdateV1) {
+		HubAssertion assertion = signCurrentUserAsAdmin();
+		PacingSlackSummarySwitch saved = summarySwitchClient.updateSwitch(
+				assertion, Boolean.TRUE.equals(pacingSlackSummarySwitchUpdateV1.getEnabled()));
+		return ResponseEntity.ok(mapper.toSlackSummarySwitchV1(saved));
 	}
 
 	/**

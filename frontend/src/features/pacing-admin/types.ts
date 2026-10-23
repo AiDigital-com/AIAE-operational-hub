@@ -15,3 +15,4 @@ export type PacingRetryAfterV1 = components["schemas"]["PacingRetryAfterV1"];
 export type PacingRevalidateResultV1 = components["schemas"]["PacingRevalidateResultV1"];
 export type PacingOrderNumberBackfillResultV1 = components["schemas"]["PacingOrderNumberBackfillResultV1"];
 export type PacingReferenceSyncResultV1 = components["schemas"]["PacingReferenceSyncResultV1"];
+export type PacingSlackSummarySwitchV1 = components["schemas"]["PacingSlackSummarySwitchV1"];

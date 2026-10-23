@@ -13,6 +13,7 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlert;
 import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.AssignableOwnerV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSlackSummarySwitchV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationRef;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingKpiTarget;
@@ -22,6 +23,7 @@ import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.model.AssignableOwner;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingHealth;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSlackSummarySwitch;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import com.aidigital.operationalhub.service.rbac.model.PacingScope;
@@ -292,6 +294,19 @@ public class PacingContractMapper {
 	 */
 	public AssignableOwnerListV1 toAssignableOwnerListV1(List<AssignableOwner> owners) {
 		return new AssignableOwnerListV1().owners(owners.stream().map(this::toAssignableOwnerV1).toList());
+	}
+
+	/**
+	 * Maps the daily Slack summaries switch onto the contract.
+	 *
+	 * @param summarySwitch the switch as Pacing has it stored
+	 * @return the contract shape
+	 */
+	public PacingSlackSummarySwitchV1 toSlackSummarySwitchV1(PacingSlackSummarySwitch summarySwitch) {
+		return new PacingSlackSummarySwitchV1()
+				.enabled(summarySwitch.enabled())
+				.updatedAt(summarySwitch.updatedAt())
+				.updatedBy(summarySwitch.updatedBy());
 	}
 
 	/**

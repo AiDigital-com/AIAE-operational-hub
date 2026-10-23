@@ -2,11 +2,13 @@ package com.aidigital.operationalhub.externalservices.pacing.config;
 
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.impl.HubAssertionSignerImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.OrderNumberCollector;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSheetSourceClientImpl;
+import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSummarySwitchClientImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -77,6 +79,22 @@ public class PacingConfig {
 			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
 		return new PacingSheetSourceClientImpl(
 				pacingRestClient(properties, properties.getSheetReadTimeoutMs()), assertionSigner, objectMapper);
+	}
+
+	/**
+	 * The daily Slack summaries switch, on its own client: {@link PacingClient} is at the file-length
+	 * cap. Same transport settings as the main client.
+	 *
+	 * @param properties      Pacing configuration properties
+	 * @param assertionSigner signs the {@code X-Hub-Assertion} header on every call
+	 * @param objectMapper    the Hub's own Jackson mapper, used to read Pacing's error bodies
+	 * @return the switch client
+	 */
+	@Bean
+	public PacingSummarySwitchClient pacingSummarySwitchClient(
+			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
+		return new PacingSummarySwitchClientImpl(
+				pacingRestClient(properties, properties.getReadTimeoutMs()), assertionSigner, objectMapper);
 	}
 
 	/**
