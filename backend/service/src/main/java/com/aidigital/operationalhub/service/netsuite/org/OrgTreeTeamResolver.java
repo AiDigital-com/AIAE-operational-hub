@@ -29,6 +29,10 @@ import java.util.stream.Collectors;
  * ({@link NetSuiteSyncProperties#getDirectorRootDepartment()}, the MPO tree). Elsewhere the same title
  * is read as a plain member, so a «Growth Director» neither gets the unrestricted role nor terminates a
  * member's manager-chain walk.
+ *
+ * <p>A member with no Team Lead between them and the MPO Director their chain reaches joins that
+ * Director's own team ({@code "<department leaf>: <Director first name>"}) while the pod waits for a new
+ * Team Lead; the Director keeps their own role. Owner decision 2026-10-26.
  */
 @Component
 @RequiredArgsConstructor
@@ -91,12 +95,14 @@ public class OrgTreeTeamResolver {
 			flagsByEmail.put(employee.workEmail(), flags);
 		}
 
-		Map<String, String> teamNameByLeadEmail = buildTeamNames(teamLeads, flagsByEmail);
 		Map<String, String> teamLeadEmailByEmail = resolveTeamLeadEmails(
 				distinct, classificationByEmail, parsedByEmail, byNormalizedName, ambiguousNames, teamLeads,
 				flagsByEmail);
+		List<RipplingEmployee> leads = teamLeadsWithActingDirectors(
+				distinct, teamLeads, classificationByEmail, teamLeadEmailByEmail);
+		Map<String, String> teamNameByLeadEmail = buildTeamNames(leads, flagsByEmail);
 		Map<String, String> podByLeadEmail = computeTeamPods(
-				teamLeads, teamLeadEmailByEmail, parsedByEmail, flagsByEmail);
+				leads, teamLeadEmailByEmail, parsedByEmail, flagsByEmail);
 		flagMemberPodMismatches(distinct, classificationByEmail, teamLeadEmailByEmail, podByLeadEmail,
 				parsedByEmail, flagsByEmail);
 
@@ -115,7 +121,7 @@ public class OrgTreeTeamResolver {
 				})
 				.toList();
 
-		List<ResolvedTeam> resolvedTeams = teamLeads.stream()
+		List<ResolvedTeam> resolvedTeams = leads.stream()
 				.map(lead -> new ResolvedTeam(lead.workEmail(), lead.name(), teamNameByLeadEmail.get(lead.workEmail()),
 						podByLeadEmail.get(lead.workEmail()), flagsByEmail.get(lead.workEmail())))
 				.toList();
@@ -310,7 +316,9 @@ public class OrgTreeTeamResolver {
 
 	/**
 	 * Resolves every employee's Team Lead work email: {@code null} for directors, self for Team Leads,
-	 * and the manager-chain (falling back to the teams-string token) result for members.
+	 * and the manager-chain (falling back to the teams-string token) result for members. A member whose
+	 * chain reaches a Director before any Team Lead, with no token to fall back on, gets that Director as
+	 * an acting Team Lead ({@link DataQualityFlag#DIRECTOR_ACTING_TEAM_LEAD}).
 	 *
 	 * @param distinct              the deduplicated employees
 	 * @param classificationByEmail each employee's title classification, keyed by work email
@@ -342,11 +350,20 @@ public class OrgTreeTeamResolver {
 			}
 			String teamLeadEmail = resolveMemberTeamLead(
 					employee, classificationByEmail, byNormalizedName, ambiguousNames, flags);
+			String directorEmail = null;
+			if (teamLeadEmail != null && classificationByEmail.get(teamLeadEmail).orgRole() == OrgRole.DIRECTOR) {
+				directorEmail = teamLeadEmail;
+				teamLeadEmail = null;
+			}
 			ParsedTeamsString parsed = parsedByEmail.get(employee.workEmail());
 			if (teamLeadEmail == null) {
 				teamLeadEmail = resolveViaTeamToken(parsed, teamLeads);
 				if (teamLeadEmail != null) {
 					flags.add(DataQualityFlag.TEAM_RESOLVED_VIA_STRING_FALLBACK);
+				} else if (directorEmail != null) {
+					// A real Team Lead named in the teams string still wins; only then the Director's team
+					teamLeadEmail = directorEmail;
+					flags.add(DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
 				}
 			} else {
 				crossCheckTeamToken(parsed, nameOf(teamLeads, teamLeadEmail), flags);
@@ -363,6 +380,31 @@ public class OrgTreeTeamResolver {
 	}
 
 	/**
+	 * The employees who head a team this run: every Team Lead, then every Director that at least one
+	 * member reached as an acting Team Lead (see {@link #resolveTeamLeadEmails}). A Director with no such
+	 * member heads no team, so their team goes away on its own once Rippling shows a Team Lead again.
+	 *
+	 * @param distinct              the deduplicated employees, in first-seen order
+	 * @param teamLeads             the Team Lead employees
+	 * @param classificationByEmail each employee's title classification, keyed by work email
+	 * @param teamLeadEmailByEmail  each employee's resolved Team Lead email, keyed by employee work email
+	 * @return the team heads, Team Leads first
+	 */
+	List<RipplingEmployee> teamLeadsWithActingDirectors(
+			List<RipplingEmployee> distinct,
+			List<RipplingEmployee> teamLeads,
+			Map<String, TitleClassification> classificationByEmail,
+			Map<String, String> teamLeadEmailByEmail) {
+		Set<String> headEmails = new HashSet<>(teamLeadEmailByEmail.values());
+		List<RipplingEmployee> leads = new ArrayList<>(teamLeads);
+		distinct.stream()
+				.filter(employee -> classificationByEmail.get(employee.workEmail()).orgRole() == OrgRole.DIRECTOR)
+				.filter(employee -> headEmails.contains(employee.workEmail()))
+				.forEach(leads::add);
+		return leads;
+	}
+
+	/**
 	 * Walks the {@code manager} chain upward from a member to the nearest Team Lead, by name.
 	 *
 	 * @param employee              the member being resolved
@@ -370,10 +412,11 @@ public class OrgTreeTeamResolver {
 	 * @param byNormalizedName      the name index
 	 * @param ambiguousNames        normalized names shared by more than one employee
 	 * @param flags                 the employee's mutable flag accumulator
-	 * @return the resolved Team Lead's work email, or {@code null} when the tree could not resolve one
-	 * (ambiguous/unknown manager name, a Director reached before any Team Lead, a cycle, the maximum
-	 * chain depth was exceeded, or the chain ran out with no team signal at all) - the specific cause
-	 * is recorded on {@code flags} in every case
+	 * @return the resolved Team Lead's work email; the Director's work email when a Director is reached
+	 * before any Team Lead (flagged {@link DataQualityFlag#MANAGER_CHAIN_HIT_DIRECTOR} - the caller decides
+	 * whether that Director acts as the Team Lead); or {@code null} when the tree could not resolve one
+	 * (ambiguous/unknown manager name, a cycle, the maximum chain depth was exceeded, or the chain ran
+	 * out with no team signal at all) - the specific cause is recorded on {@code flags} in every case
 	 */
 	String resolveMemberTeamLead(
 			RipplingEmployee employee,
@@ -406,7 +449,7 @@ public class OrgTreeTeamResolver {
 			}
 			if (managerRole == OrgRole.DIRECTOR) {
 				flags.add(DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR);
-				return null;
+				return manager.workEmail();
 			}
 			managerName = manager.manager();
 			depth++;

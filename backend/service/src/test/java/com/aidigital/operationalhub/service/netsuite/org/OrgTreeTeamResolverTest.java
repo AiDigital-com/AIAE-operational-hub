@@ -429,22 +429,57 @@ class OrgTreeTeamResolverTest {
 	}
 
 	@Test
-	void shouldFlagManagerChainHitDirectorBeforeAnyTeamLeadTest() {
+	void shouldPutMemberWithNoTeamLeadIntoTheDirectorsTeamTest() {
 		// Given: R7 - the manager chain reaches a Director with no Team Lead in between and no team token
-		// to fall back on
+		// to fall back on (a pod between Team Leads, like Stacy Rivera's in October 2026)
 		RipplingEmployee director = new RipplingEmployee("Some Director", MPO_MEDIA_OPTIMIZATION,
 				"some.director@aidigital.com", "MPO Directors", "Media Optimization Director", null);
 		RipplingEmployee member = new RipplingEmployee("Reports To Director", "Media Optimization",
-				"reports.to.director@aidigital.com", "", "Media Optimization Manager", "Some Director");
+				"reports.to.director@aidigital.com", "EAST", "Media Optimization Manager", "Some Director");
 
 		// When:
 		OrgResolution result = resolver.resolve(List.of(director, member));
 
-		// Then: cause-split (sync-issues-admin-review-PLAN.md §2)
+		// Then: the member joins the Director's team; the Director keeps their own role and no team of
+		// their own on the employee row
 		ResolvedEmployee resolved = byEmail(result).get("reports.to.director@aidigital.com");
-		assertThat(resolved.teamLeadEmail()).isNull();
-		assertThat(resolved.flags()).contains(DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR);
+		assertThat(resolved.teamLeadEmail()).isEqualTo("some.director@aidigital.com");
+		assertThat(resolved.podKey()).isEqualTo("EAST");
+		assertThat(resolved.flags()).contains(
+				DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR, DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
 		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.UNRESOLVED_TEAM);
+		ResolvedEmployee directorRow = byEmail(result).get("some.director@aidigital.com");
+		assertThat(directorRow.orgRole()).isEqualTo(OrgRole.DIRECTOR);
+		assertThat(directorRow.teamLeadEmail()).isNull();
+		assertThat(result.teams()).singleElement().satisfies(team -> {
+			assertThat(team.teamLeadEmail()).isEqualTo("some.director@aidigital.com");
+			assertThat(team.teamName()).isEqualTo("Media Optimization: Some");
+			assertThat(team.podKey()).isEqualTo("EAST");
+		});
+	}
+
+	@Test
+	void shouldPreferTeamLeadNamedInTeamsStringOverTheDirectorTest() {
+		// Given: the chain stops at a Director, but the teams string names a real Team Lead
+		RipplingEmployee director = new RipplingEmployee("Some Director", MPO_MEDIA_OPTIMIZATION,
+				"some.director@aidigital.com", "MPO Directors", "Media Optimization Director", null);
+		RipplingEmployee lead = new RipplingEmployee("Daria Pronina", "Media Optimization",
+				"daria.pronina@aidigital.com", "EAST, MPO Team Leads", "Team Lead, Media Optimization",
+				"Some Director");
+		RipplingEmployee member = new RipplingEmployee("Reports To Director", "Media Optimization",
+				"reports.to.director@aidigital.com", "Media Optimization: Daria", "Media Optimization Manager",
+				"Some Director");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(director, lead, member));
+
+		// Then: the Team Lead wins and the Director heads no team
+		ResolvedEmployee resolved = byEmail(result).get("reports.to.director@aidigital.com");
+		assertThat(resolved.teamLeadEmail()).isEqualTo("daria.pronina@aidigital.com");
+		assertThat(resolved.flags()).contains(DataQualityFlag.TEAM_RESOLVED_VIA_STRING_FALLBACK);
+		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
+		assertThat(result.teams()).extracting(ResolvedTeam::teamLeadEmail)
+				.containsExactly("daria.pronina@aidigital.com");
 	}
 
 	@Test

@@ -517,6 +517,34 @@ class NetSuiteSyncReconcilerTest {
 	}
 
 	@Test
+	void shouldKeepDirectorRoleAndMapTheirAgencyToTheTeamTheyActAsLeadForTest() {
+		// Given: a Director heads a team because members with no Team Lead fell to them, and NetSuite names
+		// that Director as the agency's MPO team lead
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(EMAIL, LEAD_NAME)),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "EAST")));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
+		when(userService.save(any())).thenReturn(user(USER_ID));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(DIRECTOR_ROLE_ID), scopeType(ALL_SCOPE_ID), null)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
+
+		// Verification: the agency goes to the Director's team, and the Director's own DIRECTOR/ALL stays
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		assertThat(summary.assignmentsUpdated()).isZero();
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
+		verify(assignmentService, never()).save(any());
+	}
+
+	@Test
 	void shouldMapAgencyViaDerivedEmailFallbackWhenNameDoesNotMatchTest() {
 		// Given: the Team Lead's synced display name ("Saveliy Maslakov") no longer matches the local part
 		// of their email ("sam.marley"), e.g. an inherited mailbox; IO Lines still records the original name
