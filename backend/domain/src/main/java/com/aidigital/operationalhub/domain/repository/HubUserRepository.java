@@ -78,4 +78,13 @@ public interface HubUserRepository
 	@QueryHints(@QueryHint(name = SpecHints.HINT_SPEC_LOCK_TIMEOUT, value = LOCK_TIMEOUT_MILLIS))
 	@Query("select u from HubUser u where u.id = :id")
 	Optional<HubUser> findByIdForUpdate(@Param("id") Long id);
+
+	/**
+	 * Finds the Hub user behind a Pacing {@code user_id}, the id Pacing names an owner by. Used after an
+	 * ownership transfer to find who, on the Hub's side, now owns the pacing.
+	 *
+	 * @param pacingUserId the Pacing {@code access.users.user_id}, as text
+	 * @return the matching user, or empty when the §2 sync has written that id to nobody
+	 */
+	Optional<HubUser> findByPacingUserId(String pacingUserId);
 }

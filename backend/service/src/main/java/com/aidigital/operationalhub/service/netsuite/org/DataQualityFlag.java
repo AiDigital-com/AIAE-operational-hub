@@ -36,16 +36,12 @@ public enum DataQualityFlag {
 	MANAGER_NOT_IN_ROSTER("Manager name does not match any active employee in the roster."),
 
 	/**
-	 * The manager chain reached a Director (or Senior Director) before encountering any Team Lead.
+	 * The manager chain reached a Director (or Senior Director) before encountering any Team Lead, so
+	 * the member joined that Director's direct team (2026-10-23; until then this left them with no team).
+	 * Informational: the structure is real for some Directors, but worth a look when it is new.
 	 */
-	MANAGER_CHAIN_HIT_DIRECTOR("Manager chain reached a Director before any Team Lead."),
-
-	/**
-	 * No Team Lead sits between this member and the Director their manager chain reached, and the
-	 * {@code teams} string named none either, so the member joins that Director's own team until Rippling
-	 * shows a Team Lead again (a pod between Team Leads; owner decision 2026-10-26).
-	 */
-	DIRECTOR_ACTING_TEAM_LEAD("No Team Lead under the Director; the Director's own team was used."),
+	MANAGER_CHAIN_HIT_DIRECTOR(
+			"Manager chain reached a Director before any Team Lead; placed in the Director's direct team."),
 
 	/**
 	 * The manager chain revisited an employee already seen on this walk (a management cycle); the walk

@@ -17,6 +17,7 @@ import type { CampaignShareListV1, CampaignShareV1 } from "./shares-api";
 vi.mock("./shares-api", () => ({
   listCampaignShares: vi.fn(),
   listShareCandidates: vi.fn(),
+  listShareOwnedPacings: vi.fn(),
   createCampaignShare: vi.fn(),
   deleteCampaignShare: vi.fn(),
 }));
@@ -39,6 +40,7 @@ function renderPeople(list: CampaignShareListV1) {
   vi.mocked(api.listShareCandidates).mockResolvedValue([
     { hubUserId: 3, fullName: "Zlatan Peleksic", email: "zlatan@aidigital.com", roleName: "Team Lead", teamName: "Team Zlatan" },
   ]);
+  vi.mocked(api.listShareOwnedPacings).mockResolvedValue([]);
   vi.mocked(api.createCampaignShare).mockResolvedValue();
   vi.mocked(api.deleteCampaignShare).mockResolvedValue();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -99,7 +101,7 @@ describe("CampaignPeople", () => {
     await waitFor(() => expect(api.createCampaignShare).toHaveBeenCalledWith(19813, 3));
   });
 
-  it("removes a person and says why when the backend refuses", async () => {
+  it("removes a person who owns nothing here at once, and says why when the backend refuses", async () => {
     renderPeople({ canShare: true, shares: [aShare()] });
     vi.mocked(api.deleteCampaignShare).mockRejectedValueOnce(new Error("User may not share campaign: 19813"));
 
@@ -107,7 +109,65 @@ describe("CampaignPeople", () => {
     await userEvent.click(screen.getByRole("button", { name: "Remove Beatris Felises" }));
 
     expect(await screen.findByText("User may not share campaign: 19813")).toBeInTheDocument();
-    expect(api.deleteCampaignShare).toHaveBeenCalledWith(19813, 2);
+    expect(api.listShareOwnedPacings).toHaveBeenCalledWith(19813, 2);
+    expect(api.deleteCampaignShare).toHaveBeenCalledWith(19813, 2, false);
+    expect(screen.queryByRole("dialog", { name: /Remove Beatris Felises\?/ })).not.toBeInTheDocument();
+  });
+
+  it("asks before removing someone who owns pacings here, naming every campaign each one spans", async () => {
+    renderPeople({ canShare: true, shares: [aShare()] });
+    vi.mocked(api.listShareOwnedPacings).mockResolvedValue([
+      {
+        pacingId: "p1",
+        dashSlug: "fox-2026",
+        pacingName: "Fox 2026",
+        campaigns: [{ id: "19813", name: "Fox Factory Ridetech" }, { id: "777", name: "Fox Summer" }],
+      },
+      { pacingId: "p2", dashSlug: "fox-q4", pacingName: "Fox Q4", campaigns: [{ id: "19813", name: null }] },
+    ]);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add people" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Beatris Felises" }));
+
+    // Then: nothing deleted yet; the dialog lists both pacings, and the one spanning two campaigns says so
+    const dialog = await screen.findByRole("dialog", { name: "Remove Beatris Felises?" });
+    expect(dialog).toHaveTextContent("owns 2 pacings on this campaign");
+    expect(dialog).toHaveTextContent("Fox 2026");
+    expect(dialog).toHaveTextContent("Spans 2 campaigns: Fox Factory Ridetech, Fox Summer");
+    expect(dialog).toHaveTextContent("Covers: Campaign 19813");
+    expect(api.deleteCampaignShare).not.toHaveBeenCalled();
+
+    // When: confirmed
+    await userEvent.click(screen.getByRole("button", { name: "Transfer to me and remove" }));
+
+    // Then: the delete carries the confirmation
+    await waitFor(() => expect(api.deleteCampaignShare).toHaveBeenCalledWith(19813, 2, true));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove Beatris Felises?" })).not.toBeInTheDocument());
+  });
+
+  it("deletes nothing when the removal is cancelled", async () => {
+    renderPeople({ canShare: true, shares: [aShare()] });
+    vi.mocked(api.listShareOwnedPacings).mockResolvedValue([
+      { pacingId: "p1", dashSlug: "fox-2026", pacingName: "Fox 2026", campaigns: [{ id: "19813", name: "Fox" }] },
+    ]);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add people" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Beatris Felises" }));
+    await screen.findByRole("dialog", { name: "Remove Beatris Felises?" });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove Beatris Felises?" })).not.toBeInTheDocument());
+    expect(api.deleteCampaignShare).not.toHaveBeenCalled();
+  });
+
+  it("marks a person who is here because they own a pacing", async () => {
+    renderPeople({ canShare: false, shares: [aShare({ source: "pacing_created", grantedByName: "Beatris Felises" })] });
+
+    await userEvent.click(await screen.findByRole("button", { name: /1 person added/ }));
+
+    expect(screen.getByText("via pacing")).toBeInTheDocument();
+    await userEvent.hover(screen.getByText("MPO Manager · Team Vlad Chubakov"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Added automatically - owns a pacing on this campaign");
   });
 
   it("stacks at most four faces and counts the rest", async () => {

@@ -1,5 +1,7 @@
 package com.aidigital.operationalhub.service.campaignshare.model;
 
+import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
+
 import java.time.LocalDateTime;
 
 /**
@@ -11,6 +13,7 @@ import java.time.LocalDateTime;
  * @param role          the recipient's current Hub role and team
  * @param grantedByName the display name of whoever shared it
  * @param createdAt     when it was shared (UTC)
+ * @param source        where the share came from: added by hand, or following a pacing they own
  */
 public record CampaignShareModel(
 		Long hubUserId,
@@ -18,9 +21,11 @@ public record CampaignShareModel(
 		String email,
 		CampaignSharePersonRoleModel role,
 		String grantedByName,
-		LocalDateTime createdAt) {
+		LocalDateTime createdAt,
+		CampaignShareSource source) {
 
 	public CampaignShareModel {
 		role = role == null ? CampaignSharePersonRoleModel.none() : role;
+		source = source == null ? CampaignShareSource.MANUAL : source;
 	}
 }

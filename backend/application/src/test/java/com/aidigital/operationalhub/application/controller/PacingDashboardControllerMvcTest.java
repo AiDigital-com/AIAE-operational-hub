@@ -63,6 +63,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPar
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
+import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrantService;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
@@ -158,6 +159,9 @@ class PacingDashboardControllerMvcTest {
 	@Mock
 	private CampaignLinksValidator campaignLinksValidator;
 
+	@Mock
+	private CampaignShareAutoGrantService campaignShareAutoGrantService;
+
 	@InjectMocks
 	private PacingDashboardController controller;
 
@@ -218,6 +222,8 @@ class PacingDashboardControllerMvcTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.saved").value(true));
 		verify(pacingClient).savePlan(any(), eq("nike-ss26"), eq(lineItems), eq(rateUpdate));
+		// Whoever planned onto a campaign goes onto its people list once the save is through.
+		verify(campaignShareAutoGrantService).grantAfterPlanSave(any(), eq(lineItems));
 	}
 
 	@Test

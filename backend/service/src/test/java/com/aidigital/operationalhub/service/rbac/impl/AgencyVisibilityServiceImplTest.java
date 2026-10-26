@@ -76,6 +76,23 @@ class AgencyVisibilityServiceImplTest {
 	}
 
 	@Test
+	void shouldUnionTheAgenciesOfADirectorsSeveralTeamAssignmentsTest() {
+		// Given: a Director holding DIRECTOR/TEAM on two teams of her stream (2026-10-23) - restricted, never
+		// unrestricted, and seeing both teams' agencies
+		Long otherTeamId = 131L;
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID)).thenReturn(access(false, List.of(
+				assignment("DIRECTOR", "TEAM", TEAM_ID), assignment("DIRECTOR", "TEAM", otherTeamId))));
+		when(hubTeamAgencyService.findAgencyIdsByTeamIdIn(List.of(TEAM_ID, otherTeamId))).thenReturn(List.of(500L, 600L));
+
+		// When:
+		AgencyVisibility visibility = service.resolveForCurrentUser(user());
+
+		// Verification:
+		assertThat(visibility.seesAll()).isFalse();
+		assertThat(visibility.agencyIds()).containsExactlyInAnyOrder(500L, 600L);
+	}
+
+	@Test
 	void shouldRestrictToTeamAgenciesForTeamScopedRoleTest() {
 		// Given:
 		when(rbacQueryService.getEffectiveAccess(CLERK_ID))

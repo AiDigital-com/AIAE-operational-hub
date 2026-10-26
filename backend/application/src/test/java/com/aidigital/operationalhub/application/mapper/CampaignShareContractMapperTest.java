@@ -4,7 +4,11 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignS
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareV1;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
+import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingCampaignModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePersonRoleModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import org.junit.jupiter.api.Test;
@@ -27,7 +31,8 @@ class CampaignShareContractMapperTest {
 		// Given:
 		LocalDateTime sharedAt = LocalDateTime.of(2026, 10, 20, 15, 47, 54);
 		CampaignShareModel model = new CampaignShareModel(2L, "Beatris Felises", "b@aidigital.com",
-				new CampaignSharePersonRoleModel("MPO Manager", "Team Vlad"), "Azat Nabiev", sharedAt);
+				new CampaignSharePersonRoleModel("MPO Manager", "Team Vlad"), "Azat Nabiev", sharedAt,
+				CampaignShareSource.PACING_CREATED);
 
 		// When:
 		CampaignShareV1 v1 = mapper.toV1(model);
@@ -40,12 +45,13 @@ class CampaignShareContractMapperTest {
 		assertThat(v1.getTeamName()).isEqualTo("Team Vlad");
 		assertThat(v1.getGrantedByName()).isEqualTo("Azat Nabiev");
 		assertThat(v1.getCreatedAt()).isEqualTo(sharedAt);
+		assertThat(v1.getSource()).isEqualTo(CampaignShareV1.SourceEnum.PACING_CREATED);
 	}
 
 	@Test
 	void shouldMapTheListWithTheCallersRightToShareTest() {
 		// Given: a share of someone with no role at all
-		CampaignShareModel roleless = new CampaignShareModel(3L, "Dan", "dan@aidigital.com", null, null, null);
+		CampaignShareModel roleless = new CampaignShareModel(3L, "Dan", "dan@aidigital.com", null, null, null, null);
 		CampaignSharesModel model = new CampaignSharesModel(true, List.of(roleless));
 
 		// When:
@@ -82,5 +88,22 @@ class CampaignShareContractMapperTest {
 		assertThat(v1.getCandidates().get(0).getTeamName()).isNull();
 		assertThat(v1.getCandidates().get(1).getEmail()).isEqualTo("zlatan@aidigital.com");
 		assertThat(v1.getCandidates().get(1).getTeamName()).isEqualTo("Team Zlatan");
+	}
+
+	@Test
+	void shouldMapThePacingsAPersonOwnsOnACampaignTest() {
+		// Given:
+		CampaignSharePacingModel pacing = new CampaignSharePacingModel("p1", "fox-2026", "Fox 2026", List.of(
+				new CampaignSharePacingCampaignModel("100", "Fox Spring"),
+				new CampaignSharePacingCampaignModel("200", null)));
+
+		// When:
+		CampaignSharePacingListV1 v1 = mapper.toPacingsV1(List.of(pacing));
+
+		// Then:
+		assertThat(v1.getPacings()).hasSize(1);
+		assertThat(v1.getPacings().getFirst().getPacingName()).isEqualTo("Fox 2026");
+		assertThat(v1.getPacings().getFirst().getCampaigns()).extracting(c -> c.getId()).containsExactly("100", "200");
+		assertThat(v1.getPacings().getFirst().getCampaigns().get(1).getName()).isNull();
 	}
 }

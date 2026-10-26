@@ -1,7 +1,6 @@
 package com.aidigital.operationalhub.service.netsuite.org;
 
 import com.aidigital.operationalhub.domain.enums.Grade;
-import com.aidigital.operationalhub.service.netsuite.config.NetSuiteSyncProperties;
 import com.aidigital.operationalhub.service.netsuite.model.RipplingEmployee;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -25,14 +24,15 @@ import java.util.stream.Collectors;
  * emails do not follow any predictable pattern relative to names, so matching must never fall back to
  * email.
  *
- * <p>A Director title counts only inside the configured root department
- * ({@link NetSuiteSyncProperties#getDirectorRootDepartment()}, the MPO tree). Elsewhere the same title
- * is read as a plain member, so a «Growth Director» neither gets the unrestricted role nor terminates a
- * member's manager-chain walk.
+ * <p>A Director title counts only inside MPO ({@link MpoDepartmentPolicy}). Elsewhere the same title is
+ * read as a plain member, so a «Growth Director» neither gets a role nor terminates a member's
+ * manager-chain walk.
  *
- * <p>A member with no Team Lead between them and the MPO Director their chain reaches joins that
- * Director's own team ({@code "<department leaf>: <Director first name>"}) while the pod waits for a new
- * Team Lead; the Director keeps their own role. Owner decision 2026-10-26.
+ * <p>Directors see their own streams, not everything (2026-10-23): every Team Lead's manager chain is
+ * walked past the Team Lead to collect the Directors above them, at every level
+ * ({@link ResolvedTeam#directorEmails()}), and a manager whose chain reaches a Director before any Team
+ * Lead joins that Director's <em>direct team</em> - a team keyed by the Director's email, resolved for
+ * every Director and materialized by the reconciler only when it has members or agencies.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,9 +40,15 @@ public class OrgTreeTeamResolver {
 
 	/**
 	 * Separator of a Rippling department path ({@code "Media & Performance Optimization > Media
-	 * Optimization"}); the segment before the first one is the root department.
+	 * Optimization"}); the segment after the last one is the department leaf a team is named after.
 	 */
 	static final String DEPARTMENT_PATH_SEPARATOR = ">";
+
+	/**
+	 * Suffix of a Director's direct team name, telling it apart from a Team Lead's team in the same
+	 * department ({@code "Media Optimization: Stacy (direct)"}).
+	 */
+	static final String DIRECT_TEAM_SUFFIX = " (direct)";
 
 	/**
 	 * Maximum manager-chain hops walked before giving up (cycle/runaway guard).
@@ -58,7 +64,6 @@ public class OrgTreeTeamResolver {
 	static final Set<DataQualityFlag> SPECIFIC_UNRESOLVED_CAUSES = EnumSet.of(
 			DataQualityFlag.DUPLICATE_MANAGER_NAME,
 			DataQualityFlag.MANAGER_NOT_IN_ROSTER,
-			DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR,
 			DataQualityFlag.MANAGER_CHAIN_CYCLE,
 			DataQualityFlag.MANAGER_CHAIN_TOO_DEEP,
 			DataQualityFlag.NO_TEAM_SIGNAL);
@@ -66,10 +71,11 @@ public class OrgTreeTeamResolver {
 	private final TitleClassifier titleClassifier;
 	private final TeamsStringParser teamsStringParser;
 	private final NameNormalizer nameNormalizer;
-	private final NetSuiteSyncProperties properties;
+	private final MpoDepartmentPolicy mpoDepartmentPolicy;
 
 	/**
-	 * Resolves every employee to a role, grade, and team, and derives one team per Team Lead.
+	 * Resolves every employee to a role, grade, and team, and derives one team per Team Lead plus one
+	 * direct team per Director.
 	 *
 	 * @param employees the active employees read from BigQuery; may contain duplicate work emails, which
 	 *                  are collapsed to one row each (defense in depth alongside the SQL-side dedup)
@@ -85,6 +91,11 @@ public class OrgTreeTeamResolver {
 		List<RipplingEmployee> teamLeads = distinct.stream()
 				.filter(employee -> classificationByEmail.get(employee.workEmail()).orgRole() == OrgRole.TEAM_LEAD)
 				.toList();
+		List<RipplingEmployee> directors = distinct.stream()
+				.filter(employee -> classificationByEmail.get(employee.workEmail()).orgRole() == OrgRole.DIRECTOR)
+				.toList();
+		List<RipplingEmployee> leads = new ArrayList<>(teamLeads);
+		leads.addAll(directors);
 
 		Map<String, List<DataQualityFlag>> flagsByEmail = new LinkedHashMap<>();
 		for (RipplingEmployee employee : distinct) {
@@ -95,14 +106,15 @@ public class OrgTreeTeamResolver {
 			flagsByEmail.put(employee.workEmail(), flags);
 		}
 
+		Map<String, String> teamNameByLeadEmail = buildTeamNames(teamLeads, directors, flagsByEmail);
 		Map<String, String> teamLeadEmailByEmail = resolveTeamLeadEmails(
 				distinct, classificationByEmail, parsedByEmail, byNormalizedName, ambiguousNames, teamLeads,
 				flagsByEmail);
-		List<RipplingEmployee> leads = teamLeadsWithActingDirectors(
-				distinct, teamLeads, classificationByEmail, teamLeadEmailByEmail);
-		Map<String, String> teamNameByLeadEmail = buildTeamNames(leads, flagsByEmail);
+		Set<String> directorEmails = directors.stream().map(RipplingEmployee::workEmail).collect(Collectors.toSet());
 		Map<String, String> podByLeadEmail = computeTeamPods(
-				leads, teamLeadEmailByEmail, parsedByEmail, flagsByEmail);
+				leads, directorEmails, teamLeadEmailByEmail, parsedByEmail, flagsByEmail);
+		Map<String, List<String>> directorEmailsByLeadEmail = resolveDirectorChains(
+				leads, classificationByEmail, byNormalizedName, ambiguousNames, flagsByEmail);
 		flagMemberPodMismatches(distinct, classificationByEmail, teamLeadEmailByEmail, podByLeadEmail,
 				parsedByEmail, flagsByEmail);
 
@@ -116,14 +128,18 @@ public class OrgTreeTeamResolver {
 					TitleClassification classification = classificationByEmail.get(employee.workEmail());
 					String teamLeadEmail = teamLeadEmailByEmail.get(employee.workEmail());
 					String podKey = teamLeadEmail == null ? null : podByLeadEmail.get(teamLeadEmail);
-					return new ResolvedEmployee(employee.workEmail(), employee.name(), classification.orgRole(),
-							classification.grade(), teamLeadEmail, podKey, flagsByEmail.get(employee.workEmail()));
+					return new ResolvedEmployee(employee.workEmail(), employee.name(), employee.department(),
+							classification.orgRole(), classification.grade(), teamLeadEmail, podKey,
+							flagsByEmail.get(employee.workEmail()));
 				})
 				.toList();
 
 		List<ResolvedTeam> resolvedTeams = leads.stream()
 				.map(lead -> new ResolvedTeam(lead.workEmail(), lead.name(), teamNameByLeadEmail.get(lead.workEmail()),
-						podByLeadEmail.get(lead.workEmail()), flagsByEmail.get(lead.workEmail())))
+						podByLeadEmail.get(lead.workEmail()),
+						classificationByEmail.get(lead.workEmail()).orgRole() == OrgRole.DIRECTOR,
+						directorEmailsByLeadEmail.getOrDefault(lead.workEmail(), List.of()),
+						flagsByEmail.get(lead.workEmail())))
 				.toList();
 
 		return new OrgResolution(resolvedEmployees, resolvedTeams);
@@ -162,7 +178,7 @@ public class OrgTreeTeamResolver {
 
 	/**
 	 * Classifies one employee: the title decides the grade, and a Director title decides the
-	 * {@link OrgRole#DIRECTOR} role only inside the configured root department. Outside it the employee
+	 * {@link OrgRole#DIRECTOR} role only inside MPO ({@link MpoDepartmentPolicy}). Outside it the employee
 	 * is a {@link OrgRole#MEMBER} with the title's grade kept as it is (a Growth Director is still graded
 	 * Director on {@code hub_users}; they just hold no Pacing role for it).
 	 *
@@ -171,37 +187,10 @@ public class OrgTreeTeamResolver {
 	 */
 	TitleClassification classifyWithDepartmentGate(RipplingEmployee employee) {
 		TitleClassification byTitle = titleClassifier.classify(employee.title());
-		if (byTitle.orgRole() != OrgRole.DIRECTOR || isInDirectorRootDepartment(employee.department())) {
+		if (byTitle.orgRole() != OrgRole.DIRECTOR || mpoDepartmentPolicy.isMpo(employee.department())) {
 			return byTitle;
 		}
 		return new TitleClassification(OrgRole.MEMBER, byTitle.grade(), byTitle.titleUnrecognized());
-	}
-
-	/**
-	 * Tells whether a Rippling department path sits under the configured root department: its first
-	 * {@code >}-segment equals the root, case-insensitively, whitespace collapsed. A blank department or
-	 * a blank configuration never qualifies, so a misconfiguration fails closed.
-	 *
-	 * @param department the raw {@code department} value, possibly {@code null}
-	 * @return {@code true} when the department is the root or one of its sub-departments
-	 */
-	boolean isInDirectorRootDepartment(String department) {
-		String configuredRoot = collapseWhitespace(properties.getDirectorRootDepartment());
-		if (department == null || configuredRoot.isEmpty()) {
-			return false;
-		}
-		String root = collapseWhitespace(department.split(DEPARTMENT_PATH_SEPARATOR)[0]);
-		return !root.isEmpty() && root.equalsIgnoreCase(configuredRoot);
-	}
-
-	/**
-	 * Trims a string and collapses inner whitespace runs to one space.
-	 *
-	 * @param value the raw value, possibly {@code null}
-	 * @return the normalized value, or an empty string for {@code null}
-	 */
-	String collapseWhitespace(String value) {
-		return value == null ? "" : value.trim().replaceAll("\\s+", " ");
 	}
 
 	/**
@@ -251,15 +240,18 @@ public class OrgTreeTeamResolver {
 	/**
 	 * Builds the unique {@code hub_teams.team_name} for every Team Lead
 	 * ({@code "<department leaf>: <TL first name>"}), matching the Rippling team-token format users see
-	 * in the {@code teams} field, and disambiguating a collision by appending the email local part and
+	 * in the {@code teams} field, and for every Director's direct team (the same shape plus
+	 * {@value #DIRECT_TEAM_SUFFIX}), disambiguating a collision by appending the email local part and
 	 * flagging both teams.
 	 *
 	 * @param teamLeads    the Team Lead employees
+	 * @param directors    the Director employees, each the lead of their own direct team
 	 * @param flagsByEmail the mutable per-employee flag accumulator
-	 * @return the team name keyed by Team Lead work email
+	 * @return the team name keyed by Team Lead (or Director) work email
 	 */
 	Map<String, String> buildTeamNames(
-			List<RipplingEmployee> teamLeads, Map<String, List<DataQualityFlag>> flagsByEmail) {
+			List<RipplingEmployee> teamLeads, List<RipplingEmployee> directors,
+			Map<String, List<DataQualityFlag>> flagsByEmail) {
 		Map<String, List<RipplingEmployee>> leadsByBaseName = new LinkedHashMap<>();
 		Map<String, String> baseNameByLeadEmail = new LinkedHashMap<>();
 		for (RipplingEmployee lead : teamLeads) {
@@ -267,8 +259,15 @@ public class OrgTreeTeamResolver {
 			baseNameByLeadEmail.put(lead.workEmail(), baseName);
 			leadsByBaseName.computeIfAbsent(baseName, key -> new ArrayList<>()).add(lead);
 		}
+		for (RipplingEmployee director : directors) {
+			String baseName = teamBaseName(director) + DIRECT_TEAM_SUFFIX;
+			baseNameByLeadEmail.put(director.workEmail(), baseName);
+			leadsByBaseName.computeIfAbsent(baseName, key -> new ArrayList<>()).add(director);
+		}
+		List<RipplingEmployee> leads = new ArrayList<>(teamLeads);
+		leads.addAll(directors);
 		Map<String, String> teamNameByLeadEmail = new LinkedHashMap<>();
-		for (RipplingEmployee lead : teamLeads) {
+		for (RipplingEmployee lead : leads) {
 			String baseName = baseNameByLeadEmail.get(lead.workEmail());
 			if (leadsByBaseName.get(baseName).size() > 1) {
 				teamNameByLeadEmail.put(lead.workEmail(), baseName + " (" + localPart(lead.workEmail()) + ")");
@@ -310,15 +309,14 @@ public class OrgTreeTeamResolver {
 		if (department == null || department.isBlank()) {
 			return "";
 		}
-		String[] segments = department.split(">");
+		String[] segments = department.split(DEPARTMENT_PATH_SEPARATOR);
 		return segments[segments.length - 1].trim().replaceAll("\\s+", " ");
 	}
 
 	/**
 	 * Resolves every employee's Team Lead work email: {@code null} for directors, self for Team Leads,
-	 * and the manager-chain (falling back to the teams-string token) result for members. A member whose
-	 * chain reaches a Director before any Team Lead, with no token to fall back on, gets that Director as
-	 * an acting Team Lead ({@link DataQualityFlag#DIRECTOR_ACTING_TEAM_LEAD}).
+	 * and the manager-chain (falling back to the teams-string token) result for members - a Director's
+	 * email when the chain reaches a Director before any Team Lead (that Director's direct team).
 	 *
 	 * @param distinct              the deduplicated employees
 	 * @param classificationByEmail each employee's title classification, keyed by work email
@@ -350,20 +348,11 @@ public class OrgTreeTeamResolver {
 			}
 			String teamLeadEmail = resolveMemberTeamLead(
 					employee, classificationByEmail, byNormalizedName, ambiguousNames, flags);
-			String directorEmail = null;
-			if (teamLeadEmail != null && classificationByEmail.get(teamLeadEmail).orgRole() == OrgRole.DIRECTOR) {
-				directorEmail = teamLeadEmail;
-				teamLeadEmail = null;
-			}
 			ParsedTeamsString parsed = parsedByEmail.get(employee.workEmail());
 			if (teamLeadEmail == null) {
 				teamLeadEmail = resolveViaTeamToken(parsed, teamLeads);
 				if (teamLeadEmail != null) {
 					flags.add(DataQualityFlag.TEAM_RESOLVED_VIA_STRING_FALLBACK);
-				} else if (directorEmail != null) {
-					// A real Team Lead named in the teams string still wins; only then the Director's team
-					teamLeadEmail = directorEmail;
-					flags.add(DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
 				}
 			} else {
 				crossCheckTeamToken(parsed, nameOf(teamLeads, teamLeadEmail), flags);
@@ -380,31 +369,6 @@ public class OrgTreeTeamResolver {
 	}
 
 	/**
-	 * The employees who head a team this run: every Team Lead, then every Director that at least one
-	 * member reached as an acting Team Lead (see {@link #resolveTeamLeadEmails}). A Director with no such
-	 * member heads no team, so their team goes away on its own once Rippling shows a Team Lead again.
-	 *
-	 * @param distinct              the deduplicated employees, in first-seen order
-	 * @param teamLeads             the Team Lead employees
-	 * @param classificationByEmail each employee's title classification, keyed by work email
-	 * @param teamLeadEmailByEmail  each employee's resolved Team Lead email, keyed by employee work email
-	 * @return the team heads, Team Leads first
-	 */
-	List<RipplingEmployee> teamLeadsWithActingDirectors(
-			List<RipplingEmployee> distinct,
-			List<RipplingEmployee> teamLeads,
-			Map<String, TitleClassification> classificationByEmail,
-			Map<String, String> teamLeadEmailByEmail) {
-		Set<String> headEmails = new HashSet<>(teamLeadEmailByEmail.values());
-		List<RipplingEmployee> leads = new ArrayList<>(teamLeads);
-		distinct.stream()
-				.filter(employee -> classificationByEmail.get(employee.workEmail()).orgRole() == OrgRole.DIRECTOR)
-				.filter(employee -> headEmails.contains(employee.workEmail()))
-				.forEach(leads::add);
-		return leads;
-	}
-
-	/**
 	 * Walks the {@code manager} chain upward from a member to the nearest Team Lead, by name.
 	 *
 	 * @param employee              the member being resolved
@@ -412,11 +376,11 @@ public class OrgTreeTeamResolver {
 	 * @param byNormalizedName      the name index
 	 * @param ambiguousNames        normalized names shared by more than one employee
 	 * @param flags                 the employee's mutable flag accumulator
-	 * @return the resolved Team Lead's work email; the Director's work email when a Director is reached
-	 * before any Team Lead (flagged {@link DataQualityFlag#MANAGER_CHAIN_HIT_DIRECTOR} - the caller decides
-	 * whether that Director acts as the Team Lead); or {@code null} when the tree could not resolve one
-	 * (ambiguous/unknown manager name, a cycle, the maximum chain depth was exceeded, or the chain ran
-	 * out with no team signal at all) - the specific cause is recorded on {@code flags} in every case
+	 * @return the resolved Team Lead's work email - a Director's when the chain reaches a Director before
+	 * any Team Lead, placing the member in that Director's direct team and flagging it for information -
+	 * or {@code null} when the tree could not resolve one (ambiguous/unknown manager name, a cycle, the
+	 * maximum chain depth was exceeded, or the chain ran out with no team signal at all) - the specific
+	 * cause is recorded on {@code flags} in every case
 	 */
 	String resolveMemberTeamLead(
 			RipplingEmployee employee,
@@ -458,6 +422,61 @@ public class OrgTreeTeamResolver {
 				? DataQualityFlag.MANAGER_CHAIN_TOO_DEEP
 				: DataQualityFlag.NO_TEAM_SIGNAL);
 		return null;
+	}
+
+	/**
+	 * Walks every lead's {@code manager} chain upward, by name, collecting the work email of each
+	 * Director it passes - at any level, through Team Leads and plain members alike - until the chain
+	 * runs out. These are the people who see the lead's team. A Director's own chain starts above them,
+	 * so their direct team is seen by the Directors above, never counted for themselves twice.
+	 *
+	 * <p>Only a shared manager name or a cycle is flagged: a chain that simply leaves the roster (the
+	 * company's top) is the normal end of every walk, not a data problem.
+	 *
+	 * @param leads                 the Team Lead and Director employees whose chains to walk
+	 * @param classificationByEmail each employee's title classification, keyed by work email
+	 * @param byNormalizedName      the name index
+	 * @param ambiguousNames        normalized names shared by more than one employee
+	 * @param flagsByEmail          the mutable per-employee flag accumulator
+	 * @return the Director emails above each lead, nearest first, keyed by lead work email
+	 */
+	Map<String, List<String>> resolveDirectorChains(
+			List<RipplingEmployee> leads,
+			Map<String, TitleClassification> classificationByEmail,
+			Map<String, List<RipplingEmployee>> byNormalizedName,
+			Set<String> ambiguousNames,
+			Map<String, List<DataQualityFlag>> flagsByEmail) {
+		Map<String, List<String>> directorEmailsByLeadEmail = new LinkedHashMap<>();
+		for (RipplingEmployee lead : leads) {
+			List<String> directorEmails = new ArrayList<>();
+			Set<String> visited = new HashSet<>();
+			visited.add(lead.workEmail());
+			String managerName = lead.manager();
+			int depth = 0;
+			while (managerName != null && depth < MAX_MANAGER_CHAIN_DEPTH) {
+				String normalizedManagerName = nameNormalizer.normalize(managerName);
+				if (ambiguousNames.contains(normalizedManagerName)) {
+					flagsByEmail.get(lead.workEmail()).add(DataQualityFlag.DUPLICATE_MANAGER_NAME);
+					break;
+				}
+				List<RipplingEmployee> matches = byNormalizedName.get(normalizedManagerName);
+				if (matches == null || matches.isEmpty()) {
+					break;
+				}
+				RipplingEmployee manager = matches.get(0);
+				if (!visited.add(manager.workEmail())) {
+					flagsByEmail.get(lead.workEmail()).add(DataQualityFlag.MANAGER_CHAIN_CYCLE);
+					break;
+				}
+				if (classificationByEmail.get(manager.workEmail()).orgRole() == OrgRole.DIRECTOR) {
+					directorEmails.add(manager.workEmail());
+				}
+				managerName = manager.manager();
+				depth++;
+			}
+			directorEmailsByLeadEmail.put(lead.workEmail(), List.copyOf(directorEmails));
+		}
+		return directorEmailsByLeadEmail;
 	}
 
 	/**
@@ -504,9 +523,13 @@ public class OrgTreeTeamResolver {
 
 	/**
 	 * Computes each team's pod (S6): the Team Lead's own pod token when there is exactly one, otherwise
-	 * the majority pod among the team's members; {@code null} and flagged when still ambiguous.
+	 * the majority pod among the team's members; {@code null} and flagged when still ambiguous. A
+	 * Director's direct team is computed the same way, over the managers reporting straight to them -
+	 * but a Director with no direct reports and no pod token of their own is not flagged: most Directors
+	 * have neither, and their direct team will not even be materialized.
 	 *
-	 * @param teamLeads            the Team Lead employees
+	 * @param teamLeads            the Team Lead and Director employees, one team each
+	 * @param directorEmails       the work emails of the Directors among them
 	 * @param teamLeadEmailByEmail each employee's resolved Team Lead email, keyed by employee work email
 	 * @param parsedByEmail        each employee's parsed teams string, keyed by work email
 	 * @param flagsByEmail         the mutable per-employee flag accumulator
@@ -514,6 +537,7 @@ public class OrgTreeTeamResolver {
 	 */
 	Map<String, String> computeTeamPods(
 			List<RipplingEmployee> teamLeads,
+			Set<String> directorEmails,
 			Map<String, String> teamLeadEmailByEmail,
 			Map<String, ParsedTeamsString> parsedByEmail,
 			Map<String, List<DataQualityFlag>> flagsByEmail) {
@@ -534,7 +558,7 @@ public class OrgTreeTeamResolver {
 						.flatMap(memberEmail -> parsedByEmail.get(memberEmail).podTokens().stream())
 						.toList();
 				pod = majorityPod(memberPods);
-				if (pod == null) {
+				if (pod == null && !(directorEmails.contains(lead.workEmail()) && memberPods.isEmpty())) {
 					flagsByEmail.get(lead.workEmail()).add(DataQualityFlag.POD_AMBIGUOUS);
 				}
 			}

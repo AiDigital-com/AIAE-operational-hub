@@ -20,6 +20,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaign
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
 import com.aidigital.operationalhub.service.agency.CampaignService;
+import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrantService;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
@@ -61,6 +62,7 @@ public class PacingController implements PacingApi {
 	private final AssignableOwnerService assignableOwnerService;
 	private final CampaignService campaignService;
 	private final CampaignLinksValidator campaignLinksValidator;
+	private final CampaignShareAutoGrantService campaignShareAutoGrantService;
 
 	@Override
 	public ResponseEntity<PacingListResponseV1> listPacings() {
@@ -112,7 +114,9 @@ public class PacingController implements PacingApi {
 	 * enforces {@code canCreate} (carried on the signed assertion) and every other create rule; the
 	 * one Hub-side check is {@link CampaignLinksValidator} over {@code campaignLinks}, because Pacing
 	 * stores links verbatim while the Hub renders them clickable - the exact reasoning of the
-	 * settings-save links path, applied to the same data arriving one screen earlier.
+	 * settings-save links path, applied to the same data arriving one screen earlier. After the create
+	 * succeeded, the creator goes onto every campaign's people list
+	 * ({@link CampaignShareAutoGrantService}) - a follow-up that never fails the create.
 	 */
 	@Override
 	public ResponseEntity<PacingCreateResultV1> createPacing(PacingCreateV1 body) {
@@ -127,6 +131,7 @@ public class PacingController implements PacingApi {
 		}
 		PacingCreateResult result =
 				pacingClient.createPacing(assertion, body.getPacingName(), lineItems, options);
+		campaignShareAutoGrantService.grantAfterPacingCreate(user, lineItems);
 		return ResponseEntity.status(HttpStatus.CREATED).body(createMapper.toCreateResultV1(result));
 	}
 
@@ -151,7 +156,8 @@ public class PacingController implements PacingApi {
 	 * Reassigns a pacing to another person (§11 of the migration plan, US-131).
 	 *
 	 * <p>No logic here either: Pacing checks that both the pacing and the recipient sit inside the
-	 * asserted scope, and journals who made the change. This signs and forwards.
+	 * asserted scope, and journals who made the change. This signs and forwards, then puts the new
+	 * owner onto every campaign of the pacing ({@link CampaignShareAutoGrantService}).
 	 */
 	@Override
 	public ResponseEntity<Void> transferPacingOwner(String pacingId, PacingOwnerUpdateV1 body) {
@@ -159,6 +165,7 @@ public class PacingController implements PacingApi {
 		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
 		HubAssertion assertion = mapper.toAssertion(user, entitlement);
 		pacingClient.transferOwner(assertion, pacingId, body.getNewOwnerId());
+		campaignShareAutoGrantService.grantAfterOwnerTransfer(user, pacingId, body.getNewOwnerId());
 		// 204 for {@link #updatePacingStatus}'s reason.
 		return ResponseEntity.noContent().build();
 	}

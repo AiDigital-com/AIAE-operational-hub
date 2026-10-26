@@ -61,8 +61,82 @@ class PacingScopeResolverImplTest {
 	@Mock
 	private HubCampaignShareService hubCampaignShareService;
 
+	@Mock
+	private TeamCampaignScopeResolver teamCampaignScopeResolver;
+
 	@InjectMocks
 	private PacingScopeResolverImpl resolver;
+
+	@Test
+	void shouldCarryTheTeamsCampaignsWithPacingsBesideTheSharesTest() {
+		// Given: a team member whose team's agencies have two campaigns with pacings, one of them also
+		// shared with the person directly
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID))
+				.thenReturn(access(false, List.of(assignment("MPO_MANAGER", "TEAM", TEAM_ID))));
+		when(hubRoleAssignmentService.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of(TEAM_ID)))
+				.thenReturn(List.of());
+		when(hubUserService.findAllByIds(any())).thenReturn(List.of(hubUser(USER_ID, ACTING_PACING_USER_ID)));
+		when(hubCampaignShareService.findCampaignIdsByUserId(USER_ID)).thenReturn(List.of(100L));
+		when(teamCampaignScopeResolver.resolve(List.of(TEAM_ID))).thenReturn(List.of("100", "200"));
+
+		// When:
+		PacingEntitlement entitlement = resolver.resolveForCurrentUser(user());
+
+		// Then: still an owners scope, with the union of both lists and no repeat
+		assertThat(entitlement.scope().kind()).isEqualTo(PacingScope.KIND_OWNERS);
+		assertThat(entitlement.scope().ids()).containsExactly(ACTING_PACING_USER_ID);
+		assertThat(entitlement.scope().campaignIds()).containsExactly("100", "200");
+	}
+
+	@Test
+	void shouldDropTheTeamCampaignsAndKeepTheSharesWhenTheListWouldNotFitTheHeaderTest() {
+		// Given: a team whose agencies have more campaigns with pacings than the header holds
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID))
+				.thenReturn(access(false, List.of(assignment("TL", "TEAM", TEAM_ID))));
+		when(hubRoleAssignmentService.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of(TEAM_ID)))
+				.thenReturn(List.of());
+		when(hubUserService.findAllByIds(any())).thenReturn(List.of(hubUser(USER_ID, ACTING_PACING_USER_ID)));
+		when(hubCampaignShareService.findCampaignIdsByUserId(USER_ID)).thenReturn(List.of(7L));
+		List<String> tooMany = java.util.stream.IntStream
+				.range(0, PacingScopeResolverImpl.MAX_CAMPAIGN_IDS_IN_SCOPE + 1)
+				.mapToObj(i -> String.valueOf(1000 + i))
+				.toList();
+		when(teamCampaignScopeResolver.resolve(List.of(TEAM_ID))).thenReturn(tooMany);
+
+		// When:
+		PacingEntitlement entitlement = resolver.resolveForCurrentUser(user());
+
+		// Then: predictable degradation - the person's own shares, none of the team's campaigns
+		assertThat(entitlement.scope().campaignIds()).containsExactly("7");
+	}
+
+	@Test
+	void shouldResolveADirectorsSeveralTeamAssignmentsIntoOneOwnersScopeTest() {
+		// Given: a Director holding DIRECTOR/TEAM on two teams of her stream (2026-10-23), each with a member
+		Long otherTeamId = 131L;
+		when(rbacQueryService.getEffectiveAccess(CLERK_ID)).thenReturn(access(false, List.of(
+				assignment("DIRECTOR", "TEAM", TEAM_ID), assignment("DIRECTOR", "TEAM", otherTeamId))));
+		HubRoleAssignment memberAssignment = new HubRoleAssignment();
+		memberAssignment.setUserId(MEMBER_ID);
+		HubRoleAssignment otherMemberAssignment = new HubRoleAssignment();
+		otherMemberAssignment.setUserId(OTHER_MEMBER_ID);
+		when(hubRoleAssignmentService.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of(TEAM_ID, otherTeamId)))
+				.thenReturn(List.of(memberAssignment, otherMemberAssignment));
+		when(hubUserService.findAllByIds(any())).thenReturn(List.of(
+				hubUser(USER_ID, ACTING_PACING_USER_ID), hubUser(MEMBER_ID, MEMBER_PACING_USER_ID),
+				hubUser(OTHER_MEMBER_ID, "33333333-3333-3333-3333-333333333333")));
+		when(hubCampaignShareService.findCampaignIdsByUserId(USER_ID)).thenReturn(List.of());
+		when(teamCampaignScopeResolver.resolve(List.of(TEAM_ID, otherTeamId))).thenReturn(List.of());
+
+		// When:
+		PacingEntitlement entitlement = resolver.resolveForCurrentUser(user());
+
+		// Then: never "all" for a Director any more - the owners of both teams, herself included
+		assertThat(entitlement.scope().kind()).isEqualTo(PacingScope.KIND_OWNERS);
+		assertThat(entitlement.scope().ids()).containsExactlyInAnyOrder(
+				ACTING_PACING_USER_ID, MEMBER_PACING_USER_ID, "33333333-3333-3333-3333-333333333333");
+		assertThat(entitlement.canCreate()).isTrue();
+	}
 
 	@Test
 	void shouldBeUnrestrictedForAdminTest() {
@@ -81,7 +155,8 @@ class PacingScopeResolverImplTest {
 
 	@Test
 	void shouldBeUnrestrictedForAllScopedRoleTest() {
-		// Given: a non-admin holding an ALL-scoped (global) role, e.g. how DIRECTOR is provisioned
+		// Given: a non-admin holding an ALL-scoped (global) role - a manual grant, since the sync stopped
+		// handing Directors ALL on 2026-10-23
 		when(rbacQueryService.getEffectiveAccess(CLERK_ID))
 				.thenReturn(access(false, List.of(assignment("DIRECTOR", "ALL", null))));
 

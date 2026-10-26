@@ -17,9 +17,11 @@ import org.springframework.validation.annotation.Validated;
 public class NetSuiteSyncProperties {
 
 	/**
-	 * The root Rippling department whose Directors are granted the {@code DIRECTOR} role (unrestricted
-	 * visibility). A Rippling department is a {@code >}-separated path; only its first segment is
-	 * compared, case-insensitively, so every sub-department of the root qualifies.
+	 * The root Rippling department of MPO: its Directors are granted the {@code DIRECTOR} role (scoped
+	 * to their own streams' teams since 2026-10-23), and its people - the whole tree under it, Integration
+	 * and AdOps included - are the only ones who can be added to a campaign. A Rippling department is a
+	 * {@code >}-separated path; only its first segment is compared, case-insensitively, so every
+	 * sub-department of the root qualifies. Read through {@code MpoDepartmentPolicy}.
 	 *
 	 * <p>A Director title anywhere else in the company (Growth, Client Service, Strategy, Finance, ...)
 	 * is read as a plain member: the title still sets the grade, but no role follows from it. Owner

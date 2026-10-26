@@ -22,7 +22,8 @@ import java.util.List;
  * inside a single write transaction (see {@code team-by-team-lead-REMEDIATION.md} R2).
  *
  * <p>Teams are derived from the Rippling org tree ({@link OrgTreeTeamResolver}): each employee is
- * assigned to the team of their Team Lead (not their {@code department}), directors get no team, and
+ * assigned to the team of their Team Lead (not their {@code department}) - or to a Director's direct
+ * team when no Team Lead sits between them - directors are scoped to the teams of their own stream, and
  * grade is set from the classified title. See {@code team-by-team-lead-PLAN.md}.
  */
 @Slf4j

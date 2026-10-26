@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
 import { SearchIcon } from "../../shared/ui/icons/icons";
+import { Modal } from "../../shared/ui/modal/modal";
 import { Tooltip } from "../../shared/ui/tooltip/tooltip";
-import type { CampaignShareV1 } from "./shares-api";
+import { listShareOwnedPacings } from "./shares-api";
+import type { CampaignSharePacingV1, CampaignShareV1 } from "./shares-api";
 import { useCampaignShares, useCreateShare, useDeleteShare, useShareCandidates } from "./shares-hooks";
 import "./campaign-people.css";
 
@@ -16,6 +18,10 @@ import "./campaign-people.css";
  * because it was shared with them gets the stack and nothing else, and Client Services likewise.
  *
  * Nothing here decides access. A refusal comes back as a sentence and is shown as written.
+ *
+ * Removing someone who owns pacings on the campaign (2026-10-23) first shows what that means: each of
+ * their pacings here moves whole to the remover - every campaign it spans included - before they go.
+ * Only on confirm does the delete carry `transferPacings`; the backend refuses the plain delete.
  */
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -28,6 +34,11 @@ export function initials(share: Pick<CampaignShareV1, "fullName" | "email">): st
   const words = source.split(/[\s.@_-]+/).filter(Boolean);
   const letters = words.slice(0, 2).map((word) => word[0]);
   return letters.join("").toUpperCase();
+}
+
+/** Whether a share came from owning a pacing on the campaign rather than from "Add people". */
+export function isViaPacing(share: Pick<CampaignShareV1, "source">): boolean {
+  return share.source === "pacing_created";
 }
 
 /** The line under a name: role and team, or the email when the person holds no role. */
@@ -45,7 +56,9 @@ function PersonDetails({ person }: { person: Partial<CampaignShareV1> }) {
     person.fullName,
     [person.roleName, person.teamName].filter(Boolean).join(" · ") || null,
     person.email,
-    person.grantedByName ? `Added by ${person.grantedByName}` : null,
+    isViaPacing(person)
+      ? "Added automatically - owns a pacing on this campaign"
+      : person.grantedByName ? `Added by ${person.grantedByName}` : null,
   ].filter(Boolean) as string[];
   return (
     <span className="cpeople__details">
@@ -63,7 +76,10 @@ function PersonText({ person }: { person: Partial<CampaignShareV1> }) {
   return (
     <Tooltip className="cpeople__text" content={<PersonDetails person={person} />}>
       <span className="cpeople__option-text">
-        <span className="cpeople__option-name">{person.fullName || person.email}</span>
+        <span className="cpeople__option-name">
+          {person.fullName || person.email}
+          {isViaPacing(person) && <span className="cpeople__badge">via pacing</span>}
+        </span>
         <span className="cpeople__option-email">{roleLine(person)}</span>
       </span>
     </Tooltip>
@@ -78,6 +94,9 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounce(searchInput, SEARCH_DEBOUNCE_MS).trim();
   const [error, setError] = useState<string | null>(null);
+  // Set while the "they own pacings here" confirmation is up; the popover stays open under it.
+  const [removal, setRemoval] = useState<{ person: CampaignShareV1; pacings: CampaignSharePacingV1[] } | null>(null);
+  const [checking, setChecking] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -90,6 +109,8 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
+      // The confirmation is portaled to the body, so a click inside it is "outside" the popover.
+      if (removal) return;
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -101,7 +122,7 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [open, removal]);
 
   useEffect(() => {
     if (open && canShare) searchRef.current?.focus();
@@ -122,12 +143,34 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
     }
   }
 
-  async function drop(hubUserId: number) {
+  // Removing somebody first asks the backend what they own here. Nothing owned: remove at once.
+  // Something owned: show it and ask, since confirming hands every one of those pacings to the remover.
+  async function drop(person: CampaignShareV1) {
     setError(null);
+    setChecking(true);
     try {
-      await remove.mutateAsync(hubUserId);
+      const pacings = await listShareOwnedPacings(campaignId, person.hubUserId);
+      if (pacings.length === 0) {
+        await remove.mutateAsync({ hubUserId: person.hubUserId, transferPacings: false });
+      } else {
+        setRemoval({ person, pacings });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not remove access");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function confirmRemoval() {
+    if (!removal) return;
+    setError(null);
+    try {
+      await remove.mutateAsync({ hubUserId: removal.person.hubUserId, transferPacings: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove access");
+    } finally {
+      setRemoval(null);
     }
   }
 
@@ -138,7 +181,7 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
 
   const stack = people.slice(0, STACK_LIMIT);
   const overflow = people.length - stack.length;
-  const busy = create.isPending || remove.isPending;
+  const busy = create.isPending || remove.isPending || checking;
 
   return (
     <div className="cpeople" ref={rootRef}>
@@ -232,7 +275,7 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
                     <button
                       type="button"
                       className={cn("button button--ghost button--sm cpeople__remove")}
-                      onClick={() => void drop(p.hubUserId)}
+                      onClick={() => void drop(p)}
                       disabled={busy}
                       aria-label={`Remove ${p.fullName || p.email}`}
                     >
@@ -246,6 +289,69 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
           {error && <p className="cpeople__error">{error}</p>}
         </div>
       )}
+
+      {removal && (
+        <RemovalConfirmation
+          removal={removal}
+          busy={remove.isPending}
+          onCancel={() => setRemoval(null)}
+          onConfirm={() => void confirmRemoval()}
+        />
+      )}
     </div>
+  );
+}
+
+/** A campaign's label in the confirmation: its name, or its id when Pacing only knows that. */
+function campaignLabel(campaign: CampaignSharePacingV1["campaigns"][number]): string {
+  return campaign.name || `Campaign ${campaign.id}`;
+}
+
+/**
+ * "They own pacings here" - the dialog before a removal that moves work. Every pacing is listed with
+ * every campaign it covers, so the remover sees when one reaches beyond this campaign: the transfer
+ * is of the whole pacing, never of a slice.
+ */
+function RemovalConfirmation({
+  removal,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  removal: { person: CampaignShareV1; pacings: CampaignSharePacingV1[] };
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const name = removal.person.fullName || removal.person.email || "this person";
+  const count = removal.pacings.length;
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      title={`Remove ${name}?`}
+      subtitle={`${name} owns ${count} pacing${count === 1 ? "" : "s"} on this campaign. Each one is transferred whole to you - including every other campaign it covers - and only then is their access removed.`}
+      className="cpeople-confirm"
+    >
+      <ul className="cpeople-confirm__list">
+        {removal.pacings.map((pacing) => (
+          <li key={pacing.pacingId} className="cpeople-confirm__pacing">
+            <span className="cpeople-confirm__pacing-name">{pacing.pacingName || pacing.dashSlug || pacing.pacingId}</span>
+            <span className="cpeople-confirm__pacing-campaigns">
+              {pacing.campaigns.length > 1 ? `Spans ${pacing.campaigns.length} campaigns: ` : "Covers: "}
+              {pacing.campaigns.map(campaignLabel).join(", ") || "no campaign on record"}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="cpeople-confirm__actions">
+        <button type="button" className="button button--secondary" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button type="button" className="button button--primary" onClick={onConfirm} disabled={busy}>
+          Transfer to me and remove
+        </button>
+      </div>
+    </Modal>
   );
 }

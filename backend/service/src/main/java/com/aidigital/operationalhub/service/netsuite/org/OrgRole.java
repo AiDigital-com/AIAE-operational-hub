@@ -7,10 +7,11 @@ package com.aidigital.operationalhub.service.netsuite.org;
 public enum OrgRole {
 
 	/**
-	 * Heads a department inside the MPO tree. Assigned the {@code DIRECTOR} RBAC role and no team (see
-	 * {@code team-by-team-lead-PLAN.md} §6 open item 1) - except that members with no Team Lead under them
-	 * form a team the Director heads, without changing the Director's own role. A Director title outside
-	 * the configured root department reads as {@link #MEMBER} - see
+	 * Heads a stream inside the MPO tree (Director or Senior Director). Assigned the {@code DIRECTOR}
+	 * RBAC role scoped to every team whose Team Lead's manager chain reaches them, plus their own direct
+	 * team when they have managers or agencies with no Team Lead in between (2026-10-23; before that,
+	 * an unscoped ALL grant - "directors see all" - which is no longer given by the sync to anyone). A
+	 * Director title outside the configured root department reads as {@link #MEMBER} - see
 	 * {@code OrgTreeTeamResolver#classifyWithDepartmentGate}.
 	 */
 	DIRECTOR,

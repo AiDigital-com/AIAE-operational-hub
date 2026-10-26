@@ -69,6 +69,30 @@ class PacingAudienceResolverTest {
 	}
 
 	@Test
+	void shouldMakeADirectorATeamViewerOfEachTeamInTheirStreamNotAGlobalTest() {
+		// Given: a Director with DIRECTOR/TEAM on both teams (2026-10-23), an owner on each, an outsider on
+		// neither
+		when(hubUserService.findAll()).thenReturn(List.of(
+				user(DIRECTOR_ID, "director@x.com", HubStatus.ACTIVE, null),
+				user(OWNER_ID, "owner@x.com", HubStatus.ACTIVE, OWNER_PACING_ID),
+				user(OUTSIDER_ID, "outsider@x.com", HubStatus.ACTIVE, OUTSIDER_PACING_ID)));
+		when(hubRoleAssignmentService.findAllActive()).thenReturn(List.of(
+				assignment(DIRECTOR_ID, "DIRECTOR", "TEAM", TEAM_A),
+				assignment(DIRECTOR_ID, "DIRECTOR", "TEAM", TEAM_B),
+				assignment(OWNER_ID, "MPO_MANAGER", "TEAM", TEAM_A),
+				assignment(OUTSIDER_ID, "MPO_MANAGER", "TEAM", TEAM_B)));
+
+		// When:
+		PacingAudienceRoster roster = resolver.resolve();
+
+		// Then: in both owners' audiences through the team rows, in nobody's as a global
+		assertThat(roster.globalEmails()).isEmpty();
+		assertThat(roster.teamViewerEmailsByOwnerPacingId().get(OWNER_PACING_ID)).contains("director@x.com");
+		assertThat(roster.teamViewerEmailsByOwnerPacingId().get(OUTSIDER_PACING_ID)).contains("director@x.com");
+		assertThat(roster.teamViewerEmailsByOwnerPacingId().get(OWNER_PACING_ID)).doesNotContain("outsider@x.com");
+	}
+
+	@Test
 	void shouldResolveTeamViewersAsCoAssignedTeamMembersKeyedByOwnerPacingIdTest() {
 		// Given: owner and teammate share TEAM_A; the outsider holds TEAM_B only
 		when(hubUserService.findAll()).thenReturn(List.of(

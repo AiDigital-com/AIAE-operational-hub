@@ -2,17 +2,23 @@ package com.aidigital.operationalhub.service.campaignshare.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubCampaignShare;
 import com.aidigital.operationalhub.domain.entity.HubUser;
+import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
+import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccessClient;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignPacing;
 import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.campaignshare.CampaignShareService;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingCampaignModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePersonRoleModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
+import com.aidigital.operationalhub.service.netsuite.org.MpoDepartmentPolicy;
 import com.aidigital.operationalhub.service.rbac.AgencyVisibilityService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
 import com.aidigital.operationalhub.service.rbac.enums.RbacRoleCode;
@@ -33,6 +39,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -42,6 +49,19 @@ import java.util.stream.Collectors;
  * <p>The right to share is decided from {@link AgencyVisibility#ownsAgency(Long)}: the agency set of a
  * visibility is the person's OWN scope (admin, ALL, the team's agencies), never what was shared with
  * them - so a recipient cannot share onward. Client Services is refused by role.
+ *
+ * <p>Who may be added (2026-10-23): current MPO people only - {@link MpoDepartmentPolicy} over the
+ * department the sync wrote to {@code hub_users}. The sync clears that department when somebody
+ * leaves Rippling; {@code hub_users.status} is NOT consulted, since it only says whether the person
+ * has ever logged in to the Hub, and a colleague who has not must still be addable. Refused on
+ * {@link #share}, not only hidden from the picker, so no client can add somebody the rule excludes.
+ *
+ * <p>Removing someone who owns pacings on the campaign (2026-10-23) moves those pacings to the remover
+ * first, through {@link PacingCampaignAccessClient#transferOwnerAsSystem}: Pacing's user route checks
+ * that the current owner is inside the caller's scope, which the person being removed usually is not -
+ * they were added precisely because they are from another team. The Hub has already decided the remover
+ * may act (they own the campaign's agency), so it tells Pacing on its own authority and names the
+ * remover for the journal. Nothing is deleted until every transfer succeeded.
  *
  * <p>Changing a share changes the recipient's cached visibility, so {@code share} and {@code unshare}
  * evict their entry of {@link AgencyVisibilityService#AGENCY_VISIBILITY_CACHE} explicitly - the same
@@ -60,6 +80,9 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	private final HubCampaignShareService hubCampaignShareService;
 	private final HubUserService hubUserService;
 	private final CampaignSharePersonDescriber personDescriber;
+	private final MpoDepartmentPolicy mpoDepartmentPolicy;
+	private final PacingCampaignAccessClient pacingCampaignAccessClient;
+	private final CampaignShareGrantWriter grantWriter;
 
 	@Override
 	public CampaignSharesModel listShares(CurrentUserModel user, long campaignId) {
@@ -82,6 +105,7 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 		hubCampaignShareService.findByCampaignId(campaignId).forEach(share -> excluded.add(share.getUserId()));
 		String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
 		List<HubUser> page = hubUserService.findAll().stream()
+				.filter(this::isCurrentMpo)
 				.filter(candidate -> !excluded.contains(candidate.getId()))
 				.filter(candidate -> matches(candidate, needle))
 				.sorted(Comparator.comparing(
@@ -107,12 +131,14 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 		HubUser recipient = hubUserService.findAllByIds(List.of(hubUserId)).stream()
 				.findFirst()
 				.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_066, hubUserId));
+		requireCurrentMpo(recipient);
 		Optional<HubCampaignShare> existing = hubCampaignShareService.findByCampaignIdAndUserId(campaignId, hubUserId);
 		HubCampaignShare share = existing.orElseGet(() -> {
 			HubCampaignShare created = new HubCampaignShare();
 			created.setCampaignId(campaignId);
 			created.setUserId(hubUserId);
 			created.setGrantedByUserId(user.id());
+			created.setSource(CampaignShareSource.MANUAL.getCode());
 			HubCampaignShare saved = hubCampaignShareService.save(created);
 			log.info("Campaign shared: campaignId={}, withUserId={}, byUserId={}", campaignId, hubUserId, user.id());
 			return saved;
@@ -123,14 +149,137 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	}
 
 	@Override
-	@CacheEvict(cacheNames = AgencyVisibilityService.AGENCY_VISIBILITY_CACHE, key = "#hubUserId")
-	public void unshare(CurrentUserModel user, long campaignId, long hubUserId) {
+	public List<CampaignSharePacingModel> listOwnedPacings(CurrentUserModel user, long campaignId, long hubUserId) {
 		requireCanShare(user, campaignId);
-		hubCampaignShareService.findByCampaignIdAndUserId(campaignId, hubUserId).ifPresent(share -> {
-			hubCampaignShareService.delete(share);
-			log.info("Campaign share removed: campaignId={}, fromUserId={}, byUserId={}",
-					campaignId, hubUserId, user.id());
-		});
+		return ownedPacings(campaignId, hubUserId).stream().map(this::toPacingModel).toList();
+	}
+
+	@Override
+	@CacheEvict(cacheNames = AgencyVisibilityService.AGENCY_VISIBILITY_CACHE, key = "#hubUserId")
+	public void unshare(CurrentUserModel user, long campaignId, long hubUserId, boolean transferPacings) {
+		requireCanShare(user, campaignId);
+		Optional<HubCampaignShare> share = hubCampaignShareService.findByCampaignIdAndUserId(campaignId, hubUserId);
+		if (share.isEmpty()) {
+			return;
+		}
+		List<PacingCampaignPacing> owned = ownedPacings(campaignId, hubUserId);
+		if (!owned.isEmpty()) {
+			transferToRemover(user, campaignId, hubUserId, owned, transferPacings);
+		}
+		hubCampaignShareService.delete(share.get());
+		log.info("Campaign share removed: campaignId={}, fromUserId={}, byUserId={}, pacingsTransferred={}",
+				campaignId, hubUserId, user.id(), owned.size());
+	}
+
+	/**
+	 * Hands every pacing the person owns on the campaign to the remover, whole, before their share
+	 * goes - or refuses, when the remover has not confirmed or cannot receive. A transfer Pacing
+	 * refuses propagates as it is, so the share stays and the person keeps their pacings.
+	 *
+	 * @param user            the remover
+	 * @param campaignId      the NetSuite campaign id
+	 * @param hubUserId       the person being removed
+	 * @param owned           the pacings they own on the campaign, never empty
+	 * @param transferPacings whether the remover confirmed taking them over
+	 */
+	void transferToRemover(
+			CurrentUserModel user, long campaignId, long hubUserId, List<PacingCampaignPacing> owned,
+			boolean transferPacings) {
+		if (!transferPacings) {
+			String name = hubUserService.findAllByIds(List.of(hubUserId)).stream()
+					.findFirst().map(this::displayName).orElse(String.valueOf(hubUserId));
+			throw new BusinessException(OperationalHubErrorReason.OPH_070, name, owned.size());
+		}
+		HubUser remover = hubUserService.findAllByIds(List.of(user.id())).stream().findFirst().orElse(null);
+		if (remover == null || remover.getPacingUserId() == null || remover.getPacingUserId().isBlank()) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_071);
+		}
+		Set<Long> campaignIds = new TreeSet<>();
+		for (PacingCampaignPacing pacing : owned) {
+			pacingCampaignAccessClient.transferOwnerAsSystem(
+					pacing.pacingId(), remover.getPacingUserId(), user.email());
+			log.info("Pacing transferred on removal from campaign: pacingId={}, campaignId={}, fromUserId={}, "
+					+ "toUserId={}", pacing.pacingId(), campaignId, hubUserId, user.id());
+			pacing.campaigns().forEach(campaign -> parseCampaignId(campaign.id()).ifPresent(campaignIds::add));
+		}
+		// The remover now owns pacings on these campaigns, so they get the owner's automatic share on
+		// each - the same rule a create or a transfer from the pacing screen follows.
+		grantWriter.grant(user.id(), user.id(), campaignIds, CampaignShareSource.PACING_CREATED);
+	}
+
+	/**
+	 * The pacings a person owns that touch the campaign, as Pacing lists them; none when Pacing does
+	 * not know the person (no {@code pacing_user_id} yet), since then nothing can be theirs there.
+	 *
+	 * @param campaignId the NetSuite campaign id
+	 * @param hubUserId  the person's {@code hub_users.id}
+	 * @return their pacings on the campaign
+	 */
+	List<PacingCampaignPacing> ownedPacings(long campaignId, long hubUserId) {
+		String pacingUserId = hubUserService.findAllByIds(List.of(hubUserId)).stream()
+				.findFirst().map(HubUser::getPacingUserId).orElse(null);
+		if (pacingUserId == null || pacingUserId.isBlank()) {
+			return List.of();
+		}
+		return pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(campaignId), pacingUserId);
+	}
+
+	/**
+	 * Maps one of Pacing's rows to the confirmation-list model.
+	 *
+	 * @param pacing the pacing as Pacing describes it
+	 * @return the model
+	 */
+	CampaignSharePacingModel toPacingModel(PacingCampaignPacing pacing) {
+		return new CampaignSharePacingModel(
+				pacing.pacingId(), pacing.dashSlug(), pacing.pacingName(),
+				pacing.campaigns().stream()
+						.map(campaign -> new CampaignSharePacingCampaignModel(campaign.id(), campaign.name()))
+						.toList());
+	}
+
+	/**
+	 * Parses a Pacing campaign id (a NetSuite id as text) for the automatic grant.
+	 *
+	 * @param raw the id as Pacing carries it
+	 * @return the numeric id, or empty when it is not one
+	 */
+	Optional<Long> parseCampaignId(String raw) {
+		if (raw == null || raw.isBlank()) {
+			return Optional.empty();
+		}
+		try {
+			return Optional.of(Long.parseLong(raw.trim()));
+		} catch (NumberFormatException ex) {
+			return Optional.empty();
+		}
+	}
+
+	/**
+	 * Tells whether a person may be on a campaign's people list: somebody in Rippling's current roster
+	 * (the sync left them a department) inside MPO. Whether they have ever logged in does not matter.
+	 *
+	 * @param candidate the user
+	 * @return {@code true} when both hold
+	 */
+	boolean isCurrentMpo(HubUser candidate) {
+		return candidate.getDepartment() != null && mpoDepartmentPolicy.isMpo(candidate.getDepartment());
+	}
+
+	/**
+	 * Refuses a recipient the people list may not hold, naming the reason - not in Rippling first, since
+	 * a leaver's department is beside the point.
+	 *
+	 * @param recipient the would-be recipient
+	 * @throws BusinessException {@code OPH_068} when not in Rippling, {@code OPH_069} when outside MPO
+	 */
+	void requireCurrentMpo(HubUser recipient) {
+		if (recipient.getDepartment() == null) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_068, displayName(recipient));
+		}
+		if (!mpoDepartmentPolicy.isMpo(recipient.getDepartment())) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_069, displayName(recipient));
+		}
 	}
 
 	/**
@@ -202,7 +351,24 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 				recipient == null ? null : recipient.getEmail(),
 				role,
 				granter == null ? null : displayName(granter),
-				share.getCreatedAt());
+				share.getCreatedAt(),
+				sourceOf(share));
+	}
+
+	/**
+	 * Reads a share's stored source code, falling back to manual for anything unrecognized - the only
+	 * value rows written before the column existed can mean.
+	 *
+	 * @param share the share
+	 * @return its source
+	 */
+	CampaignShareSource sourceOf(HubCampaignShare share) {
+		for (CampaignShareSource source : CampaignShareSource.values()) {
+			if (source.getCode().equals(share.getSource())) {
+				return source;
+			}
+		}
+		return CampaignShareSource.MANUAL;
 	}
 
 	/**

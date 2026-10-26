@@ -35,6 +35,7 @@ import static com.aidigital.operationalhub.service.exception.enums.OperationalHu
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_025;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_066;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_067;
+import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_070;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_027;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_032;
 import static com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason.OPH_051;
@@ -70,6 +71,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 			OPH_025.getCode(), NOT_FOUND,
 			OPH_066.getCode(), NOT_FOUND,
 			OPH_067.getCode(), BAD_REQUEST,
+			OPH_070.getCode(), CONFLICT,
 			OPH_032.getCode(), TOO_MANY_REQUESTS);
 
 	/**

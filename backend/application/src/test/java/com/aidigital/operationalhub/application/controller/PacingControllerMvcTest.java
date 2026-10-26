@@ -26,6 +26,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateRe
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRow;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingValidateResult;
 import com.aidigital.operationalhub.service.agency.CampaignService;
+import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrantService;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -87,6 +88,9 @@ class PacingControllerMvcTest {
 
 	@Mock
 	private CampaignLinksValidator campaignLinksValidator;
+
+	@Mock
+	private CampaignShareAutoGrantService campaignShareAutoGrantService;
 
 	@InjectMocks
 	private PacingController controller;
@@ -202,6 +206,8 @@ class PacingControllerMvcTest {
 				.andExpect(jsonPath("$.pacingId").value("p9"))
 				.andExpect(jsonPath("$.dashSlug").value("2026-campaign"));
 		verify(pacingClient).createPacing(assertion, "2026_Campaign", List.of(lineItem), options);
+		// The creator goes onto every campaign's people list once the create is through.
+		verify(campaignShareAutoGrantService).grantAfterPacingCreate(user, List.of(lineItem));
 	}
 
 	@Test
@@ -285,6 +291,9 @@ class PacingControllerMvcTest {
 						.content("{\"newOwnerId\":\"11111111-1111-1111-1111-111111111111\"}"))
 				.andExpect(status().isNoContent());
 		verify(pacingClient).transferOwner(assertion, "p1", "11111111-1111-1111-1111-111111111111");
+		// The new owner goes onto the pacing's campaigns once Pacing has accepted the move.
+		verify(campaignShareAutoGrantService)
+				.grantAfterOwnerTransfer(user, "p1", "11111111-1111-1111-1111-111111111111");
 	}
 
 	@Test

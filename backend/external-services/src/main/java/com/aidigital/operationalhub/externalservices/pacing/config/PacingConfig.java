@@ -1,5 +1,6 @@
 package com.aidigital.operationalhub.externalservices.pacing.config;
 
+import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccessClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingLibraryVisibilityClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
@@ -7,6 +8,7 @@ import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchC
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.impl.HubAssertionSignerImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.OrderNumberCollector;
+import com.aidigital.operationalhub.externalservices.pacing.impl.PacingCampaignAccessClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingLibraryVisibilityClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSheetSourceClientImpl;
@@ -112,6 +114,23 @@ public class PacingConfig {
 	public PacingLibraryVisibilityClient pacingLibraryVisibilityClient(
 			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
 		return new PacingLibraryVisibilityClientImpl(
+				pacingRestClient(properties, properties.getReadTimeoutMs()), assertionSigner, objectMapper);
+	}
+
+	/**
+	 * The campaign-access calls (2026-10-23), on their own client: {@link PacingClient} is at the
+	 * file-length cap, and these run under the SYSTEM assertion rather than a user's. Same transport
+	 * settings as the main client.
+	 *
+	 * @param properties      Pacing configuration properties
+	 * @param assertionSigner signs the system {@code X-Hub-Assertion} header on every call
+	 * @param objectMapper    the Hub's own Jackson mapper, used to read Pacing's error bodies
+	 * @return the campaign-access client
+	 */
+	@Bean
+	public PacingCampaignAccessClient pacingCampaignAccessClient(
+			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
+		return new PacingCampaignAccessClientImpl(
 				pacingRestClient(properties, properties.getReadTimeoutMs()), assertionSigner, objectMapper);
 	}
 

@@ -4,6 +4,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.CampaignShareAp
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCreateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareV1;
 import com.aidigital.operationalhub.application.mapper.CampaignShareContractMapper;
 import com.aidigital.operationalhub.service.campaignshare.CampaignShareService;
@@ -47,9 +48,16 @@ public class CampaignShareController implements CampaignShareApi {
 	}
 
 	@Override
-	public ResponseEntity<Void> deleteCampaignShare(Long campaignId, Long hubUserId) {
+	public ResponseEntity<CampaignSharePacingListV1> listCampaignSharePacings(Long campaignId, Long hubUserId) {
 		CurrentUserModel user = currentUserService.resolveCurrentUser();
-		campaignShareService.unshare(user, campaignId, hubUserId);
+		return ResponseEntity.ok(
+				mapper.toPacingsV1(campaignShareService.listOwnedPacings(user, campaignId, hubUserId)));
+	}
+
+	@Override
+	public ResponseEntity<Void> deleteCampaignShare(Long campaignId, Long hubUserId, Boolean transferPacings) {
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		campaignShareService.unshare(user, campaignId, hubUserId, Boolean.TRUE.equals(transferPacings));
 		return ResponseEntity.noContent().build();
 	}
 }

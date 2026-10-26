@@ -59,6 +59,15 @@ public class HubUser extends AuditAwareEntity {
 	@Column(name = "pacing_user_id")
 	private String pacingUserId;
 
+	/**
+	 * The employee's Rippling department path as the daily sync last read it ({@code "Media &
+	 * Performance Optimization > Media Optimization"}), or {@code null} until the sync reaches them.
+	 * What decides whether someone counts as MPO - the whole tree under the configured root department -
+	 * for "Add people" on a campaign.
+	 */
+	@Column(name = "department")
+	private String department;
+
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) {

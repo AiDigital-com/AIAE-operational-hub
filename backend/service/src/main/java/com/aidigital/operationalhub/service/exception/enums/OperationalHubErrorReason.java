@@ -376,7 +376,32 @@ public enum OperationalHubErrorReason implements BusinessExceptionReason {
 	/**
 	 * Campaign sharing: a campaign cannot be shared with the person sharing it.
 	 */
-	OPH_067("OPH_067", "You already have access to this campaign - pick someone else.");
+	OPH_067("OPH_067", "You already have access to this campaign - pick someone else."),
+
+	/**
+	 * Campaign sharing: the person to share with is not in Rippling's current roster (left the company,
+	 * or the sync has not run since they appeared). Whether they have logged in does not matter.
+	 */
+	OPH_068("OPH_068", "%s is not a current employee and cannot be added to a campaign."),
+
+	/**
+	 * Campaign sharing: the person to share with is outside MPO (the Rippling department tree under the
+	 * configured root). Only MPO people can be added to a campaign (2026-10-23).
+	 */
+	OPH_069("OPH_069", "%s is outside MPO; only MPO people can be added to a campaign."),
+
+	/**
+	 * Campaign sharing: the person being removed owns pacings on the campaign, and the remover has not
+	 * confirmed taking them over. Mapped to 409 so the UI can show the list and ask.
+	 */
+	OPH_070("OPH_070", "%s owns %d pacing(s) on this campaign; confirm the transfer to remove them."),
+
+	/**
+	 * Campaign sharing: the remover cannot take over the pacings because Pacing does not know them yet
+	 * (no {@code pacing_user_id} - the §2 user sync has not reached them).
+	 */
+	OPH_071("OPH_071", "You cannot take over pacings yet: Pacing does not know your account. "
+			+ "Ask an admin to run the Pacing user sync, then try again.");
 
 	private final String code;
 	private final String description;

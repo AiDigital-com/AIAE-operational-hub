@@ -18,6 +18,7 @@ import com.aidigital.operationalhub.service.entity.HubTeamService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.netsuite.model.AgencyLead;
 import com.aidigital.operationalhub.service.netsuite.model.AgencyTeam;
+import com.aidigital.operationalhub.service.netsuite.model.DesiredAssignment;
 import com.aidigital.operationalhub.service.netsuite.model.SyncSummary;
 import com.aidigital.operationalhub.service.netsuite.org.NameNormalizer;
 import com.aidigital.operationalhub.service.netsuite.org.OrgResolution;
@@ -33,9 +34,11 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,6 +59,13 @@ import java.util.stream.Collectors;
  * issues no repository reads at all. Writes remain one {@code save} call per
  * changed row: without Hibernate JDBC batching configured, a bulk {@code saveAll} would not reduce the
  * number of SQL statements issued, only the number of Java calls, so the fix is scoped to the reads.
+ *
+ * <p>Directors see their own streams (2026-10-23): a Director holds {@code DIRECTOR}/TEAM on every team
+ * whose Team Lead's manager chain reaches them ({@link ResolvedTeam#directorEmails()}), plus their own
+ * <em>direct team</em> - the managers reporting straight to them and the agencies NetSuite names them
+ * on - which exists as a {@code hub_teams} row only while it has one or the other (see
+ * {@link #neededDirectorTeamLeadEmails}). Nobody gets an ALL scope from the sync any more; Senior
+ * Directors and the SVP are given ADMIN by hand, and an active admin is skipped here as before.
  */
 @Slf4j
 @Service
@@ -89,14 +99,27 @@ public class NetSuiteSyncReconciler {
 		HubRole memberRole = roleService.existingByRoleCode(RbacRoleCode.MPO_MANAGER.getCode());
 		HubRole directorRole = roleService.existingByRoleCode(RbacRoleCode.DIRECTOR.getCode());
 		HubScopeType teamScope = scopeTypeService.existingByScopeCode(RbacScopeCode.TEAM.getCode());
-		HubScopeType allScope = scopeTypeService.existingByScopeCode(RbacScopeCode.ALL.getCode());
 
 		Map<String, HubUser> userByEmail = upsertUsers(resolution.employees());
 		Map<String, HubTeam> existingTeamsByName = teamService.listAllOrderedByName().stream()
 				.collect(Collectors.toMap(HubTeam::getTeamName, team -> team));
-		Map<String, HubTeam> teamByLeadEmail =
-				reconcileTeams(resolution.teams(), userByEmail, existingTeamsByName);
-		Map<String, HubTeam> teamByOverriddenOwnerName = resolveOwnerOverrides(teamByLeadEmail, userByEmail);
+		Map<String, String> leadEmailByOverriddenOwnerName = resolveOwnerOverrides(resolution.teams(), userByEmail);
+
+		// A Director's direct team is a row only while it has something in it; the TL teams always are.
+		Set<String> neededDirectorTeams = neededDirectorTeamLeadEmails(
+				resolution, agencyLeads, leadEmailByOverriddenOwnerName.keySet());
+		List<ResolvedTeam> desiredTeams = resolution.teams().stream()
+				.filter(team -> !team.directorTeam() || neededDirectorTeams.contains(team.teamLeadEmail()))
+				.toList();
+		Map<String, HubTeam> teamByLeadEmail = reconcileTeams(desiredTeams, userByEmail, existingTeamsByName);
+		Map<String, HubTeam> teamByOverriddenOwnerName = new HashMap<>();
+		leadEmailByOverriddenOwnerName.forEach((ownerName, leadEmail) -> {
+			HubTeam team = teamByLeadEmail.get(leadEmail);
+			if (team != null) {
+				teamByOverriddenOwnerName.put(ownerName, team);
+			}
+		});
+		Map<String, List<HubTeam>> teamsByDirectorEmail = teamsByDirectorEmail(desiredTeams, teamByLeadEmail);
 
 		List<Long> userIds = userByEmail.values().stream().map(HubUser::getId).toList();
 		Map<Long, List<HubRoleAssignment>> assignmentsByUserId = assignmentService.findAllByUserIds(userIds)
@@ -104,8 +127,11 @@ public class NetSuiteSyncReconciler {
 				.collect(Collectors.groupingBy(HubRoleAssignment::getUserId));
 
 		int assignmentsUpdated = 0;
+		// Team Leads first, Directors after (putIfAbsent): on a name collision the TL's team wins the
+		// agency, as it did before Directors could lead a team at all.
 		Map<String, HubTeam> teamByEmployeeName = new HashMap<>();
 		Map<String, HubTeam> teamByEmployeeEmailLocalPart = new HashMap<>();
+		List<ResolvedEmployee> directorsWithTeams = new ArrayList<>();
 		for (ResolvedEmployee employee : resolution.employees()) {
 			HubUser user = userByEmail.get(employee.workEmail());
 			if (user == null) {
@@ -113,19 +139,21 @@ public class NetSuiteSyncReconciler {
 			}
 			List<HubRoleAssignment> existingAssignments =
 					assignmentsByUserId.getOrDefault(user.getId(), List.of());
-			assignmentsUpdated += reconcileEmployeeAssignment(employee, user, teamByLeadEmail, teamLeadRole,
-					memberRole, directorRole, teamScope, allScope, existingAssignments);
-			// A Director heads a team only while members with no Team Lead fall to them; their agencies
-			// (NetSuite names them as mpo_team_lead) then belong to that team, like a Team Lead's
-			if (employee.orgRole() != OrgRole.MEMBER) {
-				HubTeam team = teamByLeadEmail.get(employee.workEmail());
-				if (team != null) {
-					if (employee.name() != null) {
-						teamByEmployeeName.put(nameNormalizer.normalize(employee.name()), team);
-					}
-					teamByEmployeeEmailLocalPart.put(emailLocalPart(employee.workEmail()), team);
-				}
+			assignmentsUpdated += reconcileEmployeeAssignments(employee, user, teamByLeadEmail, teamsByDirectorEmail,
+					teamLeadRole, memberRole, directorRole, teamScope, existingAssignments);
+			HubTeam ownTeam = teamByLeadEmail.get(employee.workEmail());
+			if (ownTeam == null) {
+				continue;
 			}
+			if (employee.orgRole() == OrgRole.TEAM_LEAD) {
+				indexTeamByLead(employee, ownTeam, teamByEmployeeName, teamByEmployeeEmailLocalPart);
+			} else if (employee.orgRole() == OrgRole.DIRECTOR) {
+				directorsWithTeams.add(employee);
+			}
+		}
+		for (ResolvedEmployee director : directorsWithTeams) {
+			indexTeamByLead(director, teamByLeadEmail.get(director.workEmail()), teamByEmployeeName,
+					teamByEmployeeEmailLocalPart);
 		}
 
 		int agenciesMapped = reconcileAgencyMappings(
@@ -140,7 +168,7 @@ public class NetSuiteSyncReconciler {
 		cacheInvalidationEventService.publishUpdateEvent(HubTeamAgency.class);
 
 		return new SyncSummary(
-				resolution.teams().size(), userByEmail.size(), assignmentsUpdated, agenciesMapped, overridesApplied);
+				desiredTeams.size(), userByEmail.size(), assignmentsUpdated, agenciesMapped, overridesApplied);
 	}
 
 	/**
@@ -163,16 +191,143 @@ public class NetSuiteSyncReconciler {
 			HubUser existing = existingByEmail.get(employee.workEmail().toLowerCase());
 			userByEmail.put(employee.workEmail(), upsertUser(employee, existing));
 		}
+		clearDepartmentOfLeavers(userByEmail.values());
 		return userByEmail;
 	}
 
 	/**
-	 * Reconciles the desired team-lead-derived teams against {@code hub_teams}: creates or refreshes one
-	 * team per resolved Team Lead, and deactivates {@code from_netsuite} teams no longer in the desired
-	 * set (e.g. a legacy department-wide team). Admin-created ({@code from_netsuite=false}) teams are
-	 * never touched, even on a {@code team_name} collision.
+	 * Clears the department of every Hub user who is no longer in Rippling's active roster. The roster
+	 * only carries people still employed, so this is how a leaver drops out of "Add people": the
+	 * campaign people list keys on the department, not on {@code hub_users.status}, which only says
+	 * whether somebody has ever logged in. An empty roster is a failed read, not the whole company
+	 * leaving, and clears nothing.
 	 *
-	 * @param resolvedTeams       the desired teams, one per Team Lead
+	 * @param currentUsers the users this run upserted from the roster
+	 */
+	void clearDepartmentOfLeavers(Collection<HubUser> currentUsers) {
+		if (currentUsers.isEmpty()) {
+			return;
+		}
+		Set<Long> currentIds = currentUsers.stream().map(HubUser::getId).collect(Collectors.toSet());
+		for (HubUser user : userService.findAll()) {
+			if (user.getDepartment() != null && !currentIds.contains(user.getId())) {
+				log.info("Cleared the department of a user no longer in Rippling: email={}", user.getEmail());
+				user.setDepartment(null);
+				userService.save(user);
+			}
+		}
+	}
+
+	/**
+	 * Records a lead's team under the two keys {@link #reconcileAgencyMappings} matches an IO Lines
+	 * owner name against: the normalized display name and the email local part. {@code putIfAbsent},
+	 * so the order of calls decides who wins a collision.
+	 *
+	 * @param lead                         the Team Lead or Director
+	 * @param team                         the team they lead
+	 * @param teamByEmployeeName           the mutable name index
+	 * @param teamByEmployeeEmailLocalPart the mutable email-local-part index
+	 */
+	void indexTeamByLead(
+			ResolvedEmployee lead, HubTeam team, Map<String, HubTeam> teamByEmployeeName,
+			Map<String, HubTeam> teamByEmployeeEmailLocalPart) {
+		if (lead.name() != null) {
+			teamByEmployeeName.putIfAbsent(nameNormalizer.normalize(lead.name()), team);
+		}
+		teamByEmployeeEmailLocalPart.putIfAbsent(emailLocalPart(lead.workEmail()), team);
+	}
+
+	/**
+	 * Decides which Directors' direct teams this run materializes: those with at least one manager
+	 * resolved straight to them (no Team Lead in between), and those NetSuite names as
+	 * {@code mpo_team_lead} on some agency - by the same name / derived-email / first-name attempts
+	 * {@link #reconcileAgencyMappings} makes - unless an active owner override already sends that name
+	 * elsewhere. A Director with neither gets no team of their own; their stream's teams are enough.
+	 *
+	 * @param resolution           the resolved employees and teams
+	 * @param agencyLeads          the agency-to-lead pairs from IO Lines
+	 * @param overriddenOwnerNames the normalized owner names an active override claims
+	 * @return the Director work emails whose direct team should exist
+	 */
+	Set<String> neededDirectorTeamLeadEmails(
+			OrgResolution resolution, List<AgencyLead> agencyLeads, Set<String> overriddenOwnerNames) {
+		Set<String> directorEmails = resolution.teams().stream()
+				.filter(ResolvedTeam::directorTeam)
+				.map(ResolvedTeam::teamLeadEmail)
+				.collect(Collectors.toSet());
+		Set<String> needed = new HashSet<>();
+		for (ResolvedEmployee employee : resolution.employees()) {
+			if (employee.orgRole() == OrgRole.MEMBER && employee.teamLeadEmail() != null
+					&& directorEmails.contains(employee.teamLeadEmail())) {
+				needed.add(employee.teamLeadEmail());
+			}
+		}
+		Map<String, String> directorEmailByName = new HashMap<>();
+		Map<String, String> directorEmailByLocalPart = new HashMap<>();
+		for (ResolvedEmployee employee : resolution.employees()) {
+			if (employee.orgRole() == OrgRole.DIRECTOR) {
+				if (employee.name() != null) {
+					directorEmailByName.putIfAbsent(nameNormalizer.normalize(employee.name()), employee.workEmail());
+				}
+				directorEmailByLocalPart.putIfAbsent(emailLocalPart(employee.workEmail()), employee.workEmail());
+			}
+		}
+		for (AgencyLead lead : agencyLeads) {
+			if (lead.agencyId() == null || lead.mpoTeamLead() == null) {
+				continue;
+			}
+			String normalizedOwner = nameNormalizer.normalize(lead.mpoTeamLead());
+			if (overriddenOwnerNames.contains(normalizedOwner)) {
+				continue;
+			}
+			String email = directorEmailByName.get(normalizedOwner);
+			if (email == null) {
+				email = directorEmailByLocalPart.get(deriveEmailLocalPart(lead.mpoTeamLead()));
+			}
+			if (email == null) {
+				email = directorEmailByLocalPart.get(deriveFirstNameEmailLocalPart(lead.mpoTeamLead()));
+			}
+			if (email != null) {
+				needed.add(email);
+			}
+		}
+		return needed;
+	}
+
+	/**
+	 * Lists, per Director, every persisted team they see: each team whose lead's manager chain reaches
+	 * them, plus their own direct team when it was materialized.
+	 *
+	 * @param desiredTeams    the teams this run materializes
+	 * @param teamByLeadEmail the persisted teams keyed by lead work email
+	 * @return the teams keyed by Director work email; a Director with none is absent
+	 */
+	Map<String, List<HubTeam>> teamsByDirectorEmail(
+			List<ResolvedTeam> desiredTeams, Map<String, HubTeam> teamByLeadEmail) {
+		Map<String, List<HubTeam>> result = new LinkedHashMap<>();
+		for (ResolvedTeam resolvedTeam : desiredTeams) {
+			HubTeam team = teamByLeadEmail.get(resolvedTeam.teamLeadEmail());
+			if (team == null) {
+				continue;
+			}
+			if (resolvedTeam.directorTeam()) {
+				result.computeIfAbsent(resolvedTeam.teamLeadEmail(), email -> new ArrayList<>()).add(team);
+			}
+			for (String directorEmail : resolvedTeam.directorEmails()) {
+				result.computeIfAbsent(directorEmail, email -> new ArrayList<>()).add(team);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Reconciles the desired teams against {@code hub_teams}: creates or refreshes one team per resolved
+	 * Team Lead (and per materialized Director direct team), and deactivates {@code from_netsuite} teams
+	 * no longer in the desired set (e.g. a legacy department-wide team, or a Director's direct team that
+	 * emptied). Admin-created ({@code from_netsuite=false}) teams are never touched, even on a
+	 * {@code team_name} collision.
+	 *
+	 * @param resolvedTeams       the desired teams, one per Team Lead and per needed Director
 	 * @param userByEmail         the persisted users keyed by work email, used to resolve each team's lead id
 	 * @param existingTeamsByName every current {@code hub_teams} row, keyed by team name (preloaded once)
 	 * @return the persisted teams keyed by Team Lead work email
@@ -283,58 +438,61 @@ public class NetSuiteSyncReconciler {
 	}
 
 	/**
-	 * Reconciles a single resolved employee's RBAC role assignment: {@code MPO_MANAGER}/TEAM for members
-	 * on a resolved team, {@code TL}/TEAM (own team) for Team Leads, and {@code DIRECTOR}/ALL (unrestricted
-	 * agency visibility, per the product decision that directors see all data) for directors. A member
-	 * whose team could not be resolved has any existing active assignment revoked instead — leaving them
-	 * pointed at a now-deactivated legacy team would be worse than no assignment — rather than guessing a
-	 * scope (see {@code team-by-team-lead-REMEDIATION.md} R1, R5).
+	 * Reconciles a single resolved employee's RBAC role assignments: {@code MPO_MANAGER}/TEAM for members
+	 * on a resolved team (a Team Lead's, or a Director's direct team), {@code TL}/TEAM (own team) for Team
+	 * Leads, and {@code DIRECTOR}/TEAM on every team of their stream for Directors - one assignment per
+	 * team, never an ALL scope (2026-10-23; "directors see all" is withdrawn). A member whose team could
+	 * not be resolved, or a Director whose stream reaches no team, has any existing active assignment
+	 * revoked instead - leaving them pointed at a now-deactivated legacy team would be worse than no
+	 * assignment - rather than guessing a scope (see {@code team-by-team-lead-REMEDIATION.md} R1, R5).
 	 *
-	 * @param employee            the resolved employee
-	 * @param user                the employee's persisted Hub user
-	 * @param teamByLeadEmail     the persisted teams keyed by Team Lead work email
-	 * @param teamLeadRole        the {@code TL} role
-	 * @param memberRole          the {@code MPO_MANAGER} role
-	 * @param directorRole        the {@code DIRECTOR} role
-	 * @param teamScope           the {@code TEAM} scope type
-	 * @param allScope            the {@code ALL} scope type
-	 * @param existingAssignments this user's current role assignments, any status (preloaded; see
-	 *                            {@link #reconcile})
+	 * @param employee             the resolved employee
+	 * @param user                 the employee's persisted Hub user
+	 * @param teamByLeadEmail      the persisted teams keyed by Team Lead (or Director) work email
+	 * @param teamsByDirectorEmail the persisted teams each Director sees, keyed by work email
+	 * @param teamLeadRole         the {@code TL} role
+	 * @param memberRole           the {@code MPO_MANAGER} role
+	 * @param directorRole         the {@code DIRECTOR} role
+	 * @param teamScope            the {@code TEAM} scope type
+	 * @param existingAssignments  this user's current role assignments, any status (preloaded; see
+	 *                             {@link #reconcile})
 	 * @return {@code 1} when an assignment was created or changed, {@code 0} otherwise
 	 */
-	int reconcileEmployeeAssignment(
+	int reconcileEmployeeAssignments(
 			ResolvedEmployee employee,
 			HubUser user,
 			Map<String, HubTeam> teamByLeadEmail,
+			Map<String, List<HubTeam>> teamsByDirectorEmail,
 			HubRole teamLeadRole,
 			HubRole memberRole,
 			HubRole directorRole,
 			HubScopeType teamScope,
-			HubScopeType allScope,
 			List<HubRoleAssignment> existingAssignments) {
 		if (hasActiveAdminAssignment(existingAssignments)) {
 			log.debug("Skipping NetSuite role reconcile for active admin user: userId={}, email={}",
 					user.getId(), user.getEmail());
 			return 0;
 		}
-		boolean changed = switch (employee.orgRole()) {
-			case DIRECTOR -> reconcileAssignment(
-					user.getId(), directorRole, allScope, null, existingAssignments);
+		List<DesiredAssignment> desired = switch (employee.orgRole()) {
+			case DIRECTOR -> teamsByDirectorEmail.getOrDefault(employee.workEmail(), List.of()).stream()
+					.map(team -> new DesiredAssignment(directorRole, teamScope, team.getId()))
+					.toList();
 			case TEAM_LEAD -> {
 				HubTeam team = teamByLeadEmail.get(employee.workEmail());
-				yield team != null
-						&& reconcileAssignment(user.getId(), teamLeadRole, teamScope, team.getId(),
-						existingAssignments);
+				yield team == null ? List.of() : List.of(new DesiredAssignment(teamLeadRole, teamScope, team.getId()));
 			}
 			case MEMBER -> {
-				if (employee.teamLeadEmail() == null) {
-					yield revokeActiveAssignments(existingAssignments);
-				}
-				HubTeam team = teamByLeadEmail.get(employee.teamLeadEmail());
-				yield team != null
-						&& reconcileAssignment(user.getId(), memberRole, teamScope, team.getId(), existingAssignments);
+				HubTeam team = employee.teamLeadEmail() == null ? null : teamByLeadEmail.get(employee.teamLeadEmail());
+				yield team == null ? List.of() : List.of(new DesiredAssignment(memberRole, teamScope, team.getId()));
 			}
 		};
+		if (desired.isEmpty() && employee.orgRole() == OrgRole.DIRECTOR) {
+			log.warn("Director's stream reaches no team this run; revoking their assignments: userId={}, email={}",
+					user.getId(), user.getEmail());
+		}
+		boolean changed = desired.isEmpty()
+				? revokeActiveAssignments(existingAssignments)
+				: reconcileAssignments(user.getId(), desired, existingAssignments);
 		return changed ? 1 : 0;
 	}
 
@@ -354,8 +512,11 @@ public class NetSuiteSyncReconciler {
 
 	/**
 	 * Resolves every active agency-owner override into the lookup {@link #reconcileAgencyMappings} uses:
-	 * the team each overridden owner's agencies should go to, keyed by that owner's normalized
-	 * {@code display_name}.
+	 * the Team Lead whose team each overridden owner's agencies should go to, keyed by that owner's
+	 * normalized {@code display_name}. Resolved before any team row is written - the set of overridden
+	 * names also decides which Directors need a direct team of their own (see
+	 * {@link #neededDirectorTeamLeadEmails}) - so it answers with the lead's email, which
+	 * {@link #reconcile} turns into the persisted team once the teams exist.
 	 *
 	 * <p>The row stores {@code hub_users} ids on both sides, but an agency arrives from IO Lines carrying
 	 * only a {@code mpo_team_lead} display name - {@code AgencyLeadBigQueryService} selects nothing else,
@@ -369,43 +530,43 @@ public class NetSuiteSyncReconciler {
 	 * the named Team Lead leads no team this run, or when the owner carries no display name. A typo or a
 	 * stale row is exactly the failure mode this override mechanism exists to remove.
 	 *
-	 * @param teamByLeadEmail the persisted teams keyed by Team Lead work email (see {@link #reconcile})
-	 * @param userByEmail     the persisted users keyed by work email (see {@link #upsertUsers})
-	 * @return the team each normalized override owner name maps to
+	 * @param resolvedTeams the resolved teams (see {@link OrgResolution#teams()}), whose leads an override
+	 *                      may point at - a Director's direct team included
+	 * @param userByEmail   the persisted users keyed by work email (see {@link #upsertUsers})
+	 * @return the lead work email each normalized override owner name maps to
 	 */
-	Map<String, HubTeam> resolveOwnerOverrides(
-			Map<String, HubTeam> teamByLeadEmail, Map<String, HubUser> userByEmail) {
+	Map<String, String> resolveOwnerOverrides(List<ResolvedTeam> resolvedTeams, Map<String, HubUser> userByEmail) {
 		Map<Long, HubUser> userById = userByEmail.values().stream()
 				.collect(Collectors.toMap(HubUser::getId, user -> user, (first, second) -> first));
-		Map<Long, HubTeam> teamByLeadUserId = new HashMap<>();
-		for (Map.Entry<String, HubTeam> entry : teamByLeadEmail.entrySet()) {
-			HubUser lead = userByEmail.get(entry.getKey());
+		Map<Long, String> leadEmailByLeadUserId = new HashMap<>();
+		for (ResolvedTeam resolvedTeam : resolvedTeams) {
+			HubUser lead = userByEmail.get(resolvedTeam.teamLeadEmail());
 			if (lead != null) {
-				teamByLeadUserId.putIfAbsent(lead.getId(), entry.getValue());
+				leadEmailByLeadUserId.putIfAbsent(lead.getId(), resolvedTeam.teamLeadEmail());
 			}
 		}
 
-		Map<String, HubTeam> teamByOverriddenOwnerName = new HashMap<>();
+		Map<String, String> leadEmailByOverriddenOwnerName = new HashMap<>();
 		List<HubAgencyOwnerOverride> overrides =
 				agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode());
 		for (HubAgencyOwnerOverride override : overrides) {
 			HubUser owner = userById.get(override.getOwnerUserId());
-			HubTeam team = teamByLeadUserId.get(override.getTeamLeadUserId());
+			String leadEmail = leadEmailByLeadUserId.get(override.getTeamLeadUserId());
 			if (owner == null || owner.getDisplayName() == null || owner.getDisplayName().isBlank()) {
 				log.warn("Agency owner override's owner is not a synced employee with a display name this "
 								+ "run: overrideId={}, ownerUserId={}",
 						override.getId(), override.getOwnerUserId());
 				continue;
 			}
-			if (team == null) {
+			if (leadEmail == null) {
 				log.warn("Agency owner override's team lead leads no team this run: overrideId={}, "
 								+ "teamLeadUserId={}",
 						override.getId(), override.getTeamLeadUserId());
 				continue;
 			}
-			teamByOverriddenOwnerName.put(nameNormalizer.normalize(owner.getDisplayName()), team);
+			leadEmailByOverriddenOwnerName.put(nameNormalizer.normalize(owner.getDisplayName()), leadEmail);
 		}
-		return teamByOverriddenOwnerName;
+		return leadEmailByOverriddenOwnerName;
 	}
 
 	/**
@@ -455,8 +616,10 @@ public class NetSuiteSyncReconciler {
 	 * {@link #deriveEmailLocalPart(String)}), then to a first-name local-part match (see
 	 * {@link #deriveFirstNameEmailLocalPart(String)}), since a synced employee's email local part can
 	 * outlive a later display-name change (e.g. a handed-down mailbox) while IO Lines keeps recording the
-	 * original name or a shortened legacy alias. Agencies still unresolved after these attempts are
-	 * skipped; mappings no longer backed by a pair are removed.
+	 * original name or a shortened legacy alias. A Director NetSuite names as the lead resolves through
+	 * the same three attempts to their direct team (2026-10-23), indexed after every Team Lead so a TL
+	 * wins any collision. Agencies still unresolved after these attempts are skipped; mappings no longer
+	 * backed by a pair are removed.
 	 *
 	 * <p>Retargeting an existing mapping to a different team is a delete of the old
 	 * {@code (agency_id, team_id)} row plus an insert of the new one, not an in-place {@code team_id}
@@ -482,9 +645,9 @@ public class NetSuiteSyncReconciler {
 	 * @param agencyLeads                  the agency-to-lead pairs from IO Lines
 	 * @param teamByOverriddenOwnerName    the team each normalized override owner name maps to (see
 	 *                                     {@link #resolveOwnerOverrides}), tried before automatic matching
-	 * @param teamByEmployeeName           the team each (normalized) Team Lead name leads
-	 * @param teamByEmployeeEmailLocalPart the team each Team Lead's email local part leads, used as a
-	 *                                     fallback when the name match misses
+	 * @param teamByEmployeeName           the team each (normalized) Team Lead or Director name leads
+	 * @param teamByEmployeeEmailLocalPart the team each Team Lead's or Director's email local part leads,
+	 *                                     used as a fallback when the name match misses
 	 * @return the number of distinct agencies mapped to at least one team
 	 */
 	int reconcileAgencyMappings(
@@ -541,8 +704,9 @@ public class NetSuiteSyncReconciler {
 	}
 
 	/**
-	 * Upserts a Hub user by email, refreshing the display name and grade. New users are created
-	 * deactivated (no Clerk id) until they log in; existing users keep their Clerk id and status.
+	 * Upserts a Hub user by email, refreshing the display name, grade and Rippling department. New users
+	 * are created deactivated (no Clerk id) until they log in; existing users keep their Clerk id and
+	 * status.
 	 *
 	 * @param employee the resolved employee
 	 * @param existing the user's current {@code hub_users} row, or {@code null} when none exists yet
@@ -554,20 +718,23 @@ public class NetSuiteSyncReconciler {
 		if (existing != null) {
 			existing.setDisplayName(employee.name());
 			existing.setGrade(gradeCode);
+			existing.setDepartment(employee.department());
 			return userService.save(existing);
 		}
 		HubUser user = new HubUser();
 		user.setEmail(employee.workEmail());
 		user.setDisplayName(employee.name());
 		user.setGrade(gradeCode);
+		user.setDepartment(employee.department());
 		user.setStatus(HubStatus.INACTIVE.getCode());
 		return userService.save(user);
 	}
 
 	/**
 	 * Revokes every currently active role assignment held by a user whose team could not be resolved this
-	 * run. Never creates a replacement assignment, since no scope can be safely guessed for an unresolved
-	 * member; the user is left with no active assignment until a future run resolves their team.
+	 * run (or whose stream, for a Director, reaches no team). Never creates a replacement assignment,
+	 * since no scope can be safely guessed; the user is left with no active assignment until a future
+	 * run resolves it.
 	 *
 	 * @param existingAssignments this user's current role assignments, any status (preloaded; see
 	 *                            {@link #reconcile})
@@ -586,30 +753,26 @@ public class NetSuiteSyncReconciler {
 	}
 
 	/**
-	 * Ensures the user's single active assignment is exactly the desired role/scope: revokes any other
-	 * active assignment, then reactivates the matching row if it exists in any status (a manual revoke is
-	 * undone rather than re-inserted, which would violate the unique index), or creates it. Returns
-	 * {@code true} when an assignment was created or changed, {@code false} when already correct.
+	 * Ensures the user's active assignments are exactly the desired set: revokes any other active
+	 * assignment, then, for each desired one, reactivates the matching row if it exists in any status (a
+	 * manual revoke is undone rather than re-inserted, which would violate the unique index), or creates
+	 * it. One desired entry for a member or Team Lead; one per team of their stream for a Director.
+	 * Returns {@code true} when any assignment was created or changed, {@code false} when already correct.
 	 *
 	 * @param userId              the user id
-	 * @param desiredRole         the role the user should hold
-	 * @param scopeType           the scope type ({@code TEAM} for members/leads, {@code ALL} for directors)
-	 * @param scopeId             the scope id ({@code hub_teams.id} for {@code TEAM}); {@code null} for
-	 *                            {@code ALL}, mirroring every other unscoped (global) assignment such as
-	 *                            ADMIN/ALL
+	 * @param desired             the assignments the user should hold, never empty
 	 * @param existingAssignments this user's current role assignments, any status (preloaded; see
 	 *                            {@link #reconcile})
-	 * @return whether the assignment was created or changed
+	 * @return whether an assignment was created or changed
 	 */
-	boolean reconcileAssignment(
-			Long userId, HubRole desiredRole, HubScopeType scopeType, Long scopeId,
-			List<HubRoleAssignment> existingAssignments) {
+	boolean reconcileAssignments(
+			Long userId, List<DesiredAssignment> desired, List<HubRoleAssignment> existingAssignments) {
 		boolean changed = false;
 
-		// Revoke any active assignment that is not the desired role/scope.
+		// Revoke any active assignment that is not among the desired role/scopes.
 		for (HubRoleAssignment active : existingAssignments) {
 			if (HubStatus.ACTIVE.getCode().equals(active.getStatus())
-					&& !matches(active, desiredRole, scopeType, scopeId)) {
+					&& desired.stream().noneMatch(want -> matches(active, want))) {
 				active.setStatus(HubStatus.REVOKED.getCode());
 				assignmentService.save(active);
 				changed = true;
@@ -619,24 +782,25 @@ public class NetSuiteSyncReconciler {
 		// Reactivate the matching row if it already exists in any status; otherwise create it. The unique
 		// index permits at most one row per (user, role, scope type, scope id) - including the unscoped
 		// (scope_id IS NULL) case - so we never insert a duplicate.
-		HubRoleAssignment desired = existingAssignments.stream()
-				.filter(assignment -> matches(assignment, desiredRole, scopeType, scopeId))
-				.findFirst()
-				.orElse(null);
-		if (desired == null) {
-			HubRoleAssignment created = new HubRoleAssignment();
-			created.setUserId(userId);
-			created.setRole(desiredRole);
-			created.setScopeType(scopeType);
-			created.setScopeId(scopeId);
-			created.setStatus(HubStatus.ACTIVE.getCode());
-			assignmentService.save(created);
-			return true;
-		}
-		if (!HubStatus.ACTIVE.getCode().equals(desired.getStatus())) {
-			desired.setStatus(HubStatus.ACTIVE.getCode());
-			assignmentService.save(desired);
-			changed = true;
+		for (DesiredAssignment want : desired) {
+			HubRoleAssignment existing = existingAssignments.stream()
+					.filter(assignment -> matches(assignment, want))
+					.findFirst()
+					.orElse(null);
+			if (existing == null) {
+				HubRoleAssignment created = new HubRoleAssignment();
+				created.setUserId(userId);
+				created.setRole(want.role());
+				created.setScopeType(want.scopeType());
+				created.setScopeId(want.scopeId());
+				created.setStatus(HubStatus.ACTIVE.getCode());
+				assignmentService.save(created);
+				changed = true;
+			} else if (!HubStatus.ACTIVE.getCode().equals(existing.getStatus())) {
+				existing.setStatus(HubStatus.ACTIVE.getCode());
+				assignmentService.save(existing);
+				changed = true;
+			}
 		}
 		return changed;
 	}
@@ -682,21 +846,19 @@ public class NetSuiteSyncReconciler {
 
 	/**
 	 * Tells whether an assignment already grants exactly the desired role/scope. Scope id equality is
-	 * null-safe: {@code ALL}-scoped assignments (directors) carry a {@code null} scope id, like every other
-	 * unscoped assignment (e.g. ADMIN/ALL), so a straight {@code .equals} would either throw or, worse,
-	 * never match and insert a duplicate every run.
+	 * null-safe: an unscoped assignment (e.g. ADMIN/ALL, or the DIRECTOR/ALL rows the sync wrote before
+	 * 2026-10-23) carries a {@code null} scope id, so a straight {@code .equals} would either throw or,
+	 * worse, never match and insert a duplicate every run.
 	 *
-	 * @param assignment  the existing assignment
-	 * @param desiredRole the role the user should hold
-	 * @param scopeType   the scope type
-	 * @param scopeId     the scope id, or {@code null} for an unscoped assignment
+	 * @param assignment the existing assignment
+	 * @param want       the desired role, scope type and scope id
 	 * @return {@code true} when the assignment matches role, scope type, and scope id
 	 */
-	boolean matches(HubRoleAssignment assignment, HubRole desiredRole, HubScopeType scopeType, Long scopeId) {
+	boolean matches(HubRoleAssignment assignment, DesiredAssignment want) {
 		return assignment.getRole() != null
-				&& desiredRole.getId().equals(assignment.getRole().getId())
+				&& want.role().getId().equals(assignment.getRole().getId())
 				&& assignment.getScopeType() != null
-				&& scopeType.getId().equals(assignment.getScopeType().getId())
-				&& Objects.equals(scopeId, assignment.getScopeId());
+				&& want.scopeType().getId().equals(assignment.getScopeType().getId())
+				&& Objects.equals(want.scopeId(), assignment.getScopeId());
 	}
 }

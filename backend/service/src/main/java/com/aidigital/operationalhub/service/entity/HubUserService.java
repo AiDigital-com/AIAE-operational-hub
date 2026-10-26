@@ -87,6 +87,15 @@ public interface HubUserService {
 	List<HubUser> findAllByIds(Collection<Long> ids);
 
 	/**
+	 * Finds the Hub user behind a Pacing {@code user_id} - the id Pacing names a pacing's owner by -
+	 * e.g. to find who, on the Hub's side, received a pacing in an ownership transfer.
+	 *
+	 * @param pacingUserId the Pacing {@code access.users.user_id}, as text
+	 * @return the matching user, or empty when no synced user carries that id
+	 */
+	Optional<HubUser> findByPacingUserId(String pacingUserId);
+
+	/**
 	 * Returns every Hub user, for the Pacing user sync (§2 of the migration plan): the sync's Pacing
 	 * side upserts by email and never deletes, so it needs the whole roster, active and inactive alike,
 	 * to know who to mark inactive there too.

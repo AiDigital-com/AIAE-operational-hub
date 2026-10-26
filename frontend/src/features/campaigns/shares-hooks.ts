@@ -5,6 +5,7 @@ import {
   listCampaignShares,
   listShareCandidates,
 } from "./shares-api";
+import type { ShareRemoval } from "./model/share-removal";
 
 /** Who the campaign is shared with. Refetched on focus: a colleague may have added or removed
  *  somebody while this tab sat open, and the avatars in the hero are what everyone looks at. */
@@ -50,5 +51,7 @@ export function useCreateShare(campaignId: number) {
 }
 
 export function useDeleteShare(campaignId: number) {
-  return useShareMutation<number>(campaignId, deleteCampaignShare);
+  return useShareMutation<ShareRemoval>(campaignId, (id, removal) =>
+    deleteCampaignShare(id, removal.hubUserId, removal.transferPacings)
+  );
 }

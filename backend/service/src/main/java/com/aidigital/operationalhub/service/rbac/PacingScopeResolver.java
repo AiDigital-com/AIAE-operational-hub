@@ -19,14 +19,16 @@ public interface PacingScopeResolver {
 	 * Resolves the given user's Hub RBAC access into a Pacing entitlement.
 	 *
 	 * <ul>
-	 *   <li>Admin, or holding any {@code ALL}-scoped role assignment (how {@code DIRECTOR} is
-	 *   provisioned) → unrestricted ({@code kind=all}).</li>
-	 *   <li>Holding one or more {@code TEAM}-scoped assignments → {@code owners} restricted to the
-	 *   Pacing {@code user_id} ({@code hub_users.pacing_user_id}) of every Hub user holding an active
-	 *   assignment scoped to any of those teams, including the acting user's own id. A member whose
-	 *   {@code pacing_user_id} is still {@code null} (the §2 sync has not reached them yet) is omitted
-	 *   rather than included as a broken id — see the implementation for why that is logged, not
-	 *   silent.</li>
+	 *   <li>Admin, or holding any {@code ALL}-scoped role assignment (a manual grant; the sync gives
+	 *   nobody one since 2026-10-23) → unrestricted ({@code kind=all}).</li>
+	 *   <li>Holding one or more {@code TEAM}-scoped assignments - a member's or Team Lead's one team, a
+	 *   Director's every team of their stream → {@code owners} restricted to the Pacing {@code user_id}
+	 *   ({@code hub_users.pacing_user_id}) of every Hub user holding an active assignment scoped to any
+	 *   of those teams, including the acting user's own id, widened by {@code campaign_ids}: the
+	 *   campaigns shared with the user plus the campaigns of those teams' agencies that carry a pacing.
+	 *   A member whose {@code pacing_user_id} is still {@code null} (the §2 sync has not reached them
+	 *   yet) is omitted rather than included as a broken id — see the implementation for why that is
+	 *   logged, not silent.</li>
 	 *   <li>{@code CLIENT_SERVICES} → {@code owners} with an empty id list ("entitled to nothing"):
 	 *   real Client Services scoping needs {@code pacings.campaign_ids}, not available yet.</li>
 	 *   <li>No active role assignment at all → {@code owners} with an empty id list.</li>

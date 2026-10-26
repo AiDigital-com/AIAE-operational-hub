@@ -65,9 +65,9 @@ class NetSuiteSyncServiceImplTest {
 						"Team Lead, Media Optimization", null));
 		List<AgencyLead> agencyLeads = List.of(new AgencyLead(AGENCY_ID, NAME));
 		OrgResolution resolution = new OrgResolution(
-				List.of(new ResolvedEmployee(EMAIL, NAME, OrgRole.TEAM_LEAD, Grade.TEAM_LEAD, EMAIL, "HOUSE",
-						List.of(DataQualityFlag.DUPLICATE_TEAM_NAME))),
-				List.of(new ResolvedTeam(EMAIL, NAME, "Media Optimization: Jane", "HOUSE",
+				List.of(new ResolvedEmployee(EMAIL, NAME, "Media Optimization", OrgRole.TEAM_LEAD, Grade.TEAM_LEAD,
+						EMAIL, "HOUSE", List.of(DataQualityFlag.DUPLICATE_TEAM_NAME))),
+				List.of(new ResolvedTeam(EMAIL, NAME, "Media Optimization: Jane", "HOUSE", false, List.of(),
 						List.of(DataQualityFlag.DUPLICATE_TEAM_NAME))));
 		SyncSummary reconcilerResult = new SyncSummary(1, 1, 1, 1, 0);
 
