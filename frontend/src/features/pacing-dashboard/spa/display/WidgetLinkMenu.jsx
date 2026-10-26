@@ -362,9 +362,10 @@ export function useLibraryLink({ resolved, libEntries, patchWidgets, onEditReady
           onCancel={() => setSharing(null)}
         >
           <div className="lib-form">
-            {/* No VisibilityPills here: this app has no "only me" library entries, every entry
-                is visible to everyone (owner decision 2026-10-14), so `sharing.visibility`
-                stays `team`. */}
+            <VisibilityPills
+              value={sharing.visibility}
+              onChange={(v) => setSharing((cur) => ({ ...cur, visibility: v }))}
+            />
             <label className="lib-form-l" htmlFor="lib-share-name">Name</label>
             <input
               id="lib-share-name" className="sp-inp sp-inp--sans" type="text" autoFocus maxLength={80}

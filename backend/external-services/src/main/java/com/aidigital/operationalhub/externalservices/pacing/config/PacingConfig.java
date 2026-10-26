@@ -1,12 +1,14 @@
 package com.aidigital.operationalhub.externalservices.pacing.config;
 
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingLibraryVisibilityClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertionSigner;
 import com.aidigital.operationalhub.externalservices.pacing.impl.HubAssertionSignerImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.OrderNumberCollector;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingClientImpl;
+import com.aidigital.operationalhub.externalservices.pacing.impl.PacingLibraryVisibilityClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSheetSourceClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSummarySwitchClientImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -94,6 +96,22 @@ public class PacingConfig {
 	public PacingSummarySwitchClient pacingSummarySwitchClient(
 			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
 		return new PacingSummarySwitchClientImpl(
+				pacingRestClient(properties, properties.getReadTimeoutMs()), assertionSigner, objectMapper);
+	}
+
+	/**
+	 * Only me / Team for a library entry, on its own client: {@link PacingClient} is at the
+	 * file-length cap. Same transport settings as the main client.
+	 *
+	 * @param properties      Pacing configuration properties
+	 * @param assertionSigner signs the {@code X-Hub-Assertion} header on every call
+	 * @param objectMapper    the Hub's own Jackson mapper, used to read Pacing's error bodies
+	 * @return the library visibility client
+	 */
+	@Bean
+	public PacingLibraryVisibilityClient pacingLibraryVisibilityClient(
+			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
+		return new PacingLibraryVisibilityClientImpl(
 				pacingRestClient(properties, properties.getReadTimeoutMs()), assertionSigner, objectMapper);
 	}
 

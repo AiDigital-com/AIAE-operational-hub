@@ -201,7 +201,8 @@ public class PacingCreateContractMapper {
 				body.getRate(),
 				body.getRateLocked(),
 				toCampaignLinks(emptyToNull(body.getCampaignLinks())),
-				body.getCampaignNotes());
+				body.getCampaignNotes(),
+				body.getLayoutId());
 	}
 
 	/**

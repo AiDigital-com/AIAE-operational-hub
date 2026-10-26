@@ -14,6 +14,7 @@ import type {
   PacingLibraryEntryV1,
   PacingLibraryKindV1,
   PacingLibrarySaveOutcome,
+  PacingLibraryVisibilityV1,
   PacingLikeResultV1,
   PacingNotifySettingsV1,
   PacingRefreshOutcome,
@@ -362,10 +363,11 @@ export async function createPacingLibraryEntry(
   kind: PacingLibraryKindV1,
   name: string,
   description: string | undefined,
-  definition: Record<string, unknown>
+  definition: Record<string, unknown>,
+  visibility?: PacingLibraryVisibilityV1
 ): Promise<PacingLibrarySaveOutcome<PacingLibraryEntryV1>> {
   const result = await apiClient.POST("/api/v1/pacing/library", {
-    body: { kind, name, description, definition },
+    body: { kind, name, description, definition, visibility },
   });
   if (result.response.status === 409) {
     return { status: "conflict", conflict: result.error as any }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -387,6 +389,27 @@ export async function updatePacingLibraryEntry(
   const result = await apiClient.PUT("/api/v1/pacing/library/{id}", {
     params: { path: { id } },
     body: { name, description, definition, expectedUpdatedAt },
+  });
+  if (result.response.status === 409) {
+    return { status: "conflict", conflict: result.error as any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  }
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return { status: "saved", result: result.data };
+}
+
+/**
+ * Only me / Team for a library entry - its author's call, or an admin's. No `expectedUpdatedAt`: the
+ * write carries no content, and Pacing leaves the entry's stamp where it was.
+ */
+export async function setPacingLibraryEntryVisibility(
+  id: string,
+  visibility: PacingLibraryVisibilityV1
+): Promise<PacingLibrarySaveOutcome<PacingLibraryEntryV1>> {
+  const result = await apiClient.PUT("/api/v1/pacing/library/{id}/visibility", {
+    params: { path: { id } },
+    body: { visibility },
   });
   if (result.response.status === 409) {
     return { status: "conflict", conflict: result.error as any }; // eslint-disable-line @typescript-eslint/no-explicit-any

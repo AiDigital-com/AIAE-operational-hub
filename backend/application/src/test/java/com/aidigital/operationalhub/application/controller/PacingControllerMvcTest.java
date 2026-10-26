@@ -183,7 +183,7 @@ class PacingControllerMvcTest {
 		// The optional extras ride as one options record - here the standalone screen's picks:
 		// client/agency (the blank-subtitle fix), the pinned campaign order, and the data namespace.
 		PacingCreateOptions options = new PacingCreateOptions(
-				List.of("40539"), "Acme", "MediaCo", null, null, null, null, null);
+				List.of("40539"), "Acme", "MediaCo", null, null, null, null, null, null);
 		doReturn(options).when(createMapper).toCreateOptions(any(PacingCreateV1.class));
 		doReturn(new PacingCreateResult("p9", "2026-campaign"))
 				.when(pacingClient)
@@ -214,7 +214,7 @@ class PacingControllerMvcTest {
 		doReturn(entitlement).when(pacingScopeResolver).resolveForCurrentUser(user);
 		doReturn(new HubAssertion(user.email(), PacingScope.KIND_OWNERS, List.of(), false))
 				.when(mapper).toAssertion(any(), any());
-		doReturn(new PacingCreateOptions(null, null, null, null, null, null, null, null))
+		doReturn(new PacingCreateOptions(null, null, null, null, null, null, null, null, null))
 				.when(createMapper).toCreateOptions(any(PacingCreateV1.class));
 		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_FORBIDDEN, "no_create_permission"))
 				.when(pacingClient).createPacing(any(), any(), any(), any());

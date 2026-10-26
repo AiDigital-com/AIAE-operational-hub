@@ -12,18 +12,18 @@
  *     is the server's CODE (`stale_entry`, `library_full`, `stale_settings`), `err.status` the HTTP
  *     status, and `spa/save-error.js` turns the code into words.
  *
- * Visibility ("only me" / "team") is not offered: this app's contract has no such field and every
- * entry is visible to everyone (owner decision 2026-10-14). The moved dialogs do not draw the
- * choice; `setVisibility` refuses rather than pretend.
+ * Visibility ("only me" / "team") is the reference's, as it is there (2026-10-26, reversing the
+ * owner decision of 2026-10-14 that hid it): Share carries the choice, `setVisibility` flips it.
  */
 import {
   createPacingLibraryEntry,
   deletePacingLibraryEntry,
   listPacingLibrary,
   setPacingLibraryLike,
+  setPacingLibraryEntryVisibility,
   updatePacingLibraryEntry,
 } from "./api";
-import type { PacingLibraryEntryV1, PacingLibraryKindV1 } from "./types";
+import type { PacingLibraryEntryV1, PacingLibraryKindV1, PacingLibraryVisibilityV1 } from "./types";
 
 /** The viewer's id as the moved gates compare it: `me.user_id === entry.owner_id`. */
 export const ME = "me";
@@ -46,7 +46,8 @@ export function toReferenceEntry(entry: PacingLibraryEntryV1): Record<string, un
     mine: entry.mine,
     usage: entry.usage,
     standard: entry.id.startsWith("std:"),
-    visibility: "team",
+    // An answer from a Pacing that predates the column carries none: that entry is shared.
+    visibility: entry.visibility ?? "team",
   };
 }
 
@@ -63,6 +64,7 @@ interface ShareBody {
   name: string;
   description?: string | null;
   definition: Record<string, unknown>;
+  visibility?: PacingLibraryVisibilityV1 | null;
 }
 
 export const pacingLibraryApi = {
@@ -81,7 +83,8 @@ export const pacingLibraryApi = {
       body.kind ?? "widget",
       body.name,
       body.description ?? undefined,
-      body.definition
+      body.definition,
+      body.visibility ?? undefined
     );
     if (outcome.status === "conflict") throw referenceError(outcome.conflict.reason, 409);
     return { ok: true, entry: toReferenceEntry(outcome.result) };
@@ -105,8 +108,10 @@ export const pacingLibraryApi = {
     return { ok: true };
   },
 
-  async setVisibility(): Promise<never> {
-    throw referenceError("visibility_not_offered", 400, "Library entries are visible to everyone here.");
+  async setVisibility(id: string, visibility: PacingLibraryVisibilityV1) {
+    const outcome = await setPacingLibraryEntryVisibility(id, visibility);
+    if (outcome.status === "conflict") throw referenceError(outcome.conflict.reason, 409);
+    return { ok: true, entry: toReferenceEntry(outcome.result) };
   },
 
   async like(id: string) {

@@ -652,6 +652,7 @@ export function aPacingLibraryEntryV1(overrides: Partial<PacingLibraryEntryV1> =
     likes: 0,
     liked: false,
     mine: true,
+    visibility: "team",
     usage: 0,
     ...overrides,
   };

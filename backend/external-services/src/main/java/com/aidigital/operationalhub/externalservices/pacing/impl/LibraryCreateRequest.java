@@ -9,8 +9,10 @@ import java.util.Map;
  * @param name        entry display name
  * @param description entry description, or null
  * @param definition  the canonical widget/block/layout definition
+ * @param visibility  {@code team} or {@code private}; null is read by Pacing as {@code team}
  * @param writer      the fixed v2 writer capability marker, see {@link PacingClientImpl#V2_WRITER}
  */
 record LibraryCreateRequest(
-		String kind, String name, String description, Map<String, Object> definition, Map<String, Object> writer) {
+		String kind, String name, String description, Map<String, Object> definition, String visibility,
+		Map<String, Object> writer) {
 }

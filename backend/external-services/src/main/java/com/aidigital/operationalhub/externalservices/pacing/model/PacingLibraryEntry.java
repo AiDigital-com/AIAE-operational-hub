@@ -23,6 +23,7 @@ import java.util.Map;
  * @param likes       total like count
  * @param liked       whether the calling user has liked this entry
  * @param mine        whether the calling user owns this entry
+ * @param visibility  {@code team} (the shared catalog) or {@code private} (the author's Mine shelf)
  * @param usage       number of pacings currently referencing this entry
  */
 public record PacingLibraryEntry(
@@ -37,5 +38,6 @@ public record PacingLibraryEntry(
 		int likes,
 		boolean liked,
 		boolean mine,
+		String visibility,
 		int usage) {
 }

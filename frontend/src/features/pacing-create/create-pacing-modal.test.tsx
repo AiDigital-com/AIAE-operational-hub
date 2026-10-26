@@ -14,6 +14,8 @@ vi.mock("./api", () => ({
   createPacing: vi.fn(),
   validatePacingLookup: vi.fn(),
 }));
+// The Dashboard layout picker reads the library; these cases are not about it.
+vi.mock("../pacing-dashboard/api", () => ({ listPacingLibrary: vi.fn().mockResolvedValue([]) }));
 
 function renderModal(onClose = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -336,10 +336,12 @@ public interface PacingClient {
 	 * @param name        entry display name
 	 * @param description entry description, or null
 	 * @param definition  the canonical widget/block/layout definition
+	 * @param visibility  {@code team} or {@code private}; null means {@code team}
 	 * @return the save outcome
 	 */
 	PacingLibrarySaveOutcome createLibraryEntry(
-			HubAssertion assertion, String kind, String name, String description, Map<String, Object> definition);
+			HubAssertion assertion, String kind, String name, String description, Map<String, Object> definition,
+			String visibility);
 
 	/**
 	 * Updates a library widget entry (US-118), guarded by {@code expectedUpdatedAt} - a mismatch is

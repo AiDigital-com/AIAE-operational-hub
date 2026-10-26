@@ -23,6 +23,7 @@ import java.util.List;
  *                      {@code rate} is sent
  * @param campaignLinks reference links to seed {@code config_json.campaign_links} with
  * @param campaignNotes free-text campaign notes ({@code config_json.campaign_notes})
+ * @param layoutId      the library Layout the new dashboard is copied from; null = Standard
  */
 public record PacingCreateOptions(
 		List<String> campaigns,
@@ -32,5 +33,6 @@ public record PacingCreateOptions(
 		Double rate,
 		Boolean rateLocked,
 		List<PacingCampaignLink> campaignLinks,
-		String campaignNotes) {
+		String campaignNotes,
+		String layoutId) {
 }

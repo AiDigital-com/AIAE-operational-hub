@@ -33,7 +33,7 @@ import {
 } from "./bulk";
 import { fmtDate, fmtInt, fmtMoneyIn, parseEditableNumber } from "./format";
 import { netPctToRatio, netRatioToPct } from "../pacing-plan/line-item-fields";
-import { useCreatePacing, usePacingDraft } from "./hooks";
+import { useCreatePacing, useCreationLayouts, usePacingDraft } from "./hooks";
 import { NumericField } from "./numeric-field";
 import type {
   PacingCampaignLinkV1,
@@ -391,6 +391,13 @@ function CreatePacingForm({
 }) {
   const toast = useToast();
   const createMutation = useCreatePacing(campaignId);
+  // The dashboard the new pacing starts from (the reference's create-screen picker): Standard, or a
+  // Layout from the library copied in at create. A chosen Layout that drops out of the list (deleted
+  // or made private by its author meanwhile) blocks Create until another one is picked.
+  const layoutsQuery = useCreationLayouts();
+  const layoutOptions = layoutsQuery.data ?? [];
+  const [layoutId, setLayoutId] = useState("standard");
+  const layoutAvailable = layoutId === "standard" || layoutOptions.some((option) => option.id === layoutId);
   const lineItems = useMemo(() => draft.lineItems ?? [], [draft.lineItems]);
   const insertionOrders = useMemo(() => draft.insertionOrders ?? [], [draft.insertionOrders]);
   const inUse = draft.inUse ?? {};
@@ -603,6 +610,7 @@ function CreatePacingForm({
     derivedCampaigns.length > 0 &&
     pacingName.trim().length > 0 &&
     invalidNetIds.length === 0 &&
+    layoutAvailable &&
     !createMutation.isPending;
 
   // Every visible row's current on-screen values, for the gap filter and its counts - live edits,
@@ -781,6 +789,7 @@ function CreatePacingForm({
       ...(nonUsdLineItem && effectiveRate != null ? { rate: effectiveRate, rateLocked: rateEdited } : {}),
       ...(cleanLinks.length > 0 ? { campaignLinks: cleanLinks } : {}),
       ...(notes.trim() ? { campaignNotes: notes.trim() } : {}),
+      ...(layoutId !== "standard" ? { layoutId } : {}),
     };
     try {
       const result = await createMutation.mutateAsync(body);
@@ -788,6 +797,9 @@ function CreatePacingForm({
       onCreated(result.pacingId, orderedCampaigns[0]?.id ?? null);
     } catch (error) {
       toast.showError(formatError(error));
+      // A Layout gone since the list loaded is refused by Pacing; a fresh list is what lets the
+      // picker say so ("Selected Layout unavailable") instead of offering it again.
+      if (layoutId !== "standard") void layoutsQuery.refetch();
     }
   }
 
@@ -1141,12 +1153,55 @@ function CreatePacingForm({
             )}
           </section>
 
-          {/* ── Settings (the reference create screen's block; net cost mode and the layout picker do
-                 not exist in this fork and are deliberately absent). ── */}
+          {/* ── Settings (the reference create screen's block). ── */}
           <section className="pcreate__block" aria-labelledby="pcreate-settings-title">
             <h3 id="pcreate-settings-title" className="pcreate__block-title">
               Settings
             </h3>
+            <div className="pcreate__setting">
+              <label className="pcreate__setting-label" htmlFor="pcreate-layout">
+                Dashboard layout
+              </label>
+              <select
+                id="pcreate-layout"
+                className="pcreate__select pcreate__select--auto"
+                value={layoutId}
+                disabled={createMutation.isPending}
+                onChange={(e) => setLayoutId(e.target.value)}
+              >
+                <option value="standard">Standard</option>
+                {layoutOptions.length > 0 && (
+                  <optgroup label="Library">
+                    {layoutOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {!layoutAvailable && (
+                  <option value={layoutId} disabled>
+                    Selected Layout unavailable
+                  </option>
+                )}
+              </select>
+              {(layoutsQuery.isLoading || layoutsQuery.isError || !layoutAvailable) && (
+                <span className="pcreate__field-hint" role="status">
+                  {layoutsQuery.isLoading ? (
+                    "Loading library…"
+                  ) : layoutsQuery.isError ? (
+                    <>
+                      Library could not load.{" "}
+                      <button type="button" className="pcreate__link-btn" onClick={() => void layoutsQuery.refetch()}>
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    "Choose another Layout or Standard."
+                  )}
+                </span>
+              )}
+            </div>
             <label className="pcreate__setting">
               <span className="pcreate__setting-label">Data source</span>
               <select

@@ -23,6 +23,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDim
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryVisibilityV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifyMetricsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
@@ -498,7 +499,7 @@ class PacingDashboardContractMapperTest {
 		// Given:
 		PacingLibraryEntry entry = new PacingLibraryEntry(
 				"e1", "widget", "Budget card", "Shows client budget", Map.of("id", "w_1"),
-				"Azat Nabiev", "2026-08-01", "2026-08-02", 3, true, true, 5);
+				"Azat Nabiev", "2026-08-01", "2026-08-02", 3, true, true, "private", 5);
 
 		// When:
 		PacingLibraryEntryV1 v1 = mapper.toV1(entry);
@@ -509,6 +510,7 @@ class PacingDashboardContractMapperTest {
 		assertThat(v1.getKind()).isEqualTo(PacingLibraryKindV1.WIDGET);
 		assertThat(v1.getOwnerName()).isEqualTo("Azat Nabiev");
 		assertThat(v1.getUsage()).isEqualTo(5);
+		assertThat(v1.getVisibility()).isEqualTo(PacingLibraryVisibilityV1.PRIVATE);
 		assertThat(listV1.getEntries()).hasSize(1);
 		assertThat(listV1.getEntries().get(0).getId()).isEqualTo("e1");
 	}

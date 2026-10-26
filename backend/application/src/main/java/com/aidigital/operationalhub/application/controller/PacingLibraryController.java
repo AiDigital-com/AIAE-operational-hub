@@ -10,10 +10,12 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLib
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryVisibilityUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLikeResultV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingLibraryVisibilityClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -46,6 +48,7 @@ public class PacingLibraryController implements PacingLibraryApi {
 	private final CurrentUserService currentUserService;
 	private final PacingScopeResolver pacingScopeResolver;
 	private final PacingClient pacingClient;
+	private final PacingLibraryVisibilityClient visibilityClient;
 	private final PacingContractMapper assertionMapper;
 	private final PacingDashboardContractMapper mapper;
 
@@ -62,7 +65,8 @@ public class PacingLibraryController implements PacingLibraryApi {
 	public ResponseEntity<PacingLibraryEntryV1> createPacingLibraryEntry(PacingLibraryCreateV1 body) {
 		HubAssertion assertion = signCurrentUser();
 		PacingLibrarySaveOutcome outcome = pacingClient.createLibraryEntry(
-				assertion, body.getKind().getValue(), body.getName(), body.getDescription(), body.getDefinition());
+				assertion, body.getKind().getValue(), body.getName(), body.getDescription(), body.getDefinition(),
+				body.getVisibility() == null ? null : body.getVisibility().getValue());
 		if (!outcome.ok()) {
 			return conflictResponse(outcome);
 		}
@@ -89,6 +93,18 @@ public class PacingLibraryController implements PacingLibraryApi {
 			return conflictResponse(outcome);
 		}
 		return ResponseEntity.ok(new PacingLibraryDeleteResultV1().id(outcome.deletedId()));
+	}
+
+	@Override
+	public ResponseEntity<PacingLibraryEntryV1> setPacingLibraryEntryVisibility(
+			String id, PacingLibraryVisibilityUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		PacingLibrarySaveOutcome outcome =
+				visibilityClient.setVisibility(assertion, id, body.getVisibility().getValue());
+		if (!outcome.ok()) {
+			return conflictResponse(outcome);
+		}
+		return ResponseEntity.ok(mapper.toV1(outcome.entry()));
 	}
 
 	@Override

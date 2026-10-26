@@ -3,9 +3,11 @@ package com.aidigital.operationalhub.application.controller;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryVisibilityV1;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingLibraryVisibilityClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibrarySaveOutcome;
@@ -54,6 +56,9 @@ class PacingLibraryControllerMvcTest {
 	private PacingClient pacingClient;
 
 	@Mock
+	private PacingLibraryVisibilityClient visibilityClient;
+
+	@Mock
 	private PacingContractMapper assertionMapper;
 
 	@Mock
@@ -73,7 +78,7 @@ class PacingLibraryControllerMvcTest {
 
 	private PacingLibraryEntry anEntry() {
 		return new PacingLibraryEntry(
-				"e1", "widget", "Budget card", null, Map.of("id", "w_1"), "Azat", "t1", "t2", 0, false, true, 0);
+				"e1", "widget", "Budget card", null, Map.of("id", "w_1"), "Azat", "t1", "t2", 0, false, true, "team", 0);
 	}
 
 	@Test
@@ -105,7 +110,7 @@ class PacingLibraryControllerMvcTest {
 		stubCurrentUser();
 		PacingLibraryEntry entry = anEntry();
 		doReturn(PacingLibrarySaveOutcome.saved(entry)).when(pacingClient)
-				.createLibraryEntry(any(), eq("widget"), eq("Budget card"), eq(null), any());
+				.createLibraryEntry(any(), eq("widget"), eq("Budget card"), eq(null), any(), eq(null));
 		doReturn(new PacingLibraryEntryV1().id("e1").kind(PacingLibraryKindV1.WIDGET).name("Budget card")
 				.likes(0).liked(false).mine(true).usage(0))
 				.when(mapper).toV1(entry);
@@ -120,11 +125,66 @@ class PacingLibraryControllerMvcTest {
 	}
 
 	@Test
+	void shouldPassChosenVisibilityOnCreateTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingLibraryEntry entry = anEntry();
+		doReturn(PacingLibrarySaveOutcome.saved(entry)).when(pacingClient)
+				.createLibraryEntry(any(), eq("layout"), eq("Board"), eq(null), any(), eq("private"));
+		doReturn(new PacingLibraryEntryV1().id("e1").kind(PacingLibraryKindV1.LAYOUT).name("Board")
+				.likes(0).liked(false).mine(true).usage(0))
+				.when(mapper).toV1(entry);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/library")
+						.contentType(APPLICATION_JSON)
+						.content("{\"kind\":\"layout\",\"name\":\"Board\",\"definition\":{},\"visibility\":\"private\"}"))
+				.andExpect(status().isCreated());
+	}
+
+	@Test
+	void shouldSetVisibilityTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		PacingLibraryEntry entry = anEntry();
+		doReturn(PacingLibrarySaveOutcome.saved(entry)).when(visibilityClient)
+				.setVisibility(any(), eq("e1"), eq("private"));
+		doReturn(new PacingLibraryEntryV1().id("e1").kind(PacingLibraryKindV1.WIDGET).name("Budget card")
+				.likes(0).liked(false).mine(true).usage(0).visibility(PacingLibraryVisibilityV1.PRIVATE))
+				.when(mapper).toV1(entry);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(put("/api/v1/pacing/library/e1/visibility")
+						.contentType(APPLICATION_JSON)
+						.content("{\"visibility\":\"private\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.visibility").value("private"));
+	}
+
+	@Test
+	void shouldReturn409WhenVisibilityWriterIsStaleTest() throws Exception {
+		// Given:
+		stubCurrentUser();
+		doReturn(PacingLibrarySaveOutcome.writerRequired()).when(visibilityClient)
+				.setVisibility(any(), eq("e1"), eq("team"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(put("/api/v1/pacing/library/e1/visibility")
+						.contentType(APPLICATION_JSON)
+						.content("{\"visibility\":\"team\"}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.reason").value("v2_writer_required"));
+	}
+
+	@Test
 	void shouldReturn409OnLibraryFullConflictTest() throws Exception {
 		// Given:
 		stubCurrentUser();
 		doReturn(PacingLibrarySaveOutcome.libraryFull()).when(pacingClient)
-				.createLibraryEntry(any(), eq("widget"), eq("Budget card"), eq(null), any());
+				.createLibraryEntry(any(), eq("widget"), eq("Budget card"), eq(null), any(), eq(null));
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:

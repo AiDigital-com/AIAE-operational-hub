@@ -338,8 +338,10 @@ function LibraryCard({
                 // can reach — so it wears the ellipsis and asks first, exactly like the
                 // Remove below it. The screen owns the question (see onFlipVisibility);
                 // both read `entry.mine`, so the promise and the behaviour cannot drift.
-                // The visibility flip is NOT offered here: this app has no "only me" entries,
-                // every entry is visible to everyone (owner decision 2026-10-14).
+                { key: 'visibility',
+                  label: entry.visibility === 'private' ? 'Share with team'
+                    : entry.mine ? 'Make it only me' : 'Make it private…',
+                  onSelect: () => onFlipVisibility(entry) },
                 { key: 'remove', label: 'Remove from library…', danger: true,
                   onSelect: () => onRemove(entry) },
               ]}

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listPacingLibrary } from "../pacing-dashboard/api";
 import { createPacing, getPacingDraft } from "./api";
+import { creationLayoutOptions } from "./layout-options";
 import type { PacingCreateV1 } from "./types";
 
 /**
@@ -36,5 +38,24 @@ export function useCreatePacing(campaignId: number | undefined) {
       });
       void queryClient.invalidateQueries({ queryKey: ["pacing", "overview"] });
     },
+  });
+}
+
+/**
+ * The Layouts a new pacing may start from: the shared ones and the caller's own private ones, read
+ * from the library the moment the create form opens (no staleTime, so a Layout shared a minute ago
+ * is in the list). Two reads, the same two shelves the reference's create screen asks for.
+ */
+export function useCreationLayouts() {
+  return useQuery({
+    queryKey: ["pacing", "library", "creation-layouts"],
+    queryFn: async () => {
+      const [shared, mine] = await Promise.all([
+        listPacingLibrary({ kind: "layout" }),
+        listPacingLibrary({ kind: "layout", shelf: "mine" }),
+      ]);
+      return creationLayoutOptions(shared, mine);
+    },
+    retry: false,
   });
 }
