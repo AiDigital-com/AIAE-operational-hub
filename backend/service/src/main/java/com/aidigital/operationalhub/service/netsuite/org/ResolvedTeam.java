@@ -3,9 +3,10 @@ package com.aidigital.operationalhub.service.netsuite.org;
 import java.util.List;
 
 /**
- * A team derived from a single Team Lead, as produced by {@link OrgTreeTeamResolver#resolve}.
+ * A team derived from a single Team Lead, as produced by {@link OrgTreeTeamResolver#resolve} - or from a
+ * Director acting as one for members with no Team Lead under them.
  *
- * @param teamLeadEmail the Team Lead's work email (unique key backing this team)
+ * @param teamLeadEmail the Team Lead's (or acting Director's) work email (unique key backing this team)
  * @param teamLeadName  the Team Lead's display name
  * @param teamName      the unique {@code hub_teams.team_name} ({@code "<department leaf>: <TL first name>"},
  *                      with the email local part appended on a name collision)

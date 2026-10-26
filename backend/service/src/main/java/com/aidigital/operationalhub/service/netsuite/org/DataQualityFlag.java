@@ -41,6 +41,13 @@ public enum DataQualityFlag {
 	MANAGER_CHAIN_HIT_DIRECTOR("Manager chain reached a Director before any Team Lead."),
 
 	/**
+	 * No Team Lead sits between this member and the Director their manager chain reached, and the
+	 * {@code teams} string named none either, so the member joins that Director's own team until Rippling
+	 * shows a Team Lead again (a pod between Team Leads; owner decision 2026-10-26).
+	 */
+	DIRECTOR_ACTING_TEAM_LEAD("No Team Lead under the Director; the Director's own team was used."),
+
+	/**
 	 * The manager chain revisited an employee already seen on this walk (a management cycle); the walk
 	 * was aborted before looping forever.
 	 */

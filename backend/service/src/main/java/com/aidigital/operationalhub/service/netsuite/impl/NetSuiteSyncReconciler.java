@@ -115,7 +115,9 @@ public class NetSuiteSyncReconciler {
 					assignmentsByUserId.getOrDefault(user.getId(), List.of());
 			assignmentsUpdated += reconcileEmployeeAssignment(employee, user, teamByLeadEmail, teamLeadRole,
 					memberRole, directorRole, teamScope, allScope, existingAssignments);
-			if (employee.orgRole() == OrgRole.TEAM_LEAD) {
+			// A Director heads a team only while members with no Team Lead fall to them; their agencies
+			// (NetSuite names them as mpo_team_lead) then belong to that team, like a Team Lead's
+			if (employee.orgRole() != OrgRole.MEMBER) {
 				HubTeam team = teamByLeadEmail.get(employee.workEmail());
 				if (team != null) {
 					if (employee.name() != null) {
