@@ -136,8 +136,7 @@ export default function ShareEntryDialog({
       onCancel={onCancel}
     >
       <div className="lib-form">
-        {/* No VisibilityPills here: this app has no "only me" library entries, every entry is
-            visible to everyone (owner decision 2026-10-14), so the choice stays `team`. */}
+        <VisibilityPills value={visibility} onChange={setVisibility} />
         <label className="lib-form-l" htmlFor="lm-share-name">Name</label>
         <input
           id="lm-share-name" className="sp-inp sp-inp--sans" type="text" autoFocus maxLength={80}

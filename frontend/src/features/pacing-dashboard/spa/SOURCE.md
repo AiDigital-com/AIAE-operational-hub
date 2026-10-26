@@ -384,8 +384,9 @@ visible to everyone), groups are made in Layout mode only.
 
 **Changed inside moved files**, each for an owner decision:
 - `display/BlockLibrary.jsx`: the History button and screen are removed.
-- `display/ShareEntryDialog.jsx`, `display/WidgetLinkMenu.jsx`: the Visibility pills are not drawn
-  (the choice stays `team`); `display/LibraryScreen.jsx`: the card menu's visibility flip is removed.
+- ~~`display/ShareEntryDialog.jsx`, `display/WidgetLinkMenu.jsx`: the Visibility pills are not drawn
+  (the choice stays `team`); `display/LibraryScreen.jsx`: the card menu's visibility flip is removed.~~
+  Reversed 2026-10-26, see below: the three are the reference's again, bar import specifiers.
 - `LaunchPlanCard.jsx`: `UNIT_SHORT` gained `CPI: 'installs'` (ours - the reference has no CPI).
 
 **This app's own seam**, ordinary code beside the moved files:
@@ -425,3 +426,23 @@ reference): the cell ceiling and the sentence under the switch. `../data-panel.t
 the section renamed from «Client cost» to the reference's «Advanced settings». The Hub's contract
 gained `deliveryTab` on the data-settings save and `deliveryStats` on the dashboard payload;
 dash-gate already stored, built and mirrored the tab.
+
+## Updated 2026-10-26 — Only me / Team, and the Layout picked at create
+
+The 2026-10-14 decision that library entries have no visibility is reversed. It hid a real loss:
+Pacing's database never had the column, so the legacy import dropped it and every entry that was
+private on the old Pacing came over shared with everyone. dash-gate now has the column back
+(`migrations/0011_library-visibility.sql`, the reference's 045) and the reference's flip route.
+
+- `display/ShareEntryDialog.jsx`, `display/WidgetLinkMenu.jsx`: the Visibility pills are drawn again;
+  `display/LibraryScreen.jsx`: the card menu's "Make it only me" / "Share with team" is back. All
+  three now differ from the reference only in import specifiers.
+- `../spa-library-api.ts`: Share carries the chosen visibility, `setVisibility` calls
+  `PUT /api/v1/pacing/library/{id}/visibility`, rows carry `visibility`.
+
+The create screen's "Dashboard layout" picker is this app's own TypeScript, not moved code: the
+reference's `CreatePacing.jsx` select is rebuilt in `../../pacing-create/create-pacing-panel.tsx`
+(Settings block, first row), its `lib/create-layout-options.js` ported to
+`../../pacing-create/layout-options.ts`. dash-gate's `lib/creation-layout.mjs` is the reference's,
+byte for byte.
+

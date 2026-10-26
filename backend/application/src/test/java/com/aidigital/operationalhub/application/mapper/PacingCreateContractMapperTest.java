@@ -309,7 +309,8 @@ class PacingCreateContractMapperTest {
 				.rate(0.7345)
 				.rateLocked(true)
 				.campaignLinks(List.of(new PacingCampaignLinkV1().name("IO").url("https://drive.example/io")))
-				.campaignNotes("notes");
+				.campaignNotes("notes")
+				.layoutId("3f0c6a52-0d1e-4f7b-9a43-2c5d8e1b7a90");
 
 		// When:
 		PacingCreateOptions options = mapper.toCreateOptions(body);
@@ -328,6 +329,7 @@ class PacingCreateContractMapperTest {
 		assertThat(options.campaignLinks().get(0).name()).isEqualTo("IO");
 		assertThat(options.campaignLinks().get(0).url()).isEqualTo("https://drive.example/io");
 		assertThat(options.campaignNotes()).isEqualTo("notes");
+		assertThat(options.layoutId()).isEqualTo("3f0c6a52-0d1e-4f7b-9a43-2c5d8e1b7a90");
 	}
 
 	@Test
@@ -343,6 +345,7 @@ class PacingCreateContractMapperTest {
 		assertThat(options.rate()).isNull();
 		assertThat(options.rateLocked()).isNull();
 		assertThat(options.campaignLinks()).isNull();
+		assertThat(options.layoutId()).isNull();
 		assertThat(options.campaignNotes()).isNull();
 	}
 

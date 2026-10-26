@@ -40,6 +40,7 @@ import java.util.List;
  * @param campaign_links     reference links to seed {@code config_json.campaign_links}; stored
  *                           verbatim by Pacing, so the Hub validates them before this is built
  * @param campaign_notes     free-text campaign notes ({@code config_json.campaign_notes})
+ * @param layout_id          the library Layout the dashboard starts from; null (omitted) = Standard
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 record CreateRequest(
@@ -54,5 +55,6 @@ record CreateRequest(
 		Double rate,
 		Boolean rate_locked,
 		List<PacingCampaignLink> campaign_links,
-		String campaign_notes) {
+		String campaign_notes,
+		String layout_id) {
 }

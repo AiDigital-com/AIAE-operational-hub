@@ -2,8 +2,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { aPacingCreateResultV1, aPacingDraftLineItemV1, aPacingDraftV1, aPacingInsertionOrderV1 } from "@/test/factories";
+import {
+  aPacingCreateResultV1,
+  aPacingDraftLineItemV1,
+  aPacingDraftV1,
+  aPacingInsertionOrderV1,
+  aPacingLibraryEntryV1,
+} from "@/test/factories";
 import { ToastProvider } from "../../shared/ui/toast/toast";
+import { listPacingLibrary } from "../pacing-dashboard/api";
 import { createPacing, getPacingDraft } from "./api";
 import { CreatePacingPanel } from "./create-pacing-panel";
 import type { PacingCreateV1 } from "./types";
@@ -12,6 +19,7 @@ vi.mock("./api", () => ({
   getPacingDraft: vi.fn(),
   createPacing: vi.fn(),
 }));
+vi.mock("../pacing-dashboard/api", () => ({ listPacingLibrary: vi.fn() }));
 
 function renderPanel(onCreated = vi.fn(), onClose = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -39,6 +47,8 @@ describe("CreatePacingPanel", () => {
   beforeEach(() => {
     vi.mocked(getPacingDraft).mockReset();
     vi.mocked(createPacing).mockReset();
+    vi.mocked(listPacingLibrary).mockReset();
+    vi.mocked(listPacingLibrary).mockResolvedValue([]);
   });
 
   it("pre-fills agency/client/campaign from the navigation with no search step (US-121)", async () => {
@@ -362,6 +372,54 @@ describe("CreatePacingPanel", () => {
     expect("rate" in body).toBe(false);
     expect("campaignLinks" in body).toBe(false);
     expect("campaignNotes" in body).toBe(false);
+    expect("layoutId" in body).toBe(false);
+  });
+
+  it("offers Standard and the library's Layouts, shared and own private ones, and sends the chosen one", async () => {
+    // Given: one shared Layout, one private Layout of the caller's, and the shared one also on Mine
+    const shared = aPacingLibraryEntryV1({ id: "lay-shared", kind: "layout", name: "Video board", mine: false });
+    const own = aPacingLibraryEntryV1({ id: "lay-own", kind: "layout", name: "Awareness", visibility: "private" });
+    vi.mocked(listPacingLibrary).mockImplementation(async (params) =>
+      params.shelf === "mine" ? [own] : [shared]
+    );
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [aPacingDraftLineItemV1({ lineItemId: "1" })] }));
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1());
+    renderPanel();
+    await screen.findByText("1");
+
+    // Then: Standard first, then the library's Layouts once each, by name
+    const picker = screen.getByLabelText("Dashboard layout");
+    await within(picker).findByRole("option", { name: "Video board" });
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Standard",
+      "Awareness",
+      "Video board",
+    ]);
+    expect(listPacingLibrary).toHaveBeenCalledWith({ kind: "layout" });
+    expect(listPacingLibrary).toHaveBeenCalledWith({ kind: "layout", shelf: "mine" });
+
+    // When:
+    await userEvent.selectOptions(picker, "lay-own");
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+
+    // Then:
+    const body = vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1;
+    expect(body.layoutId).toBe("lay-own");
+  });
+
+  it("says when the library could not load, and still creates from Standard", async () => {
+    // Given:
+    vi.mocked(listPacingLibrary).mockRejectedValue(new Error("down"));
+    vi.mocked(getPacingDraft).mockResolvedValue(aPacingDraftV1({ lineItems: [aPacingDraftLineItemV1({ lineItemId: "1" })] }));
+    vi.mocked(createPacing).mockResolvedValue(aPacingCreateResultV1());
+    renderPanel();
+    await screen.findByText("1");
+
+    // Then:
+    expect(await screen.findByText(/Library could not load/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create Pacing" }));
+    expect("layoutId" in (vi.mocked(createPacing).mock.calls[0][0] as PacingCreateV1)).toBe(false);
   });
 
   it("derives the campaign set from the SELECTED rows, recomputing as rows are ticked (§3)", async () => {

@@ -652,9 +652,11 @@ public class PacingClientImpl implements PacingClient {
 
 	@Override
 	public PacingLibrarySaveOutcome createLibraryEntry(
-			HubAssertion assertion, String kind, String name, String description, Map<String, Object> definition) {
+			HubAssertion assertion, String kind, String name, String description, Map<String, Object> definition,
+			String visibility) {
 		String header = assertionSigner.sign(assertion);
-		LibraryCreateRequest request = new LibraryCreateRequest(kind, name, description, definition, V2_WRITER);
+		LibraryCreateRequest request =
+				new LibraryCreateRequest(kind, name, description, definition, visibility, V2_WRITER);
 		try {
 			LibraryEntryResponse response = restClient.post()
 					.uri(LIBRARY_PATH)
@@ -797,7 +799,7 @@ public class PacingClientImpl implements PacingClient {
 		// data key absent means "apply the defaults", and body.rate != null is what makes the rate
 		// an override at all.
 		PacingCreateOptions opts = options == null
-				? new PacingCreateOptions(null, null, null, null, null, null, null, null)
+				? new PacingCreateOptions(null, null, null, null, null, null, null, null, null)
 				: options;
 		CreateRequest request = new CreateRequest(
 				pacingName,
@@ -811,7 +813,8 @@ public class PacingClientImpl implements PacingClient {
 				opts.rate(),
 				opts.rateLocked(),
 				opts.campaignLinks(),
-				opts.campaignNotes());
+				opts.campaignNotes(),
+				opts.layoutId());
 		try {
 			CreateResponse response = restClient.post()
 					.uri(PACINGS_PATH)
@@ -1614,7 +1617,7 @@ public class PacingClientImpl implements PacingClient {
 					PacingFailureReason.UPSTREAM_FORBIDDEN,
 					"Pacing request failed: " + method + " " + path + " returned HTTP 403 (" + error + ")");
 		}
-		if (statusCode == 400) {
+		if (statusCode == 400 || (statusCode == 409 && "layout_unavailable".equals(error))) {
 			// bad_coef_config carries a structured `details` array (one entry per offending line
 			// item), not a `detail` string - described per line item and field, same as the plan
 			// save's handling (US-125's "a message naming the field"), so the create screen can show

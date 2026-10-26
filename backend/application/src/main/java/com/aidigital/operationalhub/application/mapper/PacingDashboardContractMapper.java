@@ -20,6 +20,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingJou
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryVisibilityV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLineItemPlanV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifyMetricsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
@@ -849,6 +850,9 @@ public class PacingDashboardContractMapper {
 				.likes(entry.likes())
 				.liked(entry.liked())
 				.mine(entry.mine())
+				// An answer from a Pacing that predates the column carries none: it is shared.
+				.visibility(PacingLibraryVisibilityV1.fromValue(
+						entry.visibility() == null ? "team" : entry.visibility()))
 				.usage(entry.usage());
 	}
 

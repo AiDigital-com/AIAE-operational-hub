@@ -15,6 +15,7 @@ export type PacingThirdPartyStatusV1 = components["schemas"]["PacingThirdPartySt
 export type PacingDisplayConflictV1 = components["schemas"]["PacingDisplayConflictV1"];
 export type PacingLibraryEntryV1 = components["schemas"]["PacingLibraryEntryV1"];
 export type PacingLibraryKindV1 = components["schemas"]["PacingLibraryKindV1"];
+export type PacingLibraryVisibilityV1 = components["schemas"]["PacingLibraryVisibilityV1"];
 export type PacingLibraryConflictV1 = components["schemas"]["PacingLibraryConflictV1"];
 export type PacingLikeResultV1 = components["schemas"]["PacingLikeResultV1"];
 export type PacingDataSourceV1 = components["schemas"]["PacingDataSourceV1"];

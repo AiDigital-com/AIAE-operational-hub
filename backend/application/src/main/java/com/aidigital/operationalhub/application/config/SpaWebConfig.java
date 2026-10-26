@@ -1,10 +1,14 @@
 package com.aidigital.operationalhub.application.config;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.format.FormatterRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.Locale;
 
 /**
  * Forwards the frontend's client-side routes to {@code index.html} on a full page load, so a direct
@@ -19,12 +23,22 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p>Also the one place MVC interceptors are registered, which today is
  * {@link BigQueryOperationInterceptor} - a second {@code WebMvcConfigurer} would only split that list.
+ *
+ * <p>And the one place a query-string enum learns its wire spelling. Spring's default String-to-enum
+ * conversion matches the Java constant NAME ({@code LAYOUT}), while the contract's value - what the
+ * frontend sends - is lowercase ({@code ?kind=layout}), so every filtered library read answered 400.
  */
 @Configuration
 @RequiredArgsConstructor
 public class SpaWebConfig implements WebMvcConfigurer {
 
 	private final BigQueryOperationInterceptor bigQueryOperationInterceptor;
+
+	@Override
+	public void addFormatters(FormatterRegistry registry) {
+		registry.addConverter(String.class, PacingLibraryKindV1.class,
+				source -> PacingLibraryKindV1.fromValue(source.trim().toLowerCase(Locale.ROOT)));
+	}
 
 	@Override
 	public void addInterceptors(InterceptorRegistry registry) {

@@ -914,7 +914,7 @@ class PacingClientImplTest {
 
 		// When:
 		PacingLibrarySaveOutcome result =
-				client.createLibraryEntry(assertion, "widget", "My widget", null, Map.of("id", "w_1"));
+				client.createLibraryEntry(assertion, "widget", "My widget", null, Map.of("id", "w_1"), null);
 
 		// Then:
 		assertThat(result.ok()).isTrue();
@@ -938,7 +938,7 @@ class PacingClientImplTest {
 
 		// When:
 		PacingLibrarySaveOutcome result =
-				client.createLibraryEntry(assertion, "widget", "My widget", null, Map.of("id", "w_1"));
+				client.createLibraryEntry(assertion, "widget", "My widget", null, Map.of("id", "w_1"), null);
 
 		// Then:
 		assertThat(result.ok()).isFalse();
@@ -1227,7 +1227,7 @@ class PacingClientImplTest {
 				});
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of()))
+		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
@@ -1248,7 +1248,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "", null, Map.of()))
+		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "", null, Map.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("name is required");
@@ -1269,7 +1269,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of()))
+		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("this widget's mapping is pinned to a specific pacing and cannot be shared");
@@ -1290,7 +1290,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When:
-		PacingLibrarySaveOutcome result = client.createLibraryEntry(assertion, "widget", "n", null, Map.of());
+		PacingLibrarySaveOutcome result = client.createLibraryEntry(assertion, "widget", "n", null, Map.of(), null);
 
 		// Then:
 		assertThat(result.ok()).isFalse();
@@ -1314,7 +1314,7 @@ class PacingClientImplTest {
 						.contentType(MediaType.APPLICATION_JSON));
 
 		// When-Then:
-		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of()))
+		assertThatThrownBy(() -> client.createLibraryEntry(assertion, "widget", "n", null, Map.of(), null))
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getReason())
 				.isEqualTo(PacingFailureReason.UPSTREAM_RATE_LIMITED);
@@ -1958,6 +1958,31 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldMapUnavailableLayoutOnCreateToBadRequestWithDetailTest() {
+		// Given: the chosen Layout was deleted (or made private) between the list and the create.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), true);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/pacings"))
+				.andRespond(withStatus(HttpStatus.CONFLICT)
+						.body("{\"ok\":false,\"error\":\"layout_unavailable\","
+								+ "\"detail\":\"This Layout is no longer available. Choose another Layout or Standard.\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then: a refusal the person fixes by picking another Layout, with Pacing's own sentence.
+		assertThatThrownBy(() -> client.createPacing(assertion, "Pacing", List.of(), null))
+				.isInstanceOf(PacingExternalException.class)
+				.satisfies(ex -> {
+					PacingExternalException pex = (PacingExternalException) ex;
+					assertThat(pex.getReason()).isEqualTo(PacingFailureReason.UPSTREAM_BAD_REQUEST);
+					assertThat(pex.getDetail()).contains("no longer available");
+				});
+	}
+
+	@Test
 	void shouldClassifyCreatePacingConnectionFailureAsUnreachableTest() {
 		// Given:
 		HubAssertionSigner signer = mock(HubAssertionSigner.class);
@@ -1998,7 +2023,7 @@ class PacingClientImplTest {
 				new PacingCreateData("platform_mart", true, false, true, true),
 				0.7345, true,
 				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/1/2/3")),
-				"launches mid-flight");
+				"launches mid-flight", "3f0c6a52-0d1e-4f7b-9a43-2c5d8e1b7a90");
 		server.expect(requestTo(BASE_URL + "/api/pacings"))
 				.andExpect(method(POST))
 				.andExpect(content().json(
@@ -2008,7 +2033,8 @@ class PacingClientImplTest {
 								+ "\"fetch_conversions\":false,\"coef_enabled\":true,\"net_enabled\":true},"
 								+ "\"rate\":0.7345,\"rate_locked\":true,"
 								+ "\"campaign_links\":[{\"name\":\"Asana\",\"url\":\"https://app.asana.com/1/2/3\"}],"
-								+ "\"campaign_notes\":\"launches mid-flight\"}"))
+								+ "\"campaign_notes\":\"launches mid-flight\","
+								+ "\"layout_id\":\"3f0c6a52-0d1e-4f7b-9a43-2c5d8e1b7a90\"}"))
 				.andExpect(jsonPath("$.line_items[0].cost_coef").value(true))
 				// Net cost mode (Pacing spec 2026-09-07): the hand-confirmed ratio, its lock, and
 				// NetSuite's own baseline all ride the create wire under dash-gate's snake_case keys.
@@ -2049,6 +2075,7 @@ class PacingClientImplTest {
 				.andExpect(jsonPath("$.rate_locked").doesNotExist())
 				.andExpect(jsonPath("$.campaign_links").doesNotExist())
 				.andExpect(jsonPath("$.campaign_notes").doesNotExist())
+				.andExpect(jsonPath("$.layout_id").doesNotExist())
 				.andExpect(jsonPath("$.line_items[0].cost_coef").doesNotExist())
 				.andRespond(withStatus(HttpStatus.CREATED)
 						.body("{\"ok\":true,\"pacing_id\":\"p9\",\"dash_slug\":\"acme\"}")

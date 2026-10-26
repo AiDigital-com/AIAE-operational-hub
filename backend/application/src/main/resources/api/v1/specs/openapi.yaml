@@ -5746,7 +5746,7 @@ paths:
         users can find and add it. Only single widgets are supported from the Hub today - saving a
         multi-widget block or a whole layout to the library needs the canvas editor (§7/§9) and is not
         yet available here; `kind` stays open on the wire for parity with Pacing's own contract, but the
-        Hub's own UI only ever sends `widget`.
+        Hub's own UI only ever sends `widget`. `visibility` omitted = `team`.
       requestBody:
         required: true
         content:
@@ -5933,6 +5933,81 @@ paths:
                 $ref: '#/components/schemas/PacingLibraryConflictV1'
         '500':
           description: Removing the library entry failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/library/{id}/visibility:
+    put:
+      tags:
+        - pacingLibrary
+      operationId: setPacingLibraryEntryVisibility
+      description: >
+        Only me / Team for a library entry. Its author may change it, and so may an admin (anyone
+        Pacing sees with an unfiltered scope). No optimistic-lock stamp: the write carries no content,
+        and the entry's `updatedAt` does not move.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingLibraryVisibilityUpdateV1'
+      responses:
+        '200':
+          description: The visibility was changed (or already had this value).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryEntryV1'
+        '400':
+          description: The visibility is not one of private/team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct, or the entry belongs to someone else and the caller
+            is not an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The entry was not found, or was already removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: The Hub's writer capability is stale relative to what Pacing now requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingLibraryConflictV1'
+        '429':
+          description: Too many library writes in a short window; retry after the given number of seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingRetryAfterV1'
+        '500':
+          description: Changing the visibility failed.
           content:
             application/json:
               schema:
@@ -9923,6 +9998,13 @@ components:
         campaignNotes:
           type: string
           description: Free-text campaign notes to store as `config_json.campaign_notes`.
+        layoutId:
+          type: string
+          description: >
+            The library Layout (`PacingLibraryEntryV1.id` of a `layout` entry) the new pacing's
+            dashboard starts from, copied at create. Omitted = Standard, the adaptive default
+            dashboard. Pacing checks the caller may read it (their own, or shared with the team); one
+            that is gone or private to someone else is refused with a 400 and nothing is created.
       required:
         - pacingName
         - lineItems
@@ -9941,6 +10023,22 @@ components:
       required:
         - pacingId
         - dashSlug
+    PacingLibraryVisibilityV1:
+      type: string
+      description: >
+        Who finds a library entry in the catalog - `team` is the shared catalog everyone browses,
+        `private` is the author's own Mine shelf only. A tile already linked to a private entry still
+        renders for everyone who can open that pacing.
+      enum:
+        - private
+        - team
+    PacingLibraryVisibilityUpdateV1:
+      type: object
+      properties:
+        visibility:
+          $ref: '#/components/schemas/PacingLibraryVisibilityV1'
+      required:
+        - visibility
     PacingLibraryKindV1:
       type: string
       description: >
@@ -12357,6 +12455,8 @@ components:
           type: object
           description: The canonical widget/block/layout definition being saved.
           additionalProperties: true
+        visibility:
+          $ref: '#/components/schemas/PacingLibraryVisibilityV1'
       required:
         - kind
         - name
@@ -12428,6 +12528,8 @@ components:
         mine:
           type: boolean
           description: Whether the current user owns this entry.
+        visibility:
+          $ref: '#/components/schemas/PacingLibraryVisibilityV1'
         usage:
           type: integer
           format: int32
