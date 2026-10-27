@@ -38,6 +38,15 @@ public class HubTeamAgencyServiceImpl implements HubTeamAgencyService {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
+	public List<Long> findTeamIdsByAgencyId(Long agencyId) {
+		return teamAgencyRepository.findByAgencyId(agencyId).stream()
+				.map(HubTeamAgency::getTeamId)
+				.distinct()
+				.toList();
+	}
+
+	@Override
 	@Transactional
 	public HubTeamAgency save(HubTeamAgency mapping) {
 		return teamAgencyRepository.save(mapping);

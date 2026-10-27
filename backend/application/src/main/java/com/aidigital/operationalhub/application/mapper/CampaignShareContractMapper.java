@@ -30,7 +30,8 @@ public class CampaignShareContractMapper {
 	public CampaignShareListV1 toV1(CampaignSharesModel model) {
 		return new CampaignShareListV1()
 				.canShare(model.canShare())
-				.shares(model.shares().stream().map(this::toV1).toList());
+				.shares(model.shares().stream().map(this::toV1).toList())
+				.teamAccess(model.teamAccess().stream().map(this::toCandidateV1).toList());
 	}
 
 	/**
@@ -80,13 +81,22 @@ public class CampaignShareContractMapper {
 	 */
 	public CampaignShareCandidateListV1 toCandidatesV1(List<CampaignShareCandidateModel> candidates) {
 		return new CampaignShareCandidateListV1()
-				.candidates(candidates.stream()
-						.map(candidate -> new CampaignShareCandidateV1()
-								.hubUserId(candidate.hubUserId())
-								.fullName(candidate.fullName())
-								.email(candidate.email())
-								.roleName(candidate.role().roleName())
-								.teamName(candidate.role().teamName()))
-						.toList());
+				.candidates(candidates.stream().map(this::toCandidateV1).toList());
+	}
+
+	/**
+	 * Maps one person with their role and team - a candidate, or somebody who sees the campaign
+	 * through its team.
+	 *
+	 * @param candidate the service model
+	 * @return the contract shape
+	 */
+	public CampaignShareCandidateV1 toCandidateV1(CampaignShareCandidateModel candidate) {
+		return new CampaignShareCandidateV1()
+				.hubUserId(candidate.hubUserId())
+				.fullName(candidate.fullName())
+				.email(candidate.email())
+				.roleName(candidate.role().roleName())
+				.teamName(candidate.role().teamName());
 	}
 }

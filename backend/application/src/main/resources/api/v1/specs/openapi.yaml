@@ -6339,9 +6339,17 @@ components:
           description: The people the campaign is shared with, oldest first.
           items:
             $ref: '#/components/schemas/CampaignShareV1'
+        teamAccess:
+          type: array
+          description: >
+            The people who see the campaign through a team that owns its agency, by name - read-only,
+            they cannot be removed here. Nobody on the share list is repeated; admins are not listed.
+          items:
+            $ref: '#/components/schemas/CampaignShareCandidateV1'
       required:
         - canShare
         - shares
+        - teamAccess
     CampaignShareCreateV1:
       type: object
       description: The person to share the campaign with.
