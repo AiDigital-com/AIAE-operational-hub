@@ -87,6 +87,9 @@ class CampaignShareServiceImplTest {
 	private MpoDepartmentPolicy mpoDepartmentPolicy;
 
 	@Mock
+	private CampaignShareTeamMembers teamMembers;
+
+	@Mock
 	private PacingCampaignAccessClient pacingCampaignAccessClient;
 
 	@Mock
@@ -301,6 +304,53 @@ class CampaignShareServiceImplTest {
 				.isInstanceOf(BusinessException.class)
 				.hasMessageContaining("outside MPO");
 		verify(hubCampaignShareService, never()).save(any());
+	}
+
+	@Test
+	void shouldShareWithSomeoneOutsideMpoWhoHoldsARoleOnATeamWithAgenciesTest() {
+		// Given: a Product person an admin made a manager on an MPO team
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubUser member = user(THEM, "Beatris", "b@x.com");
+		member.setDepartment("Product & Innovation");
+		when(hubUserService.findAllByIds(anyCollection())).thenReturn(List.of(member));
+		when(mpoDepartmentPolicy.isMpo("Product & Innovation")).thenReturn(false);
+		when(teamMembers.userIds()).thenReturn(Set.of(THEM));
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.empty());
+		when(hubCampaignShareService.save(any())).thenAnswer(call -> call.getArgument(0));
+		when(personDescriber.describer(List.of(THEM))).thenReturn(id -> CampaignSharePersonRoleModel.none());
+
+		// When:
+		service.share(me(), CAMPAIGN, THEM);
+
+		// Then:
+		verify(hubCampaignShareService).save(any());
+	}
+
+	@Test
+	void shouldOfferSomeoneOutsideMpoWhoHoldsARoleOnATeamWithAgenciesTest() {
+		// Given: two Product people, only one of them on a team that owns agencies
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of());
+		HubUser member = user(THEM, "Beatris", "b@x.com");
+		member.setDepartment("Product & Innovation");
+		HubUser outsider = user(3L, "Carl", "carl@x.com");
+		outsider.setDepartment("Product & Innovation");
+		when(mpoDepartmentPolicy.isMpo("Product & Innovation")).thenReturn(false);
+		when(teamMembers.userIds()).thenReturn(Set.of(THEM));
+		when(hubUserService.findAll()).thenReturn(List.of(member, outsider));
+		when(personDescriber.describer(any())).thenReturn(id -> CampaignSharePersonRoleModel.none());
+
+		// When:
+		List<CampaignShareCandidateModel> candidates = service.listCandidates(me(), CAMPAIGN, "");
+
+		// Then:
+		assertThat(candidates).extracting(CampaignShareCandidateModel::hubUserId).containsExactly(THEM);
 	}
 
 	@Test
