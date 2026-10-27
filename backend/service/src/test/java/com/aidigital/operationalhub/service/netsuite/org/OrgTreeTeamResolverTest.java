@@ -25,7 +25,8 @@ class OrgTreeTeamResolverTest {
 	private static final String MPO_MEDIA_OPTIMIZATION = "Media & Performance Optimization > Media Optimization";
 
 	private final OrgTreeTeamResolver resolver = new OrgTreeTeamResolver(
-			new TitleClassifier(), new TeamsStringParser(), new NameNormalizer(), new NetSuiteSyncProperties());
+			new TitleClassifier(), new TeamsStringParser(), new NameNormalizer(),
+			new MpoDepartmentPolicy(new NetSuiteSyncProperties()));
 
 	@Test
 	void shouldSplitTwoTeamLeadsWithTheSameFirstNameByManagerNameTest() {
@@ -128,8 +129,9 @@ class OrgTreeTeamResolverTest {
 	}
 
 	@Test
-	void shouldAssignDirectorRoleWithNoTeamTest() {
-		// Given: edge case 5 - a Director, whose email does not resemble their name
+	void shouldAssignDirectorRoleWithADirectTeamOfTheirOwnTest() {
+		// Given: edge case 5 - a Director, whose email does not resemble their name, and whose manager is
+		// not in the roster
 		RipplingEmployee egor = new RipplingEmployee("Egor Nekrasov", MPO_MEDIA_OPTIMIZATION,
 				"george.smith@aidigital.com", "WEST, MPO Directors", "Media Optimization Director",
 				"Anastasia Lagosha");
@@ -137,12 +139,66 @@ class OrgTreeTeamResolverTest {
 		// When:
 		OrgResolution result = resolver.resolve(List.of(egor));
 
-		// Then:
+		// Then: no team of their own as a member, but a direct team keyed by them - the reconciler decides
+		// whether it has anything to hold - seen by no Director above (the chain leaves the roster)
 		ResolvedEmployee resolved = byEmail(result).get("george.smith@aidigital.com");
 		assertThat(resolved.orgRole()).isEqualTo(OrgRole.DIRECTOR);
 		assertThat(resolved.grade()).isEqualTo(Grade.DIRECTOR);
 		assertThat(resolved.teamLeadEmail()).isNull();
-		assertThat(result.teams()).isEmpty();
+		assertThat(resolved.department()).isEqualTo(MPO_MEDIA_OPTIMIZATION);
+		assertThat(result.teams()).singleElement().satisfies(team -> {
+			assertThat(team.teamLeadEmail()).isEqualTo("george.smith@aidigital.com");
+			assertThat(team.teamName()).isEqualTo("Media Optimization: Egor (direct)");
+			assertThat(team.directorTeam()).isTrue();
+			assertThat(team.directorEmails()).isEmpty();
+		});
+	}
+
+	@Test
+	void shouldCollectEveryDirectorAboveATeamLeadAtAnyLevelTest() {
+		// Given: TL → Director → Senior Director → SVP (a plain member by title); the TL's team is seen by
+		// both Directors, the Director's own direct team by the Senior Director only
+		RipplingEmployee svp = new RipplingEmployee("Anna Nizkaya", "Media & Performance Optimization",
+				"anna@aidigital.com", "", "SVP, Media & Performance Optimization", null);
+		RipplingEmployee senior = new RipplingEmployee("Anastasia Lagosha", MPO_MEDIA_OPTIMIZATION,
+				"anastacia@aidigital.com", "MPO Senior Directors", "Senior Director, Media Optimization",
+				"Anna Nizkaya");
+		RipplingEmployee director = new RipplingEmployee("Egor Nekrasov", MPO_MEDIA_OPTIMIZATION,
+				"george.smith@aidigital.com", "WEST, MPO Directors", "Media Optimization Director",
+				"Anastasia Lagosha");
+		RipplingEmployee lead = new RipplingEmployee("Daria Feofanova", MPO_MEDIA_OPTIMIZATION,
+				"dory@aidigital.com", "WEST, MPO Team Leads", "Team Lead, Media Optimization", "Egor Nekrasov");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(svp, senior, director, lead));
+
+		// Then:
+		Map<String, ResolvedTeam> teamsByLead = result.teams().stream()
+				.collect(java.util.stream.Collectors.toMap(ResolvedTeam::teamLeadEmail, team -> team));
+		assertThat(teamsByLead.get("dory@aidigital.com").directorTeam()).isFalse();
+		assertThat(teamsByLead.get("dory@aidigital.com").directorEmails())
+				.containsExactly("george.smith@aidigital.com", "anastacia@aidigital.com");
+		assertThat(teamsByLead.get("george.smith@aidigital.com").directorEmails())
+				.containsExactly("anastacia@aidigital.com");
+		assertThat(teamsByLead.get("anastacia@aidigital.com").directorEmails()).isEmpty();
+		assertThat(byEmail(result).get("anna@aidigital.com").orgRole()).isEqualTo(OrgRole.MEMBER);
+	}
+
+	@Test
+	void shouldNotCountADirectorOutsideMpoAboveATeamLeadTest() {
+		// Given: the TL reports to a Growth Director, who is a member for the sync's purposes
+		RipplingEmployee growth = new RipplingEmployee("Grace Growth", "Growth",
+				"grace@aidigital.com", "", "Growth Director", null);
+		RipplingEmployee lead = new RipplingEmployee("Daria Feofanova", MPO_MEDIA_OPTIMIZATION,
+				"dory@aidigital.com", "WEST, MPO Team Leads", "Team Lead, Media Optimization", "Grace Growth");
+
+		// When:
+		OrgResolution result = resolver.resolve(List.of(growth, lead));
+
+		// Then:
+		assertThat(result.teams()).singleElement()
+				.extracting(ResolvedTeam::directorEmails)
+				.isEqualTo(List.of());
 	}
 
 	@Test
@@ -429,57 +485,26 @@ class OrgTreeTeamResolverTest {
 	}
 
 	@Test
-	void shouldPutMemberWithNoTeamLeadIntoTheDirectorsTeamTest() {
-		// Given: R7 - the manager chain reaches a Director with no Team Lead in between and no team token
-		// to fall back on (a pod between Team Leads, like Stacy Rivera's in October 2026)
+	void shouldPlaceAManagerReportingStraightToADirectorInTheDirectorsDirectTeamTest() {
+		// Given: the manager chain reaches a Director with no Team Lead in between and no team token to
+		// fall back on - until 2026-10-23 this left the member with no team
 		RipplingEmployee director = new RipplingEmployee("Some Director", MPO_MEDIA_OPTIMIZATION,
 				"some.director@aidigital.com", "MPO Directors", "Media Optimization Director", null);
 		RipplingEmployee member = new RipplingEmployee("Reports To Director", "Media Optimization",
-				"reports.to.director@aidigital.com", "EAST", "Media Optimization Manager", "Some Director");
+				"reports.to.director@aidigital.com", "", "Media Optimization Manager", "Some Director");
 
 		// When:
 		OrgResolution result = resolver.resolve(List.of(director, member));
 
-		// Then: the member joins the Director's team; the Director keeps their own role and no team of
-		// their own on the employee row
+		// Then: the member joins the Director's direct team, flagged for information, not as unresolved
 		ResolvedEmployee resolved = byEmail(result).get("reports.to.director@aidigital.com");
 		assertThat(resolved.teamLeadEmail()).isEqualTo("some.director@aidigital.com");
-		assertThat(resolved.podKey()).isEqualTo("EAST");
-		assertThat(resolved.flags()).contains(
-				DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR, DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
+		assertThat(resolved.flags()).contains(DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR);
 		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.UNRESOLVED_TEAM);
-		ResolvedEmployee directorRow = byEmail(result).get("some.director@aidigital.com");
-		assertThat(directorRow.orgRole()).isEqualTo(OrgRole.DIRECTOR);
-		assertThat(directorRow.teamLeadEmail()).isNull();
 		assertThat(result.teams()).singleElement().satisfies(team -> {
-			assertThat(team.teamLeadEmail()).isEqualTo("some.director@aidigital.com");
-			assertThat(team.teamName()).isEqualTo("Media Optimization: Some");
-			assertThat(team.podKey()).isEqualTo("EAST");
+			assertThat(team.directorTeam()).isTrue();
+			assertThat(team.teamName()).isEqualTo("Media Optimization: Some (direct)");
 		});
-	}
-
-	@Test
-	void shouldPreferTeamLeadNamedInTeamsStringOverTheDirectorTest() {
-		// Given: the chain stops at a Director, but the teams string names a real Team Lead
-		RipplingEmployee director = new RipplingEmployee("Some Director", MPO_MEDIA_OPTIMIZATION,
-				"some.director@aidigital.com", "MPO Directors", "Media Optimization Director", null);
-		RipplingEmployee lead = new RipplingEmployee("Daria Pronina", "Media Optimization",
-				"daria.pronina@aidigital.com", "EAST, MPO Team Leads", "Team Lead, Media Optimization",
-				"Some Director");
-		RipplingEmployee member = new RipplingEmployee("Reports To Director", "Media Optimization",
-				"reports.to.director@aidigital.com", "Media Optimization: Daria", "Media Optimization Manager",
-				"Some Director");
-
-		// When:
-		OrgResolution result = resolver.resolve(List.of(director, lead, member));
-
-		// Then: the Team Lead wins and the Director heads no team
-		ResolvedEmployee resolved = byEmail(result).get("reports.to.director@aidigital.com");
-		assertThat(resolved.teamLeadEmail()).isEqualTo("daria.pronina@aidigital.com");
-		assertThat(resolved.flags()).contains(DataQualityFlag.TEAM_RESOLVED_VIA_STRING_FALLBACK);
-		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.DIRECTOR_ACTING_TEAM_LEAD);
-		assertThat(result.teams()).extracting(ResolvedTeam::teamLeadEmail)
-				.containsExactly("daria.pronina@aidigital.com");
 	}
 
 	@Test
@@ -606,23 +631,6 @@ class OrgTreeTeamResolverTest {
 		assertThat(resolved.teamLeadEmail()).isNull();
 		assertThat(resolved.flags()).contains(DataQualityFlag.NO_TEAM_SIGNAL);
 		assertThat(resolved.flags()).doesNotContain(DataQualityFlag.MANAGER_CHAIN_HIT_DIRECTOR);
-	}
-
-	@Test
-	void shouldFailClosedWhenRootDepartmentIsBlankOrMissingTest() {
-		// Given: a resolver configured with a blank root, and an MPO Director with no department at all
-		NetSuiteSyncProperties blankRoot = new NetSuiteSyncProperties();
-		blankRoot.setDirectorRootDepartment("  ");
-		OrgTreeTeamResolver blankRootResolver = new OrgTreeTeamResolver(
-				new TitleClassifier(), new TeamsStringParser(), new NameNormalizer(), blankRoot);
-
-		// When:
-		boolean blankConfiguration = blankRootResolver.isInDirectorRootDepartment(MPO_MEDIA_OPTIMIZATION);
-		boolean blankDepartment = resolver.isInDirectorRootDepartment(null);
-
-		// Then: neither side of the comparison being blank ever grants the role
-		assertThat(blankConfiguration).isFalse();
-		assertThat(blankDepartment).isFalse();
 	}
 
 	private Map<String, ResolvedEmployee> byEmail(OrgResolution resolution) {

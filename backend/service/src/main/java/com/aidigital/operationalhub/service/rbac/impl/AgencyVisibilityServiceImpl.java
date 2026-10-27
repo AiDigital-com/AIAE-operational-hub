@@ -18,9 +18,11 @@ import java.util.Objects;
 
 /**
  * Default {@link AgencyVisibilityService}. Reads the user's effective access and translates their
- * TEAM-scoped roles into visible agency ids via {@link HubTeamAgencyService}, then adds the campaigns
- * shared with them ({@link HubCampaignShareService}) - which reach a restricted user regardless of
- * team, and are moot for an unrestricted one.
+ * TEAM-scoped roles - all of them: a Director holds one per team of their stream (2026-10-23) - into
+ * visible agency ids via {@link HubTeamAgencyService}, then adds the campaigns shared with them
+ * ({@link HubCampaignShareService}) - which reach a restricted user regardless of team, and are moot
+ * for an unrestricted one. Only the user's OWN shares: a Director does not see what was shared with
+ * their subordinates.
  */
 @Service
 @RequiredArgsConstructor
@@ -58,6 +60,7 @@ public class AgencyVisibilityServiceImpl implements AgencyVisibilityService {
 
 	/**
 	 * Tells whether the user holds any ALL-scoped (global) role, which sees every agency like an admin.
+	 * A manual grant only: the sync stopped handing Directors ALL on 2026-10-23.
 	 *
 	 * @param access the user's effective access
 	 * @return {@code true} when an ALL-scoped assignment is present

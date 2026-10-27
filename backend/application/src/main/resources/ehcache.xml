@@ -84,6 +84,16 @@
 	<eh:cache alias="agencyVisibilityByUserId" uses-template="extendedEntityTemplate">
 		<eh:heap>10000</eh:heap>
 	</eh:cache>
+	<!-- The one fleet-wide set of campaign ids that carry a pacing (see PacingCampaignIndexServiceImpl),
+	     read from Pacing's system API and intersected with a team's campaigns on every scope resolution.
+	     Short TTL: the Hub evicts it after its own creates and plan saves, and a pacing created any other
+	     way reaches a team's scope within this time. -->
+	<eh:cache alias="pacingCampaignIdsWithPacings">
+		<eh:expiry>
+			<eh:ttl unit="minutes">5</eh:ttl>
+		</eh:expiry>
+		<eh:heap>1</eh:heap>
+	</eh:cache>
 	<!-- Agency/client/campaign BigQuery search results, keyed by rendered SQL (see
 	     CachedBigQuerySearchExecutor). Short TTL because the source is a nightly BigQuery snapshot, so
 	     some staleness is acceptable in exchange for skipping a repeated BigQuery job. -->

@@ -2,6 +2,15 @@ package com.aidigital.operationalhub.service.campaignshare.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubCampaignShare;
 import com.aidigital.operationalhub.domain.entity.HubUser;
+import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
+import com.aidigital.operationalhub.domain.enums.HubStatus;
+import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccessClient;
+import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
+import com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignPacing;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignRef;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
+import com.aidigital.operationalhub.service.netsuite.org.MpoDepartmentPolicy;
 import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
@@ -26,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -33,8 +43,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -49,6 +61,9 @@ class CampaignShareServiceImplTest {
 	private static final long THEM = 2L;
 	private static final long CAMPAIGN = 19813L;
 	private static final long AGENCY = 500L;
+	private static final String DEPARTMENT = "Media & Performance Optimization > Media Optimization";
+	private static final String MY_PACING_USER_ID = "11111111-1111-1111-1111-111111111111";
+	private static final String THEIR_PACING_USER_ID = "22222222-2222-2222-2222-222222222222";
 
 	@Mock
 	private CampaignService campaignService;
@@ -68,6 +83,15 @@ class CampaignShareServiceImplTest {
 	@Mock
 	private CampaignSharePersonDescriber personDescriber;
 
+	@Mock
+	private MpoDepartmentPolicy mpoDepartmentPolicy;
+
+	@Mock
+	private PacingCampaignAccessClient pacingCampaignAccessClient;
+
+	@Mock
+	private CampaignShareGrantWriter grantWriter;
+
 	@InjectMocks
 	private CampaignShareServiceImpl service;
 
@@ -76,6 +100,7 @@ class CampaignShareServiceImplTest {
 		// Given: an MPO manager whose team owns the campaign's agency
 		givenVisibleCampaign();
 		givenRoles("MPO_MANAGER");
+		givenMpo();
 		when(agencyVisibilityService.resolveForCurrentUser(me()))
 				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
 		when(hubUserService.findAllByIds(anyCollection()))
@@ -121,7 +146,7 @@ class CampaignShareServiceImplTest {
 		givenRoles("CLIENT_SERVICES");
 
 		// When / Then: refused by role before visibility is even asked
-		assertThatThrownBy(() -> service.unshare(me(), CAMPAIGN, THEM)).isInstanceOf(AccessDeniedException.class);
+		assertThatThrownBy(() -> service.unshare(me(), CAMPAIGN, THEM, false)).isInstanceOf(AccessDeniedException.class);
 		verify(agencyVisibilityService, never()).resolveForCurrentUser(any());
 	}
 
@@ -135,7 +160,7 @@ class CampaignShareServiceImplTest {
 		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(existing));
 
 		// When:
-		service.unshare(me(), CAMPAIGN, THEM);
+		service.unshare(me(), CAMPAIGN, THEM, false);
 
 		// Then:
 		verify(hubCampaignShareService).delete(existing);
@@ -146,6 +171,7 @@ class CampaignShareServiceImplTest {
 		// Given: already shared with them
 		givenVisibleCampaign();
 		givenRoles("TL");
+		givenMpo();
 		when(agencyVisibilityService.resolveForCurrentUser(me()))
 				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
 		when(hubUserService.findAllByIds(anyCollection()))
@@ -219,6 +245,7 @@ class CampaignShareServiceImplTest {
 		// Given:
 		givenVisibleCampaign();
 		givenRoles("TL");
+		givenMpo();
 		when(agencyVisibilityService.resolveForCurrentUser(me()))
 				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
 		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of(share(THEM)));
@@ -240,6 +267,226 @@ class CampaignShareServiceImplTest {
 	}
 
 	@Test
+	void shouldRefuseSharingWithSomeoneNoLongerInRipplingTest() {
+		// Given: a leaver - the sync cleared their department when they dropped out of Rippling
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubUser leaver = user(THEM, "Beatris", "b@x.com");
+		leaver.setDepartment(null);
+		when(hubUserService.findAllByIds(anyCollection())).thenReturn(List.of(leaver));
+
+		// When-Then:
+		assertThatThrownBy(() -> service.share(me(), CAMPAIGN, THEM))
+				.isInstanceOf(BusinessException.class)
+				.hasMessageContaining("not a current employee");
+		verify(hubCampaignShareService, never()).save(any());
+	}
+
+	@Test
+	void shouldRefuseSharingWithSomeoneOutsideMpoTest() {
+		// Given: an active Client Services person - visible in the Hub, but not MPO
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubUser outsider = user(THEM, "Beatris", "b@x.com");
+		outsider.setDepartment("Client Services");
+		when(hubUserService.findAllByIds(anyCollection())).thenReturn(List.of(outsider));
+		when(mpoDepartmentPolicy.isMpo("Client Services")).thenReturn(false);
+
+		// When-Then:
+		assertThatThrownBy(() -> service.share(me(), CAMPAIGN, THEM))
+				.isInstanceOf(BusinessException.class)
+				.hasMessageContaining("outside MPO");
+		verify(hubCampaignShareService, never()).save(any());
+	}
+
+	@Test
+	void shouldHideLeaversAndNonMpoPeopleButNotThoseWhoNeverLoggedInFromTheCandidatesTest() {
+		// Given: a leaver, an outsider, and an MPO colleague who has never logged in to the Hub
+		givenVisibleCampaign();
+		givenRoles("TL");
+		givenMpo();
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of());
+		HubUser leaver = user(3L, "Zlatan", "zlatan@x.com");
+		leaver.setDepartment(null);
+		HubUser outsider = user(4L, "Anna", "anna@x.com");
+		outsider.setDepartment("Growth");
+		when(mpoDepartmentPolicy.isMpo("Growth")).thenReturn(false);
+		HubUser neverLoggedIn = user(5L, "Carl", "carl@x.com");
+		neverLoggedIn.setStatus(HubStatus.INACTIVE.getCode());
+		when(hubUserService.findAll())
+				.thenReturn(List.of(user(THEM, "Beatris", "b@x.com"), leaver, outsider, neverLoggedIn));
+		when(personDescriber.describer(any())).thenReturn(id -> CampaignSharePersonRoleModel.none());
+
+		// When:
+		List<CampaignShareCandidateModel> candidates = service.listCandidates(me(), CAMPAIGN, "");
+
+		// Then:
+		assertThat(candidates).extracting(CampaignShareCandidateModel::hubUserId).containsExactly(THEM, 5L);
+	}
+
+	@Test
+	void shouldRefuseRemovingSomeoneWhoOwnsPacingsUntilTheTransferIsConfirmedTest() {
+		// Given: the person owns one pacing on the campaign and the remover has not confirmed
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(share(THEM)));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(pacingUser(THEM, "Beatris", THEIR_PACING_USER_ID)));
+		when(pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(CAMPAIGN), THEIR_PACING_USER_ID))
+				.thenReturn(List.of(pacing("p1", "Fox 2026", String.valueOf(CAMPAIGN), "777")));
+
+		// When-Then: a 409-mapped refusal naming the person and the count, and nothing deleted or moved
+		assertThatThrownBy(() -> service.unshare(me(), CAMPAIGN, THEM, false))
+				.isInstanceOf(BusinessException.class)
+				.hasMessageContaining("Beatris owns 1 pacing(s)");
+		verify(hubCampaignShareService, never()).delete(any());
+		verify(pacingCampaignAccessClient, never()).transferOwnerAsSystem(any(), any(), any());
+	}
+
+	@Test
+	void shouldTransferThePacingsToTheRemoverThenDeleteTheShareTest() {
+		// Given: confirmed; the person owns two pacings on the campaign, one spanning another campaign
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubCampaignShare theirShare = share(THEM);
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(theirShare));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(pacingUser(THEM, "Beatris", THEIR_PACING_USER_ID)));
+		when(hubUserService.findAllByIds(List.of(ME))).thenReturn(List.of(pacingUser(ME, "Me", MY_PACING_USER_ID)));
+		when(pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(CAMPAIGN), THEIR_PACING_USER_ID))
+				.thenReturn(List.of(
+						pacing("p1", "Fox 2026", String.valueOf(CAMPAIGN), "777"),
+						pacing("p2", "Fox Q4", String.valueOf(CAMPAIGN))));
+
+		// When:
+		service.unshare(me(), CAMPAIGN, THEM, true);
+
+		// Then: both pacings move to me, under my email for the journal, before the share goes; and I am
+		// put on every campaign they span as a pacing-created share
+		org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(pacingCampaignAccessClient, hubCampaignShareService);
+		inOrder.verify(pacingCampaignAccessClient).transferOwnerAsSystem("p1", MY_PACING_USER_ID, "me@x.com");
+		inOrder.verify(pacingCampaignAccessClient).transferOwnerAsSystem("p2", MY_PACING_USER_ID, "me@x.com");
+		inOrder.verify(hubCampaignShareService).delete(theirShare);
+		ArgumentCaptor<java.util.Collection<Long>> campaigns = ArgumentCaptor.forClass(java.util.Collection.class);
+		verify(grantWriter).grant(eq(ME), eq(ME), campaigns.capture(), eq(CampaignShareSource.PACING_CREATED));
+		assertThat(campaigns.getValue()).containsExactly(777L, CAMPAIGN);
+	}
+
+	@Test
+	void shouldRefuseTheTransferWhenTheRemoverHasNoPacingAccountTest() {
+		// Given: confirmed, but Pacing does not know me yet (no pacing_user_id)
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(share(THEM)));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(pacingUser(THEM, "Beatris", THEIR_PACING_USER_ID)));
+		when(hubUserService.findAllByIds(List.of(ME))).thenReturn(List.of(user(ME, "Me", "me@x.com")));
+		when(pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(CAMPAIGN), THEIR_PACING_USER_ID))
+				.thenReturn(List.of(pacing("p1", "Fox 2026", String.valueOf(CAMPAIGN))));
+
+		// When-Then:
+		assertThatThrownBy(() -> service.unshare(me(), CAMPAIGN, THEM, true))
+				.isInstanceOf(BusinessException.class)
+				.hasMessageContaining("Pacing does not know your account");
+		verify(hubCampaignShareService, never()).delete(any());
+		verify(pacingCampaignAccessClient, never()).transferOwnerAsSystem(any(), any(), any());
+	}
+
+	@Test
+	void shouldKeepTheShareWhenPacingRefusesATransferTest() {
+		// Given: Pacing answers 404 for the pacing - the share must survive
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(share(THEM)));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(pacingUser(THEM, "Beatris", THEIR_PACING_USER_ID)));
+		when(hubUserService.findAllByIds(List.of(ME))).thenReturn(List.of(pacingUser(ME, "Me", MY_PACING_USER_ID)));
+		when(pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(CAMPAIGN), THEIR_PACING_USER_ID))
+				.thenReturn(List.of(pacing("p1", "Fox 2026", String.valueOf(CAMPAIGN))));
+		org.mockito.Mockito.doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_NOT_FOUND, "gone"))
+				.when(pacingCampaignAccessClient).transferOwnerAsSystem("p1", MY_PACING_USER_ID, "me@x.com");
+
+		// When-Then:
+		assertThatThrownBy(() -> service.unshare(me(), CAMPAIGN, THEM, true))
+				.isInstanceOf(PacingExternalException.class);
+		verify(hubCampaignShareService, never()).delete(any());
+		verify(grantWriter, never()).grant(any(), any(), any(), any());
+	}
+
+	@Test
+	void shouldRemoveSomeoneWithNoPacingsWithoutAskingPacingTest() {
+		// Given: the person has no Pacing account at all, so nothing can be theirs there
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubCampaignShare theirShare = share(THEM);
+		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.of(theirShare));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(user(THEM, "Beatris", "b@x.com")));
+
+		// When:
+		service.unshare(me(), CAMPAIGN, THEM, false);
+
+		// Then:
+		verify(hubCampaignShareService).delete(theirShare);
+		verifyNoInteractions(pacingCampaignAccessClient);
+	}
+
+	@Test
+	void shouldListThePacingsAPersonOwnsOnTheCampaignTest() {
+		// Given:
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubUserService.findAllByIds(List.of(THEM))).thenReturn(List.of(pacingUser(THEM, "Beatris", THEIR_PACING_USER_ID)));
+		when(pacingCampaignAccessClient.listPacingsOnCampaign(String.valueOf(CAMPAIGN), THEIR_PACING_USER_ID))
+				.thenReturn(List.of(pacing("p1", "Fox 2026", String.valueOf(CAMPAIGN), "777")));
+
+		// When:
+		List<CampaignSharePacingModel> pacings = service.listOwnedPacings(me(), CAMPAIGN, THEM);
+
+		// Then:
+		assertThat(pacings).hasSize(1);
+		assertThat(pacings.getFirst().pacingName()).isEqualTo("Fox 2026");
+		assertThat(pacings.getFirst().campaigns()).extracting(c -> c.id()).containsExactly(String.valueOf(CAMPAIGN), "777");
+	}
+
+	@Test
+	void shouldReadAShareSourceBackAndDefaultOldRowsToManualTest() {
+		// Given: one automatic row and one row from before the column existed
+		givenVisibleCampaign();
+		givenRoles("MPO_MANAGER");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		HubCampaignShare automatic = share(THEM);
+		automatic.setSource(CampaignShareSource.PACING_CREATED.getCode());
+		HubCampaignShare legacy = share(3L);
+		legacy.setSource(null);
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of(automatic, legacy));
+		when(hubUserService.findAllByIds(anyCollection())).thenReturn(List.of(
+				user(ME, "Me", "me@x.com"), user(THEM, "Beatris", "b@x.com"), user(3L, "Zlatan", "z@x.com")));
+		when(personDescriber.describer(any())).thenReturn(id -> CampaignSharePersonRoleModel.none());
+
+		// When:
+		CampaignSharesModel shares = service.listShares(me(), CAMPAIGN);
+
+		// Then:
+		assertThat(shares.shares()).extracting(CampaignShareModel::source)
+				.containsExactly(CampaignShareSource.PACING_CREATED, CampaignShareSource.MANUAL);
+	}
+
+	@Test
 	void shouldIgnoreRemovingAShareThatDoesNotExistTest() {
 		// Given:
 		givenVisibleCampaign();
@@ -249,10 +496,14 @@ class CampaignShareServiceImplTest {
 		when(hubCampaignShareService.findByCampaignIdAndUserId(CAMPAIGN, THEM)).thenReturn(Optional.empty());
 
 		// When:
-		service.unshare(me(), CAMPAIGN, THEM);
+		service.unshare(me(), CAMPAIGN, THEM, false);
 
 		// Then:
 		verify(hubCampaignShareService, never()).delete(any());
+	}
+
+	private void givenMpo() {
+		when(mpoDepartmentPolicy.isMpo(DEPARTMENT)).thenReturn(true);
 	}
 
 	private void givenVisibleCampaign() {
@@ -275,7 +526,20 @@ class CampaignShareServiceImplTest {
 		user.setId(id);
 		user.setDisplayName(name);
 		user.setEmail(email);
+		user.setStatus(HubStatus.ACTIVE.getCode());
+		user.setDepartment(DEPARTMENT);
 		return user;
+	}
+
+	private static HubUser pacingUser(long id, String name, String pacingUserId) {
+		HubUser user = user(id, name, name.toLowerCase(Locale.ROOT) + "@x.com");
+		user.setPacingUserId(pacingUserId);
+		return user;
+	}
+
+	private static PacingCampaignPacing pacing(String id, String name, String... campaignIds) {
+		return new PacingCampaignPacing(id, "slug-" + id, name, "Live", THEIR_PACING_USER_ID,
+				java.util.Arrays.stream(campaignIds).map(c -> new PacingCampaignRef(c, "Campaign " + c, null)).toList());
 	}
 
 	private static HubCampaignShare share(long userId) {

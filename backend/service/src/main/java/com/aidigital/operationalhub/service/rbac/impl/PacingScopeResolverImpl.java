@@ -22,6 +22,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Default {@link PacingScopeResolver}. Reads the user's effective access (the same source
@@ -49,17 +50,36 @@ import java.util.Set;
  *
  * <p><b>Campaign sharing (2026-10-20).</b> Every restricted scope also carries the NetSuite campaigns
  * shared with the person ({@link HubCampaignShareService}) as {@code campaignIds}; Pacing admits a
- * pacing under any of them like a team-mate's. An unrestricted scope needs none.
+ * pacing under any of them like a team-mate's. An unrestricted scope needs none. Only the person's OWN
+ * shares: a Director does not inherit what was shared with their subordinates.
+ *
+ * <p><b>A team sees every pacing on its agencies' campaigns (2026-10-23).</b> A TEAM scope's
+ * {@code campaignIds} also carry the campaigns of the user's teams' agencies that have at least one
+ * pacing ({@link TeamCampaignScopeResolver}), so a pacing another team's manager created on this team's
+ * client is visible here too. Directors get the same through their TEAM assignments, one per team of
+ * their stream - there is no ALL-scoped DIRECTOR any more. The id list is capped
+ * ({@link #MAX_CAMPAIGN_IDS_IN_SCOPE}): the signed header has ~16KB and about a thousand ids fit. Over
+ * the cap, the team-campaign ids are left out entirely and a warning names the user and the counts -
+ * the person's own shares always stay, and a partial, arbitrary subset of the team's campaigns would be
+ * harder to explain than the previous behaviour returning for that one person.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PacingScopeResolverImpl implements PacingScopeResolver {
 
+	/**
+	 * How many campaign ids a restricted scope may carry before the team-campaign ids are dropped: the
+	 * {@code X-Hub-Assertion} header is ~16KB and roughly a thousand NetSuite ids fit beside the owner
+	 * UUIDs; this leaves room for a large team's owner list.
+	 */
+	static final int MAX_CAMPAIGN_IDS_IN_SCOPE = 900;
+
 	private final RbacQueryService rbacQueryService;
 	private final HubRoleAssignmentService hubRoleAssignmentService;
 	private final HubUserService hubUserService;
 	private final HubCampaignShareService hubCampaignShareService;
+	private final TeamCampaignScopeResolver teamCampaignScopeResolver;
 
 	@Override
 	public PacingEntitlement resolveForCurrentUser(CurrentUserModel user) {
@@ -136,7 +156,34 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 		}
 
 		return new PacingEntitlement(
-				PacingScope.owners(List.copyOf(pacingUserIds), sharedCampaignIds), canCreate);
+				PacingScope.owners(List.copyOf(pacingUserIds), campaignIdsForTeams(user, teamIds, sharedCampaignIds)),
+				canCreate);
+	}
+
+	/**
+	 * The campaign ids a TEAM scope carries: the person's own shares, plus the campaigns of their teams'
+	 * agencies that have a pacing - unless the total would not fit the header, in which case only the
+	 * shares go and a warning says so (see the class comment for why nothing partial is sent).
+	 *
+	 * @param user              the current user, for the warning
+	 * @param teamIds           the user's TEAM-scoped team ids
+	 * @param sharedCampaignIds the campaigns shared with the user, as text
+	 * @return the campaign ids to sign, de-duplicated
+	 */
+	List<String> campaignIdsForTeams(CurrentUserModel user, List<Long> teamIds, List<String> sharedCampaignIds) {
+		List<String> teamCampaignIds = teamCampaignScopeResolver.resolve(teamIds);
+		Set<String> merged = new TreeSet<>(sharedCampaignIds);
+		merged.addAll(teamCampaignIds);
+		if (merged.size() > MAX_CAMPAIGN_IDS_IN_SCOPE) {
+			log.warn(
+					"Pacing scope for {} would carry {} campaign ids ({} shared + {} from the team's agencies "
+							+ "with pacings), over the {} the header holds; sending only the shared ones - this "
+							+ "person sees their team-mates' pacings but not other teams' pacings on their agencies",
+					user.email(), merged.size(), sharedCampaignIds.size(), teamCampaignIds.size(),
+					MAX_CAMPAIGN_IDS_IN_SCOPE);
+			return List.copyOf(new TreeSet<>(sharedCampaignIds));
+		}
+		return List.copyOf(merged);
 	}
 
 	/**
@@ -153,6 +200,7 @@ public class PacingScopeResolverImpl implements PacingScopeResolver {
 
 	/**
 	 * Tells whether the user holds any ALL-scoped (global) role, which sees every pacing like an admin.
+	 * The sync no longer grants one (2026-10-23); an ALL-scoped row is a manual grant.
 	 *
 	 * @param access the user's effective access
 	 * @return {@code true} when an ALL-scoped assignment is present

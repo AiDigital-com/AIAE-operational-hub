@@ -50,6 +50,13 @@ public class HubCampaignShare extends AuditAwareEntity {
 	@Column(name = "granted_by_user_id", nullable = false)
 	private Long grantedByUserId;
 
+	/**
+	 * Where the share came from (see {@code com.aidigital.operationalhub.domain.enums.CampaignShareSource}):
+	 * "Add people" on the campaign, or the automatic grant that follows owning a pacing on it.
+	 */
+	@Column(name = "source", nullable = false)
+	private String source;
+
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) {
@@ -73,6 +80,7 @@ public class HubCampaignShare extends AuditAwareEntity {
 				", campaignId=" + campaignId +
 				", userId=" + userId +
 				", grantedByUserId=" + grantedByUserId +
+				", source=" + source +
 				"}";
 	}
 }

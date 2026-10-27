@@ -41,6 +41,7 @@ import com.aidigital.operationalhub.application.mapper.PacingNsDiffContractMappe
 import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
@@ -61,6 +62,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPar
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.service.entity.HubUserService;
+import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrantService;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
@@ -99,6 +101,7 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final PacingNsDiffContractMapper nsDiffMapper;
 	private final HubUserService hubUserService;
 	private final CampaignLinksValidator campaignLinksValidator;
+	private final CampaignShareAutoGrantService campaignShareAutoGrantService;
 
 	@Override
 	public ResponseEntity<PacingDashboardV1> getPacingDashboard(String slug) {
@@ -298,9 +301,13 @@ public class PacingDashboardController implements PacingDashboardApi {
 
 	@Override
 	public ResponseEntity<PacingPlanUpdateResultV1> updatePacingPlan(String slug, PacingPlanUpdateV1 body) {
-		HubAssertion assertion = signCurrentUser();
-		pacingClient.savePlan(
-				assertion, slug, planMapper.toPlanUpdateLineItems(body), planMapper.toPlanRateUpdate(body));
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		HubAssertion assertion = assertionMapper.toAssertion(user, pacingScopeResolver.resolveForCurrentUser(user));
+		List<PacingLineItemPlanUpdate> lineItems = planMapper.toPlanUpdateLineItems(body);
+		pacingClient.savePlan(assertion, slug, lineItems, planMapper.toPlanRateUpdate(body));
+		// Whoever planned line items onto a campaign now owns work on it: onto its people list they go
+		// (a follow-up that never fails the save).
+		campaignShareAutoGrantService.grantAfterPlanSave(user, lineItems);
 		return ResponseEntity.ok(new PacingPlanUpdateResultV1().saved(true));
 	}
 

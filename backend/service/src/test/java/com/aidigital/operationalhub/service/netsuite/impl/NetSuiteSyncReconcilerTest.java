@@ -47,8 +47,8 @@ import static org.mockito.Mockito.when;
 /**
  * Pure Mockito unit tests for {@link NetSuiteSyncReconciler}. Covers the DB-write side extracted from
  * {@link NetSuiteSyncServiceImpl} by {@code team-by-team-lead-REMEDIATION.md} R2: team upsert/deactivation,
- * grade, role/scope assignment (including the R1 director-ALL-scope and R5 unresolved-member-revoke
- * behavior), agency mapping, and the bulk-preload read pattern — users,
+ * grade, role/scope assignment (including the director-per-stream-team scoping of 2026-10-23 and the R5
+ * unresolved-member-revoke behavior), agency mapping, and the bulk-preload read pattern — users,
  * assignments (any status), and teams are each loaded once via
  * {@code findAllByEmailIgnoreCaseIn}/{@code findAllByUserIds}/{@code listAllOrderedByName} rather than
  * queried per employee. {@link NameNormalizer} is used as a real instance (like
@@ -75,6 +75,16 @@ class NetSuiteSyncReconcilerTest {
 	private static final String OWNER_EMAIL = "asya@example.com";
 	private static final String OWNER_NAME = "Asya Tikhomolova";
 	private static final String MEMBER_NAME = "John Member";
+	private static final String DEPARTMENT = "Media & Performance Optimization > Media Optimization";
+	private static final Long OTHER_TEAM_ID = 11L;
+	private static final Long DIRECT_TEAM_ID = 12L;
+	private static final String OTHER_TEAM_NAME = "Media Optimization: Kate";
+	private static final String DIRECT_TEAM_NAME = "Media Optimization: Stacy (direct)";
+	private static final String DIRECTOR_EMAIL = "stacy@example.com";
+	private static final String DIRECTOR_NAME = "Stacy Rivera";
+	private static final Long DIRECTOR_USER_ID = 300L;
+	private static final String OTHER_LEAD_EMAIL = "kate@example.com";
+	private static final Long OTHER_LEAD_USER_ID = 400L;
 
 	@Mock
 	private HubTeamService teamService;
@@ -153,6 +163,38 @@ class NetSuiteSyncReconcilerTest {
 	}
 
 	@Test
+	void shouldClearTheDepartmentOfAUserNoLongerInRipplingTest() {
+		// Given: one person still in the roster, one who has left, one who never had a department
+		HubUser current = user(USER_ID, EMAIL);
+		current.setDepartment("Media & Performance Optimization");
+		HubUser leaver = user(USER_ID + 1, "gone@aidigital.com");
+		leaver.setDepartment("Media & Performance Optimization");
+		HubUser noDepartment = user(USER_ID + 2, "never@aidigital.com");
+		noDepartment.setDepartment(null);
+		when(userService.findAll()).thenReturn(List.of(current, leaver, noDepartment));
+
+		// When:
+		reconciler().clearDepartmentOfLeavers(List.of(current));
+
+		// Then: only the leaver loses it
+		ArgumentCaptor<HubUser> saved = ArgumentCaptor.forClass(HubUser.class);
+		verify(userService).save(saved.capture());
+		assertThat(saved.getValue().getId()).isEqualTo(USER_ID + 1);
+		assertThat(saved.getValue().getDepartment()).isNull();
+		assertThat(current.getDepartment()).isEqualTo("Media & Performance Optimization");
+	}
+
+	@Test
+	void shouldClearNoDepartmentWhenTheRosterCameBackEmptyTest() {
+		// When: a failed Rippling read, not the whole company leaving
+		reconciler().clearDepartmentOfLeavers(List.of());
+
+		// Then:
+		verify(userService, never()).findAll();
+		verify(userService, never()).save(any());
+	}
+
+	@Test
 	void shouldAssignMemberRoleToAResolvedTeamTest() {
 		// Given: the team already exists (returned by the bulk team preload)
 		stubDictionaries();
@@ -177,76 +219,301 @@ class NetSuiteSyncReconcilerTest {
 	}
 
 	@Test
-	void shouldAssignDirectorRoleWithAllScopeAndNullScopeIdTest() {
-		// Given: R1 - directors see ALL data (product decision), so DIRECTOR is granted with ALL scope and
-		// a null scope_id (mirroring every other unscoped assignment, e.g. ADMIN/ALL) - not TEAM/OWN
+	void shouldAssignDirectorOneTeamScopedAssignmentPerTeamOfTheirStreamTest() {
+		// Given: a Director above two Team Leads; every team's lead chain reaches her, nobody reports to
+		// her directly and no agency names her - so no direct team of her own
 		stubDictionaries();
-		OrgResolution resolution = new OrgResolution(List.of(resolvedDirector(EMAIL, LEAD_NAME)), List.of());
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME),
+						resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE"),
+						resolvedTeamLead(OTHER_LEAD_EMAIL, "Kate Lead", "HOUSE")),
+				List.of(resolvedTeamUnder(EMAIL, LEAD_NAME, TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedTeamUnder(OTHER_LEAD_EMAIL, "Kate Lead", OTHER_TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
 		when(teamService.listAllOrderedByName()).thenReturn(List.of());
+		when(teamService.create(any())).thenAnswer(invocation -> withId(invocation.getArgument(0)));
 		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of());
-		when(userService.save(any())).thenReturn(user(USER_ID));
+		when(userService.save(any())).thenAnswer(invocation -> withUserId(invocation.getArgument(0)));
 		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
 
 		// When:
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
-		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
-		verify(teamService, never()).create(any());
-		verify(teamService, never()).saveFromNetSuite(any());
-
+		// Then: two TL teams, no direct team; the Director holds DIRECTOR/TEAM on both, nothing ALL-scoped
+		assertThat(summary.assignmentsUpdated()).isEqualTo(3);
+		ArgumentCaptor<HubTeam> teamCaptor = ArgumentCaptor.forClass(HubTeam.class);
+		verify(teamService, times(2)).create(teamCaptor.capture());
+		assertThat(teamCaptor.getAllValues()).extracting(HubTeam::getTeamName)
+				.containsExactlyInAnyOrder(TEAM_NAME, OTHER_TEAM_NAME);
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
-		verify(assignmentService).save(assignmentCaptor.capture());
-		HubRoleAssignment created = assignmentCaptor.getValue();
-		assertThat(created.getRole().getId()).isEqualTo(DIRECTOR_ROLE_ID);
-		assertThat(created.getScopeType().getId()).isEqualTo(ALL_SCOPE_ID);
-		assertThat(created.getScopeId()).isNull();
+		verify(assignmentService, times(4)).save(assignmentCaptor.capture());
+		List<HubRoleAssignment> directorRows = assignmentCaptor.getAllValues().stream()
+				.filter(assignment -> assignment.getUserId().equals(DIRECTOR_USER_ID))
+				.toList();
+		assertThat(directorRows).hasSize(2);
+		assertThat(directorRows).allSatisfy(row -> {
+			assertThat(row.getRole().getId()).isEqualTo(DIRECTOR_ROLE_ID);
+			assertThat(row.getScopeType().getId()).isEqualTo(TEAM_SCOPE_ID);
+			assertThat(row.getStatus()).isEqualTo(HubStatus.ACTIVE.getCode());
+		});
+		assertThat(directorRows).extracting(HubRoleAssignment::getScopeId)
+				.containsExactlyInAnyOrder(TEAM_ID, OTHER_TEAM_ID);
 	}
 
 	@Test
-	void shouldBeIdempotentForDirectorWithNullScopeIdAlreadyCorrectTest() {
-		// Given: R1 - a director's ALL/null-scope_id assignment is already exactly correct; the null-safe
-		// lookup must find and reactivate it rather than NPE or insert a duplicate
+	void shouldReplaceALegacyDirectorAllAssignmentWithTeamAssignmentsTest() {
+		// Given: a Director still holding the DIRECTOR/ALL (null scope id) row the sync wrote before
+		// 2026-10-23, over one team of her stream
 		stubDictionaries();
-		OrgResolution resolution = new OrgResolution(List.of(resolvedDirector(EMAIL, LEAD_NAME)), List.of());
-		when(teamService.listAllOrderedByName()).thenReturn(List.of());
-		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
-		when(userService.save(any())).thenReturn(user(USER_ID));
-		HubRoleAssignment existing = assignment(role(DIRECTOR_ROLE_ID), scopeType(ALL_SCOPE_ID), null);
-		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(existing));
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedTeamUnder(EMAIL, LEAD_NAME, TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(DIRECTOR_USER_ID, DIRECTOR_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		HubRoleAssignment legacy = assignment(role(DIRECTOR_ROLE_ID), scopeType(ALL_SCOPE_ID), null);
+		legacy.setUserId(DIRECTOR_USER_ID);
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(legacy));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
 
 		// When:
 		SyncSummary summary = reconciler().reconcile(resolution, List.of());
 
-		// Verification: nothing changed, and no duplicate row was ever attempted
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 0, 0, 0));
-		verify(assignmentService, never()).save(any());
-	}
-
-	@Test
-	void shouldRevokeStaleTeamAssignmentAndCreateAllScopeWhenUserBecomesDirectorTest() {
-		// Given: R1 - a user previously held a TEAM-scoped assignment and is now resolved as a Director;
-		// the stale TEAM assignment must be revoked and replaced with DIRECTOR/ALL (null scope_id)
-		stubDictionaries();
-		OrgResolution resolution = new OrgResolution(List.of(resolvedDirector(EMAIL, LEAD_NAME)), List.of());
-		when(teamService.listAllOrderedByName()).thenReturn(List.of());
-		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
-		when(userService.save(any())).thenReturn(user(USER_ID));
-		HubRoleAssignment stale = assignment(role(MEMBER_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID);
-		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(stale));
-
-		// When:
-		SyncSummary summary = reconciler().reconcile(resolution, List.of());
-
-		// Verification:
-		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
-		assertThat(stale.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
+		// Then: the ALL row is revoked, one TEAM row created; the admin-created team row is reused, not
+		// recreated
+		assertThat(summary.assignmentsUpdated()).isEqualTo(1);
+		assertThat(legacy.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
 		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
 		verify(assignmentService, times(2)).save(assignmentCaptor.capture());
 		HubRoleAssignment created = assignmentCaptor.getAllValues().get(1);
 		assertThat(created.getRole().getId()).isEqualTo(DIRECTOR_ROLE_ID);
-		assertThat(created.getScopeId()).isNull();
-		assertThat(created.getStatus()).isEqualTo(HubStatus.ACTIVE.getCode());
+		assertThat(created.getScopeType().getId()).isEqualTo(TEAM_SCOPE_ID);
+		assertThat(created.getScopeId()).isEqualTo(TEAM_ID);
+		verify(teamService, never()).create(any());
+	}
+
+	@Test
+	void shouldBeIdempotentForDirectorWhoseTeamAssignmentsAreAlreadyCorrectTest() {
+		// Given: the Director already holds exactly DIRECTOR/TEAM on the one team of her stream
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedTeamUnder(EMAIL, LEAD_NAME, TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(DIRECTOR_USER_ID, DIRECTOR_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		HubRoleAssignment existing = assignment(role(DIRECTOR_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID);
+		existing.setUserId(DIRECTOR_USER_ID);
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(existing));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of());
+
+		// Then: nothing changed, no duplicate attempted
+		assertThat(summary.assignmentsUpdated()).isEqualTo(0);
+		verify(assignmentService, never()).save(any());
+	}
+
+	@Test
+	void shouldRevokeADirectorsAssignmentOnATeamThatLeftTheirStreamTest() {
+		// Given: the Director holds DIRECTOR/TEAM on two teams, but this run only one lead's chain still
+		// reaches her
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedTeamUnder(EMAIL, LEAD_NAME, TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedTeam(OTHER_LEAD_EMAIL, "Kate Lead", OTHER_TEAM_NAME, "HOUSE"),
+						resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID), team(OTHER_TEAM_ID, OTHER_TEAM_NAME)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(DIRECTOR_USER_ID, DIRECTOR_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		HubRoleAssignment kept = assignment(role(DIRECTOR_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID);
+		HubRoleAssignment stale = assignment(role(DIRECTOR_ROLE_ID), scopeType(TEAM_SCOPE_ID), OTHER_TEAM_ID);
+		kept.setUserId(DIRECTOR_USER_ID);
+		stale.setUserId(DIRECTOR_USER_ID);
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(kept, stale));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of());
+
+		// Then: the stale one is revoked (never deleted), the kept one untouched
+		assertThat(summary.assignmentsUpdated()).isEqualTo(1);
+		assertThat(stale.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
+		assertThat(kept.getStatus()).isEqualTo(HubStatus.ACTIVE.getCode());
+		verify(assignmentService, times(1)).save(stale);
+	}
+
+	@Test
+	void shouldRevokeADirectorWithNoTeamInTheirStreamTest() {
+		// Given: a Director nobody's chain reaches, nobody reports to directly and no agency names - the
+		// same answer an unresolved member gets: no guessed scope, active rows revoked
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of());
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(DIRECTOR_USER_ID, DIRECTOR_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		HubRoleAssignment legacy = assignment(role(DIRECTOR_ROLE_ID), scopeType(ALL_SCOPE_ID), null);
+		legacy.setUserId(DIRECTOR_USER_ID);
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of(legacy));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of());
+
+		// Then: an unmaterialized direct team is not counted as a team
+		assertThat(summary).isEqualTo(new SyncSummary(0, 1, 1, 0, 0));
+		assertThat(legacy.getStatus()).isEqualTo(HubStatus.REVOKED.getCode());
+		verify(assignmentService, times(1)).save(legacy);
+		verify(teamService, never()).create(any());
+	}
+
+	@Test
+	void shouldMaterializeADirectorsDirectTeamWhenAManagerReportsStraightToThemTest() {
+		// Given: a manager whose chain hit the Director before any Team Lead (teamLeadEmail = the Director)
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME),
+						resolvedMember(EMAIL, MEMBER_NAME, DIRECTOR_EMAIL, "HOUSE")),
+				List.of(resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of());
+		when(teamService.create(any())).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of());
+		when(userService.save(any())).thenAnswer(invocation -> withUserId(invocation.getArgument(0)));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of());
+
+		// Then: the direct team exists, led by the Director; she holds DIRECTOR/TEAM on it and the manager
+		// MPO_MANAGER/TEAM
+		ArgumentCaptor<HubTeam> teamCaptor = ArgumentCaptor.forClass(HubTeam.class);
+		verify(teamService).create(teamCaptor.capture());
+		assertThat(teamCaptor.getValue().getTeamName()).isEqualTo(DIRECT_TEAM_NAME);
+		assertThat(teamCaptor.getValue().getTeamLeadUserId()).isEqualTo(DIRECTOR_USER_ID);
+		assertThat(teamCaptor.getValue().isFromNetSuite()).isTrue();
+		assertThat(summary.assignmentsUpdated()).isEqualTo(2);
+		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
+		verify(assignmentService, times(2)).save(assignmentCaptor.capture());
+		assertThat(assignmentCaptor.getAllValues()).allSatisfy(row -> {
+			assertThat(row.getScopeType().getId()).isEqualTo(TEAM_SCOPE_ID);
+			assertThat(row.getScopeId()).isEqualTo(DIRECT_TEAM_ID);
+		});
+		assertThat(assignmentCaptor.getAllValues()).extracting(row -> row.getRole().getId())
+				.containsExactlyInAnyOrder(DIRECTOR_ROLE_ID, MEMBER_ROLE_ID);
+	}
+
+	@Test
+	void shouldMaterializeADirectorsDirectTeamWhenNetSuiteNamesThemOnAnAgencyTest() {
+		// Given: IO Lines names the Director as mpo_team_lead; no Team Lead carries that name
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of());
+		when(teamService.create(any())).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of());
+		when(userService.save(any())).thenAnswer(invocation -> withUserId(invocation.getArgument(0)));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, DIRECTOR_NAME)));
+
+		// Then: the agency maps to the Director's direct team, which she sees
+		assertThat(summary.agenciesMapped()).isEqualTo(1);
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(DIRECT_TEAM_ID);
+		ArgumentCaptor<HubRoleAssignment> assignmentCaptor = ArgumentCaptor.forClass(HubRoleAssignment.class);
+		verify(assignmentService).save(assignmentCaptor.capture());
+		assertThat(assignmentCaptor.getValue().getRole().getId()).isEqualTo(DIRECTOR_ROLE_ID);
+		assertThat(assignmentCaptor.getValue().getScopeId()).isEqualTo(DIRECT_TEAM_ID);
+	}
+
+	@Test
+	void shouldPreferATeamLeadOverADirectorForAnAgencyNameCollisionTest() {
+		// Given: a Team Lead and a Director share the display name IO Lines carries
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, LEAD_NAME),
+						resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE")),
+				List.of(resolvedTeamUnder(EMAIL, LEAD_NAME, TEAM_NAME, DIRECTOR_EMAIL),
+						resolvedDirectTeam(DIRECTOR_EMAIL, LEAD_NAME, DIRECT_TEAM_NAME)));
+		when(teamService.listAllOrderedByName()).thenReturn(List.of());
+		when(teamService.create(any())).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of());
+		when(userService.save(any())).thenAnswer(invocation -> withUserId(invocation.getArgument(0)));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
+
+		// Then: the TL's team gets the agency, as before Directors could lead a team at all
+		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
+		verify(teamAgencyService).save(mappingCaptor.capture());
+		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
+	}
+
+	@Test
+	void shouldDeactivateADirectorsDirectTeamThatEmptiedTest() {
+		// Given: last run's direct team row, and this run nobody reports to the Director and no agency
+		// names her
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedDirector(DIRECTOR_EMAIL, DIRECTOR_NAME)),
+				List.of(resolvedDirectTeam(DIRECTOR_EMAIL, DIRECTOR_NAME, DIRECT_TEAM_NAME)));
+		HubTeam directTeam = Instancio.of(HubTeam.class)
+				.set(field(HubTeam::getId), DIRECT_TEAM_ID)
+				.set(field(HubTeam::getTeamName), DIRECT_TEAM_NAME)
+				.set(field(HubTeam::isFromNetSuite), true)
+				.set(field(HubTeam::getStatus), HubStatus.ACTIVE.getCode())
+				.create();
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(directTeam));
+		when(teamService.saveFromNetSuite(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(DIRECTOR_USER_ID, DIRECTOR_EMAIL)));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any())).thenReturn(List.of());
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		reconciler().reconcile(resolution, List.of());
+
+		// Then:
+		assertThat(directTeam.getStatus()).isEqualTo(HubStatus.INACTIVE.getCode());
+		verify(teamService).saveFromNetSuite(directTeam);
+	}
+
+	@Test
+	void shouldWriteTheRipplingDepartmentOnEveryUpsertTest() {
+		// Given: an existing user with no department yet
+		stubDictionaries();
+		OrgResolution resolution = new OrgResolution(
+				List.of(resolvedTeamLead(EMAIL, LEAD_NAME, "HOUSE")),
+				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "HOUSE")));
+		HubUser existing = user(USER_ID, EMAIL);
+		existing.setDepartment(null);
+		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
+		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(existing));
+		when(userService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(assignmentService.findAllByUserIds(any()))
+				.thenReturn(List.of(assignment(role(TL_ROLE_ID), scopeType(TEAM_SCOPE_ID), TEAM_ID)));
+		when(teamAgencyService.findAll()).thenReturn(List.of());
+
+		// When:
+		reconciler().reconcile(resolution, List.of());
+
+		// Then:
+		assertThat(existing.getDepartment()).isEqualTo(DEPARTMENT);
 	}
 
 	@Test
@@ -256,7 +523,8 @@ class NetSuiteSyncReconcilerTest {
 		// revoked rather than left dangling, and no new assignment may be guessed
 		stubDictionaries();
 		OrgResolution resolution = new OrgResolution(
-				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, OrgRole.MEMBER, Grade.MIDDLE, null, null, List.of())),
+				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, DEPARTMENT, OrgRole.MEMBER, Grade.MIDDLE, null, null,
+						List.of())),
 				List.of());
 		when(teamService.listAllOrderedByName()).thenReturn(List.of());
 		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
@@ -281,7 +549,8 @@ class NetSuiteSyncReconcilerTest {
 		// must be a no-op rather than fabricating one
 		stubDictionaries();
 		OrgResolution resolution = new OrgResolution(
-				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, OrgRole.MEMBER, Grade.MIDDLE, null, null, List.of())),
+				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, DEPARTMENT, OrgRole.MEMBER, Grade.MIDDLE, null, null,
+						List.of())),
 				List.of());
 		when(teamService.listAllOrderedByName()).thenReturn(List.of());
 		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
@@ -375,7 +644,8 @@ class NetSuiteSyncReconcilerTest {
 		// managed and must survive the sync.
 		stubDictionaries();
 		OrgResolution resolution = new OrgResolution(
-				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, OrgRole.MEMBER, Grade.MIDDLE, null, null, List.of())),
+				List.of(new ResolvedEmployee(EMAIL, MEMBER_NAME, DEPARTMENT, OrgRole.MEMBER, Grade.MIDDLE, null, null,
+						List.of())),
 				List.of());
 		when(teamService.listAllOrderedByName()).thenReturn(List.of());
 		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
@@ -514,34 +784,6 @@ class NetSuiteSyncReconcilerTest {
 		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
 		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
 		verify(teamAgencyService, never()).deleteAll(any());
-	}
-
-	@Test
-	void shouldKeepDirectorRoleAndMapTheirAgencyToTheTeamTheyActAsLeadForTest() {
-		// Given: a Director heads a team because members with no Team Lead fell to them, and NetSuite names
-		// that Director as the agency's MPO team lead
-		stubDictionaries();
-		OrgResolution resolution = new OrgResolution(
-				List.of(resolvedDirector(EMAIL, LEAD_NAME)),
-				List.of(resolvedTeam(EMAIL, LEAD_NAME, TEAM_NAME, "EAST")));
-		when(teamService.listAllOrderedByName()).thenReturn(List.of(team(TEAM_ID)));
-		when(userService.findAllByEmailIgnoreCaseIn(any())).thenReturn(List.of(user(USER_ID)));
-		when(userService.save(any())).thenReturn(user(USER_ID));
-		when(assignmentService.findAllByUserIds(any()))
-				.thenReturn(List.of(assignment(role(DIRECTOR_ROLE_ID), scopeType(ALL_SCOPE_ID), null)));
-		when(teamAgencyService.findAll()).thenReturn(List.of());
-
-		// When:
-		SyncSummary summary = reconciler().reconcile(resolution, List.of(new AgencyLead(AGENCY_ID, LEAD_NAME)));
-
-		// Verification: the agency goes to the Director's team, and the Director's own DIRECTOR/ALL stays
-		assertThat(summary.agenciesMapped()).isEqualTo(1);
-		assertThat(summary.assignmentsUpdated()).isZero();
-		ArgumentCaptor<HubTeamAgency> mappingCaptor = ArgumentCaptor.forClass(HubTeamAgency.class);
-		verify(teamAgencyService).save(mappingCaptor.capture());
-		assertThat(mappingCaptor.getValue().getAgencyId()).isEqualTo(AGENCY_ID);
-		assertThat(mappingCaptor.getValue().getTeamId()).isEqualTo(TEAM_ID);
-		verify(assignmentService, never()).save(any());
 	}
 
 	@Test
@@ -886,27 +1128,73 @@ class NetSuiteSyncReconcilerTest {
 		when(roleService.existingByRoleCode(RbacRoleCode.DIRECTOR.getCode()))
 				.thenReturn(role(DIRECTOR_ROLE_ID, RbacRoleCode.DIRECTOR.getCode()));
 		when(scopeTypeService.existingByScopeCode(RbacScopeCode.TEAM.getCode())).thenReturn(scopeType(TEAM_SCOPE_ID));
-		when(scopeTypeService.existingByScopeCode(RbacScopeCode.ALL.getCode())).thenReturn(scopeType(ALL_SCOPE_ID));
 		// resolveOwnerOverrides() runs unconditionally on every reconcile() call, just like the role/scope
 		// dictionary lookups above; tests that exercise override behavior re-stub this with a specific list.
 		when(agencyOwnerOverrideService.findAllByStatus(HubStatus.ACTIVE.getCode())).thenReturn(List.of());
 	}
 
 	private static ResolvedEmployee resolvedTeamLead(String email, String name, String podKey) {
-		return new ResolvedEmployee(email, name, OrgRole.TEAM_LEAD, Grade.TEAM_LEAD, email, podKey, List.of());
+		return new ResolvedEmployee(email, name, DEPARTMENT, OrgRole.TEAM_LEAD, Grade.TEAM_LEAD, email, podKey,
+				List.of());
 	}
 
 	private static ResolvedEmployee resolvedMember(String email, String name, String teamLeadEmail, String podKey) {
-		return new ResolvedEmployee(email, name, OrgRole.MEMBER, Grade.MIDDLE, teamLeadEmail, podKey, List.of());
+		return new ResolvedEmployee(email, name, DEPARTMENT, OrgRole.MEMBER, Grade.MIDDLE, teamLeadEmail, podKey,
+				List.of());
 	}
 
 	private static ResolvedEmployee resolvedDirector(String email, String name) {
-		return new ResolvedEmployee(email, name, OrgRole.DIRECTOR, Grade.DIRECTOR, null, null, List.of());
+		return new ResolvedEmployee(email, name, DEPARTMENT, OrgRole.DIRECTOR, Grade.DIRECTOR, null, null, List.of());
 	}
 
 	private static ResolvedTeam resolvedTeam(
 			String teamLeadEmail, String teamLeadName, String teamName, String podKey) {
-		return new ResolvedTeam(teamLeadEmail, teamLeadName, teamName, podKey, List.of());
+		return new ResolvedTeam(teamLeadEmail, teamLeadName, teamName, podKey, false, List.of(), List.of());
+	}
+
+	/**
+	 * A Team Lead's team whose lead's manager chain reaches the given Director.
+	 */
+	private static ResolvedTeam resolvedTeamUnder(
+			String teamLeadEmail, String teamLeadName, String teamName, String directorEmail) {
+		return new ResolvedTeam(teamLeadEmail, teamLeadName, teamName, "HOUSE", false, List.of(directorEmail),
+				List.of());
+	}
+
+	/**
+	 * A Director's direct team, as the resolver emits one for every Director; seen by no Director above.
+	 */
+	private static ResolvedTeam resolvedDirectTeam(String directorEmail, String directorName, String teamName) {
+		return new ResolvedTeam(directorEmail, directorName, teamName, null, true, List.of(), List.of());
+	}
+
+	/**
+	 * Stands in for the database assigning a team id on create, keyed by the team's name so a test can
+	 * tell several created teams apart.
+	 */
+	private static HubTeam withId(HubTeam team) {
+		if (OTHER_TEAM_NAME.equals(team.getTeamName())) {
+			team.setId(OTHER_TEAM_ID);
+		} else if (DIRECT_TEAM_NAME.equals(team.getTeamName())) {
+			team.setId(DIRECT_TEAM_ID);
+		} else {
+			team.setId(TEAM_ID);
+		}
+		return team;
+	}
+
+	/**
+	 * Stands in for the database assigning a user id on create, keyed by email.
+	 */
+	private static HubUser withUserId(HubUser user) {
+		if (DIRECTOR_EMAIL.equals(user.getEmail())) {
+			user.setId(DIRECTOR_USER_ID);
+		} else if (OTHER_LEAD_EMAIL.equals(user.getEmail())) {
+			user.setId(OTHER_LEAD_USER_ID);
+		} else {
+			user.setId(USER_ID);
+		}
+		return user;
 	}
 
 	private static HubRole role(Long id) {
@@ -925,12 +1213,16 @@ class NetSuiteSyncReconcilerTest {
 	}
 
 	private static HubTeam team(Long id) {
+		return team(id, TEAM_NAME);
+	}
+
+	private static HubTeam team(Long id, String teamName) {
 		// fromNetSuite pinned to false (like every other unset field this fixture's callers don't care
 		// about) because upsertTeam() branches on it: a random true from Instancio would flip several
 		// existing-team tests onto the refresh path instead of the plain lookup they intend to exercise.
 		return Instancio.of(HubTeam.class)
 				.set(field(HubTeam::getId), id)
-				.set(field(HubTeam::getTeamName), TEAM_NAME)
+				.set(field(HubTeam::getTeamName), teamName)
 				.set(field(HubTeam::isFromNetSuite), false)
 				.create();
 	}

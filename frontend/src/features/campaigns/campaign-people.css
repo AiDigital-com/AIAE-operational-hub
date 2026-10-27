@@ -200,3 +200,58 @@
   color: var(--bad);
   border-top: 1px solid var(--border);
 }
+
+/* "via pacing" beside a name: the person is here because they own a pacing on the campaign, not
+   because somebody added them. A tint, not a stripe. */
+.cpeople__badge {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--n-100);
+  color: var(--muted-strong);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* The "they own pacings here" confirmation (2026-10-23): what moves to the remover, one pacing per
+   row with every campaign it covers, so a pacing reaching beyond this campaign is seen before the
+   button is pressed. */
+.cpeople-confirm__list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.cpeople-confirm__pacing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--n-100);
+  min-width: 0;
+}
+.cpeople-confirm__pacing-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.cpeople-confirm__pacing-campaigns {
+  font-size: 0.75rem;
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+.cpeople-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  margin-top: 1.125rem;
+}

@@ -27,7 +27,11 @@ import java.util.TreeSet;
  * The forward resolver answers "which owners may user X see": ADMIN or any ALL-scoped assignment →
  * everyone; TEAM-scoped assignments on teams {T} → every holder of an active assignment scoped to
  * any T. Inverting it: a pacing owned by O is visible to every global viewer, plus every holder of a
- * TEAM-scoped assignment on any team where O also holds an active TEAM-scoped assignment. Client
+ * TEAM-scoped assignment on any team where O also holds an active TEAM-scoped assignment - which,
+ * since 2026-10-23, is how a Director sees their stream: one TEAM assignment per team, so they appear
+ * here as a team viewer of each, not as a global. What the forward resolver adds beyond assignments
+ * (campaign shares, and a team's agencies' campaigns with pacings) is NOT mirrored into the sheet
+ * audience here - see the access rework report. Client
  * Services contributes nobody, exactly as the forward resolver entitles it to nothing (its campaign
  * scoping has no Hub-side id source yet — see the forward resolver's comment). Keeping both
  * directions derived from the same assignment rows is what keeps sheet access aligned with app

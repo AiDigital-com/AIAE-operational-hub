@@ -626,9 +626,11 @@ paths:
       operationId: createCampaignShare
       description: >
         Shares the campaign with a Hub user. Only someone whose OWN scope covers the campaign may share
-        it - an admin, a Director, or a member of the team that owns the campaign's agency; a person who
-        sees it only through a share, or Client Services, is refused. Sharing again with the same person
-        returns the existing share.
+        it - an admin, a Director of the stream, or a member of the team that owns the campaign's agency;
+        a person who sees it only through a share, or Client Services, is refused. Only an active MPO
+        person (the Rippling department tree under Media & Performance Optimization) can be added; anyone
+        else is refused here, not just hidden from the picker. Sharing again with the same person returns
+        the existing share.
       parameters:
         - name: campaignId
           in: path
@@ -651,7 +653,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/CampaignShareV1'
         '400':
-          description: The campaign cannot be shared with the caller themselves.
+          description: >
+            The campaign cannot be shared with the caller themselves, or the person is not an active
+            MPO user.
           content:
             application/json:
               schema:
@@ -676,9 +680,9 @@ paths:
         - campaignShare
       operationId: listCampaignShareCandidates
       description: >
-        The Hub users the campaign could be shared with - everyone except the caller and those it is
-        already shared with - narrowed by a name or email fragment and capped at twenty, by name.
-        Requires the right to share.
+        The Hub users the campaign could be shared with - every active MPO person except the caller and
+        those it is already shared with - narrowed by a name or email fragment and capped at twenty, by
+        name. Requires the right to share.
       parameters:
         - name: campaignId
           in: path
@@ -723,6 +727,11 @@ paths:
       description: >
         Removes a user's share of the campaign. Takes effect at once; removing one that does not exist
         is a no-op. Requires the right to share.
+
+        When the person owns pacings touching this campaign, each is transferred whole to the caller
+        FIRST - every campaign it spans included - and only then is the share removed. Without
+        transferPacings=true that case answers 409 with the count, so the client can list them (see the
+        pacings endpoint) and ask. A transfer Pacing refuses leaves the share in place.
       parameters:
         - name: campaignId
           in: path
@@ -738,9 +747,25 @@ paths:
           schema:
             type: integer
             format: int64
+        - name: transferPacings
+          in: query
+          required: false
+          description: >
+            True when the caller has confirmed taking over the pacings this person owns on the campaign.
+          schema:
+            type: boolean
+            default: false
       responses:
         '204':
           description: The share is gone.
+        '400':
+          description: >
+            The caller cannot take over the person's pacings because Pacing does not know the caller's
+            account yet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '401':
           description: The authorization token not provided or expired.
         '403':
@@ -751,6 +776,70 @@ paths:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '404':
           description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '409':
+          description: >
+            The person owns pacings on this campaign and the caller has not confirmed the transfer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/shares/{hubUserId}/pacings:
+    get:
+      tags:
+        - campaignShare
+      operationId: listCampaignSharePacings
+      description: >
+        The pacings a person on the campaign owns that touch it - what removing them hands to the
+        caller, each one whole with every campaign it spans. Requires the right to share. Empty when
+        they own none.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+        - name: hubUserId
+          in: path
+          required: true
+          description: The person's hub_users.id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Their pacings on this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignSharePacingListV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: The caller may not share this campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The campaign was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: The Pacing service could not be reached (connection failure or timeout).
           content:
             application/json:
               schema:
@@ -6184,8 +6273,60 @@ components:
           type: string
           format: date-time
           description: When it was shared.
+        source:
+          type: string
+          enum:
+            - manual
+            - pacing_created
+          description: >
+            Where the share came from: added by hand ("Add people"), or following a pacing the person
+            owns on the campaign (created it, planned onto it, or received it in a transfer).
       required:
         - hubUserId
+    CampaignSharePacingCampaignV1:
+      type: object
+      description: One campaign a pacing covers.
+      properties:
+        id:
+          type: string
+          description: The NetSuite campaign id, as text.
+        name:
+          type: string
+          nullable: true
+          description: The campaign name; absent when Pacing only knows the id.
+      required:
+        - id
+    CampaignSharePacingV1:
+      type: object
+      description: A pacing a person owns on the campaign, handed whole to whoever removes them.
+      properties:
+        pacingId:
+          type: string
+          description: Pacing's own UUID primary key.
+        dashSlug:
+          type: string
+          description: The dashboard slug.
+        pacingName:
+          type: string
+          description: The display name.
+        campaigns:
+          type: array
+          description: Every campaign the pacing covers, in Pacing's stored order.
+          items:
+            $ref: '#/components/schemas/CampaignSharePacingCampaignV1'
+      required:
+        - pacingId
+        - campaigns
+    CampaignSharePacingListV1:
+      type: object
+      description: The pacings a person owns on a campaign.
+      properties:
+        pacings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignSharePacingV1'
+      required:
+        - pacings
     CampaignShareListV1:
       type: object
       description: A campaign's shares and the caller's right to change them.

@@ -149,9 +149,10 @@ app:
       # per request rather than reused.
       assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}
   netsuite-sync:
-    # Only Directors whose Rippling department sits under this root (the first `>` segment of the path)
-    # get the DIRECTOR / ALL role from the daily sync. A Director title anywhere else in the company is
-    # read as a plain member with no role.
+    # The MPO root. Only Directors whose Rippling department sits under it (the first `>` segment of the
+    # path) get the DIRECTOR role from the daily sync - scoped to the teams of their own stream, never
+    # ALL (2026-10-23) - and only people under it can be added to a campaign. A Director title anywhere
+    # else in the company is read as a plain member with no role.
     director-root-department: ${NETSUITE_SYNC_DIRECTOR_ROOT_DEPARTMENT:Media & Performance Optimization}
   usage-logging:
     # One usage_events row per meaningful user action (PDI_100), written off the request thread. Set to false

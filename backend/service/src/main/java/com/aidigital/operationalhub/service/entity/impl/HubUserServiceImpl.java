@@ -68,6 +68,14 @@ public class HubUserServiceImpl implements HubUserService {
 	}
 
 	@Override
+	public Optional<HubUser> findByPacingUserId(String pacingUserId) {
+		if (pacingUserId == null || pacingUserId.isBlank()) {
+			return Optional.empty();
+		}
+		return userRepository.findByPacingUserId(pacingUserId);
+	}
+
+	@Override
 	public List<HubUser> findAll() {
 		return userRepository.findAll();
 	}

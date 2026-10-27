@@ -3,9 +3,13 @@ package com.aidigital.operationalhub.application.mapper;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingCampaignV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareV1;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import org.springframework.stereotype.Component;
 
@@ -43,7 +47,29 @@ public class CampaignShareContractMapper {
 				.roleName(model.role().roleName())
 				.teamName(model.role().teamName())
 				.grantedByName(model.grantedByName())
-				.createdAt(model.createdAt());
+				.createdAt(model.createdAt())
+				.source(CampaignShareV1.SourceEnum.fromValue(model.source().getCode()));
+	}
+
+	/**
+	 * Maps the pacings a person owns on a campaign, for the removal confirmation.
+	 *
+	 * @param pacings the service models
+	 * @return the contract shape
+	 */
+	public CampaignSharePacingListV1 toPacingsV1(List<CampaignSharePacingModel> pacings) {
+		return new CampaignSharePacingListV1()
+				.pacings(pacings.stream()
+						.map(pacing -> new CampaignSharePacingV1()
+								.pacingId(pacing.pacingId())
+								.dashSlug(pacing.dashSlug())
+								.pacingName(pacing.pacingName())
+								.campaigns(pacing.campaigns().stream()
+										.map(campaign -> new CampaignSharePacingCampaignV1()
+												.id(campaign.id())
+												.name(campaign.name()))
+										.toList()))
+						.toList());
 	}
 
 	/**
