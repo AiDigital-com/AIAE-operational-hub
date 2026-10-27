@@ -129,6 +129,14 @@
   color: var(--primary);
   font-weight: 700;
 }
+.campaign-ws__note--denied p {
+  margin: 0 0 6px;
+}
+.campaign-ws__note-title {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+}
 
 @media (max-width: 720px) {
   .campaign-ws__title {

@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../shared/api/api-error";
 import { ToastProvider } from "../../shared/ui/toast/toast";
 import { getCampaign } from "./api";
 import type { CampaignV1 } from "./types";
@@ -203,8 +204,24 @@ describe("CampaignWorkspace", () => {
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
+  it("should explain how to get access when the campaign is outside the user's visibility", async () => {
+    // Given: the Hub answers 404 for a campaign this user can't see
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // Then:
+    expect(await screen.findByText("You don’t have access to this campaign.")).toBeInTheDocument();
+    expect(screen.getByText("It may belong to another team, or it may not be shared with you.")).toBeInTheDocument();
+    expect(screen.getByText("Ask the MPO manager for this campaign to share it with you.")).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown campaign/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Go to Agencies" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
+
   it("should show a way back instead of a broken hero when the campaign can't be fetched", async () => {
-    // Given: e.g. an id that doesn't exist, or one outside this user's visibility
+    // Given: any other failure, e.g. the Hub is down
     vi.mocked(getCampaign).mockRejectedValue(new Error("Campaign 42 was not found."));
 
     // When:

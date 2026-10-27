@@ -51,10 +51,12 @@ import java.util.stream.Collectors;
  * them - so a recipient cannot share onward. Client Services is refused by role.
  *
  * <p>Who may be added (2026-10-23): current MPO people only - {@link MpoDepartmentPolicy} over the
- * department the sync wrote to {@code hub_users}. The sync clears that department when somebody
- * leaves Rippling; {@code hub_users.status} is NOT consulted, since it only says whether the person
- * has ever logged in to the Hub, and a colleague who has not must still be addable. Refused on
- * {@link #share}, not only hidden from the picker, so no client can add somebody the rule excludes.
+ * department the sync wrote to {@code hub_users}, or (2026-10-27) anyone an admin has put on a team
+ * that owns agencies ({@link CampaignShareTeamMembers}). The sync clears the department when somebody
+ * leaves Rippling, and a leaver is refused either way; {@code hub_users.status} is NOT consulted,
+ * since it only says whether the person has ever logged in to the Hub, and a colleague who has not
+ * must still be addable. Refused on {@link #share}, not only hidden from the picker, so no client can
+ * add somebody the rule excludes.
  *
  * <p>Removing someone who owns pacings on the campaign (2026-10-23) moves those pacings to the remover
  * first, through {@link PacingCampaignAccessClient#transferOwnerAsSystem}: Pacing's user route checks
@@ -81,6 +83,7 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	private final HubUserService hubUserService;
 	private final CampaignSharePersonDescriber personDescriber;
 	private final MpoDepartmentPolicy mpoDepartmentPolicy;
+	private final CampaignShareTeamMembers teamMembers;
 	private final PacingCampaignAccessClient pacingCampaignAccessClient;
 	private final CampaignShareGrantWriter grantWriter;
 
@@ -104,8 +107,9 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 		excluded.add(user.id());
 		hubCampaignShareService.findByCampaignId(campaignId).forEach(share -> excluded.add(share.getUserId()));
 		String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+		Set<Long> teamMemberIds = teamMembers.userIds();
 		List<HubUser> page = hubUserService.findAll().stream()
-				.filter(this::isCurrentMpo)
+				.filter(candidate -> isAddable(candidate, teamMemberIds))
 				.filter(candidate -> !excluded.contains(candidate.getId()))
 				.filter(candidate -> matches(candidate, needle))
 				.sorted(Comparator.comparing(
@@ -131,7 +135,7 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 		HubUser recipient = hubUserService.findAllByIds(List.of(hubUserId)).stream()
 				.findFirst()
 				.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_066, hubUserId));
-		requireCurrentMpo(recipient);
+		requireAddable(recipient);
 		Optional<HubCampaignShare> existing = hubCampaignShareService.findByCampaignIdAndUserId(campaignId, hubUserId);
 		HubCampaignShare share = existing.orElseGet(() -> {
 			HubCampaignShare created = new HubCampaignShare();
@@ -257,13 +261,16 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 
 	/**
 	 * Tells whether a person may be on a campaign's people list: somebody in Rippling's current roster
-	 * (the sync left them a department) inside MPO. Whether they have ever logged in does not matter.
+	 * (the sync left them a department) who is MPO there or holds a role on a team that owns agencies.
+	 * Whether they have ever logged in does not matter.
 	 *
-	 * @param candidate the user
+	 * @param candidate     the user
+	 * @param teamMemberIds the people with a role on a team that owns agencies
 	 * @return {@code true} when both hold
 	 */
-	boolean isCurrentMpo(HubUser candidate) {
-		return candidate.getDepartment() != null && mpoDepartmentPolicy.isMpo(candidate.getDepartment());
+	boolean isAddable(HubUser candidate, Set<Long> teamMemberIds) {
+		return candidate.getDepartment() != null
+				&& (mpoDepartmentPolicy.isMpo(candidate.getDepartment()) || teamMemberIds.contains(candidate.getId()));
 	}
 
 	/**
@@ -271,13 +278,15 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	 * a leaver's department is beside the point.
 	 *
 	 * @param recipient the would-be recipient
-	 * @throws BusinessException {@code OPH_068} when not in Rippling, {@code OPH_069} when outside MPO
+	 * @throws BusinessException {@code OPH_068} when not in Rippling, {@code OPH_069} when outside MPO and
+	 *                           on no team that owns agencies
 	 */
-	void requireCurrentMpo(HubUser recipient) {
+	void requireAddable(HubUser recipient) {
 		if (recipient.getDepartment() == null) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_068, displayName(recipient));
 		}
-		if (!mpoDepartmentPolicy.isMpo(recipient.getDepartment())) {
+		if (!mpoDepartmentPolicy.isMpo(recipient.getDepartment())
+				&& !teamMembers.userIds().contains(recipient.getId())) {
 			throw new BusinessException(OperationalHubErrorReason.OPH_069, displayName(recipient));
 		}
 	}

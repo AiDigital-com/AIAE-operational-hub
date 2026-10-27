@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useParams } from "react-router-dom";
+import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { campaignDisplayName } from "../../shared/format/names";
 import { cn } from "../../shared/style/cn";
@@ -113,14 +114,23 @@ export function CampaignWorkspace() {
   }
 
   if (isError || !campaign) {
+    // The Hub answers 404 both for an id that doesn't exist and for a campaign outside the user's
+    // visibility, so a 404 reads as "no access" - the case people actually run into.
+    const noAccess = !isError || (error instanceof ApiError && error.status === 404);
     return (
       <section className="campaign-ws">
-        <p className="campaign-ws__note">
-          {isError
-            ? formatError(error)
-            : "This campaign couldn't be found, or you don't have access to it."}{" "}
-          <Link to="/agencies">Go to Agencies</Link> to browse the campaigns you can open.
-        </p>
+        {noAccess ? (
+          <div className="campaign-ws__note campaign-ws__note--denied">
+            <p className="campaign-ws__note-title">You don&rsquo;t have access to this campaign.</p>
+            <p>It may belong to another team, or it may not be shared with you.</p>
+            <p>Ask the MPO manager for this campaign to share it with you.</p>
+          </div>
+        ) : (
+          <p className="campaign-ws__note">
+            {formatError(error)} <Link to="/agencies">Go to Agencies</Link> to browse the campaigns you
+            can open.
+          </p>
+        )}
       </section>
     );
   }

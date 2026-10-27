@@ -1,3 +1,4 @@
+import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
 import type {
@@ -25,7 +26,7 @@ interface ApiResult<T> {
 
 function requireData<T>(result: ApiResult<T>) {
   if (result.error || !result.response.ok || result.data === undefined) {
-    throw new Error(formatError(result.error));
+    throw new ApiError(formatError(result.error), result.response.status);
   }
   return result.data;
 }
