@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.campaignshare.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubCampaignShare;
+import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
 import com.aidigital.operationalhub.domain.enums.HubStatus;
@@ -18,6 +19,8 @@ import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareMod
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePersonRoleModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
+import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
+import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
@@ -34,6 +37,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -88,6 +92,12 @@ class CampaignShareServiceImplTest {
 
 	@Mock
 	private CampaignShareTeamMembers teamMembers;
+
+	@Mock
+	private HubTeamAgencyService hubTeamAgencyService;
+
+	@Mock
+	private HubRoleAssignmentService hubRoleAssignmentService;
 
 	@Mock
 	private PacingCampaignAccessClient pacingCampaignAccessClient;
@@ -513,6 +523,78 @@ class CampaignShareServiceImplTest {
 	}
 
 	@Test
+	void shouldListTheOwningTeamsPeopleOnceAndWithoutLeaversTest() {
+		// Given: two teams own the agency; THEM is also shared with, 4 has left, 5 and 6 are on the teams
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of(share(THEM)));
+		when(hubTeamAgencyService.findTeamIdsByAgencyId(AGENCY)).thenReturn(List.of(7L, 8L));
+		when(hubRoleAssignmentService.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of(7L, 8L)))
+				.thenReturn(List.of(assignment(THEM), assignment(4L), assignment(5L), assignment(6L)));
+		HubUser leaver = user(4L, "Lena", "lena@x.com");
+		leaver.setDepartment(null);
+		when(hubUserService.findAllByIds(anyCollection())).thenAnswer(call -> {
+			Collection<Long> ids = call.getArgument(0);
+			return List.of(user(ME, "Me", "me@x.com"), user(THEM, "Beatris", "b@x.com"), leaver,
+					user(5L, "Zoe", "zoe@x.com"), user(6L, "Galina", "galina@x.com")).stream()
+					.filter(person -> ids.contains(person.getId()))
+					.toList();
+		});
+		when(personDescriber.describer(any())).thenReturn(id -> id == 6L
+				? new CampaignSharePersonRoleModel("Team Lead", "Team Galina")
+				: CampaignSharePersonRoleModel.none());
+
+		// When:
+		CampaignSharesModel shares = service.listShares(me(), CAMPAIGN);
+
+		// Then: by name, the shared person only on the share list
+		assertThat(shares.teamAccess()).extracting(CampaignShareCandidateModel::hubUserId).containsExactly(6L, 5L);
+		assertThat(shares.teamAccess().getFirst().role().teamName()).isEqualTo("Team Galina");
+	}
+
+	@Test
+	void shouldListNoTeamAccessWhenNoTeamOwnsTheAgencyTest() {
+		// Given:
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of());
+		when(hubTeamAgencyService.findTeamIdsByAgencyId(AGENCY)).thenReturn(List.of());
+
+		// When:
+		CampaignSharesModel shares = service.listShares(me(), CAMPAIGN);
+
+		// Then:
+		assertThat(shares.teamAccess()).isEmpty();
+		verifyNoInteractions(hubRoleAssignmentService);
+	}
+
+	@Test
+	void shouldListNoTeamAccessWhenEveryTeammateIsSharedWithAlreadyTest() {
+		// Given:
+		givenVisibleCampaign();
+		givenRoles("TL");
+		when(agencyVisibilityService.resolveForCurrentUser(me()))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of(AGENCY)));
+		when(hubCampaignShareService.findByCampaignId(CAMPAIGN)).thenReturn(List.of(share(THEM)));
+		when(hubUserService.findAllByIds(anyCollection()))
+				.thenReturn(List.of(user(ME, "Me", "me@x.com"), user(THEM, "Beatris", "b@x.com")));
+		when(personDescriber.describer(any())).thenReturn(id -> CampaignSharePersonRoleModel.none());
+		when(hubTeamAgencyService.findTeamIdsByAgencyId(AGENCY)).thenReturn(List.of(7L));
+		when(hubRoleAssignmentService.findActiveByScopeTypeCodeAndScopeIds("TEAM", List.of(7L)))
+				.thenReturn(List.of(assignment(THEM)));
+
+		// When:
+		CampaignSharesModel shares = service.listShares(me(), CAMPAIGN);
+
+		// Then:
+		assertThat(shares.teamAccess()).isEmpty();
+	}
+
+	@Test
 	void shouldReadAShareSourceBackAndDefaultOldRowsToManualTest() {
 		// Given: one automatic row and one row from before the column existed
 		givenVisibleCampaign();
@@ -569,6 +651,12 @@ class CampaignShareServiceImplTest {
 
 	private static CurrentUserModel me() {
 		return new CurrentUserModel(ME, CLERK_ID, "me@x.com", "Me", "ACTIVE");
+	}
+
+	private static HubRoleAssignment assignment(long userId) {
+		HubRoleAssignment assignment = new HubRoleAssignment();
+		assignment.setUserId(userId);
+		return assignment;
 	}
 
 	private static HubUser user(long id, String name, String email) {

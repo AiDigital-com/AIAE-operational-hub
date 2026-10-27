@@ -30,6 +30,14 @@ public interface HubTeamAgencyService {
 	List<Long> findAgencyIdsByTeamIdIn(Collection<Long> teamIds);
 
 	/**
+	 * Returns the distinct ids of the teams that own an agency.
+	 *
+	 * @param agencyId the agency id
+	 * @return the owning {@code hub_teams.id} values, in no guaranteed order
+	 */
+	List<Long> findTeamIdsByAgencyId(Long agencyId);
+
+	/**
 	 * Persists the given mapping.
 	 *
 	 * @param mapping the mapping to save

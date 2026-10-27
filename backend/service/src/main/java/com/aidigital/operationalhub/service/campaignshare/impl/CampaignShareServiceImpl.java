@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.service.campaignshare.impl;
 
 import com.aidigital.operationalhub.domain.entity.HubCampaignShare;
+import com.aidigital.operationalhub.domain.entity.HubRoleAssignment;
 import com.aidigital.operationalhub.domain.entity.HubUser;
 import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
 import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccessClient;
@@ -15,6 +16,8 @@ import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePac
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePersonRoleModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import com.aidigital.operationalhub.service.entity.HubCampaignShareService;
+import com.aidigital.operationalhub.service.entity.HubRoleAssignmentService;
+import com.aidigital.operationalhub.service.entity.HubTeamAgencyService;
 import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
@@ -22,6 +25,7 @@ import com.aidigital.operationalhub.service.netsuite.org.MpoDepartmentPolicy;
 import com.aidigital.operationalhub.service.rbac.AgencyVisibilityService;
 import com.aidigital.operationalhub.service.rbac.RbacQueryService;
 import com.aidigital.operationalhub.service.rbac.enums.RbacRoleCode;
+import com.aidigital.operationalhub.service.rbac.enums.RbacScopeCode;
 import com.aidigital.operationalhub.service.rbac.model.AgencyVisibility;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import lombok.RequiredArgsConstructor;
@@ -86,6 +90,8 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	private final CampaignShareTeamMembers teamMembers;
 	private final PacingCampaignAccessClient pacingCampaignAccessClient;
 	private final CampaignShareGrantWriter grantWriter;
+	private final HubTeamAgencyService hubTeamAgencyService;
+	private final HubRoleAssignmentService hubRoleAssignmentService;
 
 	@Override
 	public CampaignSharesModel listShares(CurrentUserModel user, long campaignId) {
@@ -97,7 +103,47 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 		List<CampaignShareModel> rows = shares.stream()
 				.map(share -> toModel(share, usersById, roleOf.apply(share.getUserId())))
 				.toList();
-		return new CampaignSharesModel(canShare(user, campaign), rows);
+		Set<Long> sharedWith = shares.stream().map(HubCampaignShare::getUserId).collect(Collectors.toSet());
+		return new CampaignSharesModel(canShare(user, campaign), rows, teamAccess(campaign, sharedWith));
+	}
+
+	/**
+	 * The people who see a campaign through a team that owns its agency (2026-10-27), for the read-only
+	 * part of "Add people": everyone with an active role on one of those teams, Directors included.
+	 * Somebody already on the share list is left out, so they appear once - where they can be removed.
+	 * Leavers (the sync cleared their department) are left out too: a stale role is not access anybody
+	 * uses. Admins are not listed; they see every campaign.
+	 *
+	 * @param campaign   the campaign
+	 * @param sharedWith the people on the share list
+	 * @return the team's people, by name
+	 */
+	List<CampaignShareCandidateModel> teamAccess(CampaignModel campaign, Set<Long> sharedWith) {
+		if (campaign.agencyId() == null) {
+			return List.of();
+		}
+		List<Long> teamIds = hubTeamAgencyService.findTeamIdsByAgencyId(campaign.agencyId());
+		if (teamIds.isEmpty()) {
+			return List.of();
+		}
+		Set<Long> userIds = hubRoleAssignmentService
+				.findActiveByScopeTypeCodeAndScopeIds(RbacScopeCode.TEAM.getCode(), teamIds).stream()
+				.map(HubRoleAssignment::getUserId)
+				.filter(userId -> !sharedWith.contains(userId))
+				.collect(Collectors.toSet());
+		if (userIds.isEmpty()) {
+			return List.of();
+		}
+		List<HubUser> people = hubUserService.findAllByIds(userIds).stream()
+				.filter(person -> person.getDepartment() != null)
+				.sorted(Comparator.comparing(person -> displayName(person).toLowerCase(Locale.ROOT)))
+				.toList();
+		Function<Long, CampaignSharePersonRoleModel> roleOf =
+				personDescriber.describer(people.stream().map(HubUser::getId).toList());
+		return people.stream()
+				.map(person -> new CampaignShareCandidateModel(
+						person.getId(), displayName(person), person.getEmail(), roleOf.apply(person.getId())))
+				.toList();
 	}
 
 	@Override

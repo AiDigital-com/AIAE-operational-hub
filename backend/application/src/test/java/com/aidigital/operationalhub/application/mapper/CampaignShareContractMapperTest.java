@@ -50,9 +50,11 @@ class CampaignShareContractMapperTest {
 
 	@Test
 	void shouldMapTheListWithTheCallersRightToShareTest() {
-		// Given: a share of someone with no role at all
+		// Given: a share of someone with no role at all, and one person who sees it through the team
 		CampaignShareModel roleless = new CampaignShareModel(3L, "Dan", "dan@aidigital.com", null, null, null, null);
-		CampaignSharesModel model = new CampaignSharesModel(true, List.of(roleless));
+		CampaignShareCandidateModel teammate = new CampaignShareCandidateModel(6L, "Galina", "galina@aidigital.com",
+				new CampaignSharePersonRoleModel("Team Lead", "Team Galina"));
+		CampaignSharesModel model = new CampaignSharesModel(true, List.of(roleless), List.of(teammate));
 
 		// When:
 		CampaignShareListV1 v1 = mapper.toV1(model);
@@ -66,6 +68,11 @@ class CampaignShareContractMapperTest {
 		assertThat(row.getTeamName()).isNull();
 		assertThat(row.getGrantedByName()).isNull();
 		assertThat(row.getCreatedAt()).isNull();
+		assertThat(v1.getTeamAccess()).singleElement().satisfies(person -> {
+			assertThat(person.getHubUserId()).isEqualTo(6L);
+			assertThat(person.getRoleName()).isEqualTo("Team Lead");
+			assertThat(person.getTeamName()).isEqualTo("Team Galina");
+		});
 	}
 
 	@Test

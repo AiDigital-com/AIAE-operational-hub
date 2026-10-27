@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./shares-api";
@@ -35,8 +35,8 @@ function aShare(over: Partial<CampaignShareV1> = {}): CampaignShareV1 {
   };
 }
 
-function renderPeople(list: CampaignShareListV1) {
-  vi.mocked(api.listCampaignShares).mockResolvedValue(list);
+function renderPeople(list: Omit<CampaignShareListV1, "teamAccess"> & Partial<Pick<CampaignShareListV1, "teamAccess">>) {
+  vi.mocked(api.listCampaignShares).mockResolvedValue({ teamAccess: [], ...list });
   vi.mocked(api.listShareCandidates).mockResolvedValue([
     { hubUserId: 3, fullName: "Zlatan Peleksic", email: "zlatan@aidigital.com", roleName: "Team Lead", teamName: "Team Zlatan" },
   ]);
@@ -87,6 +87,37 @@ describe("CampaignPeople", () => {
 
     await waitFor(() => expect(api.listCampaignShares).toHaveBeenCalledWith(19813));
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("lists who sees the campaign through its team, with no way to remove them", async () => {
+    renderPeople({
+      canShare: true,
+      shares: [aShare()],
+      teamAccess: [
+        { hubUserId: 6, fullName: "Galina Kozlova", email: "galina@aidigital.com", roleName: "Team Lead", teamName: "Team Galina" },
+      ],
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add people" }));
+    // Folded until asked for, so a big team does not push the share list away.
+    expect(screen.queryByRole("list", { name: "Team access" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Team access/ }));
+
+    const team = screen.getByRole("list", { name: "Team access" });
+    expect(within(team).getByText("Galina Kozlova")).toBeInTheDocument();
+    expect(within(team).getByText("Team Lead · Team Galina")).toBeInTheDocument();
+    expect(within(team).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Beatris Felises" })).toBeInTheDocument();
+    expect(screen.getByText("Admins can see every campaign.")).toBeInTheDocument();
+  });
+
+  it("asks for no suggestions until something is typed", async () => {
+    renderPeople({ canShare: true, shares: [aShare()] });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add people" }));
+
+    expect(screen.getByText("Added to Campaign")).toBeInTheDocument();
+    expect(api.listShareCandidates).not.toHaveBeenCalled();
   });
 
   it("lets someone who may share pick a person from the search", async () => {

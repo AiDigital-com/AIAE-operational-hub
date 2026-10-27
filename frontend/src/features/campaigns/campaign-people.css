@@ -48,9 +48,9 @@
   color: var(--ink);
 }
 .cpeople__avatar--sm {
-  width: 26px;
-  height: 26px;
-  font-size: 10px;
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
   border-width: 1px;
   box-shadow: none;
 }
@@ -60,9 +60,9 @@
   top: calc(100% + 8px);
   right: 0;
   z-index: 320;
-  width: 320px;
+  width: 380px;
   max-width: calc(100vw - 32px);
-  max-height: 420px;
+  max-height: 520px;
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -79,7 +79,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
 }
@@ -89,7 +89,7 @@
   border: none;
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink);
   outline: none;
 }
@@ -106,8 +106,57 @@
 }
 .cpeople__list--candidates {
   flex: 1;
-  max-height: 180px;
-  border-bottom: 1px solid var(--border);
+}
+/* Everything below the search scrolls as one, so neither list is squeezed by the other. */
+.cpeople__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+.cpeople__body .cpeople__list {
+  overflow: visible;
+}
+.cpeople__list--team {
+  padding-top: 0;
+}
+
+.cpeople__team-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.cpeople__team-toggle:hover,
+.cpeople__team-toggle:focus-visible {
+  background: var(--n-100);
+}
+.cpeople__team-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+.cpeople__team-count {
+  flex: 1;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.cpeople__team-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-strong);
+  transition: transform .15s ease;
+}
+.cpeople__team-chevron--open {
+  transform: rotate(180deg);
 }
 
 .cpeople__option,
@@ -116,7 +165,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 8px 12px;
 }
 .cpeople__option {
   border: none;
@@ -160,14 +209,14 @@
   font-weight: 800;
 }
 .cpeople__option-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .cpeople__option-email {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-strong);
   white-space: nowrap;
   overflow: hidden;
@@ -179,17 +228,18 @@
 
 .cpeople__heading {
   margin: 0;
-  padding: 8px 10px 2px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--muted-strong);
+  padding: 12px 12px 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.cpeople__note--foot {
+  border-top: 1px solid var(--border);
 }
 .cpeople__note {
   margin: 0;
-  padding: 8px 10px;
-  font-size: 11px;
+  padding: 8px 12px;
+  font-size: 12px;
   color: var(--muted-strong);
 }
 /* Wraps rather than truncating: the refusal names the rule, and that sentence is the point. */

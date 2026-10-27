@@ -19,4 +19,12 @@ public interface HubTeamAgencyRepository extends JpaRepository<HubTeamAgency, Lo
 	 * @return the matching agency mappings across the given teams
 	 */
 	List<HubTeamAgency> findByTeamIdIn(Collection<Long> teamIds);
+
+	/**
+	 * Returns every team mapping of one agency - an agency may belong to more than one team.
+	 *
+	 * @param agencyId the agency id
+	 * @return the agency's mappings
+	 */
+	List<HubTeamAgency> findByAgencyId(Long agencyId);
 }

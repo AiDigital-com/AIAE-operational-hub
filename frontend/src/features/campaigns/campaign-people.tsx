@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { SearchIcon } from "../../shared/ui/icons/icons";
+import { ChevronDownIcon, SearchIcon } from "../../shared/ui/icons/icons";
 import { Modal } from "../../shared/ui/modal/modal";
 import { Tooltip } from "../../shared/ui/tooltip/tooltip";
 import { listShareOwnedPacings } from "./shares-api";
@@ -18,6 +18,11 @@ import "./campaign-people.css";
  * because it was shared with them gets the stack and nothing else, and Client Services likewise.
  *
  * Nothing here decides access. A refusal comes back as a sentence and is shown as written.
+ *
+ * Under the share list (2026-10-27), read-only and folded by default: who sees the campaign anyway,
+ * through a team that owns its agency (`teamAccess`) - the way a shared document lists who has
+ * access. No Remove there; team membership is changed in team management, not on a campaign. The
+ * search shows suggestions only once something is typed, and they take the popover's place.
  *
  * Removing someone who owns pacings on the campaign (2026-10-23) first shows what that means: each of
  * their pacings here moves whole to the remover - every campaign it spans included - before they go.
@@ -102,7 +107,12 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
 
   const canShare = shares.data?.canShare ?? false;
   const people = shares.data?.shares ?? [];
-  const candidates = useShareCandidates(campaignId, search, open && canShare);
+  const team = shares.data?.teamAccess ?? [];
+  // Suggestions only while typing, the way a shared document's dialog works: an empty box leaves the
+  // popover to who already has access.
+  const searching = canShare && searchInput.trim().length > 0;
+  const candidates = useShareCandidates(campaignId, search, open && canShare && search.length > 0);
+  const [teamOpen, setTeamOpen] = useState(false);
 
   // Close on a click anywhere else or on Escape - a popover that only closes from its own button
   // ends up left open under the next thing the person does.
@@ -224,67 +234,100 @@ export function CampaignPeople({ campaignId }: { campaignId: number }) {
       {open && (
         <div className="cpeople__pop" role="dialog" aria-label="People on this campaign">
           {canShare && (
-            <>
-              <label className="cpeople__search">
-                <SearchIcon />
-                <input
-                  ref={searchRef}
-                  className="cpeople__search-input"
-                  type="search"
-                  placeholder="Add a person by name or email…"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  aria-label="Add a person"
-                />
-              </label>
-              <ul className="cpeople__list cpeople__list--candidates">
-                {(candidates.data ?? []).map((c) => (
-                  <li key={c.hubUserId}>
-                    <button
-                      type="button"
-                      className="cpeople__option"
-                      onClick={() => void add(c.hubUserId)}
-                      disabled={busy}
-                    >
-                      <span className="cpeople__avatar cpeople__avatar--sm" aria-hidden="true">
-                        {initials(c)}
-                      </span>
-                      <PersonText person={c} />
-                    </button>
-                  </li>
-                ))}
-                {candidates.data && candidates.data.length === 0 && (
-                  <li className="cpeople__note">{search ? "Nobody matches that." : "Everyone is on this campaign already."}</li>
-                )}
-              </ul>
-            </>
+            <label className="cpeople__search">
+              <SearchIcon />
+              <input
+                ref={searchRef}
+                className="cpeople__search-input"
+                type="search"
+                placeholder="Add a person by name or email…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                aria-label="Add a person"
+              />
+            </label>
           )}
 
-          <p className="cpeople__heading">On this campaign</p>
-          {people.length === 0 ? (
-            <p className="cpeople__note">Nobody has been added yet. People on the owning team see it anyway.</p>
-          ) : (
-            <ul className="cpeople__list">
-              {people.map((p) => (
-                <li key={p.hubUserId} className="cpeople__row">
-                  <span className="cpeople__avatar cpeople__avatar--sm" aria-hidden="true">
-                    {initials(p)}
-                  </span>
-                  <PersonText person={p} />
-                  {canShare && (
-                    <button
-                      type="button"
-                      className={cn("button button--ghost button--sm cpeople__remove")}
-                      onClick={() => void drop(p)}
-                      disabled={busy}
-                      aria-label={`Remove ${p.fullName || p.email}`}
-                    >
-                      Remove
-                    </button>
-                  )}
+          {searching ? (
+            <ul className="cpeople__list cpeople__list--candidates">
+              {(candidates.data ?? []).map((c) => (
+                <li key={c.hubUserId}>
+                  <button
+                    type="button"
+                    className="cpeople__option"
+                    onClick={() => void add(c.hubUserId)}
+                    disabled={busy}
+                  >
+                    <span className="cpeople__avatar cpeople__avatar--sm" aria-hidden="true">
+                      {initials(c)}
+                    </span>
+                    <PersonText person={c} />
+                  </button>
                 </li>
               ))}
+              {candidates.data && candidates.data.length === 0 && (
+                <li className="cpeople__note">Nobody matches that.</li>
+              )}
             </ul>
+          ) : (
+            <div className="cpeople__body">
+              <p className="cpeople__heading">Added to Campaign</p>
+              {people.length === 0 ? (
+                <p className="cpeople__note">Nobody has been added yet.</p>
+              ) : (
+                <ul className="cpeople__list">
+                  {people.map((p) => (
+                    <li key={p.hubUserId} className="cpeople__row">
+                      <span className="cpeople__avatar cpeople__avatar--sm" aria-hidden="true">
+                        {initials(p)}
+                      </span>
+                      <PersonText person={p} />
+                      {canShare && (
+                        <button
+                          type="button"
+                          className={cn("button button--ghost button--sm cpeople__remove")}
+                          onClick={() => void drop(p)}
+                          disabled={busy}
+                          aria-label={`Remove ${p.fullName || p.email}`}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {team.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="cpeople__team-toggle"
+                    onClick={() => setTeamOpen((current) => !current)}
+                    aria-expanded={teamOpen}
+                  >
+                    <span className="cpeople__team-label">Team access</span>
+                    <span className="cpeople__team-count">
+                      {team.length} {team.length === 1 ? "person" : "people"}
+                    </span>
+                    <ChevronDownIcon className={cn("cpeople__team-chevron", teamOpen && "cpeople__team-chevron--open")} />
+                  </button>
+                  {teamOpen && (
+                    <ul className="cpeople__list cpeople__list--team" aria-label="Team access">
+                      {team.map((p) => (
+                        <li key={p.hubUserId} className="cpeople__row">
+                          <span className="cpeople__avatar cpeople__avatar--sm" aria-hidden="true">
+                            {initials(p)}
+                          </span>
+                          <PersonText person={p} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+              <p className="cpeople__note cpeople__note--foot">Admins can see every campaign.</p>
+            </div>
           )}
           {error && <p className="cpeople__error">{error}</p>}
         </div>

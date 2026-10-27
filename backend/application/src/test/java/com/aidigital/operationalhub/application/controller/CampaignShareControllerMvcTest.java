@@ -58,7 +58,7 @@ class CampaignShareControllerMvcTest {
 	void shouldListSharesForTheCurrentUserTest() throws Exception {
 		// Given:
 		CurrentUserModel user = stubCurrentUser();
-		CampaignSharesModel model = new CampaignSharesModel(true, List.of());
+		CampaignSharesModel model = new CampaignSharesModel(true, List.of(), List.of());
 		doReturn(model).when(campaignShareService).listShares(user, 19813L);
 		doReturn(new CampaignShareListV1().canShare(true).shares(List.of())).when(mapper).toV1(model);
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();

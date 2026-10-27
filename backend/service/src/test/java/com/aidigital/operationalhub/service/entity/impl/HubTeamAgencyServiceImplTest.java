@@ -56,6 +56,19 @@ class HubTeamAgencyServiceImplTest {
 	}
 
 	@Test
+	void shouldReturnTheDistinctTeamsOwningAnAgencyTest() {
+		// Given:
+		when(teamAgencyRepository.findByAgencyId(100L))
+				.thenReturn(List.of(mapping(100L, TEAM_ID), mapping(100L, 20L), mapping(100L, TEAM_ID)));
+
+		// When:
+		List<Long> result = service.findTeamIdsByAgencyId(100L);
+
+		// Then:
+		assertThat(result).containsExactly(TEAM_ID, 20L);
+	}
+
+	@Test
 	void shouldReturnEmptyWithoutQueryingWhenTeamIdsIsEmptyTest() {
 		// When:
 		List<Long> result = service.findAgencyIdsByTeamIdIn(List.of());
