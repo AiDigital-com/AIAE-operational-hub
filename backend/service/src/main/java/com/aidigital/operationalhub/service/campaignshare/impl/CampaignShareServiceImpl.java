@@ -8,7 +8,9 @@ import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccess
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignPacing;
 import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.CampaignTeamLeadsModel;
 import com.aidigital.operationalhub.service.campaignshare.CampaignShareService;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingCampaignModel;
@@ -92,6 +94,7 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 	private final CampaignShareGrantWriter grantWriter;
 	private final HubTeamAgencyService hubTeamAgencyService;
 	private final HubRoleAssignmentService hubRoleAssignmentService;
+	private final CampaignAccessContactResolver accessContactResolver;
 
 	@Override
 	public CampaignSharesModel listShares(CurrentUserModel user, long campaignId) {
@@ -144,6 +147,13 @@ public class CampaignShareServiceImpl implements CampaignShareService {
 				.map(person -> new CampaignShareCandidateModel(
 						person.getId(), displayName(person), person.getEmail(), roleOf.apply(person.getId())))
 				.toList();
+	}
+
+	@Override
+	public CampaignAccessContactsModel listAccessContacts(CurrentUserModel user, long campaignId) {
+		CampaignTeamLeadsModel campaign = campaignService.findCampaignTeamLeads(campaignId)
+				.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_025, campaignId));
+		return accessContactResolver.resolve(campaign);
 	}
 
 	@Override

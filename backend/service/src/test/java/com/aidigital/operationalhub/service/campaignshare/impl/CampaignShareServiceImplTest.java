@@ -14,6 +14,8 @@ import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePac
 import com.aidigital.operationalhub.service.netsuite.org.MpoDepartmentPolicy;
 import com.aidigital.operationalhub.service.agency.CampaignService;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.CampaignTeamLeadsModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePersonRoleModel;
@@ -105,8 +107,42 @@ class CampaignShareServiceImplTest {
 	@Mock
 	private CampaignShareGrantWriter grantWriter;
 
+	@Mock
+	private CampaignAccessContactResolver accessContactResolver;
+
 	@InjectMocks
 	private CampaignShareServiceImpl service;
+
+	@Test
+	void shouldNameWhoToAskForACampaignTheCallerCannotOpenTest() {
+		// Given: NetSuite says Sam Marley runs the campaign, and his team's lead resolves
+		CampaignTeamLeadsModel leads = new CampaignTeamLeadsModel(CAMPAIGN, "Fox", AGENCY, List.of("Sam Marley"));
+		when(campaignService.findCampaignTeamLeads(CAMPAIGN)).thenReturn(Optional.of(leads));
+		CampaignShareCandidateModel sam = new CampaignShareCandidateModel(
+				THEM, "Saveliy Maslakov", "sam.marley@x.com", new CampaignSharePersonRoleModel("Team Lead", "Team S"));
+		CampaignAccessContactsModel resolved =
+				new CampaignAccessContactsModel("Fox", List.of("Sam Marley"), true, List.of(sam));
+		when(accessContactResolver.resolve(leads)).thenReturn(resolved);
+
+		// When:
+		CampaignAccessContactsModel result = service.listAccessContacts(me(), CAMPAIGN);
+
+		// Then: the resolver's answer, with no visibility check on the way
+		assertThat(result).isEqualTo(resolved);
+		verifyNoInteractions(agencyVisibilityService);
+	}
+
+	@Test
+	void shouldRefuseToNameAnyoneForAnUnknownCampaignTest() {
+		// Given:
+		when(campaignService.findCampaignTeamLeads(CAMPAIGN)).thenReturn(Optional.empty());
+
+		// When-Then:
+		assertThatThrownBy(() -> service.listAccessContacts(me(), CAMPAIGN))
+				.isInstanceOf(BusinessException.class)
+				.extracting("code").isEqualTo(OperationalHubErrorReason.OPH_025.getCode());
+		verifyNoInteractions(accessContactResolver);
+	}
 
 	@Test
 	void shouldShareWhenTheCallersOwnTeamOwnsTheAgencyTest() {

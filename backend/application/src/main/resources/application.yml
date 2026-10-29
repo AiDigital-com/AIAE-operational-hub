@@ -114,7 +114,7 @@ app:
       dataset: ${BIGQUERY_DATASET:}
       location: ${BIGQUERY_LOCATION:US}
       # Each table is a fully-qualified project.dataset.table name, used verbatim as the query source.
-      io-lines-table: ${BIGQUERY_IO_LINES_TABLE:silken-quasar-376417.netsuite.netsuite_campaigns_with_ids_fresh_data}
+      io-lines-table: ${BIGQUERY_IO_LINES_TABLE:silken-quasar-376417.netsuite.netsuite_campaigns_with_ids}
       rippling-employees-table: ${BIGQUERY_RIPPLING_EMPLOYEES_TABLE:silken-quasar-376417.custom_task_data.rippling_employees}
       adjustments-view: ${BIGQUERY_ADJUSTMENTS_VIEW:silken-quasar-376417.operational_hub.platform_mart_adjustments_view_op_hub}
       write-table: ${BIGQUERY_ADJUSTMENTS_TABLE:silken-quasar-376417.operational_hub.platform_mart_operational_hub_adjustements}

@@ -1,17 +1,19 @@
 package com.aidigital.operationalhub.service.agency;
 
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.CampaignTeamLeadsModel;
 import com.aidigital.operationalhub.service.agency.search.CampaignField;
 import com.aidigital.operationalhub.service.common.search.SearchCriteria;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import org.springframework.data.domain.Page;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Reads campaigns from BigQuery, optionally filtered by client or agency.
  *
- * <p>Implementations query the {@code netsuite_campaigns_with_ids_fresh_data} BigQuery table for
+ * <p>Implementations query the {@code netsuite_campaigns_with_ids} BigQuery table for
  * distinct campaigns, apply the search criteria, and map the rows into campaign models.
  */
 public interface CampaignService {
@@ -78,4 +80,14 @@ public interface CampaignService {
 	 * @throws com.aidigital.operationalhub.service.exception.BusinessException if the BigQuery read fails
 	 */
 	List<CampaignModel> getVisibleCampaignIdentities(CurrentUserModel user, List<Long> campaignIds);
+
+	/**
+	 * Reads who NetSuite says runs a campaign - its agency and Team Lead names - WITHOUT the caller's
+	 * visibility. Built for the "you have no access" screen, which has to name somebody who can add the
+	 * caller; never use it to show a campaign's own data.
+	 *
+	 * @param campaignId the campaign id
+	 * @return the campaign's agency and Team Leads, or empty when no campaign has this id
+	 */
+	Optional<CampaignTeamLeadsModel> findCampaignTeamLeads(long campaignId);
 }

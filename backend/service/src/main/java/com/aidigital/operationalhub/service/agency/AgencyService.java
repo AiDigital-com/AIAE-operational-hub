@@ -9,7 +9,7 @@ import org.springframework.data.domain.Page;
 /**
  * Reads agencies from BigQuery, filtered by the current user's RBAC scope.
  *
- * <p>Implementations query the {@code netsuite_campaigns_with_ids_fresh_data} BigQuery table for
+ * <p>Implementations query the {@code netsuite_campaigns_with_ids} BigQuery table for
  * distinct agencies, apply the search criteria, and map the rows into agency models.
  */
 public interface AgencyService {

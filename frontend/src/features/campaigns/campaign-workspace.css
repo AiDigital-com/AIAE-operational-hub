@@ -137,6 +137,96 @@
   font-size: 16px;
   font-weight: 700;
 }
+.campaign-ws__note--denied .campaign-ws__access-label {
+  margin-top: 14px;
+  color: var(--ink);
+}
+.campaign-ws__access-message {
+  position: relative;
+  max-width: 640px;
+  padding: 12px 48px 12px 14px;
+  border-radius: 8px;
+  background: var(--n-200);
+}
+.campaign-ws__note--denied .campaign-ws__access-request {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.campaign-ws__access-copy-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.campaign-ws__access-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.campaign-ws__access-copy:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.campaign-ws__access-copy:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-focus);
+}
+.campaign-ws__access-copy--done,
+.campaign-ws__access-copy--done:hover {
+  color: var(--primary);
+}
+.campaign-ws__access-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform .15s;
+}
+.campaign-ws__access-icon--open {
+  transform: rotate(180deg);
+}
+.campaign-ws__note--denied .campaign-ws__access-fallback {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.campaign-ws__access-toggle {
+  margin-top: 12px;
+}
+.campaign-ws__contacts {
+  max-width: 640px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.campaign-ws__contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.campaign-ws__contact-name {
+  color: var(--ink);
+  font-weight: 700;
+}
+.campaign-ws__contact-role {
+  font-size: 13px;
+}
+.campaign-ws__contact-email {
+  margin-left: auto;
+  font-size: 13px;
+  user-select: all;
+}
 
 @media (max-width: 720px) {
   .campaign-ws__title {

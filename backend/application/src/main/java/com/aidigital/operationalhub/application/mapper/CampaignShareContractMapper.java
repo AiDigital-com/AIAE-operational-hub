@@ -1,5 +1,6 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignAccessContactsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
@@ -7,6 +8,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignS
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareV1;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
@@ -71,6 +73,20 @@ public class CampaignShareContractMapper {
 												.name(campaign.name()))
 										.toList()))
 						.toList());
+	}
+
+	/**
+	 * Maps who to ask for access to a campaign.
+	 *
+	 * @param model the service model
+	 * @return the contract shape
+	 */
+	public CampaignAccessContactsV1 toAccessContactsV1(CampaignAccessContactsModel model) {
+		return new CampaignAccessContactsV1()
+				.campaignName(model.campaignName())
+				.netSuiteTeamLeads(model.netSuiteTeamLeads())
+				.runningTeamFound(model.runningTeamFound())
+				.contacts(model.contacts().stream().map(this::toCandidateV1).toList());
 	}
 
 	/**

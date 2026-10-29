@@ -7,6 +7,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.model.BqRequest;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
 import com.aidigital.operationalhub.service.agency.bigquery.service.CachedBigQuerySearchExecutor;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.CampaignTeamLeadsModel;
 import com.aidigital.operationalhub.service.agency.search.CampaignField;
 import com.aidigital.operationalhub.service.common.search.FilterCriterion;
 import com.aidigital.operationalhub.service.common.search.FilterOperation;
@@ -27,6 +28,7 @@ import org.springframework.data.domain.Page;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -185,6 +187,41 @@ class BigQueryCampaignServiceTest {
 		// When-Then:
 		assertThatThrownBy(() -> service.getVisibleCampaignIdentity(null, 1L))
 				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void shouldReadACampaignsTeamLeadsWithoutTheCallersVisibilityTest() {
+		// Given: the "no access" screen asks about a campaign nobody's visibility is consulted for
+		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
+		Map<String, Object> row = new HashMap<>();
+		row.put("id", 54741L);
+		row.put("name", "Alexandra Williams for OUSD 6");
+		row.put("agency_id", 51076L);
+		row.put("mpo_team_leads", List.of("Sam Marley"));
+		when(bigQueryClient.query(anyString())).thenReturn(List.of(row));
+		ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+
+		// When:
+		Optional<CampaignTeamLeadsModel> result = service.findCampaignTeamLeads(54741L);
+
+		// Then: the name, the agency and the lead names, and no visibility predicate in the SQL
+		assertThat(result).contains(new CampaignTeamLeadsModel(
+				54741L, "Alexandra Williams for OUSD 6", 51076L, List.of("Sam Marley")));
+		verify(bigQueryClient).query(sql.capture());
+		assertThat(sql.getValue())
+				.contains("ARRAY_AGG(DISTINCT `mpo_team_lead` IGNORE NULLS)", "`campaign_id` = 54741", "LIMIT 1")
+				.doesNotContain("`agency_id` IN");
+		verifyNoInteractions(agencyVisibilityService);
+	}
+
+	@Test
+	void shouldReadNoTeamLeadsForAnUnknownCampaignTest() {
+		// Given:
+		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
+		when(bigQueryClient.query(anyString())).thenReturn(List.of());
+
+		// When-Then:
+		assertThat(service.findCampaignTeamLeads(1L)).isEmpty();
 	}
 
 	@Test

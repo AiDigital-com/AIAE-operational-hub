@@ -1,7 +1,7 @@
 package com.aidigital.operationalhub.service.agency.bigquery.model;
 
 /**
- * Column names of the BigQuery {@code netsuite_campaigns_with_ids_fresh_data} IO Lines source table
+ * Column names of the BigQuery {@code netsuite_campaigns_with_ids} IO Lines source table
  * used to load agencies, clients, and campaigns.
  *
  * <p>Names match the actual BigQuery schema exactly (lowercase snake_case).

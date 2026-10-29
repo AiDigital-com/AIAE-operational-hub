@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Sortable and filterable fields of the client listing, each mapped to its BigQuery column on the
- * {@code netsuite_campaigns_with_ids_fresh_data} table.
+ * {@code netsuite_campaigns_with_ids} table.
  */
 @RequiredArgsConstructor
 public enum ClientField implements SearchableField {

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createCampaignShare,
   deleteCampaignShare,
+  listCampaignAccessContacts,
   listCampaignShares,
   listShareCandidates,
 } from "./shares-api";
@@ -14,6 +15,19 @@ export function useCampaignShares(campaignId: number | undefined) {
     queryKey: ["campaigns", "shares", campaignId],
     queryFn: () => listCampaignShares(campaignId as number),
     enabled: campaignId !== undefined && Number.isFinite(campaignId),
+  });
+}
+
+/** Who to ask for access, for the "no access" screen. Fetched only once the campaign itself came back
+ *  404; the answer changes once a night with the NetSuite load, so it is not refetched on focus. */
+export function useCampaignAccessContacts(campaignId: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["campaigns", "access-contacts", campaignId],
+    queryFn: () => listCampaignAccessContacts(campaignId as number),
+    enabled: enabled && campaignId !== undefined && Number.isFinite(campaignId),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 

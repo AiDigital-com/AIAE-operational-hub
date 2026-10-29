@@ -1,6 +1,7 @@
 package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.CampaignShareApi;
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignAccessContactsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCreateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
@@ -45,6 +46,12 @@ public class CampaignShareController implements CampaignShareApi {
 	public ResponseEntity<CampaignShareCandidateListV1> listCampaignShareCandidates(Long campaignId, String q) {
 		CurrentUserModel user = currentUserService.resolveCurrentUser();
 		return ResponseEntity.ok(mapper.toCandidatesV1(campaignShareService.listCandidates(user, campaignId, q)));
+	}
+
+	@Override
+	public ResponseEntity<CampaignAccessContactsV1> listCampaignAccessContacts(Long campaignId) {
+		CurrentUserModel user = currentUserService.resolveCurrentUser();
+		return ResponseEntity.ok(mapper.toAccessContactsV1(campaignShareService.listAccessContacts(user, campaignId)));
 	}
 
 	@Override
