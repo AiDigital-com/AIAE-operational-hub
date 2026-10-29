@@ -1,5 +1,6 @@
 package com.aidigital.operationalhub.application.controller;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignAccessContactsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingV1;
@@ -7,6 +8,7 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignS
 import com.aidigital.operationalhub.application.mapper.CampaignShareContractMapper;
 import com.aidigital.operationalhub.service.campaignshare.CampaignShareService;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharesModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
@@ -126,5 +128,21 @@ class CampaignShareControllerMvcTest {
 		mockMvc.perform(get("/api/v1/campaigns/19813/shares/2/pacings"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.pacings[0].pacingName").value("Fox 2026"));
+	}
+
+	@Test
+	void shouldListWhoToAskForAccessTest() throws Exception {
+		// Given:
+		CurrentUserModel user = stubCurrentUser();
+		CampaignAccessContactsModel model = new CampaignAccessContactsModel("Fox", List.of("Sam Marley"), false, List.of());
+		doReturn(model).when(campaignShareService).listAccessContacts(user, 54741L);
+		doReturn(new CampaignAccessContactsV1().netSuiteTeamLeads(List.of("Sam Marley")).contacts(List.of()))
+				.when(mapper).toAccessContactsV1(model);
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then:
+		mockMvc.perform(get("/api/v1/campaigns/54741/access-contacts"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.netSuiteTeamLeads[0]").value("Sam Marley"));
 	}
 }

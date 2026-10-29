@@ -6,6 +6,7 @@ import { campaignDisplayName } from "../../shared/format/names";
 import { cn } from "../../shared/style/cn";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { displayStatusLabel, resolveStatusStyle } from "../../shared/ui/status-badge/status-badge";
+import { CampaignAccessDenied } from "./campaign-access-denied";
 import { CampaignPeople } from "./campaign-people";
 import { useCampaign } from "./hooks";
 import type { CampaignV1 } from "./types";
@@ -120,11 +121,7 @@ export function CampaignWorkspace() {
     return (
       <section className="campaign-ws">
         {noAccess ? (
-          <div className="campaign-ws__note campaign-ws__note--denied">
-            <p className="campaign-ws__note-title">You don&rsquo;t have access to this campaign.</p>
-            <p>It may belong to another team, or it may not be shared with you.</p>
-            <p>Ask the MPO manager for this campaign to share it with you.</p>
-          </div>
+          <CampaignAccessDenied campaignId={numericId} />
         ) : (
           <p className="campaign-ws__note">
             {formatError(error)} <Link to="/agencies">Go to Agencies</Link> to browse the campaigns you

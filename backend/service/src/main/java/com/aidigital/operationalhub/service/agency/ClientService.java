@@ -9,7 +9,7 @@ import org.springframework.data.domain.Page;
 /**
  * Reads clients from BigQuery, filtered by the current user's RBAC scope.
  *
- * <p>Implementations query the {@code netsuite_campaigns_with_ids_fresh_data} BigQuery table for
+ * <p>Implementations query the {@code netsuite_campaigns_with_ids} BigQuery table for
  * distinct clients (advertisers), apply the search criteria, and map the rows into client models.
  */
 public interface ClientService {

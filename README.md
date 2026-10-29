@@ -8,7 +8,7 @@ The product is intentionally operational rather than marketing-facing: it is a w
 
 | Area | Business purpose | Primary data source |
 | --- | --- | --- |
-| Agencies / clients / campaigns | Browse the commercial hierarchy available to the current user. | BigQuery IO Lines table, default `silken-quasar-376417.netsuite.netsuite_campaigns_with_ids_fresh_data`. |
+| Agencies / clients / campaigns | Browse the commercial hierarchy available to the current user. | BigQuery IO Lines table, default `silken-quasar-376417.netsuite.netsuite_campaigns_with_ids`. |
 | Campaign workspace | Inspect a campaign's setup, pacing, reporting, and dashboard views. | BigQuery campaign/search services plus frontend campaign tabs. |
 | Reporting rows | Show delivery metrics, derived KPIs, totals, filters, sorting, grouping, saved views, and Excel exports. | `platform_mart_adjustments_view_op_hub` plus conversions joined from `conversions_mart_adjustments_view_op_hub`. |
 | Manual adjustments | Let users edit delivery metrics and conversion values through UI or `.xlsx` upload/download flows. | Hub writes BigQuery adjustment tables; BigQuery views merge them back into readable marts. |
@@ -140,7 +140,7 @@ Resulting runtime path:
 
 | Property | Default table/view | Used for |
 | --- | --- | --- |
-| `BIGQUERY_IO_LINES_TABLE` | `silken-quasar-376417.netsuite.netsuite_campaigns_with_ids_fresh_data` | Agencies, clients, campaigns, insertion orders. |
+| `BIGQUERY_IO_LINES_TABLE` | `silken-quasar-376417.netsuite.netsuite_campaigns_with_ids` | Agencies, clients, campaigns, insertion orders. |
 | `BIGQUERY_RIPPLING_EMPLOYEES_TABLE` | `silken-quasar-376417.custom_task_data.rippling_employees` | Employee org tree sync. |
 | `BIGQUERY_ADJUSTMENTS_VIEW` | `silken-quasar-376417.operational_hub.platform_mart_adjustments_view_op_hub` | Delivery/report rows with delivery adjustments merged in. |
 | `BIGQUERY_ADJUSTMENTS_TABLE` | `silken-quasar-376417.operational_hub.platform_mart_operational_hub_adjustements` | Hub delivery adjustment writes. |

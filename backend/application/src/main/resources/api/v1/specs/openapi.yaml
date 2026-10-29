@@ -549,7 +549,7 @@ paths:
         - campaigns
       operationId: getCampaign
       description: >
-        Returns one campaign by id, sourced from the netsuite_campaigns_with_ids_fresh_data BigQuery
+        Returns one campaign by id, sourced from the netsuite_campaigns_with_ids BigQuery
         table, enforcing the current user's agency visibility (a campaign outside it resolves the same
         as an unknown one). Lets the campaign workspace be opened directly - by a pasted link, a
         bookmark, or a restored tab - instead of only from a list that carries the campaign along.
@@ -840,6 +840,47 @@ paths:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
         '503':
           description: The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/campaigns/{campaignId}/access-contacts:
+    get:
+      tags:
+        - campaignShare
+      operationId: listCampaignAccessContacts
+      description: >
+        Who to ask for access to a campaign the caller cannot open: the campaign's name, the Team Lead(s)
+        NetSuite records on it (mpo_team_lead), and the Hub people who can add the caller through "Add
+        people" - the people of the team NetSuite's lead resolves to among the teams owning the campaign's
+        agency, lead first, or, when that does not resolve, the leads of every team owning it.
+        Deliberately NOT gated by the caller's visibility: it exists for the screen that says "you have no
+        access". Reads the campaign from the netsuite_campaigns_with_ids BigQuery table.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The campaign id.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The people to ask; both lists may be empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignAccessContactsV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '404':
+          description: No campaign has this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Exception occurred while reading the campaign from BigQuery.
           content:
             application/json:
               schema:
@@ -1733,7 +1774,7 @@ paths:
       operationId: listCampaignInsertionOrders
       description: >
         Returns one campaign's insertion orders (US-009…011), each with its real NetSuite line items,
-        sourced from the netsuite_campaigns_with_ids_fresh_data IO Lines table. One insertion order per
+        sourced from the netsuite_campaigns_with_ids IO Lines table. One insertion order per
         order_id; one line item per row of that table. Order-level values (budget/status/dates) are
         read once per order, never summed or repeated across its line items. The source has no
         per-line-item status - a line item's status is its order's. Not paginated: a campaign's IO/LI
@@ -6394,6 +6435,36 @@ components:
             $ref: '#/components/schemas/CampaignShareCandidateV1'
       required:
         - candidates
+    CampaignAccessContactsV1:
+      type: object
+      description: Who to ask for access to a campaign.
+      properties:
+        campaignName:
+          type: string
+          nullable: true
+          description: The campaign name, for the access request the caller sends.
+        netSuiteTeamLeads:
+          type: array
+          description: The Team Lead names NetSuite records on the campaign, as NetSuite spells them.
+          items:
+            type: string
+        runningTeamFound:
+          type: boolean
+          description: >
+            Whether NetSuite's lead resolved to a Hub team. When true, contacts are that team's people;
+            when false, the leads of every team owning the campaign's agency.
+        contacts:
+          type: array
+          description: >
+            The Hub people who can add the caller to the campaign: Team Lead(s) first, then those who have
+            logged in to the Hub, then the rest, each group by name. Empty when no team owns the
+            campaign's agency in the Hub.
+          items:
+            $ref: '#/components/schemas/CampaignShareCandidateV1'
+      required:
+        - netSuiteTeamLeads
+        - runningTeamFound
+        - contacts
     SyncSummaryV1:
       type: object
       description: Summary of a NetSuite/Rippling sync run.

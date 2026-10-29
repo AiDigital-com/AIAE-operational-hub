@@ -1,5 +1,6 @@
 package com.aidigital.operationalhub.service.campaignshare;
 
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignSharePacingModel;
@@ -90,4 +91,18 @@ public interface CampaignShareService {
 	 *         user has no Pacing account to receive them
 	 */
 	void unshare(CurrentUserModel user, long campaignId, long hubUserId, boolean transferPacings);
+
+	/**
+	 * Names who to ask for access to a campaign the current user cannot open: the Team Lead(s) NetSuite
+	 * records on it, and the Hub people who can add them (see {@code CampaignAccessContactResolver}).
+	 * Deliberately not gated by the user's visibility - it serves the "no access" screen - and it
+	 * tells nothing about the campaign beyond those names.
+	 *
+	 * @param user       the current user
+	 * @param campaignId the NetSuite campaign id
+	 * @return the people to ask
+	 * @throws com.aidigital.operationalhub.service.exception.BusinessException {@code OPH_025} when no
+	 *         campaign has this id
+	 */
+	CampaignAccessContactsModel listAccessContacts(CurrentUserModel user, long campaignId);
 }

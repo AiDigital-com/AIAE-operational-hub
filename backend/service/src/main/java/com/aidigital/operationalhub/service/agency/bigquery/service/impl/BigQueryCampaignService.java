@@ -9,6 +9,7 @@ import com.aidigital.operationalhub.service.agency.bigquery.model.BqSql;
 import com.aidigital.operationalhub.service.agency.bigquery.model.CampaignFlightSql;
 import com.aidigital.operationalhub.service.agency.bigquery.service.BigQuerySearchGateway;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
+import com.aidigital.operationalhub.service.agency.model.CampaignTeamLeadsModel;
 import com.aidigital.operationalhub.service.agency.search.CampaignField;
 import com.aidigital.operationalhub.service.common.search.FilterCriterion;
 import com.aidigital.operationalhub.service.common.search.FilterOperation;
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * BigQuery-backed implementation of {@link CampaignService}.
@@ -54,6 +56,7 @@ public class BigQueryCampaignService implements CampaignService {
 	private static final String AGENCY_ID = BigQueryIoLinesColumns.AGENCY_ID;
 	private static final String AGENCY = BigQueryIoLinesColumns.AGENCY;
 	private static final String ORDER_STATUS = BigQueryIoLinesColumns.ORDER_STATUS;
+	private static final String MPO_TEAM_LEAD = BigQueryIoLinesColumns.MPO_TEAM_LEAD;
 
 	/** The names a {@code SEARCH} term is matched against, in the order a reader would expect them. */
 	private static final List<String> SEARCHABLE_NAMES = List.of(CAMPAIGN, ADVERTISER, AGENCY);
@@ -71,6 +74,7 @@ public class BigQueryCampaignService implements CampaignService {
 	private static final String ALIAS_CHANNELS = "channels";
 	private static final String ALIAS_INDUSTRY_VERTICAL = "industry_vertical";
 	private static final String ALIAS_LINE_ITEM_COUNT = "line_item_count";
+	private static final String ALIAS_MPO_TEAM_LEADS = "mpo_team_leads";
 
 	private final BigQuerySearchGateway gateway;
 	private final AgencyVisibilityService agencyVisibilityService;
@@ -248,6 +252,27 @@ public class BigQueryCampaignService implements CampaignService {
 		// Cached like the single-id identity read: the answer changes once a night, and every
 		// Overview load asks the same question for the same set of pacings.
 		return gateway.fetchCached(query.build(), this::toCampaignIdentity);
+	}
+
+	@Override
+	public Optional<CampaignTeamLeadsModel> findCampaignTeamLeads(long campaignId) {
+		FilterCriterion<CampaignField> idFilter =
+				new FilterCriterion<>(CampaignField.ID, String.valueOf(campaignId), FilterOperation.EQUALS, false);
+		// No visibility predicate, on purpose: this answers "who can let me in" for a campaign the caller
+		// cannot open. It reads the name (for the request they send), the agency and the lead names, and
+		// nothing else about the campaign.
+		BqRequest.Builder query = new BqRequest.Builder()
+				.from(gateway.table())
+				.select(CAMPAIGN_ID, ALIAS_ID)
+				.selectAnyValue(CAMPAIGN, ALIAS_NAME)
+				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
+				.selectArrayAggDistinct(MPO_TEAM_LEAD, ALIAS_MPO_TEAM_LEADS)
+				.whereNotNull(CAMPAIGN_ID)
+				.groupBy(CAMPAIGN_ID)
+				.limitOffset(1, 0);
+		query.filter(CAMPAIGN_ID, true, idFilter);
+		// Cached with the other snapshot reads: the leads change once a night with the NetSuite load.
+		return gateway.fetchCached(query.build(), this::toCampaignTeamLeads).stream().findFirst();
 	}
 
 	/**
@@ -435,5 +460,16 @@ public class BigQueryCampaignService implements CampaignService {
 				row.getLong(ALIAS_AGENCY_ID),
 				row.getString(ALIAS_AGENCY_NAME),
 				null, null, null, null, null, null, null);
+	}
+
+	/**
+	 * Maps a {@link #findCampaignTeamLeads} row.
+	 *
+	 * @param row the campaign's name, agency and lead names
+	 * @return who NetSuite says runs the campaign
+	 */
+	CampaignTeamLeadsModel toCampaignTeamLeads(BqRow row) {
+		return new CampaignTeamLeadsModel(row.getLong(ALIAS_ID), row.getString(ALIAS_NAME),
+				row.getLong(ALIAS_AGENCY_ID), row.getStringList(ALIAS_MPO_TEAM_LEADS));
 	}
 }

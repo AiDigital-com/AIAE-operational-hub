@@ -64,7 +64,7 @@ public class BigQueryProperties {
 	 * distribution has a few weeks of production data behind it.
 	 */
 	private long maxBytesBilled = 0;
-	private String ioLinesTable = "silken-quasar-376417.netsuite.netsuite_campaigns_with_ids_fresh_data";
+	private String ioLinesTable = "silken-quasar-376417.netsuite.netsuite_campaigns_with_ids";
 	private String ripplingEmployeesTable = "silken-quasar-376417.custom_task_data.rippling_employees";
 	private String adjustmentsView = "silken-quasar-376417.operational_hub.platform_mart_adjustments_view_op_hub";
 	private String writeTable = "silken-quasar-376417.operational_hub.platform_mart_operational_hub_adjustements";

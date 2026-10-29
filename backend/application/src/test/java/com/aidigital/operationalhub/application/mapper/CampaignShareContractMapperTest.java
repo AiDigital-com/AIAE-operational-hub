@@ -1,8 +1,10 @@
 package com.aidigital.operationalhub.application.mapper;
 
+import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignAccessContactsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareCandidateListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareListV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignShareV1;
+import com.aidigital.operationalhub.service.campaignshare.model.CampaignAccessContactsModel;
 import com.aidigital.operationalhub.service.campaignshare.model.CampaignShareCandidateModel;
 import com.aidigital.operationalhub.domain.enums.CampaignShareSource;
 import com.aidigital.operationalhub.application.api.v1.generated.model.CampaignSharePacingListV1;
@@ -112,5 +114,24 @@ class CampaignShareContractMapperTest {
 		assertThat(v1.getPacings().getFirst().getPacingName()).isEqualTo("Fox 2026");
 		assertThat(v1.getPacings().getFirst().getCampaigns()).extracting(c -> c.getId()).containsExactly("100", "200");
 		assertThat(v1.getPacings().getFirst().getCampaigns().get(1).getName()).isNull();
+	}
+
+	@Test
+	void shouldMapWhoToAskForAccessTest() {
+		// Given:
+		CampaignAccessContactsModel model = new CampaignAccessContactsModel("Fox", List.of("Sam Marley"), true, List.of(
+				new CampaignShareCandidateModel(380L, "Saveliy Maslakov", "sam.marley@aidigital.com",
+						new CampaignSharePersonRoleModel("Team Lead", "Media Optimization: Saveliy"))));
+
+		// When:
+		CampaignAccessContactsV1 v1 = mapper.toAccessContactsV1(model);
+
+		// Then:
+		assertThat(v1.getCampaignName()).isEqualTo("Fox");
+		assertThat(v1.getNetSuiteTeamLeads()).containsExactly("Sam Marley");
+		assertThat(v1.getRunningTeamFound()).isTrue();
+		assertThat(v1.getContacts()).hasSize(1);
+		assertThat(v1.getContacts().getFirst().getEmail()).isEqualTo("sam.marley@aidigital.com");
+		assertThat(v1.getContacts().getFirst().getTeamName()).isEqualTo("Media Optimization: Saveliy");
 	}
 }

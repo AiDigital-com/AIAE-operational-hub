@@ -7,6 +7,7 @@ export type CampaignShareV1 = components["schemas"]["CampaignShareV1"];
 export type CampaignShareListV1 = components["schemas"]["CampaignShareListV1"];
 export type CampaignShareCandidateV1 = components["schemas"]["CampaignShareCandidateV1"];
 export type CampaignSharePacingV1 = components["schemas"]["CampaignSharePacingV1"];
+export type CampaignAccessContactsV1 = components["schemas"]["CampaignAccessContactsV1"];
 
 /**
  * Campaign sharing - "Add people" on a campaign (2026-10-20).
@@ -75,4 +76,19 @@ export async function deleteCampaignShare(campaignId: number, hubUserId: number,
   if (result.error || !result.response.ok) {
     throw new ApiError(formatError(result.error), result.response.status);
   }
+}
+
+/**
+ * Who to ask for access to a campaign the user cannot open: the Team Lead(s) NetSuite records on it
+ * and the Hub people who can add them. Not gated by the user's visibility - it is what the "no access"
+ * screen reads.
+ */
+export async function listCampaignAccessContacts(campaignId: number): Promise<CampaignAccessContactsV1> {
+  const result = await apiClient.GET("/api/v1/campaigns/{campaignId}/access-contacts", {
+    params: { path: { campaignId } },
+  });
+  if (result.error || !result.response.ok || result.data === undefined) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+  return result.data;
 }

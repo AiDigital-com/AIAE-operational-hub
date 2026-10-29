@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../shared/api/api-error";
 import { ToastProvider } from "../../shared/ui/toast/toast";
 import { getCampaign } from "./api";
+import { listCampaignAccessContacts, type CampaignAccessContactsV1 } from "./shares-api";
 import type { CampaignV1 } from "./types";
 import { CampaignTabRedirect, CampaignWorkspace } from "./campaign-workspace";
 
@@ -18,6 +19,7 @@ vi.mock("./shares-api", () => ({
   listShareCandidates: vi.fn().mockResolvedValue([]),
   createCampaignShare: vi.fn(),
   deleteCampaignShare: vi.fn(),
+  listCampaignAccessContacts: vi.fn(),
 }));
 
 interface WorkspaceState {
@@ -61,6 +63,30 @@ function renderWorkspace(initialPath: string, state: WorkspaceState | undefined 
       </ToastProvider>
     </QueryClientProvider>
   );
+}
+
+function anAccessAnswer(): CampaignAccessContactsV1 {
+  return {
+    campaignName: "Alexandra Williams for OUSD 6",
+    netSuiteTeamLeads: ["Sam Marley"],
+    runningTeamFound: true,
+    contacts: [
+      {
+        hubUserId: 380,
+        fullName: "Saveliy Maslakov",
+        email: "sam.marley@aidigital.com",
+        roleName: "MPO Team Lead",
+        teamName: "Media Optimization: Saveliy",
+      },
+      {
+        hubUserId: 167,
+        fullName: "Anna Motorina",
+        email: "anna.motorina@aidigital.com",
+        roleName: "MPO Manager",
+        teamName: "Media Optimization: Saveliy",
+      },
+    ],
+  };
 }
 
 const FULL_STATE: WorkspaceState = {
@@ -204,20 +230,128 @@ describe("CampaignWorkspace", () => {
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
-  it("should explain how to get access when the campaign is outside the user's visibility", async () => {
-    // Given: the Hub answers 404 for a campaign this user can't see
+  it("should name the team that runs the campaign and keep its people folded", async () => {
+    // Given: the Hub answers 404 for a campaign this user can't see, and resolves NetSuite's lead to a team
     vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockResolvedValue(anAccessAnswer());
+    const user = userEvent.setup();
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // Then: one line about the team, nobody listed yet
+    expect(await screen.findByText(/In NetSuite it’s run by Sam Marley’s team\./)).toBeInTheDocument();
+    expect(screen.getByText("You don’t have access to this campaign.")).toBeInTheDocument();
+    expect(screen.queryByText("Saveliy Maslakov")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Media Optimization: Saveliy/)).not.toBeInTheDocument();
+    expect(listCampaignAccessContacts).toHaveBeenCalledExactlyOnceWith(42);
+
+    // When: the people are unfolded
+    await user.click(screen.getByRole("button", { name: "Show 2 people" }));
+
+    // Then: the lead first, with role and email
+    const people = screen.getAllByRole("listitem");
+    expect(within(people[0]).getByText("Saveliy Maslakov")).toBeInTheDocument();
+    expect(within(people[0]).getByText("MPO Team Lead")).toBeInTheDocument();
+    expect(within(people[0]).getByText("sam.marley@aidigital.com")).toBeInTheDocument();
+    expect(within(people[1]).getByText("Anna Motorina")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide people" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("should show the ready message with the campaign name and link, and copy it", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockResolvedValue(anAccessAnswer());
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // Then: the message itself is on screen, addressed to the team
+    expect(await screen.findByText("Send this to someone on the team in Slack:")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Hi! Could you add me to the campaign “Alexandra Williams for OUSD 6” through Add people/)
+    ).toBeInTheDocument();
+
+    // When:
+    await user.click(screen.getByRole("button", { name: "Copy message" }));
+
+    // Then:
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("add me to the campaign “Alexandra Williams for OUSD 6” through Add people")
+    );
+    expect(writeText.mock.calls[0][0]).toContain("/campaigns/42/pacing");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy message" })).not.toBeInTheDocument();
+  });
+
+  it("should ask to copy by hand when the clipboard refuses", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockResolvedValue(anAccessAnswer());
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // When:
+    await user.click(await screen.findByRole("button", { name: "Copy message" }));
+
+    // Then:
+    expect(await screen.findByText("Could not copy. Select the text above and copy it yourself.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+  });
+
+  it("should name the agency's team leads when NetSuite's lead resolves to no team", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockResolvedValue({
+      ...anAccessAnswer(),
+      netSuiteTeamLeads: ["Nino Jincharadze"],
+      runningTeamFound: false,
+    });
 
     // When:
     renderWorkspace("/campaigns/42/pacing", undefined);
 
     // Then:
-    expect(await screen.findByText("You don’t have access to this campaign.")).toBeInTheDocument();
-    expect(screen.getByText("It may belong to another team, or it may not be shared with you.")).toBeInTheDocument();
+    expect(await screen.findByText(/In NetSuite it is assigned to Nino Jincharadze\./)).toBeInTheDocument();
+    expect(screen.getByText(/Any of these team leads can add you/)).toBeInTheDocument();
+    expect(screen.getByText("Send this to one of them in Slack:")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show 2 people" })).toBeInTheDocument();
+  });
+
+  it("should send the user to an admin when NetSuite's lead has no team in the Hub", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockResolvedValue({
+      campaignName: "Alexandra Williams for OUSD 6",
+      netSuiteTeamLeads: ["Nino Jincharadze"],
+      runningTeamFound: false,
+      contacts: [],
+    });
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // Then:
+    expect(await screen.findByText(/assigned to Nino Jincharadze, whose team is not set up/)).toBeInTheDocument();
+    expect(screen.getByText(/Ask an admin to give you access\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy message" })).not.toBeInTheDocument();
+  });
+
+  it("should fall back to the general explanation when nobody can be named", async () => {
+    // Given: the lookup fails (e.g. the id is unknown altogether)
+    vi.mocked(getCampaign).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+    vi.mocked(listCampaignAccessContacts).mockRejectedValue(new ApiError("Unknown campaign: 42.", 404));
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", undefined);
+
+    // Then:
+    expect(await screen.findByText("It may belong to another team, or it may not be shared with you.")).toBeInTheDocument();
+    expect(screen.getByText("You don’t have access to this campaign.")).toBeInTheDocument();
     expect(screen.getByText("Ask the MPO manager for this campaign to share it with you.")).toBeInTheDocument();
     expect(screen.queryByText(/Unknown campaign/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Go to Agencies" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
   it("should show a way back instead of a broken hero when the campaign can't be fetched", async () => {
