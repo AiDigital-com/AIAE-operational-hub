@@ -3341,13 +3341,22 @@ paths:
       description: >
         §6 of the migration plan ("Pacing Dashboard"). Resolves the current user's Hub RBAC scope into
         a Pacing assertion the same way GET /api/v1/pacing/pacings does, then fetches the live
-        dashboard payload for one pacing from Pacing (GET /api/dashboards/:slug/data on that side,
-        unchanged by this migration) - campaign, plan by line item, daily delivery facts, the
-        per-pacing widget/layout configuration, journal and any library entries referenced by a
-        library-linked widget. `slug` is the pacing's own `dash_slug` (see `PacingRowV1.dashSlug`), not
-        its `id` (Pacing's UUID) - the two are deliberately different: dashboards are addressed by slug
-        everywhere on the Pacing side, refresh is addressed by id (see POST
-        /api/v1/pacing/pacings/{pacingId}/refresh below).
+        dashboard payload for one pacing from Pacing (GET /api/dashboards/:slug/data on that side) -
+        campaign, plan by line item, daily delivery facts, the per-pacing widget/layout configuration,
+        journal and any library entries referenced by a library-linked widget. `slug` is the pacing's
+        own `dash_slug` (see `PacingRowV1.dashSlug`), not its `id` (Pacing's UUID) - the two are
+        deliberately different: dashboards are addressed by slug everywhere on the Pacing side, refresh
+        is addressed by id (see POST /api/v1/pacing/pacings/{pacingId}/refresh below).
+
+
+        A PASS-THROUGH since 2026-10-29 (DASHBOARD-DATA-PASSTHROUGH-PLAN): the Hub copies Pacing's
+        bytes, status and cache headers to the browser without parsing them - a body of 30-132 MB
+        used to be deserialised, reshaped and re-serialised here, several copies at once, which is
+        what took the pods down. The browser's `If-None-Match` and `Accept-Encoding` travel up to
+        Pacing as they are, so a 304 is decided against Pacing's cached ETag and a gzip'd body stays
+        gzip'd end to end. The reshaping the Java mapper used to do (field names, date parsing,
+        `canEdit`) now happens in the browser, in `features/pacing-dashboard/wire.ts`, from the
+        `PacingDashboardWireV1` shape into the unchanged `PacingDashboardV1`.
       parameters:
         - name: slug
           in: path
@@ -3355,13 +3364,71 @@ paths:
           description: The pacing's dash_slug.
           schema:
             type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          description: >
+            The ETag the browser already holds for this dashboard, forwarded to Pacing unchanged. A
+            match answers 304 with no body - decided against the ETag Pacing has cached, so a 304
+            costs neither side a rebuild.
+          schema:
+            type: string
+        - name: Accept-Encoding
+          in: header
+          required: false
+          description: >
+            The browser's own Accept-Encoding, forwarded to Pacing unchanged. Pacing holds the body
+            gzip'd and answers a caller that accepts gzip with those bytes and `Content-Encoding:
+            gzip`; the Hub copies them through as they are and the browser inflates them itself. A
+            caller that does not accept gzip gets the inflated body.
+          schema:
+            type: string
       responses:
         '200':
-          description: The dashboard payload was fetched from the Pacing service successfully.
+          description: >
+            Pacing's dashboard body, byte for byte - the Hub neither parses nor reshapes it. Declared
+            as an opaque binary string so the generated server interface hands the controller a
+            streamed `Resource` instead of asking it to build an object; the SHAPE of those bytes is
+            `PacingDashboardWireV1` (named in `x-body-schema` below, because a `$ref` here would make
+            the generator build the object). `features/pacing-dashboard/wire.ts` reads that shape
+            into `PacingDashboardV1` in the browser.
+          headers:
+            ETag:
+              description: Pacing's strong ETag - the md5 of the uncompressed body, copied through.
+              schema:
+                type: string
+            Cache-Control:
+              description: "`private, no-cache`: the browser keeps a copy and revalidates every reuse."
+              schema:
+                type: string
+            Content-Encoding:
+              description: "`gzip` when the request accepted it; absent otherwise."
+              schema:
+                type: string
+            Vary:
+              description: "`Accept-Encoding` - the same URL has two representations."
+              schema:
+                type: string
+          x-body-schema: '#/components/schemas/PacingDashboardWireV1'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PacingDashboardV1'
+                type: string
+                format: binary
+        '304':
+          description: >
+            The browser's `If-None-Match` matched Pacing's current ETag: nothing has changed since
+            the copy it holds. No body; the browser's HTTP cache answers the request from its copy
+            and the page sees an ordinary 200.
+          headers:
+            ETag:
+              description: The matching ETag.
+              schema:
+                type: string
+            Cache-Control:
+              description: "`private, no-cache`, as on the 200."
+              schema:
+                type: string
         '401':
           description: The authorization token not provided or expired.
         '403':
@@ -6653,6 +6720,19 @@ components:
           description: Active role assignment views backing the effective access result.
           items:
             $ref: '#/components/schemas/RoleAssignmentV1'
+        pacingUserId:
+          type: string
+          nullable: true
+          description: >
+            The user's own Pacing user id (`hub_users.pacing_user_id`), or null when the §2 employee
+            sync has not reached them yet. What `features/pacing-dashboard/wire.ts` compares a journal
+            entry's author with to compute `canEdit` - the same value the Hub's dashboard mapper used
+            to resolve server-side before the 2026-10-29 pass-through.
+        pacingUnrestricted:
+          type: boolean
+          description: >
+            True when the user's resolved Pacing scope is unfiltered (`kind=all` - admin). Such a user
+            may edit every journal entry; `wire.ts` reads it beside `pacingUserId`.
       required:
         - user_id
         - email
@@ -12216,6 +12296,556 @@ components:
             $ref: '#/components/schemas/PacingJournalEntryV1'
       required:
         - journal
+    PacingDashboardWireV1:
+      type: object
+      description: >
+        The dashboard body EXACTLY as Pacing's GET /api/dashboards/:slug/data serves it
+        (`dash-gate/lib/merge.mjs`, plus the `capabilities` stamp) - the bytes
+        GET /api/v1/pacing/dashboards/{slug} copies through to the browser since the 2026-10-29
+        pass-through (DASHBOARD-DATA-PASSTHROUGH-PLAN). Not what any screen reads: the browser turns
+        it into `PacingDashboardV1` with `features/pacing-dashboard/wire.ts`, a one-to-one port of the
+        Java mapper that used to run in the Hub, so every consumer of the dashboard keeps the type it
+        had. Field descriptions below say what that port does with each key; the full rule table is
+        §5 of the plan. Keys the port drops (`timezone`, `sourceFacts`, `bidCpm`, ...) are listed so
+        the shape is honest, and so dropping them stays a decision rather than an accident.
+      properties:
+        campaign:
+          $ref: '#/components/schemas/PacingDashboardWireCampaignV1'
+        types:
+          type: array
+          description: Carried as is into `PacingDashboardV1.types`.
+          items:
+            type: object
+            additionalProperties: true
+        planByLineItem:
+          type: object
+          description: Line item id (as text) to its plan. Absent/null reads as `{}`.
+          additionalProperties:
+            $ref: '#/components/schemas/PacingDashboardWireLineItemPlanV1'
+        factsDaily:
+          type: array
+          description: Carried as is; absent/null reads as `[]`.
+          items:
+            type: object
+            additionalProperties: true
+        asOf:
+          type: string
+          nullable: true
+        availableSplits:
+          type: object
+          description: Carried as is; absent reads as null (the key is still written).
+          additionalProperties: true
+        availableMetrics:
+          type: object
+          description: Sparse on the wire; absent reads as null.
+          additionalProperties: true
+        aggregate:
+          type: object
+          description: Carried as is; absent/null reads as `{}`.
+          additionalProperties: true
+        display:
+          type: object
+          description: Carried as is; absent/null reads as `{}`.
+          additionalProperties: true
+        notify:
+          $ref: '#/components/schemas/PacingDashboardWireNotifyV1'
+        data:
+          type: object
+          description: Carried as is; absent reads as null.
+          additionalProperties: true
+        third_party:
+          type: array
+          description: Becomes `thirdParty`; absent/null reads as `[]`.
+          items:
+            type: object
+            additionalProperties: true
+        mappings_v3:
+          type: array
+          nullable: true
+          description: Becomes `mappingsV3`; null STAYS null (it means "predates the v3 model").
+          items:
+            type: object
+            additionalProperties: true
+        deliveryStats:
+          $ref: '#/components/schemas/PacingDashboardWireDeliveryStatsV1'
+        journal:
+          type: array
+          description: Absent/null reads as `[]`; each entry gains `canEdit` and loses `user_id`.
+          items:
+            $ref: '#/components/schemas/PacingDashboardWireJournalEntryV1'
+        creatives:
+          type: array
+          description: Present only when the aux file matched the refresh; absent reads as null.
+          items:
+            type: object
+            additionalProperties: true
+        conversions:
+          type: array
+          description: Same presence rule as `creatives`.
+          items:
+            type: object
+            additionalProperties: true
+        conversionTags:
+          type: string
+          description: >
+            `own` or `dropped`, present only beside `conversions`. Anything else is an error in
+            the port, exactly as it was a 500 in the Java mapper (`fromValue`).
+        dimSources:
+          type: object
+          description: Present only when at least one source file matched; absent reads as null.
+          additionalProperties: true
+        sourceFacts:
+          type: object
+          description: DROPPED by the port, as the Java mapper dropped it (no record field).
+          additionalProperties: true
+        libraryEntries:
+          type: object
+          description: Present only when a tile links to a Library row; absent reads as null.
+          additionalProperties: true
+        metrics:
+          type: object
+          nullable: true
+          description: The metric bag, carried as is; null when Pacing could not derive it.
+          additionalProperties: true
+        capabilities:
+          type: object
+          description: Stamped by the route (§7.5 handshake); carried as is.
+          additionalProperties: true
+    PacingDashboardWireCampaignV1:
+      type: object
+      description: >
+        `campaign` as Pacing's `buildCampaign` writes it. The port renames `id` to `slug`, parses the
+        two dates strictly (`YYYY-MM-DD` on a real calendar, anything else null), reads the three
+        booleans as "true only when exactly true", keeps `links` to `{name, url}`, and drops
+        `timezone`, `client`, `agency`, `notes` and `notesRich`.
+      properties:
+        id:
+          type: string
+          description: The pacing's dash_slug - becomes `slug`.
+        pacingId:
+          type: string
+        name:
+          type: string
+        startDate:
+          type: string
+          nullable: true
+          description: "`span.flight_start`; may be absent."
+        endDate:
+          type: string
+          nullable: true
+        currency:
+          type: string
+        rate:
+          type: number
+          format: double
+        rateLocked:
+          type: boolean
+          nullable: true
+        nsRate:
+          type: number
+          format: double
+          nullable: true
+        status:
+          type: string
+        orderNumber:
+          type: string
+        sourceUrl:
+          type: string
+        netMode:
+          type: boolean
+          nullable: true
+        periodScope:
+          type: boolean
+          nullable: true
+        periodScopeKey:
+          type: string
+          nullable: true
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingDashboardWireCampaignLinkV1'
+        timezone:
+          type: string
+          description: DROPPED by the port.
+        client:
+          type: string
+          nullable: true
+          description: DROPPED by the port.
+        agency:
+          type: string
+          nullable: true
+          description: DROPPED by the port.
+        notes:
+          type: string
+          nullable: true
+          description: DROPPED by the port.
+        notesRich:
+          type: object
+          nullable: true
+          description: DROPPED by the port.
+          additionalProperties: true
+    PacingDashboardWireCampaignLinkV1:
+      type: object
+      description: One stored `campaign_links` entry; the port keeps `name` and `url` only.
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+      additionalProperties: true
+    PacingDashboardWireLineItemPlanV1:
+      type: object
+      description: >
+        One `planByLineItem` value as Pacing's `buildPlanByLineItem` writes it. Two keys are snake on
+        the wire (`native_budget`, `cost_coef`) and camel on `PacingLineItemPlanV1`; `bidCpm` is
+        dropped; `labels`/`containers`/`dimGroups`/`pauseIntervals` read as `[]` when absent;
+        `primaryConversions`/`storedPrimaryConversions` stay null when absent.
+      properties:
+        lineItemId:
+          type: string
+        channel:
+          type: string
+        dsp:
+          type: string
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+          nullable: true
+        rateType:
+          type: string
+        clientBudget:
+          type: number
+          format: double
+        plannedImpressions:
+          type: number
+          format: double
+        marginTargetPct:
+          type: number
+          format: double
+        ctrTargetPct:
+          type: number
+          format: double
+          nullable: true
+        vcrTargetPct:
+          type: number
+          format: double
+          nullable: true
+        flightStart:
+          type: string
+          nullable: true
+        flightEnd:
+          type: string
+          nullable: true
+        pauseIntervals:
+          type: array
+          items:
+            $ref: '#/components/schemas/PacingDashboardWirePauseIntervalV1'
+        containers:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        dimGroups:
+          type: array
+          description: Present only when non-empty.
+          items:
+            type: object
+            additionalProperties: true
+        native_budget:
+          type: number
+          format: double
+          nullable: true
+          description: Becomes `nativeBudget`.
+        cost_coef:
+          type: boolean
+          description: Becomes `costCoef`; read as "true only when exactly true".
+        converted:
+          type: boolean
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        netRatio:
+          type: number
+          format: double
+          nullable: true
+        storedNetRatio:
+          type: number
+          format: double
+          nullable: true
+        netRatioLocked:
+          type: boolean
+          nullable: true
+        nsNetRatio:
+          type: number
+          format: double
+          nullable: true
+        primaryConversions:
+          type: array
+          items:
+            type: string
+        storedPrimaryConversions:
+          type: array
+          items:
+            type: string
+        conversionData:
+          type: boolean
+          nullable: true
+        bidCpm:
+          type: number
+          format: double
+          nullable: true
+          description: DROPPED by the port.
+    PacingDashboardWirePauseIntervalV1:
+      type: object
+      description: One paused range as stored; both ends are parsed as dates by the port.
+      properties:
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+      additionalProperties: true
+    PacingDashboardWireJournalEntryV1:
+      type: object
+      description: >
+        One journal line as `db.mjs getJournal` writes it. `id` is a PG bigint, which the driver
+        hands over as text. `user_id` is the author's Pacing user id: the port compares it with the
+        caller's own id to compute `canEdit` and does not forward it.
+      properties:
+        id:
+          type: string
+        ts:
+          type: string
+        msg:
+          type: string
+        uid:
+          type: string
+          description: The author's email, or empty when unresolved.
+        user_id:
+          type: string
+          nullable: true
+        edited_at:
+          type: string
+          nullable: true
+          description: Becomes `editedAt`.
+    PacingDashboardWireDeliveryStatsV1:
+      type: object
+      nullable: true
+      description: "`deliveryStats` - null when never measured, else what the last build measured."
+      properties:
+        rows:
+          type: integer
+          format: int64
+          nullable: true
+        cells:
+          type: integer
+          format: int64
+          nullable: true
+        measuredAt:
+          type: string
+          nullable: true
+        autoOffAt:
+          type: string
+          nullable: true
+    PacingDashboardWireNotifyV1:
+      type: object
+      nullable: true
+      description: >
+        `config.notify` as stored - null on a pacing that never saved alert settings. When present
+        it is the full form `notify-validate.mjs` requires: `alerts` with all 13 blocks. A missing
+        block is an error in the port, exactly as it was a 500 in the Java mapper.
+      properties:
+        alerts:
+          $ref: '#/components/schemas/PacingDashboardWireAlertsV1'
+        metrics:
+          type: object
+          nullable: true
+          description: "`{vcr}`; absent reads as `vcr: false`."
+          properties:
+            vcr:
+              type: boolean
+              nullable: true
+        hide_paused:
+          type: boolean
+          nullable: true
+          description: Becomes `hidePaused`; absent reads as false.
+        summary_projection:
+          type: string
+          nullable: true
+          description: Becomes `summaryProjection`; `plan` is plan, anything else is `reforecast`.
+    PacingDashboardWireAlertsV1:
+      type: object
+      description: The 13 detector blocks under their stored snake keys, plus the master switch.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        bid_fact_above_plan:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleWindowThresholdV1'
+        data_gap:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleGapDaysV1'
+        ctr_below_target:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleFactorV1'
+        vcr_below_target:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleFactorV1'
+        ctr_above_target:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleFactorV1'
+        vcr_over_100:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleBaseV1'
+        no_impressions_yet:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleBaseV1'
+        pacing_off_pace:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleBandV1'
+        margin_below_target:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleGapPpV1'
+        spend_overspend:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleSpendV1'
+        dsp_forecast_overspend:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleBaseV1'
+        stale_data:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleDaysV1'
+        rate_cost_above_plan:
+          $ref: '#/components/schemas/PacingDashboardWireAlertRuleThresholdPctV1'
+    PacingDashboardWireAlertRuleBaseV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleBaseV1`.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+    PacingDashboardWireAlertRuleWindowThresholdV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleWindowThresholdV1` (`threshold_pct` becomes `thresholdPct`).
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        window:
+          type: integer
+          format: int32
+          nullable: true
+        threshold_pct:
+          type: number
+          format: double
+          nullable: true
+    PacingDashboardWireAlertRuleGapDaysV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleGapDaysV1` (`gap_days` becomes `gapDays`).
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        gap_days:
+          type: integer
+          format: int32
+          nullable: true
+    PacingDashboardWireAlertRuleFactorV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleFactorV1`.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        factor:
+          type: number
+          format: double
+          nullable: true
+    PacingDashboardWireAlertRuleBandV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleBandV1`.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        low:
+          type: number
+          format: double
+          nullable: true
+        high:
+          type: number
+          format: double
+          nullable: true
+    PacingDashboardWireAlertRuleGapPpV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleGapPpV1` (`gap_pp` becomes `gapPp`).
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        gap_pp:
+          type: number
+          format: double
+          nullable: true
+    PacingDashboardWireAlertRuleSpendV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleSpendV1` (`warn_pct`/`bad_pct` become `warnPct`/`badPct`).
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        warn_pct:
+          type: number
+          format: double
+          nullable: true
+        bad_pct:
+          type: number
+          format: double
+          nullable: true
+    PacingDashboardWireAlertRuleDaysV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleDaysV1`.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        days:
+          type: integer
+          format: int32
+          nullable: true
+    PacingDashboardWireAlertRuleThresholdPctV1:
+      type: object
+      description: Stored twin of `PacingAlertRuleThresholdPctV1` (`threshold_pct` becomes `thresholdPct`).
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        slack:
+          type: boolean
+          nullable: true
+        threshold_pct:
+          type: number
+          format: double
+          nullable: true
     PacingDashboardV1:
       type: object
       description: >

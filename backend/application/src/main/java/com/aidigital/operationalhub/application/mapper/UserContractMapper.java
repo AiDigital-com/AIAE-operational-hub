@@ -17,10 +17,15 @@ import org.mapstruct.MappingConstants;
 public interface UserContractMapper {
 
 	/**
-	 * Builds the {@code /auth/me} payload from the current user and its effective access context.
+	 * Builds the {@code /auth/me} payload from the current user, its effective access context and
+	 * the two Pacing facts the dashboard's browser-side journal rule reads
+	 * (DASHBOARD-DATA-PASSTHROUGH-PLAN, H3).
 	 *
-	 * @param user   the resolved current user
-	 * @param access the effective access context for the user
+	 * @param user               the resolved current user
+	 * @param access             the effective access context for the user
+	 * @param pacingUserId       the user's own Pacing user id, or null when the §2 sync has not
+	 *                           reached them
+	 * @param pacingUnrestricted whether the user's resolved Pacing scope is {@code kind=all}
 	 * @return the generated {@link UserV1}
 	 */
 	@Mapping(target = "userId", source = "user.clerkUserId")
@@ -30,5 +35,7 @@ public interface UserContractMapper {
 	@Mapping(target = "status", source = "user.status")
 	@Mapping(target = "roles", source = "access.roleCodes")
 	@Mapping(target = "assignments", source = "access.assignments")
-	UserV1 toV1(CurrentUserModel user, EffectiveAccessContext access);
+	@Mapping(target = "pacingUserId", source = "pacingUserId")
+	@Mapping(target = "pacingUnrestricted", source = "pacingUnrestricted")
+	UserV1 toV1(CurrentUserModel user, EffectiveAccessContext access, String pacingUserId, boolean pacingUnrestricted);
 }

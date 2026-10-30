@@ -82,4 +82,30 @@ class LogbookConfigTest {
 		assertThat(excluded).containsEntry("/actuator/**", List.of("GET"));
 		assertThat(actuatorExclusion).accepts(request);
 	}
+
+	@Test
+	void shouldExcludeTheDashboardBodyButNotItsSiblingsTest() {
+		// Given: the Pacing dashboard body (DASHBOARD-DATA-PASSTHROUGH-PLAN) - 30-132 MB, copied through
+		// from Pacing. Logbook buffers a logged response whole before its body filters run, so a mere
+		// truncation would still cost one full copy per request; the path has to be excluded outright.
+		Map<String, List<String>> excluded = new LogbookConfig.LogbookProperties().getExcluded();
+		Predicate<HttpRequest> exclusion = Conditions.requestTo("/**/pacing/dashboards/*")
+				.and(Conditions.requestWithMethod("GET"));
+
+		// When / Then: the body is excluded by path, by default.
+		assertThat(excluded).containsEntry("/**/pacing/dashboards/*", List.of("GET"));
+		assertThat(exclusion).accepts(request("GET", "/api/v1/pacing/dashboards/nike-ss26"));
+		// ...and the small sibling calls under the same slug stay logged - one segment, not `**`.
+		assertThat(exclusion).rejects(request("GET", "/api/v1/pacing/dashboards/nike-ss26/refresh-status"));
+		assertThat(exclusion).rejects(request("GET", "/api/v1/pacing/dashboards/nike-ss26/third-party/status"));
+		assertThat(exclusion).rejects(request("POST", "/api/v1/pacing/dashboards/nike-ss26/journal"));
+		assertThat(exclusion).rejects(request("POST", "/api/v1/pacing/dashboards/nike-ss26"));
+	}
+
+	private HttpRequest request(String method, String path) {
+		HttpRequest request = mock(HttpRequest.class);
+		when(request.getPath()).thenReturn(path);
+		when(request.getMethod()).thenReturn(method);
+		return request;
+	}
 }

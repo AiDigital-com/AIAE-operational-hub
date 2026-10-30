@@ -18,6 +18,7 @@ import org.springframework.validation.annotation.Validated;
  *       assertion-secret: ${PACING_ASSERTION_SECRET:}
  *       connect-timeout-ms: ${PACING_CONNECT_TIMEOUT_MS:3000}
  *       read-timeout-ms: ${PACING_READ_TIMEOUT_MS:10000}
+ *       dashboard-read-timeout-ms: ${PACING_DASHBOARD_READ_TIMEOUT_MS:60000}
  *       assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}
  * </pre>
  *
@@ -58,6 +59,19 @@ public class PacingProperties {
 	 * these same calls 185s; this is that number, not a guess.
 	 */
 	private long sheetReadTimeoutMs = 185000;
+
+	/**
+	 * Read timeout for the dashboard-body call ({@code GET /api/dashboards/:slug/data}), in
+	 * milliseconds.
+	 *
+	 * <p>Longer than {@link #readTimeoutMs} because this is the one call where Pacing may have to
+	 * REBUILD before it answers: the first open after a refresh re-reads a conversions file of 30-132
+	 * MB and re-serialises the whole body, which does not reliably fit the general 10 s - the first
+	 * opener then saw "Pacing is unreachable" while Pacing was merely busy. A warm open answers from
+	 * Pacing's cache in milliseconds and never gets near this. The JDK client applies it to the wait
+	 * for response headers, not to the body transfer that follows.
+	 */
+	private long dashboardReadTimeoutMs = 60000;
 
 	/**
 	 * How long a minted assertion stays valid, in seconds. Kept short (60-120s recommended): a Hub
@@ -154,6 +168,24 @@ public class PacingProperties {
 	 */
 	public void setReadTimeoutMs(long readTimeoutMs) {
 		this.readTimeoutMs = readTimeoutMs;
+	}
+
+	/**
+	 * Returns the read timeout for the dashboard-body call, in milliseconds.
+	 *
+	 * @return dashboard read timeout
+	 */
+	public long getDashboardReadTimeoutMs() {
+		return dashboardReadTimeoutMs;
+	}
+
+	/**
+	 * Sets the read timeout for the dashboard-body call.
+	 *
+	 * @param dashboardReadTimeoutMs dashboard read timeout, in milliseconds
+	 */
+	public void setDashboardReadTimeoutMs(long dashboardReadTimeoutMs) {
+		this.dashboardReadTimeoutMs = dashboardReadTimeoutMs;
 	}
 
 	/**

@@ -2,6 +2,7 @@ package com.aidigital.operationalhub.externalservices.pacing.config;
 
 import com.aidigital.operationalhub.externalservices.pacing.PacingCampaignAccessClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingDashboardDataClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingLibraryVisibilityClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSummarySwitchClient;
@@ -10,6 +11,7 @@ import com.aidigital.operationalhub.externalservices.pacing.impl.HubAssertionSig
 import com.aidigital.operationalhub.externalservices.pacing.impl.OrderNumberCollector;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingCampaignAccessClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingClientImpl;
+import com.aidigital.operationalhub.externalservices.pacing.impl.PacingDashboardDataClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingLibraryVisibilityClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSheetSourceClientImpl;
 import com.aidigital.operationalhub.externalservices.pacing.impl.PacingSummarySwitchClientImpl;
@@ -83,6 +85,24 @@ public class PacingConfig {
 			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
 		return new PacingSheetSourceClientImpl(
 				pacingRestClient(properties, properties.getSheetReadTimeoutMs()), assertionSigner, objectMapper);
+	}
+
+	/**
+	 * The dashboard-body pass-through, on its own client (DASHBOARD-DATA-PASSTHROUGH-PLAN,
+	 * 2026-10-29): {@link PacingClient} is at the file-length cap, and this is the one call that
+	 * waits longer for Pacing's headers - a cold rebuild of the biggest body does not fit the general
+	 * read timeout. Same transport otherwise.
+	 *
+	 * @param properties      Pacing configuration properties
+	 * @param assertionSigner signs the {@code X-Hub-Assertion} header on every call
+	 * @param objectMapper    the Hub's own Jackson mapper, used to read Pacing's error bodies
+	 * @return the dashboard-body client
+	 */
+	@Bean
+	public PacingDashboardDataClient pacingDashboardDataClient(
+			PacingProperties properties, HubAssertionSigner assertionSigner, ObjectMapper objectMapper) {
+		return new PacingDashboardDataClientImpl(
+				pacingRestClient(properties, properties.getDashboardReadTimeoutMs()), assertionSigner, objectMapper);
 	}
 
 	/**

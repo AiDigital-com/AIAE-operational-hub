@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { useCurrentUser } from "../rbac/hooks";
 import {
   getPacingDashboard,
   getPacingRefreshStatus,
@@ -8,16 +9,33 @@ import {
   savePacingNotifySettings,
 } from "./api";
 import type { PacingCampaignLinkV1, PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
+import type { WireContext } from "./wire";
 
 /**
  * The pacing dashboard payload (§6 of the migration plan, US-114/115) - one request per pacing, same
  * pattern as `usePacingOverview`/`useCampaignPacings`.
+ *
+ * Waits for `/api/v1/auth/me` (DASHBOARD-DATA-PASSTHROUGH-PLAN, H2/H3): since the pass-through the
+ * journal's `canEdit` is computed in the browser from `UserV1.pacingUserId`/`pacingUnrestricted`, so
+ * the dashboard is not asked for until that answer is in. In the app that is immediate - the shell
+ * renders nothing until `/auth/me` has succeeded, and this reads the same `["auth","me"]` cache - so
+ * the gate is "settled" (success OR error) rather than "succeeded": a failed `/auth/me` never reaches
+ * this screen in production, and gating on success alone would only stall a test that mounts the page
+ * without one. On an error the context is the most restrictive one (no own id, not unrestricted).
+ *
+ * The query key is unchanged: the context changes `canEdit`, never the body, and a different user is
+ * a page reload through Clerk.
  */
 export function usePacingDashboard(slug: string | undefined) {
+  const me = useCurrentUser(true);
+  const ctx: WireContext = {
+    ownPacingUserId: me.data?.pacingUserId ?? null,
+    unrestricted: me.data?.pacingUnrestricted === true,
+  };
   return useQuery({
     queryKey: ["pacing", "dashboard", slug],
-    queryFn: () => getPacingDashboard(slug as string),
-    enabled: !!slug,
+    queryFn: () => getPacingDashboard(slug as string, ctx),
+    enabled: !!slug && !me.isPending,
   });
 }
 

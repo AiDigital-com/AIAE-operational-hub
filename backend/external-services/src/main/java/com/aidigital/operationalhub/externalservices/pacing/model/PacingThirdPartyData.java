@@ -14,7 +14,8 @@ import java.util.Map;
  * and the call failed with a transport-level exception rather than a usable body, which this
  * client's caller then reported as "Pacing is unreachable". Inside a record the generic types are
  * declared, so {@code rows} and {@code groups} convert the way {@code factsDaily} already does on
- * {@link PacingDashboardData}.
+ * {@code PacingDashboardData} (gone since the 2026-10-29 pass-through - that body now reaches the
+ * browser unparsed, see {@link PacingDashboardStream}).
  *
  * <p>Rows stay opaque maps on purpose: they are ad-server columns that differ per report, and the
  * compare screens read them by name. Naming them here would mean this service holding an opinion

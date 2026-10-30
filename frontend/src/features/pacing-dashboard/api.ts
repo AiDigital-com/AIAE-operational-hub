@@ -1,6 +1,7 @@
 import { ApiError } from "../../shared/api/api-error";
 import { apiClient } from "../../shared/api/client";
 import { formatError } from "../../shared/format/error";
+import { readDashboardWire, type PacingDashboardWireV1, type WireContext } from "./wire";
 import type {
   PacingCampaignLinkV1,
   PacingDashboardV1,
@@ -28,13 +29,27 @@ import type {
 /**
  * Fetches one pacing's full dashboard payload (§6 of the migration plan, US-114/115). `slug` is the
  * pacing's `dashSlug` (see `pacing-overview`'s `PacingRowV1.dashSlug`), not its `id`.
+ *
+ * Since the 2026-10-29 pass-through (DASHBOARD-DATA-PASSTHROUGH-PLAN) the Hub copies Pacing's bytes
+ * through unparsed, so the body on the wire is `PacingDashboardWireV1` and the reshaping the Hub's
+ * Java mapper used to do happens here, in `readDashboardWire` - the one place this feature's code
+ * changed; every consumer still gets the `PacingDashboardV1` it always got. `ctx` is what that
+ * mapper took from the server side (`UserV1.pacingUserId` / `pacingUnrestricted`), for each journal
+ * entry's `canEdit`.
+ *
+ * The contract declares the 200 as an opaque binary string (so the backend streams it), which the
+ * generated client types as `string`; it is parsed as JSON here and read as the wire shape - the one
+ * `as` in this feature's API layer, documented in the contract's `x-body-schema`.
  */
-export async function getPacingDashboard(slug: string): Promise<PacingDashboardV1> {
-  const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}", { params: { path: { slug } } });
+export async function getPacingDashboard(slug: string, ctx: WireContext): Promise<PacingDashboardV1> {
+  const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}", {
+    params: { path: { slug } },
+    parseAs: "json",
+  });
   if (result.error || !result.response.ok || result.data === undefined) {
     throw new ApiError(formatError(result.error), result.response.status);
   }
-  return result.data;
+  return readDashboardWire(result.data as unknown as PacingDashboardWireV1, ctx);
 }
 
 /**
