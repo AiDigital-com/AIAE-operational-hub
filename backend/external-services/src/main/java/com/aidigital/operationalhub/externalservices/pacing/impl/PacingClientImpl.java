@@ -18,7 +18,6 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOp
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
@@ -317,29 +316,6 @@ public class PacingClientImpl implements PacingClient {
 		} catch (RestClientException ex) {
 			throw new PacingExternalException(
 					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + PACING_AUDIENCE_PATH, ex);
-		}
-	}
-
-	@Override
-	public PacingDashboardData getDashboardData(HubAssertion assertion, String slug) {
-		String header = assertionSigner.sign(assertion);
-		String path = DASHBOARDS_PATH + "/" + slug + "/data";
-		try {
-			PacingDashboardData response = restClient.get()
-					.uri(path)
-					.header(HubAssertionSigner.HEADER_NAME, header)
-					.retrieve()
-					.body(PacingDashboardData.class);
-			if (response == null) {
-				throw new PacingExternalException(
-						PacingFailureReason.OTHER, "Pacing request failed: GET " + path + " returned an empty body");
-			}
-			return response;
-		} catch (RestClientResponseException ex) {
-			throw dashboardFailure("GET", path, ex);
-		} catch (RestClientException ex) {
-			throw new PacingExternalException(
-					PacingFailureReason.UNREACHABLE, "Pacing request failed: GET " + path, ex);
 		}
 	}
 

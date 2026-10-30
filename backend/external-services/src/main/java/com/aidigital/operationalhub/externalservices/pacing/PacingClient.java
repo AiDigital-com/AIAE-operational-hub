@@ -12,7 +12,6 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOp
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
@@ -140,19 +139,6 @@ public interface PacingClient {
 	 *         on a non-2xx response or network failure (unchecked)
 	 */
 	PacingAudiencePushResult pushPacingAudience(List<PacingAudienceEntry> audiences);
-
-	/**
-	 * Fetches one pacing's full dashboard payload (§6 of the migration plan, US-114/115): campaign
-	 * summary, plan by line item, daily delivery facts, the per-pacing widget/layout configuration,
-	 * journal, and any shared library entries a linked widget refers to.
-	 *
-	 * @param assertion who is calling and what they may see
-	 * @param slug      the pacing's dash_slug
-	 * @return the dashboard payload
-	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
-	 *         on a non-2xx response or network failure (unchecked)
-	 */
-	PacingDashboardData getDashboardData(HubAssertion assertion, String slug);
 
 	/**
 	 * Fetches whether/when a pacing's last data refresh landed (US-119) - a completion read, not an

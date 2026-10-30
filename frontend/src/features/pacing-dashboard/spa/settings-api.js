@@ -17,6 +17,7 @@ import {
   readPacingDimSourceValues,
   suggestPacingDimSource,
 } from "../api";
+import { NOBODY } from "../wire";
 
 /** The `{ ok: false, error }` shape the editors check for, from a thrown Hub error. */
 function failed(err) {
@@ -97,7 +98,11 @@ export const api = {
    */
   dashboardData: async (slug) => {
     try {
-      return await getPacingDashboard(slug);
+      // NOBODY: this read is for `dimSources`, a pass-through slice; the journal's `canEdit` (the one
+      // thing the caller's identity changes since the 2026-10-29 pass-through, see ../wire.ts) is
+      // not read here, and this seam has no /auth/me to offer. The host's own react-query copy -
+      // the one the journal panel reads - is refetched separately, with the real context.
+      return await getPacingDashboard(slug, NOBODY);
     } catch (err) {
       // The caller treats a missing blob as "the figures will catch up on the next load", which is
       // true: the read itself already happened on the server.

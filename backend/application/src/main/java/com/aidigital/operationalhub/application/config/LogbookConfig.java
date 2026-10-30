@@ -110,7 +110,15 @@ public class LogbookConfig {
 				"/**", List.of("OPTIONS"),
 				// Report-row listing/export/adjustment paths: multi-MB .xlsx binaries and ~48-column page
 				// bodies, neither of which belongs in a log record.
-				"/**/report-rows/**", List.of("GET", "POST"));
+				"/**/report-rows/**", List.of("GET", "POST"),
+				// The Pacing dashboard body (DASHBOARD-DATA-PASSTHROUGH-PLAN, 2026-10-29): 30-132 MB,
+				// copied through from Pacing without being parsed. Excluded by PATH and not merely
+				// truncated, because the body filters run on a response Logbook has ALREADY buffered
+				// whole - with TRACE on in eks that was one more full copy of the body per request,
+				// which is exactly the memory this endpoint no longer spends. One segment after
+				// `dashboards/`, so the small sibling calls (`/{slug}/refresh-status`, `/{slug}/journal`,
+				// ...) stay logged.
+				"/**/pacing/dashboards/*", List.of("GET"));
 
 		private int maxLoggedBodyChars = 10_000;
 

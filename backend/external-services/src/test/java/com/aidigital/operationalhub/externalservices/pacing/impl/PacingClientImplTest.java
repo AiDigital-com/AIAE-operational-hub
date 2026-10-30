@@ -16,9 +16,7 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateOp
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingPlanRateUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCreateResult;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDeliveryStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetSourceInstruction;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegation;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDelegationGrant;
@@ -575,98 +573,8 @@ class PacingClientImplTest {
 				.isEqualTo(PacingFailureReason.UNREACHABLE);
 	}
 
-	// ── §6: dashboard data / refresh-status / refresh / display save ──
-
-	@Test
-	void shouldReturnDashboardDataTest() {
-		// Given:
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
-				.andExpect(method(GET))
-				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
-				.andRespond(withSuccess(
-						"{\"campaign\":{\"id\":\"nike-ss26\",\"pacingId\":\"p1\",\"name\":\"Nike SS26\"},"
-								+ "\"planByLineItem\":{\"111\":{\"lineItemId\":\"111\",\"plannedImpressions\":1000}},"
-								+ "\"factsDaily\":[{\"date\":\"2026-08-01\"}],\"display\":{\"widgets\":[]},"
-								+ "\"journal\":[],\"types\":[{\"ignored\":true}]}",
-						MediaType.APPLICATION_JSON));
-
-		// When:
-		PacingDashboardData result = client.getDashboardData(assertion, "nike-ss26");
-
-		// Then: extra fields Pacing sends (e.g. "types") are ignored, not a deserialization failure
-		assertThat(result.campaign().name()).isEqualTo("Nike SS26");
-		assertThat(result.planByLineItem().get("111").plannedImpressions()).isEqualTo(1000.0);
-		assertThat(result.factsDaily()).hasSize(1);
-		server.verify();
-	}
-
-	@Test
-	void shouldMapDashboardDataNotFoundTest() {
-		// Given:
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/missing/data")).andRespond(withStatus(HttpStatus.NOT_FOUND));
-
-		// When-Then:
-		assertThatThrownBy(() -> client.getDashboardData(assertion, "missing"))
-				.isInstanceOf(PacingExternalException.class)
-				.extracting(ex -> ((PacingExternalException) ex).getReason())
-				.isEqualTo(PacingFailureReason.UPSTREAM_NOT_FOUND);
-	}
-
-	@Test
-	void shouldMapDashboardDataUnknownUserTo409ConflictTest() {
-		// Given: dashboardFailure's uniform 403 rule (shared by every /api/dashboards/* read/write) - a
-		// sync gap here, not a refusal.
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
-				.andRespond(withStatus(HttpStatus.FORBIDDEN)
-						.body("{\"error\":\"unknown_user\"}")
-						.contentType(MediaType.APPLICATION_JSON));
-
-		// When-Then:
-		assertThatThrownBy(() -> client.getDashboardData(assertion, "nike-ss26"))
-				.isInstanceOf(PacingExternalException.class)
-				.extracting(ex -> ((PacingExternalException) ex).getReason())
-				.isEqualTo(PacingFailureReason.UPSTREAM_USER_NOT_SYNCED);
-	}
-
-	@Test
-	void shouldMapDashboardDataNoAccessTo403ForbiddenTest() {
-		// Given: a real authorization decision Pacing made about this specific dashboard, distinct from
-		// the unknown_user sync-gap case above.
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_OWNERS, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
-				.andRespond(withStatus(HttpStatus.FORBIDDEN)
-						.body("{\"error\":\"no_access\"}")
-						.contentType(MediaType.APPLICATION_JSON));
-
-		// When-Then:
-		assertThatThrownBy(() -> client.getDashboardData(assertion, "nike-ss26"))
-				.isInstanceOf(PacingExternalException.class)
-				.extracting(ex -> ((PacingExternalException) ex).getReason())
-				.isEqualTo(PacingFailureReason.UPSTREAM_FORBIDDEN);
-	}
+	// ── §6: refresh-status / refresh / display save (the dashboard body itself is
+	//    PacingDashboardDataClientImplTest's since the 2026-10-29 pass-through) ──
 
 	@Test
 	void shouldReturnRefreshStatusTest() {
@@ -1087,27 +995,6 @@ class PacingClientImplTest {
 		assertThat(result.liked()).isFalse();
 		assertThat(result.likes()).isEqualTo(3);
 		server.verify();
-	}
-
-	@Test
-	void shouldClassifyDashboardDataConnectionFailureAsUnreachableTest() {
-		// Given:
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/p1/data"))
-				.andRespond(request -> {
-					throw new SocketTimeoutException("Read timed out");
-				});
-
-		// When-Then:
-		assertThatThrownBy(() -> client.getDashboardData(assertion, "p1"))
-				.isInstanceOf(PacingExternalException.class)
-				.extracting(ex -> ((PacingExternalException) ex).getReason())
-				.isEqualTo(PacingFailureReason.UNREACHABLE);
 	}
 
 	@Test
@@ -2551,31 +2438,6 @@ class PacingClientImplTest {
 	}
 
 	@Test
-	void shouldDeserializeDeliveryStatsOnDashboardDataTest() {
-		// Given: dash-gate's measurement of the last built Delivery tab, as merge.mjs publishes it.
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
-				.andRespond(withSuccess(
-						"{\"campaign\":{\"id\":\"nike-ss26\"},\"planByLineItem\":{},\"factsDaily\":[],"
-								+ "\"display\":{},\"journal\":[],"
-								+ "\"deliveryStats\":{\"rows\":120000,\"cells\":3600000,"
-								+ "\"measuredAt\":\"2026-10-14T11:20:00.000Z\",\"autoOffAt\":null}}",
-						MediaType.APPLICATION_JSON));
-
-		// When:
-		PacingDashboardData result = client.getDashboardData(assertion, "nike-ss26");
-
-		// Then:
-		assertThat(result.deliveryStats())
-				.isEqualTo(new PacingDeliveryStats(120000L, 3600000L, "2026-10-14T11:20:00.000Z", null));
-	}
-
-	@Test
 	void shouldSendCoefEnabledUnderItsSnakeCaseKeyWhenSavingDataSettingsTest() {
 		// Given: the Data panel flipping the coefficient switch alone. It is a pure UI gate, but it is
 		// still a stored key - so it rides the wire on its own, with no sibling setting dragged along.
@@ -2820,55 +2682,6 @@ class PacingClientImplTest {
 				.isInstanceOf(PacingExternalException.class)
 				.extracting(ex -> ((PacingExternalException) ex).getDetail())
 				.isEqualTo("devices: unknown catalog");
-	}
-
-	@Test
-	void shouldDeserializeNotifySettingsOnDashboardDataTest() {
-		// Given: §14 - dash-gate's snake_case `config.notify` wire shape, one full round trip through
-		// all 13 alert keys plus the master switch, metrics, hide_paused and summary_projection.
-		HubAssertionSigner signer = mock(HubAssertionSigner.class);
-		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
-		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
-		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
-		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
-		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/data"))
-				.andRespond(withSuccess(
-						"{\"campaign\":{\"id\":\"nike-ss26\"},\"planByLineItem\":{},\"factsDaily\":[],"
-								+ "\"display\":{},\"journal\":[],"
-								+ "\"notify\":{\"alerts\":{\"enabled\":true,"
-								+ "\"bid_fact_above_plan\":{\"enabled\":true,\"slack\":true,\"window\":2,\"threshold_pct\":5},"
-								+ "\"data_gap\":{\"enabled\":true,\"slack\":true,\"gap_days\":1},"
-								+ "\"ctr_below_target\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
-								+ "\"vcr_below_target\":{\"enabled\":true,\"slack\":true,\"factor\":0.7},"
-								+ "\"ctr_above_target\":{\"enabled\":true,\"slack\":true,\"factor\":2.0},"
-								+ "\"vcr_over_100\":{\"enabled\":true,\"slack\":true},"
-								+ "\"no_impressions_yet\":{\"enabled\":true,\"slack\":true},"
-								+ "\"pacing_off_pace\":{\"enabled\":true,\"slack\":true,\"low\":-5,\"high\":5},"
-								+ "\"margin_below_target\":{\"enabled\":true,\"slack\":true,\"gap_pp\":3},"
-								+ "\"spend_overspend\":{\"enabled\":true,\"slack\":true,\"warn_pct\":90,\"bad_pct\":100},"
-								+ "\"dsp_forecast_overspend\":{\"enabled\":true,\"slack\":true},"
-								+ "\"stale_data\":{\"enabled\":true,\"slack\":true,\"days\":2},"
-								+ "\"rate_cost_above_plan\":{\"enabled\":true,\"slack\":true,\"threshold_pct\":10}},"
-								+ "\"metrics\":{\"vcr\":true},\"hide_paused\":false,\"summary_projection\":\"plan\"}}",
-						MediaType.APPLICATION_JSON));
-
-		// When:
-		PacingDashboardData result = client.getDashboardData(assertion, "nike-ss26");
-
-		// Then:
-		PacingNotifySettings notify = result.notifySettings();
-		assertThat(notify).isNotNull();
-		assertThat(notify.alerts().enabled()).isTrue();
-		assertThat(notify.alerts().bidFactAbovePlan().window()).isEqualTo(2);
-		assertThat(notify.alerts().bidFactAbovePlan().thresholdPct()).isEqualTo(5);
-		assertThat(notify.alerts().pacingOffPace().low()).isEqualTo(-5);
-		assertThat(notify.alerts().pacingOffPace().high()).isEqualTo(5);
-		assertThat(notify.alerts().spendOverspend().warnPct()).isEqualTo(90);
-		assertThat(notify.alerts().spendOverspend().badPct()).isEqualTo(100);
-		assertThat(notify.metrics().vcr()).isTrue();
-		assertThat(notify.hidePaused()).isFalse();
-		assertThat(notify.summaryProjection()).isEqualTo("plan");
 	}
 
 	@Test

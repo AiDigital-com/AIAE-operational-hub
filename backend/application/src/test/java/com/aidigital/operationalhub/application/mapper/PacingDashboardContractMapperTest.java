@@ -16,7 +16,6 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAle
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSourceV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourcesV1;
@@ -40,16 +39,11 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetTab;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDeliveryStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingPauseInterval;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyDataV1;
@@ -58,6 +52,17 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPar
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceBinding;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceGroup;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceRead;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceSuggestions;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValue;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceValues;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetProbe;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceReadV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceSuggestionsV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDimSourceValuesV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSheetProbeV1;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -74,143 +79,10 @@ class PacingDashboardContractMapperTest {
 	private final PacingDashboardContractMapper mapper = new PacingDashboardContractMapper();
 
 	@Test
-	void shouldMapFullDashboardPayloadTest() {
-		// Given:
-		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
-				"https://docs.google.com/spreadsheets/d/abc",
-				List.of(new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456")), true,
-				true, "2026-09-01|2026-09-07", true, 0.26);
-		PacingLineItemPlan plan = new PacingLineItemPlan(
-				"111", "Display", "DV360", List.of("VIP", "renewal"), "Nike SS26 - Display", "CPM", 5000.0,
-				1_000_000.0, 20.0, null, null,
-				"2026-08-01", "2026-09-30",
-				List.of(new PacingPauseInterval("2026-08-10", "2026-08-12")),
-				List.of(Map.of("target_impressions", 200_000)),
-				// Value groups: two delivered Audience values read as one named value on this line.
-				List.of(Map.of("dim_key", "audience", "name", "Brand", "values", List.of("PMax_Brand", "Search_Brand"))),
-				// Net cost mode: operative ratio, stored ratio, lock, NetSuite baseline.
-				null, false, false, null, 0.85, 0.85, true, 0.8,
-				// Primary conversions: the operative choice, the stored one, and whether this line's
-				// own source brings conversion rows at all.
-				List.of("Purchase"), List.of("Purchase"), true);
-		PacingJournalEntry journal =
-				new PacingJournalEntry("j1", "2026-08-05", "Kicked off", "azat@aidigital.com", "pu-1", null);
-		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of("111", plan), List.of(Map.of("date", "2026-08-01", "impressions", 500)),
-				"2026-08-05",
-				// types / availableSplits / availableMetrics / conversionTags - the four the moved
-				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, List.of(Map.of("creative_name", "Hero 15s")), null,
-				Map.of("devices", Map.of("rows", List.of())), null, null,
-				Map.of("widgets", List.of()), Map.of("groupBy", "day"), Map.of("contextWidgetSpec", 2),
-				Map.of("campaign", Map.of("mA", 42.5)), null,
-				Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true), null,
-				List.of(journal), null);
-
-		// When: the caller authored this journal entry themselves ("pu-1"), on a restricted scope.
-		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
-
-		// Then: the "id" field Pacing calls the campaign is renamed to "slug" on this contract
-		assertThat(result.getCampaign().getSlug()).isEqualTo("nike-ss26");
-		// The metric bag rides through untouched: it is Pacing's arithmetic, and the
-		// Hub neither reshapes nor recomputes any of it - margin especially, which is
-		// applied server-side and nowhere else.
-		assertThat(result.getMetrics()).isEqualTo(Map.of("campaign", Map.of("mA", 42.5)));
-		assertThat(result.getCampaign().getPacingId()).isEqualTo("p1");
-		// §16: the source URL and the reference links ride through verbatim - Pacing already dropped
-		// any link duplicating the source URL, so the mapper repeats no de-duplication.
-		assertThat(result.getCampaign().getSourceUrl()).isEqualTo("https://docs.google.com/spreadsheets/d/abc");
-		assertThat(result.getCampaign().getLinks()).hasSize(1);
-		assertThat(result.getCampaign().getLinks().get(0).getName()).isEqualTo("Asana");
-		assertThat(result.getCampaign().getLinks().get(0).getUrl()).isEqualTo("https://app.asana.com/0/123/456");
-		assertThat(result.getCampaign().getStartDate()).isEqualTo(LocalDate.of(2026, 8, 1));
-		assertThat(result.getPlanByLineItem()).containsKey("111");
-		assertThat(result.getPlanByLineItem().get("111").getPlannedImpressions()).isEqualTo(1_000_000.0);
-		// Primary conversions (spec 2026-09-13). Asserted rather than merely compiled: the operative
-		// list is a MATH input the browser-side engine reads, and a mapper that quietly stopped
-		// forwarding it would leave every line counting every conversion action the platform
-		// reported - a wrong number with nothing failing anywhere. The same class of silent loss this
-		// contract already suffered on `cost_coef` and the net family.
-		assertThat(result.getPlanByLineItem().get("111").getPrimaryConversions()).containsExactly("Purchase");
-		assertThat(result.getPlanByLineItem().get("111").getStoredPrimaryConversions()).containsExactly("Purchase");
-		assertThat(result.getPlanByLineItem().get("111").getConversionData()).isTrue();
-		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals()).hasSize(1);
-		assertThat(result.getPlanByLineItem().get("111").getPauseIntervals().get(0).getFrom())
-				.isEqualTo(LocalDate.of(2026, 8, 10));
-		assertThat(result.getPlanByLineItem().get("111").getLabels()).containsExactly("VIP", "renewal");
-		assertThat(result.getPlanByLineItem().get("111").getDescription()).isEqualTo("Nike SS26 - Display");
-		// Net cost mode (Pacing spec 2026-09-07): the four net fields pass through verbatim - the
-		// browser-side engine multiplies each cost row by netRatio, so dropping it here would
-		// silently read a net pacing as gross. netMode is the campaign-wide switch echo.
-		assertThat(result.getCampaign().getNetMode()).isTrue();
-		// Period scope: the saved switch and key, so the dashboard can show the period the Overview
-		// row and the Slack summary already show.
-		assertThat(result.getCampaign().getPeriodScope()).isTrue();
-		assertThat(result.getCampaign().getPeriodScopeKey()).isEqualTo("2026-09-01|2026-09-07");
-		// Exchange-rate control: a hand-set rate's lock and the NetSuite rate Reset to NS restores.
-		assertThat(result.getCampaign().getRateLocked()).isTrue();
-		assertThat(result.getCampaign().getNsRate()).isEqualTo(0.26);
-		assertThat(result.getPlanByLineItem().get("111").getNetRatio()).isEqualTo(0.85);
-		assertThat(result.getPlanByLineItem().get("111").getStoredNetRatio()).isEqualTo(0.85);
-		assertThat(result.getPlanByLineItem().get("111").getNetRatioLocked()).isTrue();
-		assertThat(result.getPlanByLineItem().get("111").getNsNetRatio()).isEqualTo(0.8);
-		assertThat(result.getFactsDaily()).hasSize(1);
-		assertThat(result.getAsOf()).isEqualTo("2026-08-05");
-		// The two Breakdown aux feeds ride through byte-for-byte, and an ABSENT one stays absent:
-		// null is what tells the panel this pacing does not collect the file, so it must not offer
-		// that cut. Flattening it to an empty list would earn an empty tab instead.
-		assertThat(result.getCreatives()).containsExactly(Map.of("creative_name", "Hero 15s"));
-		assertThat(result.getConversions()).isNull();
-		assertThat(result.getDimSources()).containsKey("devices");
-		assertThat(result.getDisplay()).containsKey("widgets");
-		assertThat(result.getAggregate()).containsEntry("groupBy", "day");
-		assertThat(result.getLibraryEntries()).isNull();
-		// The data namespace rides through whole: the Data panel edits four of its keys and must be
-		// able to carry the rest back unchanged.
-		assertThat(result.getData())
-				.isEqualTo(Map.of("source", "platform_mart_adjustments_view", "fetch_creatives", true));
-		assertThat(result.getJournal()).hasSize(1);
-		assertThat(result.getJournal().get(0).getMsg()).isEqualTo("Kicked off");
-		assertThat(result.getJournal().get(0).getCanEdit()).isTrue();
-	}
-
-	@Test
-	void shouldDefaultLineItemPlanLabelsToEmptyListWhenPacingOmitsThemTest() {
-		// Given: a line item with no labels/description at all, exactly like every other optional
-		// field on this record - a missing labels array must not become a null on the contract
-		// (matching the existing `containers` default two lines above it in the mapper).
-		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
-				"", List.of(), null, null, null, null, null);
-		PacingLineItemPlan plan = new PacingLineItemPlan(
-				"111", "Display", "DV360", null, null, "CPM", 5000.0, 1_000_000.0, 20.0, null, null,
-				"2026-08-01", "2026-09-30", List.of(), List.of(), null, null, false, false, null, null, null, null, null,
-				// Primary conversions unset: this case is about the fields above.
-				null, null, null);
-		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of("111", plan), List.of(), "2026-08-05",
-				// types / availableSplits / availableMetrics / conversionTags - the four the moved
-				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
-				Map.of(), Map.of(), null, Map.of(), null, List.of(), null);
-
-		// When:
-		PacingDashboardV1 result = mapper.toV1(data, "pu-1", false);
-
-		// Then:
-		assertThat(result.getPlanByLineItem().get("111").getLabels()).isEmpty();
-		assertThat(result.getPlanByLineItem().get("111").getDescription()).isNull();
-		// A pacing that never saved a period scope reads as scope off, with no key.
-		assertThat(result.getCampaign().getPeriodScope()).isFalse();
-		assertThat(result.getCampaign().getPeriodScopeKey()).isNull();
-		// A payload without rateLocked/nsRate reads as unlocked, with no NetSuite rate known.
-		assertThat(result.getCampaign().getRateLocked()).isFalse();
-		assertThat(result.getCampaign().getNsRate()).isNull();
-	}
-
-	@Test
 	void shouldAllowEditOnlyForTheEntrysOwnAuthorOrAnUnrestrictedScopeTest() {
+		// Still here after the dashboard pass-through (2026-10-29): the journal WRITE responses are
+		// built by this method, and the browser-side port of the same rule (wire.ts) is held to it by
+		// its parity test over real bodies - so this case and that one must keep agreeing.
 		// Given: one entry authored by "pu-1".
 		PacingJournalEntry entry = new PacingJournalEntry("j1", "2026-08-05", "Note", "someone@aidigital.com", "pu-1", null);
 
@@ -261,34 +133,6 @@ class PacingDashboardContractMapperTest {
 	}
 
 	@Test
-	void shouldMapDeliveryStatsAndKeepAnUnmeasuredOneNullTest() {
-		// Given: one payload with a measurement and one without.
-		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", "SO-1",
-				"", List.of(), null, null, null, null, null);
-		PacingDeliveryStats stats = new PacingDeliveryStats(120000L, 3600000L, "2026-10-14T11:20:00.000Z", null);
-		PacingDashboardData measured = new PacingDashboardData(
-				campaign, Map.of(), List.of(), "2026-08-05",
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
-				Map.of(), Map.of(), null, Map.of(), null, List.of(), stats);
-		PacingDashboardData unmeasured = new PacingDashboardData(
-				campaign, Map.of(), List.of(), "2026-08-05",
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(),
-				Map.of(), Map.of(), null, Map.of(), null, List.of(), null);
-
-		// When:
-		PacingDashboardV1 withStats = mapper.toV1(measured, "pu-1", false);
-		PacingDashboardV1 withoutStats = mapper.toV1(unmeasured, "pu-1", false);
-
-		// Then: "never measured" stays null rather than reading as a zero-cell tab.
-		assertThat(withStats.getDeliveryStats().getRows()).isEqualTo(120000L);
-		assertThat(withStats.getDeliveryStats().getCells()).isEqualTo(3600000L);
-		assertThat(withStats.getDeliveryStats().getMeasuredAt()).isEqualTo("2026-10-14T11:20:00.000Z");
-		assertThat(withStats.getDeliveryStats().getAutoOffAt()).isNull();
-		assertThat(withoutStats.getDeliveryStats()).isNull();
-	}
-
-	@Test
 	void shouldKeepAFalseFetchToggleDistinctFromAnAbsentOneTest() {
 		// Given: turning a toggle off is a value to write; leaving it alone is not. Collapsing the two
 		// would make every toggle one-way.
@@ -319,88 +163,6 @@ class PacingDashboardContractMapperTest {
 
 		// Then:
 		assertThat(result.dimSources()).isNotNull().isEmpty();
-	}
-
-	@Test
-	void shouldMapFullNotifySettingsToV1Test() {
-		// Given: §14 - all 13 alert keys, exercising every one of the per-shape mapping helpers.
-		PacingNotifySettings settings = new PacingNotifySettings(
-				new PacingAlertsConfig(
-						true,
-						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
-						new PacingAlertRuleGapDays(true, true, 1),
-						new PacingAlertRuleFactor(true, true, 0.7),
-						new PacingAlertRuleFactor(true, true, 0.7),
-						new PacingAlertRuleFactor(true, true, 2.0),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleBand(true, true, -5, 5),
-						new PacingAlertRuleGapPp(true, true, 3),
-						new PacingAlertRuleSpend(true, true, 90, 100),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleDays(true, true, 2),
-						new PacingAlertRuleThresholdPct(true, true, 10)),
-				new PacingNotifyMetrics(true),
-				true,
-				"plan");
-
-		// When:
-		PacingNotifySettingsV1 result = mapper.toV1(settings);
-
-		// Then:
-		assertThat(result.getAlerts().getEnabled()).isTrue();
-		assertThat(result.getAlerts().getBidFactAbovePlan().getWindow()).isEqualTo(2);
-		assertThat(result.getAlerts().getBidFactAbovePlan().getThresholdPct()).isEqualTo(5);
-		assertThat(result.getAlerts().getDataGap().getGapDays()).isEqualTo(1);
-		assertThat(result.getAlerts().getCtrBelowTarget().getFactor()).isEqualTo(0.7);
-		assertThat(result.getAlerts().getVcrBelowTarget().getFactor()).isEqualTo(0.7);
-		assertThat(result.getAlerts().getCtrAboveTarget().getFactor()).isEqualTo(2.0);
-		assertThat(result.getAlerts().getVcrOver100().getEnabled()).isTrue();
-		assertThat(result.getAlerts().getNoImpressionsYet().getSlack()).isTrue();
-		assertThat(result.getAlerts().getPacingOffPace().getLow()).isEqualTo(-5);
-		assertThat(result.getAlerts().getPacingOffPace().getHigh()).isEqualTo(5);
-		assertThat(result.getAlerts().getMarginBelowTarget().getGapPp()).isEqualTo(3);
-		assertThat(result.getAlerts().getSpendOverspend().getWarnPct()).isEqualTo(90);
-		assertThat(result.getAlerts().getSpendOverspend().getBadPct()).isEqualTo(100);
-		assertThat(result.getAlerts().getDspForecastOverspend().getEnabled()).isTrue();
-		assertThat(result.getAlerts().getStaleData().getDays()).isEqualTo(2);
-		assertThat(result.getAlerts().getRateCostAbovePlan().getThresholdPct()).isEqualTo(10);
-		assertThat(result.getMetrics().getVcr()).isTrue();
-		assertThat(result.getHidePaused()).isTrue();
-		assertThat(result.getSummaryProjection()).isEqualTo(PacingSummaryProjectionV1.PLAN);
-	}
-
-	@Test
-	void shouldDefaultAbsentNotifyKeysLikePacingDoesTest() {
-		// Given: a notify block written before summary_projection and metrics existed - 236 of the
-		// 1337 production pacings carry one. Pacing reads both as their defaults, never as an error.
-		PacingNotifySettings settings = new PacingNotifySettings(
-				new PacingAlertsConfig(
-						false,
-						new PacingAlertRuleWindowThreshold(true, true, 2, 5),
-						new PacingAlertRuleGapDays(true, true, 1),
-						new PacingAlertRuleFactor(true, true, 0.7),
-						new PacingAlertRuleFactor(true, true, 0.7),
-						new PacingAlertRuleFactor(true, true, 2.0),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleBand(true, true, -5, 5),
-						new PacingAlertRuleGapPp(true, true, 3),
-						new PacingAlertRuleSpend(true, true, 90, 100),
-						new PacingAlertRuleBase(true, true),
-						new PacingAlertRuleDays(true, true, 2),
-						new PacingAlertRuleThresholdPct(true, true, 10)),
-				null,
-				false,
-				null);
-
-		// When:
-		PacingNotifySettingsV1 result = mapper.toV1(settings);
-
-		// Then:
-		assertThat(result.getMetrics().getVcr()).isFalse();
-		assertThat(result.getHidePaused()).isFalse();
-		assertThat(result.getSummaryProjection()).isEqualTo(PacingSummaryProjectionV1.REFORECAST);
 	}
 
 	@Test
@@ -453,33 +215,6 @@ class PacingDashboardContractMapperTest {
 	}
 
 	@Test
-	void shouldDegradeMalformedFlightDatesToNullRatherThanFailTest() {
-		// Given: a defensive rule shared with PacingContractMapper's own date parsing
-		PacingDashboardCampaign campaign =
-				new PacingDashboardCampaign(
-						"slug", "p1", "Name", "not-a-date", "", "USD", 1.0, "Live", null, null, null, null,
-						null, null, null, null);
-		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of(), List.of(), null,
-				// types / availableSplits / availableMetrics / conversionTags - the four the moved
-				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
-				null, List.of(), null);
-
-		// When:
-		PacingDashboardV1 result = mapper.toV1(data, null, false);
-
-		// Then:
-		// Null stays null rather than flattening to an empty map, unlike display and
-		// aggregate: those are configuration, where "nothing chosen" and "{}" mean the
-		// same thing, while this is measurement. An empty bag would let a widget draw
-		// confident zeroes for figures Pacing could not derive at all.
-		assertThat(result.getMetrics()).isNull();
-		assertThat(result.getCampaign().getStartDate()).isNull();
-		assertThat(result.getCampaign().getEndDate()).isNull();
-	}
-
-	@Test
 	void shouldMapRefreshStatusTest() {
 		// Given:
 		PacingRefreshStatus status = new PacingRefreshStatus(true, "r1", 42, "2026-08-31");
@@ -516,28 +251,6 @@ class PacingDashboardContractMapperTest {
 	}
 
 	@Test
-	void shouldFlattenNullCampaignLinksToEmptyListTest() {
-		// Given: a pacing whose campaign_links was never written. "Never written" and "none kept"
-		// are the same answer to a reader, so null flattens - unlike the payload's measurement
-		// fields, whose absence carries meaning.
-		PacingDashboardCampaign campaign = new PacingDashboardCampaign(
-				"slug", "p1", "Name", "2026-08-01", "2026-09-30", "USD", 1.0, "Live", null, "", null, null,
-				null, null, null, null);
-		PacingDashboardData data = new PacingDashboardData(
-				campaign, Map.of(), List.of(), null,
-				// types / availableSplits / availableMetrics / conversionTags - the four the moved
-				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
-				null, List.of(), null);
-
-		// When:
-		PacingDashboardV1 result = mapper.toV1(data, null, false);
-
-		// Then:
-		assertThat(result.getCampaign().getLinks()).isEmpty();
-	}
-
-	@Test
 	void shouldReadCampaignLinksUpdateInOrderTest() {
 		// Given: a whole-array save (§16) - order is display order, so it must survive the mapping
 		PacingCampaignLinksUpdateV1 body = new PacingCampaignLinksUpdateV1().links(List.of(
@@ -551,32 +264,6 @@ class PacingDashboardContractMapperTest {
 		assertThat(result).containsExactly(
 				new PacingCampaignLink("DV360", "https://displayvideo.google.com/#ng_nav/p/1"),
 				new PacingCampaignLink("Asana", "https://app.asana.com/0/123/456"));
-	}
-
-	@Test
-	void thirdPartyBecomesAnEmptyListWhileMappingsV3KeepsItsNull() {
-		// The asymmetry is deliberate. A CM360 widget reads `thirdParty` to decide whether to ask for
-		// rows at all, so a length check must always be safe. `mappingsV3` answers a different
-		// question: null means the pacing predates the v3 mapping model, an empty list means it was
-		// migrated and nothing is mapped yet, and the compare screens show a different thing for each.
-		PacingDashboardData data = dashboardDataWith(null, null);
-
-		PacingDashboardV1 result = mapper.toV1(data, null, true);
-
-		assertThat(result.getThirdParty()).isEmpty();
-		assertThat(result.getMappingsV3()).isNull();
-	}
-
-	@Test
-	void thirdPartyAndMappingsV3RideThroughUntouched() {
-		List<Map<String, Object>> blocks = List.of(Map.of("type", "cm360", "campaigns", List.of("Spring Sale")));
-		List<Map<String, Object>> mappings = List.of(Map.of("id", "m1"));
-		PacingDashboardData data = dashboardDataWith(blocks, mappings);
-
-		PacingDashboardV1 result = mapper.toV1(data, null, true);
-
-		assertThat(result.getThirdParty()).isEqualTo(blocks);
-		assertThat(result.getMappingsV3()).isEqualTo(mappings);
 	}
 
 	@Test
@@ -606,25 +293,6 @@ class PacingDashboardContractMapperTest {
 		assertThat(result.getFetchedAt()).isEqualTo("2026-10-09T12:00:00.000Z");
 		assertThat(result.getRowCount()).isEqualTo(1200);
 		assertThat(result.getCampaigns()).containsExactly("Spring Sale", "Autumn");
-	}
-
-	/**
-	 * A dashboard payload that differs only in its two CM360 fields - every other slot is the
-	 * minimum the mapper needs, so a failure above points at the field under test.
-	 *
-	 * @param thirdParty the configured CM360 blocks, or null
-	 * @param mappingsV3 the v3 mapping entities, or null
-	 * @return the payload to map
-	 */
-	PacingDashboardData dashboardDataWith(
-			List<Map<String, Object>> thirdParty, List<Map<String, Object>> mappingsV3) {
-		return new PacingDashboardData(
-				new PacingDashboardCampaign("nike-ss26", "p1", "Nike SS26", "2026-08-01", "2026-09-30",
-						"USD", 1.0, "Live", null, null, List.of(), false, null, null, null, null),
-				Map.of(), List.of(), "2026-08-05",
-				null, null, null, null, null, null, null,
-				thirdParty, mappingsV3,
-				null, null, null, null, null, null, null, List.of(), null);
 	}
 
 	@Test
@@ -749,5 +417,151 @@ class PacingDashboardContractMapperTest {
 		// The grid is the display twin and stays text - it is what the header-row picker shows.
 		assertThat(result.getGrid()).singleElement()
 				.satisfies(row -> assertThat(row.get(0)).isEqualTo("46170"));
+	}
+
+	@Test
+	void shouldReadAnAbsentJournalAsAnEmptyListTest() {
+		// Given/When/Then: a pacing with no journal yet answers with an empty list, never a null the
+		// write responses would have to guard against.
+		assertThat(mapper.toJournalV1(null, "pu-1", true)).isEmpty();
+	}
+
+	@Test
+	void shouldLeaveTheLatestDateEmptyWhenPacingHasNoneOrAMalformedOneTest() {
+		// Given/When/Then: no date, a blank date and a date that is not ISO all read as "no date";
+		// a missing row count reads as zero.
+		assertThat(mapper.toV1(new PacingRefreshStatus(false, null, null, null)).getLatestDate()).isNull();
+		assertThat(mapper.toV1(new PacingRefreshStatus(false, null, null, "  ")).getLatestDate()).isNull();
+		assertThat(mapper.toV1(new PacingRefreshStatus(true, "r1", 1, "yesterday")).getLatestDate()).isNull();
+		assertThat(mapper.toV1(new PacingRefreshStatus(false, null, null, null)).getRowCount()).isZero();
+	}
+
+	@Test
+	void shouldMapASheetProbeWithItsTabsTest() {
+		// Given: a readable spreadsheet with one tab.
+		PacingSheetTab tab = new PacingSheetTab(7, "Plan", 120, 6, 1,
+				List.of("Date", "Impressions"), List.of(List.of("2026-05-28", 10)), List.of(List.of("2026-05-28", "10")));
+		PacingSheetProbe probe = new PacingSheetProbe(true, "sheet-1", "GAF pacing", "svc@example.iam", null, List.of(tab));
+
+		// When:
+		PacingSheetProbeV1 result = mapper.toV1(probe);
+
+		// Then: `ok` arrives as `readable`, the rest field for field.
+		assertThat(result.getReadable()).isTrue();
+		assertThat(result.getSpreadsheetId()).isEqualTo("sheet-1");
+		assertThat(result.getTitle()).isEqualTo("GAF pacing");
+		assertThat(result.getShareWith()).isEqualTo("svc@example.iam");
+		assertThat(result.getError()).isNull();
+		assertThat(result.getTabs()).singleElement()
+				.satisfies(t -> assertThat(t.getTitle()).isEqualTo("Plan"));
+	}
+
+	@Test
+	void shouldReadAnUnreadableSheetProbeWithoutIdOrTabsAsEmptyRatherThanNullTest() {
+		// Given: Pacing could not open the sheet, so it knows neither its id nor its tabs.
+		PacingSheetProbe probe = new PacingSheetProbe(false, null, null, null, "not_shared", null);
+
+		// When:
+		PacingSheetProbeV1 result = mapper.toV1(probe);
+
+		// Then:
+		assertThat(result.getReadable()).isFalse();
+		assertThat(result.getSpreadsheetId()).isEmpty();
+		assertThat(result.getTabs()).isEmpty();
+		assertThat(result.getError()).isEqualTo("not_shared");
+	}
+
+	@Test
+	void shouldMapDimSourceValuesWithTheirRowCountsTest() {
+		// Given:
+		PacingDimSourceValues values = new PacingDimSourceValues(
+				List.of("Placement"),
+				List.of(new PacingDimSourceValue(List.of("Display_300x250"), 12), new PacingDimSourceValue(null, 0)),
+				true, 5000);
+
+		// When:
+		PacingDimSourceValuesV1 result = mapper.toV1(values);
+
+		// Then:
+		assertThat(result.getColumns()).containsExactly("Placement");
+		assertThat(result.getTruncated()).isTrue();
+		assertThat(result.getScannedRows()).isEqualTo(5000);
+		assertThat(result.getValues()).hasSize(2);
+		assertThat(result.getValues().get(0).getValues()).containsExactly("Display_300x250");
+		assertThat(result.getValues().get(0).getRows()).isEqualTo(12);
+		// A value Pacing listed without cells is an empty tuple, not a null.
+		assertThat(result.getValues().get(1).getValues()).isEmpty();
+	}
+
+	@Test
+	void shouldReadAbsentDimSourceColumnsAndValuesAsEmptyListsTest() {
+		PacingDimSourceValuesV1 result = mapper.toV1(new PacingDimSourceValues(null, null, false, 0));
+
+		assertThat(result.getColumns()).isEmpty();
+		assertThat(result.getValues()).isEmpty();
+		assertThat(result.getTruncated()).isFalse();
+	}
+
+	@Test
+	void shouldMapDimSourceSuggestionsWithBindingsAndGroupsTest() {
+		// Given: a proposal that routes one sheet value to a line item and groups two others.
+		PacingDimSourceSuggestions suggestions = new PacingDimSourceSuggestions(
+				true, null,
+				List.of(new PacingDimSourceBinding("Display_300x250", "li-1")),
+				List.of("Video_A", "Video_B"),
+				List.of(new PacingDimSourceGroup("Video", List.of("Video_A", "Video_B")), new PacingDimSourceGroup("Other", null)),
+				3);
+
+		// When:
+		PacingDimSourceSuggestionsV1 result = mapper.toV1(suggestions);
+
+		// Then:
+		assertThat(result.getAvailable()).isTrue();
+		assertThat(result.getNotice()).isNull();
+		assertThat(result.getConsidered()).isEqualTo(3);
+		assertThat(result.getBindings()).singleElement().satisfies(b -> {
+			assertThat(b.getValue()).isEqualTo("Display_300x250");
+			assertThat(b.getLineItemId()).isEqualTo("li-1");
+		});
+		assertThat(result.getMembers()).containsExactly("Video_A", "Video_B");
+		assertThat(result.getGroups()).hasSize(2);
+		assertThat(result.getGroups().get(0).getLabel()).isEqualTo("Video");
+		assertThat(result.getGroups().get(0).getMembers()).containsExactly("Video_A", "Video_B");
+		// A group Pacing proposed without members is an empty group, not a null.
+		assertThat(result.getGroups().get(1).getMembers()).isEmpty();
+	}
+
+	@Test
+	void shouldCarryAnUnavailableProposalWithItsNoticeAndEmptyListsTest() {
+		// Given: Pacing has no model configured; the lists may be absent altogether.
+		PacingDimSourceSuggestions suggestions =
+				new PacingDimSourceSuggestions(false, "we need to add ai connection", null, null, null, 0);
+
+		// When:
+		PacingDimSourceSuggestionsV1 result = mapper.toV1(suggestions);
+
+		// Then: the UI gets the notice and empty lists, never nulls to guard.
+		assertThat(result.getAvailable()).isFalse();
+		assertThat(result.getNotice()).isEqualTo("we need to add ai connection");
+		assertThat(result.getBindings()).isEmpty();
+		assertThat(result.getMembers()).isEmpty();
+		assertThat(result.getGroups()).isEmpty();
+	}
+
+	@Test
+	void shouldMapADimSourceReadFieldForFieldTest() {
+		// Given:
+		PacingDimSourceRead read = new PacingDimSourceRead("src-1", 5003, 12, 3, 184_320L, "covers 2026-05-01..2026-05-28");
+
+		// When:
+		PacingDimSourceReadV1 result = mapper.toV1(read);
+
+		// Then:
+		assertThat(result.getSourceId()).isEqualTo("src-1");
+		assertThat(result.getRows()).isEqualTo(5003);
+		assertThat(result.getUnboundRows()).isEqualTo(12);
+		assertThat(result.getUnparsedCells()).isEqualTo(3);
+		assertThat(result.getBytes()).isEqualTo(184_320L);
+		assertThat(result.getCoverageHint()).isEqualTo("covers 2026-05-01..2026-05-28");
 	}
 }

@@ -2,7 +2,6 @@ package com.aidigital.operationalhub.application.controller;
 
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMappingSuggestionsV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffCountsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNsDiffReportV1;
@@ -27,6 +26,8 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourc
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceBinding;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDimSourceUnboundName;
 import com.aidigital.operationalhub.externalservices.pacing.PacingClient;
+import com.aidigital.operationalhub.externalservices.pacing.PacingDashboardDataClient;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardStream;
 import com.aidigital.operationalhub.externalservices.pacing.PacingSheetSourceClient;
 import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAssertion;
 import com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException;
@@ -42,7 +43,6 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleThresholdPct;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
@@ -67,7 +67,6 @@ import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrant
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.exception.BusinessException;
 import com.aidigital.operationalhub.service.exception.enums.OperationalHubErrorReason;
-import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
@@ -84,6 +83,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -100,6 +101,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -154,7 +157,7 @@ class PacingDashboardControllerMvcTest {
 	private PacingNsDiffContractMapper nsDiffMapper;
 
 	@Mock
-	private HubUserService hubUserService;
+	private PacingDashboardDataClient dashboardDataClient;
 
 	@Mock
 	private CampaignLinksValidator campaignLinksValidator;
@@ -175,29 +178,98 @@ class PacingDashboardControllerMvcTest {
 	}
 
 	@Test
-	void shouldReturnDashboardPayloadTest() throws Exception {
-		// Given:
+	void shouldCopyTheDashboardBodyAndCacheHeadersThroughUntouchedTest() throws Exception {
+		// Given: Pacing answers a gzip'd body with its cache headers, and the browser sent an ETag and
+		// its Accept-Encoding - both must reach Pacing exactly as sent (DASHBOARD-DATA-PASSTHROUGH-PLAN).
 		stubCurrentUser();
-		PacingDashboardData data =
-				new PacingDashboardData(
-						null, Map.of(), List.of(), null,
-				// types / availableSplits / availableMetrics / conversionTags - the four the moved
-				// widget renderer reads; unset here because these cases are about the other fields.
-				null, null, null, null, null, null, null, null, null, Map.of(), Map.of(), null, null, null, null,
-						null, List.of(), null);
-		doReturn(data).when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
-		// Unstubbed hubUserService.findByClerkUserId(...) answers Optional.empty() (Mockito's default for
-		// Optional-returning methods), so the resolved own-pacing-user-id is null here - an unrestricted
-		// (kind=all) scope from stubCurrentUser() still resolves canEdit to true regardless.
-		doReturn(new PacingDashboardV1().display(Map.of("widgets", List.of())).journal(List.of())
-				.planByLineItem(Map.of()).factsDaily(List.of()))
-				.when(mapper).toV1(data, null, true);
+		byte[] body = "{\"campaign\":{\"id\":\"nike-ss26\"},\"journal\":[]}".getBytes(StandardCharsets.UTF_8);
+		ClosableBody upstreamBody = new ClosableBody(body);
+		doReturn(new PacingDashboardStream(200, "\"abc123\"", "application/json; charset=utf-8", "gzip",
+				(long) body.length, "private, no-cache", "Accept-Encoding", upstreamBody))
+				.when(dashboardDataClient).open(any(), eq("nike-ss26"), eq("\"stale\""), eq("gzip, deflate, br"));
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: status, headers and bytes are Pacing's, byte for byte - nothing was parsed - and
+		// the upstream connection is released once the copy is done.
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26")
+						.header("If-None-Match", "\"stale\"")
+						.header("Accept-Encoding", "gzip, deflate, br"))
+				.andExpect(status().isOk())
+				.andExpect(header().string("ETag", "\"abc123\""))
+				.andExpect(header().string("Cache-Control", "private, no-cache"))
+				.andExpect(header().string("Content-Encoding", "gzip"))
+				.andExpect(header().string("Vary", "Accept-Encoding"))
+				.andExpect(header().string("Content-Length", String.valueOf(body.length)))
+				.andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
+				.andExpect(content().bytes(body));
+		assertThat(upstreamBody.closed).isTrue();
+	}
+
+	@Test
+	void shouldAnswerNotModifiedWithoutABodyWhenPacingDoesTest() throws Exception {
+		// Given: the browser's ETag is current - Pacing answered 304 with no body.
+		stubCurrentUser();
+		doReturn(new PacingDashboardStream(304, "\"abc123\"", null, null, null, "private, no-cache", "Accept-Encoding", null))
+				.when(dashboardDataClient).open(any(), eq("nike-ss26"), eq("\"abc123\""), isNull());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: a 304 with the ETag and no body, exactly as Pacing said it.
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26").header("If-None-Match", "\"abc123\""))
+				.andExpect(status().isNotModified())
+				.andExpect(header().string("ETag", "\"abc123\""))
+				.andExpect(header().string("Cache-Control", "private, no-cache"))
+				.andExpect(content().string(""));
+	}
+
+	@Test
+	void shouldPassNoConditionalOrEncodingHeaderUpWhenTheBrowserSentNoneTest() throws Exception {
+		// Given: a bare GET - no If-None-Match, no Accept-Encoding. Pacing then answers plain bytes.
+		stubCurrentUser();
+		byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+		doReturn(new PacingDashboardStream(200, "\"e1\"", "application/json; charset=utf-8", null,
+				(long) body.length, "private, no-cache", "Accept-Encoding", new ByteArrayInputStream(body)))
+				.when(dashboardDataClient).open(any(), eq("nike-ss26"), isNull(), isNull());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: no Content-Encoding is invented, the plain bytes go through.
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26"))
+				.andExpect(status().isOk())
+				.andExpect(header().doesNotExist("Content-Encoding"))
+				.andExpect(content().bytes(body));
+	}
+
+	@Test
+	void shouldReleaseTheUpstreamBodyWhenSpringWouldAnswerNotModifiedItselfTest() throws Exception {
+		// Given: Pacing answered 200 with an ETag equal to the browser's (the two compare the same
+		// header, so this does not happen in practice - but if it did, Spring's own conditional-GET
+		// handling would answer 304 without ever reading the body, and the upstream connection would
+		// stay open). The controller closes it and answers 304 itself.
+		stubCurrentUser();
+		ClosableBody upstreamBody = new ClosableBody("{}".getBytes(StandardCharsets.UTF_8));
+		doReturn(new PacingDashboardStream(200, "\"same\"", "application/json", null, 2L, "private, no-cache", null, upstreamBody))
+				.when(dashboardDataClient).open(any(), eq("nike-ss26"), eq("W/\"same\""), isNull());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:
-		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26"))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.display.widgets").isArray());
+		mockMvc.perform(get("/api/v1/pacing/dashboards/{slug}", "nike-ss26").header("If-None-Match", "W/\"same\""))
+				.andExpect(status().isNotModified())
+				.andExpect(content().string(""));
+		assertThat(upstreamBody.closed).isTrue();
+	}
+
+	/** A body that remembers whether whoever drained it also closed it. */
+	static final class ClosableBody extends ByteArrayInputStream {
+
+		private boolean closed;
+
+		ClosableBody(byte[] bytes) {
+			super(bytes);
+		}
+
+		@Override
+		public void close() {
+			closed = true;
+		}
 	}
 
 	@Test
@@ -660,7 +732,7 @@ class PacingDashboardControllerMvcTest {
 		// Given: the generic PacingExternalException mapping applies to every §6 endpoint too
 		stubCurrentUser();
 		doThrow(new PacingExternalException(PacingFailureReason.UNREACHABLE, "down"))
-				.when(pacingClient).getDashboardData(any(), eq("nike-ss26"));
+				.when(dashboardDataClient).open(any(), eq("nike-ss26"), isNull(), isNull());
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
 				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
 				.build();

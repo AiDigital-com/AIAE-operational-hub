@@ -4,7 +4,6 @@ import com.aidigital.operationalhub.application.api.v1.generated.PacingDashboard
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictReasonV1;
@@ -36,6 +35,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThi
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshTriggeredV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRetryAfterV1;
 import com.aidigital.operationalhub.application.mapper.PacingDashboardContractMapper;
+import com.aidigital.operationalhub.externalservices.pacing.PacingDashboardDataClient;
+import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardStream;
 import com.aidigital.operationalhub.application.mapper.PacingContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingNsDiffContractMapper;
 import com.aidigital.operationalhub.application.mapper.PacingPlanContractMapper;
@@ -44,7 +45,6 @@ import com.aidigital.operationalhub.externalservices.pacing.assertion.HubAsserti
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlanUpdate;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAddableLineItems;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDisplaySaveOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNsDiffReport;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshOutcome;
@@ -60,19 +60,21 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingS
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyRefetchOutcome;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyCampaigns;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyStatus;
-import com.aidigital.operationalhub.domain.entity.HubUser;
-import com.aidigital.operationalhub.service.entity.HubUserService;
 import com.aidigital.operationalhub.service.campaignshare.CampaignShareAutoGrantService;
 import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
-import com.aidigital.operationalhub.service.rbac.model.PacingScope;
 import lombok.RequiredArgsConstructor;
 
+import java.io.IOException;
 import java.util.List;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -85,7 +87,8 @@ import org.springframework.web.bind.annotation.RestController;
  * the current user, asks {@link PacingScopeResolver} for their Pacing entitlement exactly as
  * {@link PacingController} does, signs and sends it to Pacing via {@link PacingClient}, and maps the
  * result. A concurrent display-save conflict or a refresh cooldown is a normal outcome the mapper
- * turns into the matching typed response, not an exception.
+ * turns into the matching typed response, not an exception. The one exception to "maps the result"
+ * is the dashboard body itself, which is copied through unparsed - see {@link #getPacingDashboard}.
  */
 @RestController
 @RequiredArgsConstructor
@@ -99,29 +102,90 @@ public class PacingDashboardController implements PacingDashboardApi {
 	private final PacingDashboardContractMapper mapper;
 	private final PacingPlanContractMapper planMapper;
 	private final PacingNsDiffContractMapper nsDiffMapper;
-	private final HubUserService hubUserService;
+	private final PacingDashboardDataClient dashboardDataClient;
 	private final CampaignLinksValidator campaignLinksValidator;
 	private final CampaignShareAutoGrantService campaignShareAutoGrantService;
 
 	@Override
-	public ResponseEntity<PacingDashboardV1> getPacingDashboard(String slug) {
-		CurrentUserModel user = currentUserService.resolveCurrentUser();
-		PacingEntitlement entitlement = pacingScopeResolver.resolveForCurrentUser(user);
-		HubAssertion assertion = assertionMapper.toAssertion(user, entitlement);
-		PacingDashboardData data = pacingClient.getDashboardData(assertion, slug);
-		return ResponseEntity.ok(mapper.toV1(
-				data, resolveOwnPacingUserId(user), PacingScope.KIND_ALL.equals(entitlement.scope().kind())));
+	public ResponseEntity<Resource> getPacingDashboard(String slug, String ifNoneMatch, String acceptEncoding) {
+		// A pass-through (DASHBOARD-DATA-PASSTHROUGH-PLAN, 2026-10-29). The body used to be read into
+		// Java objects, reshaped and re-serialised here - several copies of a 30-132 MB body at once,
+		// which is what took the pods down. Now Pacing's bytes, status and cache headers go to the
+		// browser as they are: the browser's If-None-Match and Accept-Encoding travel up unchanged, so
+		// Pacing decides the 304 and the compression, and the reshaping (field names, dates, canEdit)
+		// happens in the browser (features/pacing-dashboard/wire.ts) from UserV1's pacingUserId /
+		// pacingUnrestricted. What this method holds in memory is the 8 KB buffer Spring copies with.
+		HubAssertion assertion = signCurrentUser();
+		PacingDashboardStream upstream = dashboardDataClient.open(assertion, slug, ifNoneMatch, acceptEncoding);
+		boolean notModified = upstream.notModified() || etagMatches(ifNoneMatch, upstream.etag());
+		ResponseEntity.BodyBuilder response =
+				ResponseEntity.status(notModified ? HttpStatus.NOT_MODIFIED.value() : upstream.status());
+		if (upstream.etag() != null) {
+			response.header(HttpHeaders.ETAG, upstream.etag());
+		}
+		if (upstream.cacheControl() != null) {
+			response.header(HttpHeaders.CACHE_CONTROL, upstream.cacheControl());
+		}
+		if (upstream.vary() != null) {
+			response.header(HttpHeaders.VARY, upstream.vary());
+		}
+		if (notModified) {
+			// The etagMatches half is Spring's own rule, applied first: HttpEntityMethodProcessor turns
+			// a GET whose If-None-Match matches the entity's ETag into a 304 WITHOUT reading the body,
+			// which would leave the upstream connection open. Pacing compares the same header, so the
+			// two agree in practice; this keeps the connection accounted for if they ever did not.
+			closeQuietly(upstream);
+			return response.build();
+		}
+		if (upstream.contentEncoding() != null) {
+			response.header(HttpHeaders.CONTENT_ENCODING, upstream.contentEncoding());
+		}
+		if (upstream.contentLength() != null) {
+			response.contentLength(upstream.contentLength());
+		}
+		response.contentType(upstream.contentType() == null
+				? MediaType.APPLICATION_JSON
+				: MediaType.parseMediaType(upstream.contentType()));
+		// InputStreamResource, whose stream's close() releases the upstream connection: Spring's
+		// resource converter copies it to the browser in 8 KB steps and closes it, and does not try
+		// to measure its length first (it special-cases this one class).
+		return response.body(new InputStreamResource(upstream.body()));
 	}
 
 	/**
-	 * The current user's own Pacing {@code user_id} ({@code hub_users.pacing_user_id}), for the
-	 * journal's {@code canEdit} computation - null when the §2 employee sync has not reached them yet.
+	 * Spring's weak ETag comparison, so the early 304 above triggers exactly when
+	 * {@code HttpEntityMethodProcessor} would have.
 	 *
-	 * @param user the current user
-	 * @return the Pacing user id, or null if unresolved
+	 * @param ifNoneMatch the browser's If-None-Match, possibly null or a list
+	 * @param etag        the upstream ETag, possibly null
+	 * @return whether the browser already holds this ETag
 	 */
-	String resolveOwnPacingUserId(CurrentUserModel user) {
-		return hubUserService.findByClerkUserId(user.clerkUserId()).map(HubUser::getPacingUserId).orElse(null);
+	static boolean etagMatches(String ifNoneMatch, String etag) {
+		if (ifNoneMatch == null || ifNoneMatch.isBlank() || etag == null) {
+			return false;
+		}
+		String wanted = etag.startsWith("W/") ? etag.substring(2) : etag;
+		for (String candidate : ifNoneMatch.split(",")) {
+			String c = candidate.trim();
+			if ("*".equals(c) || (c.startsWith("W/") ? c.substring(2) : c).equals(wanted)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Releases an upstream answer this method will not stream. A failure to close is not surfaced:
+	 * the response to the browser is already decided.
+	 *
+	 * @param upstream the answer to release
+	 */
+	private static void closeQuietly(PacingDashboardStream upstream) {
+		try {
+			upstream.close();
+		} catch (IOException ignored) {
+			// The upstream connection is being discarded either way.
+		}
 	}
 
 	@Override

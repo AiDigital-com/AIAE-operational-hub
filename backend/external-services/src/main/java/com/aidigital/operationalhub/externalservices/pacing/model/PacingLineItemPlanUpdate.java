@@ -5,7 +5,8 @@ import java.util.Map;
 
 /**
  * One line item's plan to save on {@code POST /api/dashboards/:slug/settings} (§9 of the migration
- * plan, US-125/126/127) - the editable counterpart of {@link PacingLineItemPlan}. Carried from the
+ * plan, US-125/126/127) - the editable counterpart of the {@code planByLineItem[]} entries the dashboard
+ * body carries (read in the browser since the 2026-10-29 pass-through). Carried from the
  * generated {@code PacingLineItemPlanUpdateV1} request DTO into the external-services layer unchanged,
  * same reason {@link PacingCreateLineItem} exists: so {@link com.aidigital.operationalhub
  * .externalservices.pacing.PacingClient}'s interface does not depend on the generated API model.

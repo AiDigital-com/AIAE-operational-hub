@@ -145,6 +145,11 @@ app:
       # The three sheet-source calls open a Google spreadsheet and read it, which a 72,000-row tab
       # does not finish inside the general ceiling above. The retired SPA allowed them 185s.
       sheet-read-timeout-ms: ${PACING_SHEET_READ_TIMEOUT_MS:185000}
+      # The dashboard-body pass-through (GET /api/dashboards/:slug/data): the first open after a
+      # refresh makes Pacing rebuild a body of up to 132 MB before it can answer, which does not fit
+      # the general ceiling; a warm open answers from Pacing's cache in milliseconds. Headers only -
+      # the body transfer that follows is not bounded by this (DASHBOARD-DATA-PASSTHROUGH-PLAN).
+      dashboard-read-timeout-ms: ${PACING_DASHBOARD_READ_TIMEOUT_MS:60000}
       # Short-lived on purpose: a Hub assertion is a bearer token for whatever it asserts, minted fresh
       # per request rather than reused.
       assertion-ttl-seconds: ${PACING_ASSERTION_TTL_SECONDS:90}

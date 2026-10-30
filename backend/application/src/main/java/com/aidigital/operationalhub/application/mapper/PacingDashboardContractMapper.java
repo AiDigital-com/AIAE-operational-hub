@@ -1,30 +1,17 @@
 package com.aidigital.operationalhub.application.mapper;
 
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBandV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleBaseV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleDaysV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleFactorV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapDaysV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleGapPpV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleSpendV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleThresholdPctV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertRuleWindowThresholdV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAlertsConfigV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinkV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardCampaignV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDashboardV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDeliveryStatsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingJournalEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryEntryV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryKindV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryListResponseV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLibraryVisibilityV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingLineItemPlanV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifyMetricsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingNotifySettingsV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingPauseIntervalV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingRefreshStatusV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingThirdPartyData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingMappingSuggestedDimension;
@@ -56,7 +43,6 @@ import com.aidigital.operationalhub.application.api.v1.generated.model.PacingMap
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyCampaignsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingThirdPartyStatusV1;
-import com.aidigital.operationalhub.application.api.v1.generated.model.PacingSummaryProjectionV1;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBand;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleBase;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleDays;
@@ -68,101 +54,33 @@ import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRul
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertRuleWindowThreshold;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingAlertsConfig;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingCampaignLink;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardCampaign;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDashboardData;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingDataSettings;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingDeliveryStats;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingSheetSourceInstruction;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingJournalEntry;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingLibraryEntry;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingLineItemPlan;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifyMetrics;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingNotifySettings;
-import com.aidigital.operationalhub.externalservices.pacing.model.PacingPauseInterval;
 import com.aidigital.operationalhub.externalservices.pacing.model.PacingRefreshStatus;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Bridges the Pacing HTTP client's transport-level dashboard/library models to the generated
+ * Bridges the Pacing HTTP client's transport-level models to the generated
  * {@code /api/v1/pacing/dashboards/*} and {@code /api/v1/pacing/library/*} contracts (§6 of the
- * migration plan).
+ * migration plan) - every one of them except the dashboard body itself, which since 2026-10-29
+ * (DASHBOARD-DATA-PASSTHROUGH-PLAN) is copied through to the browser unparsed and reshaped there
+ * by {@code features/pacing-dashboard/wire.ts}, a one-to-one port of what used to be this class's
+ * {@code toV1(PacingDashboardData, ...)}. The write directions (data settings, notify settings,
+ * campaign links) and the journal write responses stay here.
  *
- * <p>{@code display}/{@code aggregate}/a library entry's {@code definition} pass through opaquely -
- * this mapper never inspects their internal shape, matching §6's "service logic: None."
+ * <p>A library entry's {@code definition} passes through opaquely - this mapper never inspects its
+ * internal shape, matching §6's "service logic: None."
  */
 @Component
 public class PacingDashboardContractMapper {
-
-	/**
-	 * Builds the {@code GET /api/v1/pacing/dashboards/{slug}} response.
-	 *
-	 * @param data              the dashboard payload Pacing returned
-	 * @param ownPacingUserId   the current user's own Pacing user id ({@code hub_users.pacing_user_id}),
-	 *                          or null if not yet synced - used to compute each journal entry's
-	 *                          {@code canEdit}
-	 * @param unrestrictedScope whether the current user's resolved Pacing scope is unfiltered
-	 *                          ({@code kind=all}) - such a user can edit every journal entry, mirroring
-	 *                          the admin half of Pacing's own author-or-admin rule
-	 * @return the generated {@link PacingDashboardV1}
-	 */
-	public PacingDashboardV1 toV1(PacingDashboardData data, String ownPacingUserId, boolean unrestrictedScope) {
-		return new PacingDashboardV1()
-				.campaign(toCampaignV1(data.campaign()))
-				.planByLineItem(toPlanByLineItemV1(data.planByLineItem()))
-				.factsDaily(data.factsDaily() == null ? List.of() : data.factsDaily())
-				.asOf(data.asOf())
-				// The four the moved widget renderer reads. All sparse for the same reason
-				// `capabilities` below is: each distinguishes "Pacing did not measure this" from
-				// "it measured nothing", and flattening either to an empty value answers the
-				// second question when the first was asked. `availableMetrics` absent means the
-				// facts file predates the inventory; `conversionTags` absent means the conversion
-				// rows were never tagged, not that their tags were dropped.
-				.types(data.types())
-				.availableSplits(data.availableSplits())
-				.availableMetrics(data.availableMetrics())
-				.conversionTags(data.conversionTags() == null
-						? null
-						: PacingDashboardV1.ConversionTagsEnum.fromValue(data.conversionTags()))
-				// Null stays null, unlike factsDaily above: absent means this pacing does not collect
-				// the file at all, which is what tells the Breakdown panel not to OFFER that cut.
-				// An empty list would read as "collected, nothing delivered" and earn an empty tab.
-				.creatives(data.creatives())
-				.conversions(data.conversions())
-				.dimSources(data.dimSources())
-				// Empty, not null, when nothing is configured: a CM360 widget reads this list to
-				// decide whether to ask for rows at all, and `null` would make that gate a
-				// null-check on every caller instead of a length check.
-				.thirdParty(data.thirdParty() == null ? List.of() : data.thirdParty())
-				// mappingsV3 keeps its null, unlike thirdParty right above. The two states are
-				// different answers: null means the pacing predates the v3 mapping model, an empty
-				// list means it was migrated and nothing is mapped yet. The compare screens show a
-				// different thing for each, so flattening one into the other would hide a migration.
-				.mappingsV3(data.mappingsV3())
-				.display(data.display() == null ? Map.of() : data.display())
-				.aggregate(data.aggregate() == null ? Map.of() : data.aggregate())
-				// Null is NOT flattened to an empty map, unlike display/aggregate above. Those two
-				// are configuration - "no widgets chosen" and "{}" mean the same thing to a reader.
-				// This one is measurement: absent means Pacing could not derive the figures, and a
-				// widget must say so rather than draw an empty map's worth of confident zeroes.
-				.capabilities(data.capabilities())
-				.metrics(data.metrics())
-				.libraryEntries(data.libraryEntries())
-				// Null stays null for `metrics`' reason, not display's: a pacing that has never had
-				// these settings written is not a pacing whose source is "". The panel shows Pacing's
-				// own defaults for an absent namespace, and an empty map would be indistinguishable
-				// from a namespace that exists and happens to be empty.
-				.data(data.data())
-				// Null stays null: "never measured" is not "small", and the Data tab lets the switch on
-				// only while the measurement it has is under the cap.
-				.deliveryStats(data.deliveryStats() == null ? null : toV1(data.deliveryStats()))
-				.notify(data.notifySettings() == null ? null : toV1(data.notifySettings()))
-				.journal(toJournalV1(data.journal(), ownPacingUserId, unrestrictedScope));
-	}
 
 	/**
 	 * Reads a data-settings save request into the external-services model.
@@ -203,53 +121,6 @@ public class PacingDashboardContractMapper {
 	}
 
 	/**
-	 * Builds the {@code deliveryStats} field of the {@code GET /api/v1/pacing/dashboards/{slug}}
-	 * response.
-	 *
-	 * @param stats what Pacing's last build measured of the Delivery tab
-	 * @return the generated {@link PacingDeliveryStatsV1}
-	 */
-	public PacingDeliveryStatsV1 toV1(PacingDeliveryStats stats) {
-		return new PacingDeliveryStatsV1()
-				.rows(stats.rows())
-				.cells(stats.cells())
-				.measuredAt(stats.measuredAt())
-				.autoOffAt(stats.autoOffAt());
-	}
-
-	/**
-	 * Builds the {@code notify} field of the {@code GET /api/v1/pacing/dashboards/{slug}} response
-	 * (§14 of the migration plan).
-	 *
-	 * @param settings the alert configuration Pacing returned
-	 * @return the generated {@link PacingNotifySettingsV1}
-	 */
-	public PacingNotifySettingsV1 toV1(PacingNotifySettings settings) {
-		return new PacingNotifySettingsV1()
-				.alerts(toV1(settings.alerts()))
-				.metrics(new PacingNotifyMetricsV1().vcr(settings.metrics() != null && settings.metrics().vcr()))
-				.hidePaused(settings.hidePaused())
-				.summaryProjection(summaryProjectionOf(settings.summaryProjection()));
-	}
-
-	/**
-	 * Reads the stored {@code summary_projection} the way Pacing itself does: {@code plan} is plan,
-	 * anything else - including absent - is {@code reforecast}. The key was added to the notify block
-	 * after many pacings were created, so a config that predates it carries no value at all; both
-	 * sides of Pacing (its notify validator and its Slack summary) treat that as the default rather
-	 * than as an error, and the {@code metrics} block above is read with the same rule ({@code vcr}
-	 * absent is off).
-	 *
-	 * @param stored the raw stored value, possibly null
-	 * @return the contract enum, never null
-	 */
-	PacingSummaryProjectionV1 summaryProjectionOf(String stored) {
-		return PacingSummaryProjectionV1.PLAN.getValue().equals(stored)
-				? PacingSummaryProjectionV1.PLAN
-				: PacingSummaryProjectionV1.REFORECAST;
-	}
-
-	/**
 	 * Reads a {@code POST /api/v1/pacing/dashboards/{slug}/notify-settings} request into the
 	 * external-services model (§14 of the migration plan).
 	 *
@@ -266,75 +137,6 @@ public class PacingDashboardContractMapper {
 				new PacingNotifyMetrics(body.getMetrics().getVcr()),
 				body.getHidePaused(),
 				body.getSummaryProjection().getValue());
-	}
-
-	/**
-	 * Maps the 13-detector alert configuration, plus its master Slack switch, to the generated shape.
-	 *
-	 * @param alerts the alert configuration Pacing returned
-	 * @return the generated {@link PacingAlertsConfigV1}
-	 */
-	PacingAlertsConfigV1 toV1(PacingAlertsConfig alerts) {
-		return new PacingAlertsConfigV1()
-				.enabled(alerts.enabled())
-				.bidFactAbovePlan(toV1(alerts.bidFactAbovePlan()))
-				.dataGap(new PacingAlertRuleGapDaysV1()
-						.enabled(alerts.dataGap().enabled()).slack(alerts.dataGap().slack())
-						.gapDays(alerts.dataGap().gapDays()))
-				.ctrBelowTarget(toV1(alerts.ctrBelowTarget()))
-				.vcrBelowTarget(toV1(alerts.vcrBelowTarget()))
-				.ctrAboveTarget(toV1(alerts.ctrAboveTarget()))
-				.vcrOver100(toV1(alerts.vcrOver100()))
-				.noImpressionsYet(toV1(alerts.noImpressionsYet()))
-				.pacingOffPace(new PacingAlertRuleBandV1()
-						.enabled(alerts.pacingOffPace().enabled()).slack(alerts.pacingOffPace().slack())
-						.low(alerts.pacingOffPace().low()).high(alerts.pacingOffPace().high()))
-				.marginBelowTarget(new PacingAlertRuleGapPpV1()
-						.enabled(alerts.marginBelowTarget().enabled()).slack(alerts.marginBelowTarget().slack())
-						.gapPp(alerts.marginBelowTarget().gapPp()))
-				.spendOverspend(new PacingAlertRuleSpendV1()
-						.enabled(alerts.spendOverspend().enabled()).slack(alerts.spendOverspend().slack())
-						.warnPct(alerts.spendOverspend().warnPct()).badPct(alerts.spendOverspend().badPct()))
-				.dspForecastOverspend(toV1(alerts.dspForecastOverspend()))
-				.staleData(new PacingAlertRuleDaysV1()
-						.enabled(alerts.staleData().enabled()).slack(alerts.staleData().slack())
-						.days(alerts.staleData().days()))
-				.rateCostAbovePlan(new PacingAlertRuleThresholdPctV1()
-						.enabled(alerts.rateCostAbovePlan().enabled()).slack(alerts.rateCostAbovePlan().slack())
-						.thresholdPct(alerts.rateCostAbovePlan().thresholdPct()));
-	}
-
-	/**
-	 * Maps a threshold-less detector (no threshold field beyond enabled/slack).
-	 *
-	 * @param rule the detector's stored configuration
-	 * @return the generated {@link PacingAlertRuleBaseV1}
-	 */
-	PacingAlertRuleBaseV1 toV1(PacingAlertRuleBase rule) {
-		return new PacingAlertRuleBaseV1().enabled(rule.enabled()).slack(rule.slack());
-	}
-
-	/**
-	 * Maps a factor-of-target detector ({@code ctr_below_target}, {@code vcr_below_target},
-	 * {@code ctr_above_target}).
-	 *
-	 * @param rule the detector's stored configuration
-	 * @return the generated {@link PacingAlertRuleFactorV1}
-	 */
-	PacingAlertRuleFactorV1 toV1(PacingAlertRuleFactor rule) {
-		return new PacingAlertRuleFactorV1().enabled(rule.enabled()).slack(rule.slack()).factor(rule.factor());
-	}
-
-	/**
-	 * Maps the Bid Fact above plan detector, the only one with both a window and a threshold.
-	 *
-	 * @param rule the detector's stored configuration
-	 * @return the generated {@link PacingAlertRuleWindowThresholdV1}
-	 */
-	PacingAlertRuleWindowThresholdV1 toV1(PacingAlertRuleWindowThreshold rule) {
-		return new PacingAlertRuleWindowThresholdV1()
-				.enabled(rule.enabled()).slack(rule.slack())
-				.window(rule.window()).thresholdPct(rule.thresholdPct());
 	}
 
 	/**
@@ -401,49 +203,6 @@ public class PacingDashboardContractMapper {
 		return new PacingAlertRuleWindowThreshold(v1.getEnabled(), v1.getSlack(), v1.getWindow(), v1.getThresholdPct());
 	}
 
-	private PacingDashboardCampaignV1 toCampaignV1(PacingDashboardCampaign campaign) {
-		if (campaign == null) {
-			return new PacingDashboardCampaignV1();
-		}
-		// Pacing's own field is called `id`, but it is in fact the dash_slug - renamed here so the Hub
-		// contract never confuses it with the pacing's real id (see PacingDashboardCampaign's javadoc).
-		return new PacingDashboardCampaignV1()
-				.slug(campaign.id())
-				.pacingId(campaign.pacingId())
-				.name(campaign.name())
-				.startDate(parseDate(campaign.startDate()))
-				.endDate(parseDate(campaign.endDate()))
-				.currency(campaign.currency())
-				.rate(campaign.rate())
-				.rateLocked(Boolean.TRUE.equals(campaign.rateLocked()))
-				.nsRate(campaign.nsRate())
-				.status(campaign.status())
-				.orderNumber(campaign.orderNumber())
-				.sourceUrl(campaign.sourceUrl())
-				.netMode(Boolean.TRUE.equals(campaign.netMode()))
-				.periodScope(Boolean.TRUE.equals(campaign.periodScope()))
-				.periodScopeKey(campaign.periodScopeKey())
-				.links(toLinksV1(campaign.links()));
-	}
-
-	/**
-	 * Maps the campaign's reference links (§16) onto the contract. Null (a pacing whose
-	 * {@code campaign_links} was never written - Pacing sends {@code []} in practice, but this
-	 * mapper does not rely on it) flattens to an empty list: to a reader "never written" and "none
-	 * kept" are the same answer, unlike the payload's measurement fields above.
-	 *
-	 * @param links the links Pacing returned, possibly null
-	 * @return the generated link list, never null
-	 */
-	List<PacingCampaignLinkV1> toLinksV1(List<PacingCampaignLink> links) {
-		if (links == null) {
-			return List.of();
-		}
-		return links.stream()
-				.map(link -> new PacingCampaignLinkV1().name(link.name()).url(link.url()))
-				.toList();
-	}
-
 	/**
 	 * Reads a campaign-links save request into the external-services model (§16, US-140/141).
 	 * Shape-only: validation (scheme, lengths, the Asana rule) belongs to
@@ -459,60 +218,16 @@ public class PacingDashboardContractMapper {
 				.toList();
 	}
 
-	private Map<String, PacingLineItemPlanV1> toPlanByLineItemV1(Map<String, PacingLineItemPlan> planByLineItem) {
-		if (planByLineItem == null) {
-			return Map.of();
-		}
-		return planByLineItem.entrySet().stream()
-				.collect(java.util.stream.Collectors.toMap(
-						Map.Entry::getKey, entry -> toLineItemPlanV1(entry.getValue())));
-	}
-
-	private PacingLineItemPlanV1 toLineItemPlanV1(PacingLineItemPlan plan) {
-		PacingLineItemPlanV1 v1 = new PacingLineItemPlanV1()
-				.lineItemId(plan.lineItemId())
-				.channel(plan.channel())
-				.dsp(plan.dsp())
-				.labels(plan.labels() == null ? List.of() : plan.labels())
-				.description(plan.description())
-				.rateType(plan.rateType())
-				.clientBudget(plan.clientBudget())
-				.plannedImpressions(plan.plannedImpressions())
-				.marginTargetPct(plan.marginTargetPct())
-				.ctrTargetPct(plan.ctrTargetPct())
-				.vcrTargetPct(plan.vcrTargetPct())
-				.flightStart(parseDate(plan.flightStart()))
-				.flightEnd(parseDate(plan.flightEnd()))
-				.containers(plan.containers() == null ? List.of() : plan.containers())
-				.dimGroups(plan.dimGroups() == null ? List.of() : plan.dimGroups())
-				.nativeBudget(plan.nativeBudget())
-				.costCoef(plan.costCoef())
-				.netRatio(plan.netRatio())
-				.storedNetRatio(plan.storedNetRatio())
-				.netRatioLocked(Boolean.TRUE.equals(plan.netRatioLocked()))
-				.nsNetRatio(plan.nsNetRatio())
-				.converted(plan.converted())
-				.currency(plan.currency())
-				// Primary conversions (spec 2026-09-13). Null stays null rather than becoming an empty
-				// list: absent means "this line counts every conversion action", which is a different
-				// statement from "it counts none", and the browser-side engine reads the two apart.
-				.primaryConversions(plan.primaryConversions())
-				.storedPrimaryConversions(plan.storedPrimaryConversions())
-				.conversionData(plan.conversionData());
-		if (plan.pauseIntervals() != null) {
-			for (PacingPauseInterval interval : plan.pauseIntervals()) {
-				v1.addPauseIntervalsItem(new PacingPauseIntervalV1()
-						.from(parseDate(interval.from()))
-						.to(parseDate(interval.to())));
-			}
-		}
-		return v1;
-	}
-
 	/**
-	 * Builds the journal array shared by the {@code GET /api/v1/pacing/dashboards/{slug}} response and
-	 * the three {@code pacingJournal} write endpoints (§15, US-139), computing each entry's
-	 * {@code canEdit} from the caller's own identity rather than forwarding Pacing's raw author id.
+	 * Builds the journal array the three {@code pacingJournal} write endpoints answer with (§15,
+	 * US-139), computing each entry's {@code canEdit} from the caller's own identity rather than
+	 * forwarding Pacing's raw author id.
+	 *
+	 * <p>The dashboard GET no longer comes through here: since the 2026-10-29 pass-through
+	 * (DASHBOARD-DATA-PASSTHROUGH-PLAN) its body is copied to the browser unparsed and
+	 * {@code features/pacing-dashboard/wire.ts} applies this same two-line rule there, from
+	 * {@code UserV1.pacingUserId}/{@code pacingUnrestricted}. The two copies are held identical by
+	 * that side's parity test over real bodies; change the rule here and it must change there.
 	 *
 	 * @param journal           the journal Pacing returned; null is treated as empty
 	 * @param ownPacingUserId   the current user's own Pacing user id, or null if not yet synced

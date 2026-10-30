@@ -6,7 +6,8 @@ import java.util.Map;
 /**
  * A pacing's {@code config.data} namespace as the Hub writes it: where its delivery is read from in
  * BigQuery, and which optional extras are fetched with it. The editable counterpart of the {@code data}
- * object {@link PacingDashboardData} carries back. Carried from the generated
+ * object the dashboard body carries back (read in the browser since the 2026-10-29 pass-through, see
+ * {@link PacingDashboardStream}). Carried from the generated
  * {@code PacingDataSettingsUpdateV1} request DTO into the external-services layer unchanged, same
  * reason {@link PacingLineItemPlanUpdate} exists: so {@link com.aidigital.operationalhub
  * .externalservices.pacing.PacingClient}'s interface does not depend on the generated API model.
