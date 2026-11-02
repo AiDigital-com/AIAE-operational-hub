@@ -50,15 +50,16 @@ kind". Proven end to end on the page in `../pacing-dashboard.test.tsx` and in is
 Also wired: `widgets/widget-tiles.ts` re-exports Pacing's `WIDGET_CAP`, `newWidgetId` and
 `copyWidget` instead of its earlier hand-ports.
 
-Not moved yet: the builder's **UI** (`pages/Dashboard/components/Settings/Widgets/**`, about 13 600
-lines of JSX) — so a widget can be rendered here but not yet authored here. That phase is JSX → TSX
-(or, as it turned out for the renderer, no conversion at all), the `.sp-*` slice of the SPA's
-`index.css`, and `ReportBuilder.jsx`, which reaches for the SPA store the way the four renderer
-files did and can go through the same seam.
+**The builder is live too** (PDI_171, 2026-10-01). Its UI is moved code in `builder/` (`ReportBuilder.jsx`
+and its cards, popovers and formula editor), with no TSX conversion, and goes through the same
+`store.js` seam. Settings → Display (`../widgets-section.tsx` → `display/BlockLibrary.jsx` →
+`display/WidgetGallery.jsx`) opens it on "+ Add widget" and on a widget's Edit, so widgets are both
+drawn and authored here.
 
-The library panel's card thumbnails still draw through the Hub's own `widget-engine.tsx` /
-`brick-registry.tsx` / `chart-view.tsx`. Moving them onto the real renderer is what makes those
-~1 400 lines deletable.
+The library panel's card thumbnails are moved code as well (`MiniPreview` in
+`display/WidgetGallery.jsx`, used by `display/LibraryScreen.jsx`). The Hub's own `widget-engine.tsx`
+and `chart-view.tsx` are deleted, and `brick-registry` is now the reference's
+`report/brick-registry.jsx`.
 
 ## Line Items (PDI_167, 2026-10-01)
 

@@ -121,6 +121,7 @@ function renderTab(options: { initialPath?: string; initialState?: unknown; camp
           <Routes>
             <Route path="/campaigns/:campaignId" element={<CampaignRouteStub campaign={campaign} />}>
               <Route path="pacing" element={<PacingTab />} />
+              <Route path="pacing/:pacingId" element={<PacingTab />} />
             </Route>
           </Routes>
           <LocationProbe />
@@ -133,7 +134,13 @@ function renderTab(options: { initialPath?: string; initialState?: unknown; camp
 /** Puts the live query string in the DOM, so a test can assert what the tab did to the URL. */
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="location-search">{location.search}</span>;
+  return (
+    <>
+      <span data-testid="location-search">{location.search}</span>
+      {/* An attribute, not text: "/campaigns/42/pacing" as text would match the list heading's count queries. */}
+      <span data-testid="location-pathname" data-pathname={location.pathname} />
+    </>
+  );
 }
 
 /**
@@ -377,6 +384,45 @@ describe("PacingTab", () => {
     const wantedRow = await screen.findByRole("button", { name: /^Wanted pacing/ });
     expect(wantedRow).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: /^Other pacing/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("selects the pacing named by the address, keeping its line-item filter (the Slack link)", async () => {
+    // Given: a Slack summary links /campaigns/42/pacing/wanted?li=1001 - "Wanted pacing" is the SECOND
+    // row, so the default-to-first selection would land on the wrong one
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "other", name: "Other pacing" }), aPacing({ id: "wanted", name: "Wanted pacing" })])
+    );
+
+    // When:
+    renderTab({ initialPath: "/campaigns/42/pacing/wanted?li=1001" });
+
+    // Then: the named pacing is selected, and the line-item filter is left on the URL for its dashboard
+    const wantedRow = await screen.findByRole("button", { name: /^Wanted pacing/ });
+    expect(wantedRow).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: /^Other pacing/ })).not.toHaveAttribute("aria-current");
+    expect(new URLSearchParams(screen.getByTestId("location-search").textContent ?? "").get("li")).toBe("1001");
+  });
+
+  it("moves the address to the picked pacing when it was opened by address, dropping the filters", async () => {
+    // Given: opened from a Slack link, filtered to one line
+    vi.mocked(listCampaignPacings).mockResolvedValue(
+      aResponse([aPacing({ id: "other", name: "Other pacing" }), aPacing({ id: "wanted", name: "Wanted pacing" })])
+    );
+    renderTab({ initialPath: "/campaigns/42/pacing/wanted?li=1001&tab=plan" });
+    await screen.findByRole("button", { name: /^Wanted pacing/ });
+
+    // When: picking the other pacing
+    await userEvent.click(screen.getByRole("button", { name: /^Other pacing/ }));
+
+    // Then: the address names what is shown - a reload must not bring the old pacing back - and the old
+    // pacing's line-item filter does not follow it over
+    await waitFor(() =>
+      expect(screen.getByTestId("location-pathname")).toHaveAttribute("data-pathname", "/campaigns/42/pacing/other")
+    );
+    const search = new URLSearchParams(screen.getByTestId("location-search").textContent ?? "");
+    expect(search.get("li")).toBeNull();
+    expect(search.get("tab")).toBe("plan");
+    expect(screen.getByRole("button", { name: /^Other pacing/ })).toHaveAttribute("aria-current", "true");
   });
 
   // The list used to sit under a row holding nothing but a right-aligned Create button, so the left

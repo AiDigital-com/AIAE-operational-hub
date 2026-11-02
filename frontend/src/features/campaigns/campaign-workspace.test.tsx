@@ -54,6 +54,7 @@ function renderWorkspace(initialPath: string, state: WorkspaceState | undefined 
             <Route path="/campaigns/:campaignId" element={<CampaignWorkspace />}>
               <Route index element={<CampaignTabRedirect />} />
               <Route path="pacing" element={<div>Pacing content</div>} />
+              <Route path="pacing/:pacingId" element={<div>Pacing content</div>} />
               <Route path="setup" element={<div>Setup content</div>} />
               <Route path="reporting" element={<div>Reporting content</div>} />
               <Route path="dashboards" element={<div>Dashboards content</div>} />
@@ -182,6 +183,16 @@ describe("CampaignWorkspace", () => {
 
     // Then:
     expect(sessionStorage.getItem("oph.campaign-tab.42")).toBe("reporting");
+  });
+
+  it("should treat an address naming one pacing as the Pacing tab", () => {
+    // Given/When: the link a Slack summary carries
+    renderWorkspace("/campaigns/42/pacing/p1", FULL_STATE);
+
+    // Then:
+    expect(screen.getByText("Pacing content")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pacing" })).toHaveAttribute("aria-current", "page");
+    expect(sessionStorage.getItem("oph.campaign-tab.42")).toBe("pacing");
   });
 
   it("should show the breadcrumb trail including the active tab", () => {

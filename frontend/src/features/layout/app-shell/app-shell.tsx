@@ -120,6 +120,8 @@ export function AppShell() {
               <Route path="/campaigns/:campaignId" element={<CampaignWorkspace />}>
                 <Route index element={<CampaignTabRedirect />} />
                 <Route path="pacing" element={<PacingTab />} />
+                {/* One pacing selected - the address Slack summaries link to (dash-gate hub-links.mjs). */}
+                <Route path="pacing/:pacingId" element={<PacingTab />} />
                 <Route path="setup" element={<SetupTab />} />
                 <Route path="reporting" element={<ReportingTab />} />
                 <Route path="dashboards" element={<DashboardsTab />} />

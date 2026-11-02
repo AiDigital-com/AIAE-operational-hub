@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Link, useLocation, useOutletContext, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { formatError } from "../../../shared/format/error";
 import { campaignDisplayName } from "../../../shared/format/names";
 import { cn } from "../../../shared/style/cn";
@@ -299,13 +299,17 @@ function AlsoCoversNotice({ row, currentCampaignId }: { row: PacingRowV1; curren
  * going back and doing both again.
  *
  * Arriving from the Overview with a pacing to open (`location.state.openPacingId`) selects and
- * scrolls to that one instead of the first.
+ * scrolls to that one instead of the first. So does an address naming the pacing,
+ * `/campaigns/:campaignId/pacing/:pacingId` - the link Slack summaries carry, often with `?li=` to
+ * open it filtered to one line item.
  */
 export function PacingTab() {
   const { campaign, agencyName, clientName } = useOutletContext<CampaignTabContext>();
   const location = useLocation();
   const navState = location.state as OpenPacingState | null;
-  const openPacingId = navState?.openPacingId;
+  const { pacingId: pathPacingId } = useParams<{ pacingId?: string }>();
+  const navigate = useNavigate();
+  const openPacingId = navState?.openPacingId ?? pathPacingId;
   const openJustCreated = navState?.justCreated === true;
   const pacingsQuery = useCampaignPacings(campaign.id);
   // What the user has picked, which is NOT the same as what is showing: until they pick anything this
@@ -491,7 +495,17 @@ export function PacingTab() {
     setPickedId(rowId);
     const next = new URLSearchParams(searchParams);
     clearFilterParams(next);
-    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+    if (pathPacingId) {
+      // Opened by its address: keep the address naming what is shown, or the old pacing's id would
+      // stay in the URL (and a reload would bring it back).
+      const search = next.toString();
+      navigate(
+        { pathname: `/campaigns/${campaign.id}/pacing/${encodeURIComponent(rowId)}`, search: search ? `?${search}` : "" },
+        { replace: true, state: location.state },
+      );
+    } else if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
   }
 
   // §8 (Create Pacing): swaps the list for the review/create panel in place. Kept as it was - creating
