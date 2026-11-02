@@ -24,6 +24,8 @@ import { isAdminUser, useCurrentUser } from "../rbac/hooks";
 import { usePacingDashboard, useRefreshStatus } from "./hooks";
 import { computeHasVideo } from "./alerts-panel";
 import { JournalPanel } from "./journal/journal-panel";
+import { NotesButton, NotesPanel } from "./notes/notes-panel";
+import { hasAnyNotes } from "./notes/notes-doc";
 import type { PacingDashboardV1, PacingDataShape, PacingDisplayShape, PacingWidgetInstance } from "./types";
 import { pacingLibraryApi, referenceError, referenceMe } from "./spa-library-api";
 import { SpaToastBridge } from "./spa-toast-bridge";
@@ -163,10 +165,14 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+  // The campaign notes panel (reference: DashboardView's NotesFab + NotesPanel).
+  const [notesOpen, setNotesOpen] = useState(false);
+
   // A pacing switched away from mid-session leaves nothing behind for the next one.
   useEffect(() => {
     setLayoutMode(false);
     layoutDirtyRef.current = false;
+    setNotesOpen(false);
   }, [slug]);
 
   // At most once per mount: a first build that times out falls back to the normal "no data" state
@@ -902,6 +908,22 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             openLibraryRequest={openLibraryRequest}
             onLibraryOpened={() => setOpenLibraryRequest(null)}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] })}
+          />
+
+          {/* Campaign notes, as in the reference: a floating button bottom-right that opens a
+              right-hand panel. Hidden in Layout mode and while the settings drawer is open. */}
+          {!layoutMode && !settingsOpen && (
+            <NotesButton
+              hasNotes={hasAnyNotes(data.campaign?.notesRich, data.campaign?.notes)}
+              onOpen={() => setNotesOpen(true)}
+            />
+          )}
+          <NotesPanel
+            open={notesOpen}
+            onClose={() => setNotesOpen(false)}
+            slug={slug ?? ""}
+            notesRich={data.campaign?.notesRich ?? null}
+            notes={data.campaign?.notes ?? null}
           />
 
         </PacingStateProvider>

@@ -301,6 +301,18 @@ export function CopyIcon({ className }: IconProps) {
   );
 }
 
+/** Sticky-note glyph for the campaign notes button. */
+export function NoteIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M15 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" />
+      <path d="M15 21v-4a2 2 0 0 1 2-2h4" />
+      <path d="M7 8h10" />
+      <path d="M7 12h6" />
+    </svg>
+  );
+}
+
 interface LogoIconProps extends IconProps {
   fill?: string;
   stroke?: string;

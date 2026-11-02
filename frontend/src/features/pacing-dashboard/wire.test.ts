@@ -270,9 +270,11 @@ describe("readDashboardWire - what the port had to make explicit", () => {
     expect(out.capabilities).toBeNull();
     expect(out.thirdParty).toEqual([]);
     expect(Object.keys(out.campaign).sort()).toEqual([
-      "currency", "endDate", "links", "name", "netMode", "nsRate", "orderNumber", "pacingId", "periodScope",
-      "periodScopeKey", "rate", "rateLocked", "slug", "sourceUrl", "startDate", "status",
+      "currency", "endDate", "links", "name", "netMode", "notes", "notesRich", "nsRate", "orderNumber", "pacingId",
+      "periodScope", "periodScopeKey", "rate", "rateLocked", "slug", "sourceUrl", "startDate", "status",
     ]);
+    expect(out.campaign.notes).toBeNull();
+    expect(out.campaign.notesRich).toBeNull();
   });
 
   it("reads a null campaign as the empty model - every field null, links []", () => {
@@ -282,8 +284,29 @@ describe("readDashboardWire - what the port had to make explicit", () => {
     expect(out.campaign).toEqual({
       slug: null, pacingId: null, name: null, startDate: null, endDate: null, currency: null, rate: null,
       rateLocked: null, nsRate: null, netMode: null, periodScope: null, periodScopeKey: null, status: null,
-      orderNumber: null, sourceUrl: null, links: [],
+      orderNumber: null, sourceUrl: null, links: [], notes: null, notesRich: null,
     });
+  });
+
+  it("carries the campaign notes - the plain text and the document - which the Java mapper dropped", () => {
+    const doc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Launch Monday" }] }] };
+    const out = readDashboardWire(
+      minimal({ campaign: { id: "slug", pacingId: "p1", name: "Name", notes: "Launch Monday", notesRich: doc } }),
+      RESTRICTED
+    );
+
+    expect(out.campaign.notes).toBe("Launch Monday");
+    expect(out.campaign.notesRich).toEqual(doc);
+  });
+
+  it("reads malformed notes as no notes rather than failing the whole dashboard", () => {
+    const out = readDashboardWire(
+      minimal({ campaign: { id: "slug", pacingId: "p1", name: "Name", notes: 42, notesRich: ["not", "a", "doc"] } }),
+      RESTRICTED
+    );
+
+    expect(out.campaign.notes).toBeNull();
+    expect(out.campaign.notesRich).toBeNull();
   });
 
   it("passes cost_coef and converted through as Booleans, null included", () => {

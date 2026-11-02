@@ -4,6 +4,8 @@ import com.aidigital.operationalhub.application.api.v1.generated.PacingDashboard
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingAddableLineItemsV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignLinksUpdateV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignNotesUpdateResultV1;
+import com.aidigital.operationalhub.application.api.v1.generated.model.PacingCampaignNotesUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateResultV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDataSettingsUpdateV1;
 import com.aidigital.operationalhub.application.api.v1.generated.model.PacingDisplayConflictReasonV1;
@@ -402,6 +404,16 @@ public class PacingDashboardController implements PacingDashboardApi {
 		campaignLinksValidator.validate(links);
 		pacingClient.saveCampaignLinks(assertion, slug, links);
 		return ResponseEntity.ok(new PacingCampaignLinksUpdateResultV1().saved(true));
+	}
+
+	@Override
+	public ResponseEntity<PacingCampaignNotesUpdateResultV1> updatePacingCampaignNotes(
+			String slug, PacingCampaignNotesUpdateV1 body) {
+		HubAssertion assertion = signCurrentUser();
+		// Not validated here, unlike the links: Pacing owns the notes whitelist (dash-gate/lib/notes.mjs)
+		// and refuses a bad document with a 400 that names the problem, which reaches the caller as one.
+		pacingClient.saveCampaignNotes(assertion, slug, body.getNotesRich());
+		return ResponseEntity.ok(new PacingCampaignNotesUpdateResultV1().saved(true));
 	}
 
 	@Override

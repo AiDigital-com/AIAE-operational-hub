@@ -499,6 +499,45 @@ class PacingDashboardControllerMvcTest {
 	}
 
 	@Test
+	void shouldForwardTheNotesDocumentToPacingAsGivenTest() throws Exception {
+		// Given: the notes panel saving one paragraph
+		stubCurrentUser();
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		// When / Then: no Hub-side check - the document reaches Pacing exactly as it came in
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/notes", "nike-ss26")
+						.contentType(APPLICATION_JSON)
+						.content("{\"notesRich\":{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\","
+								+ "\"content\":[{\"type\":\"text\",\"text\":\"Launch on Monday\"}]}]}}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.saved").value(true));
+		verify(pacingClient).saveCampaignNotes(any(), eq("nike-ss26"), eq(Map.of(
+				"type", "doc",
+				"content", List.of(Map.of(
+						"type", "paragraph",
+						"content", List.of(Map.of("type", "text", "text", "Launch on Monday")))))));
+	}
+
+	@Test
+	void shouldForwardPacingsNotesRefusalAsBadRequestTest() throws Exception {
+		// Given: Pacing's whitelist refuses the document and says why
+		stubCurrentUser();
+		doThrow(new PacingExternalException(PacingFailureReason.UPSTREAM_BAD_REQUEST,
+				"bad_notes", "the campaign notes are too long (128 KB at most)"))
+				.when(pacingClient).saveCampaignNotes(any(), any(), any());
+		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+				.setControllerAdvice(new GlobalExceptionHandler(new GlobalExceptionResponseHelperImpl()))
+				.build();
+
+		// When / Then:
+		mockMvc.perform(post("/api/v1/pacing/dashboards/{slug}/notes", "nike-ss26")
+						.contentType(APPLICATION_JSON).content("{\"notesRich\":{\"type\":\"doc\"}}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value(
+						"The Pacing service rejected the request: the campaign notes are too long (128 KB at most)."));
+	}
+
+	@Test
 	void shouldSaveNotifySettingsTest() throws Exception {
 		// Given: §14 - a full round-trip alert configuration, camelCase on this contract.
 		stubCurrentUser();

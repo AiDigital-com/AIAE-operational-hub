@@ -48,6 +48,10 @@ describe.skipIf(names.length === 0)("wire.ts against the Java mapper's recorded 
         const expected = read(`${name}.${context}.expected.json`);
         const wireCtx: WireContext = { ownPacingUserId: ctx.ownPacingUserId, unrestricted: ctx.unrestricted };
         const actual = JSON.parse(JSON.stringify(readDashboardWire(raw, wireCtx)));
+        // Carried since the campaign notes panel (2026-11-02), after the Java mapper was recorded -
+        // the one deliberate widening of the port, so it is not part of the comparison.
+        delete actual.campaign.notes;
+        delete actual.campaign.notesRich;
         expect(actual).toEqual(expected);
       });
     }

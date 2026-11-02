@@ -120,6 +120,23 @@ export async function savePacingCampaignLinks(slug: string, links: PacingCampaig
   }
 }
 
+/**
+ * Saves the campaign notes - the whole TipTap document the notes panel's editor produces.
+ *
+ * A WHOLE-DOCUMENT replace: Pacing validates it against its own whitelist, stores it and derives the
+ * plain-text `campaign.notes` from it. A document with no text in it clears the notes. A refused
+ * document is a 400 whose message names the problem (Pacing's, passed through by the Hub).
+ */
+export async function savePacingCampaignNotes(slug: string, notesRich: Record<string, unknown>): Promise<void> {
+  const result = await apiClient.POST("/api/v1/pacing/dashboards/{slug}/notes", {
+    params: { path: { slug } },
+    body: { notesRich },
+  });
+  if (result.error || !result.response.ok) {
+    throw new ApiError(formatError(result.error), result.response.status);
+  }
+}
+
 /** Polls the last completed refresh for a pacing (US-119) - see `usePollingRefreshStatus`. */
 export async function getPacingRefreshStatus(slug: string): Promise<PacingRefreshStatusV1> {
   const result = await apiClient.GET("/api/v1/pacing/dashboards/{slug}/refresh-status", {

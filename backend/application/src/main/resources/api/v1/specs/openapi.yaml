@@ -4844,6 +4844,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+  /api/v1/pacing/dashboards/{slug}/notes:
+    post:
+      tags:
+        - pacingDashboard
+      operationId: updatePacingCampaignNotes
+      description: >
+        Saves the campaign notes: the launch context, decisions and links the team keeps beside the
+        numbers, as one formatted document. Reaches Pacing as POST .../settings carrying only the
+        `campaign_notes_rich` fragment - the same single write path the display, plan, data, notify
+        and links saves use.
+
+        A WHOLE-DOCUMENT replace. Pacing validates the document against its own whitelist
+        (`dash-gate/lib/notes.mjs`: known node and mark types, http/https links only, 128 KB at
+        most), stores it, and derives the plain-text `notes` from it. A document with no text in it
+        clears the notes - there is no separate delete. No revision: a concurrent edit by another
+        user is not detected, last write wins.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The pacing's dash_slug.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PacingCampaignNotesUpdateV1'
+      responses:
+        '200':
+          description: The campaign notes were saved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PacingCampaignNotesUpdateResultV1'
+        '400':
+          description: >
+            Pacing refused the document: not a TipTap document, a node or mark it does not allow, or
+            larger than 128 KB. `message` names what was wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '401':
+          description: The authorization token not provided or expired.
+        '403':
+          description: >-
+            The authorization token not correct or user not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '404':
+          description: The pacing was not found, or is not visible to the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '500':
+          description: Saving the campaign notes failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
+        '503':
+          description: >-
+            The Pacing service could not be reached (connection failure or timeout).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalHubApiExceptionResponseV1'
   /api/v1/pacing/dashboards/{slug}/addable-line-items:
     get:
       tags:
@@ -12184,6 +12256,25 @@ components:
             `POST /api/v1/pacing/dashboards/{slug}/links`.
           items:
             $ref: '#/components/schemas/PacingCampaignLinkV1'
+        notes:
+          type: string
+          nullable: true
+          description: >
+            The campaign notes as plain text (`config_json.campaign_notes`). Pacing derives it from
+            `notesRich` on every notes save, so it is a read-only shadow of that document; on an
+            older pacing that has no rich document it is the only copy, typed at create. Read for
+            the notes button's dot and for Copy; never written directly.
+        notesRich:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: >
+            The campaign notes (`config_json.campaign_notes_rich`): a TipTap document
+            (`{type: "doc", content: [...]}`) with headings, lists, quotes, code, links and the
+            usual marks. Pacing validates it against its own whitelist on every save
+            (`dash-gate/lib/notes.mjs`). Null when the pacing has no notes, or only the plain
+            `notes` an older pacing carries. Written via
+            `POST /api/v1/pacing/dashboards/{slug}/notes`.
       required:
         - slug
         - pacingId
@@ -12231,6 +12322,30 @@ components:
         Acknowledges a successful campaign-links save. Carries no echoed list for
         `PacingDataSettingsUpdateResultV1`'s reason: the caller re-reads the dashboard, whose
         `campaign.links` is the stored truth (including Pacing's own source-URL de-duplication).
+      properties:
+        saved:
+          type: boolean
+      required:
+        - saved
+    PacingCampaignNotesUpdateV1:
+      type: object
+      description: >
+        The campaign's WHOLE notes document to store. A document with no text in it clears the
+        notes.
+      properties:
+        notesRich:
+          type: object
+          additionalProperties: true
+          description: >
+            A TipTap document, `{type: "doc", content: [...]}`, as the notes editor produces it.
+            Validated by Pacing, not here.
+      required:
+        - notesRich
+    PacingCampaignNotesUpdateResultV1:
+      type: object
+      description: >
+        Acknowledges a successful notes save. Carries no echoed document: the caller re-reads the
+        dashboard, whose `campaign.notesRich` is what Pacing actually stored after its whitelist.
       properties:
         saved:
           type: boolean
@@ -12417,7 +12532,8 @@ components:
         `campaign` as Pacing's `buildCampaign` writes it. The port renames `id` to `slug`, parses the
         two dates strictly (`YYYY-MM-DD` on a real calendar, anything else null), reads the three
         booleans as "true only when exactly true", keeps `links` to `{name, url}`, and drops
-        `timezone`, `client`, `agency`, `notes` and `notesRich`.
+        `timezone`, `client` and `agency`. `notes` and `notesRich` are carried since the campaign
+        notes panel (2026-11-02).
       properties:
         id:
           type: string
@@ -12478,11 +12594,11 @@ components:
         notes:
           type: string
           nullable: true
-          description: DROPPED by the port.
+          description: "`config_json.campaign_notes`, the plain text Pacing derives from `notesRich`."
         notesRich:
           type: object
           nullable: true
-          description: DROPPED by the port.
+          description: "`config_json.campaign_notes_rich`, the TipTap document."
           additionalProperties: true
     PacingDashboardWireCampaignLinkV1:
       type: object
