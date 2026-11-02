@@ -935,6 +935,27 @@ public class PacingClientImpl implements PacingClient {
 	}
 
 	@Override
+	public void saveCampaignNotes(HubAssertion assertion, String slug, Map<String, Object> notesRich) {
+		String header = assertionSigner.sign(assertion);
+		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
+		CampaignNotesRequest request = new CampaignNotesRequest(notesRich);
+		try {
+			restClient.post()
+					.uri(path)
+					.header(HubAssertionSigner.HEADER_NAME, header)
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(request)
+					.retrieve()
+					.toBodilessEntity();
+		} catch (RestClientResponseException ex) {
+			throw dashboardFailure("POST", path, ex);
+		} catch (RestClientException ex) {
+			throw new PacingExternalException(
+					PacingFailureReason.UNREACHABLE, "Pacing request failed: POST " + path, ex);
+		}
+	}
+
+	@Override
 	public void saveNotifySettings(HubAssertion assertion, String slug, PacingNotifySettings settings) {
 		String header = assertionSigner.sign(assertion);
 		String path = DASHBOARDS_PATH + "/" + slug + "/settings";
@@ -1967,6 +1988,7 @@ public class PacingClientImpl implements PacingClient {
 					"this widget's mapping is pinned to a specific pacing and cannot be shared";
 			case "bad_seed_display" -> "the pacing's default layout could not be seeded";
 			case "invalid_notify_destination" -> "the Daily Summary delivery option must be auto, dm or off";
+			case "notes_too_large" -> "the campaign notes are too long (128 KB at most)";
 			default -> errorCode;
 		};
 	}

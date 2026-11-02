@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  aPacingDashboardCampaignV1,
   aPacingDashboardV1,
   aPacingLibraryEntryV1,
   aPacingLineItemPlanV1,
@@ -20,6 +21,7 @@ import { stdEntry } from "./spa/std-catalog.js";
 vi.mock("./api", () => ({
   getPacingDashboard: vi.fn(),
   savePacingCampaignLinks: vi.fn(),
+  savePacingCampaignNotes: vi.fn(),
   getPacingRefreshStatus: vi.fn(),
   triggerPacingRefresh: vi.fn(),
   savePacingDisplay: vi.fn(),
@@ -589,5 +591,31 @@ describe("PacingDashboard period scope", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByRole("button", { name: "Period Scope" })).not.toBeInTheDocument();
   });
-});
 
+  it("should open the campaign notes from the button and hide the button while the settings drawer is open", async () => {
+    // Given: a pacing with notes
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(
+      aPacingDashboardV1({
+        campaign: aPacingDashboardCampaignV1({
+          notes: "Launch on Monday",
+          notesRich: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Launch on Monday" }] }] },
+        }),
+      })
+    );
+    renderDashboard();
+
+    // When:
+    await userEvent.click(await screen.findByRole("button", { name: "Campaign notes (has notes)" }));
+
+    // Then:
+    const panel = screen.getByRole("dialog", { name: "Campaign notes" });
+    expect(panel).toHaveTextContent("Launch on Monday");
+
+    // When: closed, then the settings drawer opened
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    // Then: the button steps aside, as in the reference
+    expect(screen.queryByRole("button", { name: /Campaign notes/ })).not.toBeInTheDocument();
+  });
+});

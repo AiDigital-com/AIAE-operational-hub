@@ -146,6 +146,11 @@ function asObject(v: unknown, field: string): Record<string, unknown> | null {
   return v as Record<string, unknown>;
 }
 
+/** A JSON object - not null, not an array, not a scalar. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
 /** A `List<Map<String, Object>>` field: null/absent stay null; a non-list, or a non-object inside, fails. */
 function asObjectList(v: unknown, field: string): Record<string, unknown>[] | null {
   if (v === null || v === undefined) return null;
@@ -213,6 +218,9 @@ interface CampaignOutput {
   orderNumber: string | null;
   sourceUrl: string | null;
   links: { name: string | null; url: string | null }[];
+  /** Added after the Java mapper (campaign notes, 2026-11-02) - see `toCampaignV1`. */
+  notes: string | null;
+  notesRich: Json | null;
 }
 
 interface PlanOutput {
@@ -373,7 +381,7 @@ export function toCampaignV1(campaign: WireCampaign | null): CampaignOutput {
     return {
       slug: null, pacingId: null, name: null, startDate: null, endDate: null, currency: null, rate: null,
       rateLocked: null, nsRate: null, netMode: null, periodScope: null, periodScopeKey: null, status: null,
-      orderNumber: null, sourceUrl: null, links: [],
+      orderNumber: null, sourceUrl: null, links: [], notes: null, notesRich: null,
     };
   }
   const c = campaign as Record<string, unknown>;
@@ -395,6 +403,13 @@ export function toCampaignV1(campaign: WireCampaign | null): CampaignOutput {
     periodScope: bool(c.periodScope) === true, // 424
     periodScopeKey: str(c.periodScopeKey),
     links: toLinksV1(c.links),
+    // NOT from the Java mapper, which dropped both: the campaign notes panel (2026-11-02) reads them.
+    // The plain text is Pacing's own shadow of the document, kept for the dot and Copy on pacings
+    // that only ever had the create-time text. `wire.parity.test.ts` leaves these two out.
+    // Read leniently, unlike everything above: a malformed note degrades to "no notes" rather than
+    // failing the whole dashboard, which it has no business doing.
+    notes: typeof c.notes === "string" ? c.notes : null,
+    notesRich: isPlainObject(c.notesRich) ? c.notesRich : null,
   };
 }
 

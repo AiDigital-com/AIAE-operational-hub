@@ -537,6 +537,28 @@ public interface PacingClient {
 	void saveCampaignLinks(HubAssertion assertion, String slug, List<PacingCampaignLink> links);
 
 	/**
+	 * Saves a pacing's campaign notes: the whole TipTap document. {@code POST
+	 * /api/dashboards/:slug/settings} on the Pacing side carrying only the
+	 * {@code campaign_notes_rich} fragment - the sixth caller of that one write path, beside
+	 * {@link #saveCampaignLinks}.
+	 *
+	 * <p>A WHOLE-DOCUMENT replace. Unlike the links, Pacing validates this itself
+	 * ({@code dash-gate/lib/notes.mjs}: its node/mark whitelist, http/https links, 128 KB) and
+	 * derives the plain-text {@code campaign_notes} from it, so the Hub forwards the document as
+	 * given. A document with no text in it clears the notes on the Pacing side. No revision: last
+	 * write wins.
+	 *
+	 * @param assertion who is calling and what they may see
+	 * @param slug      the pacing's dash_slug
+	 * @param notesRich the TipTap document, {@code {type: "doc", content: [...]}}
+	 * @throws com.aidigital.operationalhub.externalservices.pacing.exception.PacingExternalException
+	 *         on a non-2xx response or network failure (unchecked) - a refused document is
+	 *         {@link com.aidigital.operationalhub.externalservices.pacing.exception.PacingFailureReason
+	 *         #UPSTREAM_BAD_REQUEST} with a human {@code detail}
+	 */
+	void saveCampaignNotes(HubAssertion assertion, String slug, Map<String, Object> notesRich);
+
+	/**
 	 * Adds a free-text note to a pacing (§15 of the migration plan, US-139): {@code POST
 	 * /api/dashboards/:slug/journal} on the Pacing side, which rate-limits journal writes on its own
 	 * side and stamps the author from the assertion. Returns the whole fresh journal, not just the

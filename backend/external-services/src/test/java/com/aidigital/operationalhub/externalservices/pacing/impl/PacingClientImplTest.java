@@ -2592,6 +2592,101 @@ class PacingClientImplTest {
 	}
 
 	@Test
+	void shouldSaveCampaignNotesUnderTheSnakeCaseKeyAndNothingElseTest() {
+		// Given: the notes-only settings save. The body carries campaign_notes_rich and NOTHING else -
+		// not the plain campaign_notes either, which Pacing derives from the document itself.
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		Map<String, Object> doc = Map.of(
+				"type", "doc",
+				"content", List.of(Map.of(
+						"type", "paragraph",
+						"content", List.of(Map.of("type", "text", "text", "Launch on Monday")))));
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andExpect(method(POST))
+				.andExpect(header(HubAssertionSigner.HEADER_NAME, SIGNED_HEADER))
+				.andExpect(content().json(
+						"{\"campaign_notes_rich\":{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\","
+								+ "\"content\":[{\"type\":\"text\",\"text\":\"Launch on Monday\"}]}]}}",
+						true))
+				.andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		client.saveCampaignNotes(assertion, "nike-ss26", doc);
+		server.verify();
+	}
+
+	@Test
+	void shouldCarryPacingsReasonWhenItRefusesTheNotesDocumentTest() {
+		// Given: Pacing's notes whitelist refuses a node it does not know, naming it in `detail`
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
+						.body("{\"ok\":false,\"error\":\"bad_notes\",\"detail\":\"unknown node type: image\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.saveCampaignNotes(assertion, "nike-ss26", Map.of("type", "doc")))
+				.isInstanceOf(PacingExternalException.class)
+				.satisfies(ex -> {
+					PacingExternalException pex = (PacingExternalException) ex;
+					assertThat(pex.getReason()).isEqualTo(PacingFailureReason.UPSTREAM_BAD_REQUEST);
+					assertThat(pex.getDetail()).isEqualTo("unknown node type: image");
+				});
+	}
+
+	@Test
+	void shouldDescribeNotesThatAreTooLargeTest() {
+		// Given: the size refusal carries no `detail`, only the code and the limit
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST)
+						.body("{\"ok\":false,\"error\":\"notes_too_large\",\"limit\":131072}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		// When-Then:
+		assertThatThrownBy(() -> client.saveCampaignNotes(assertion, "nike-ss26", Map.of("type", "doc")))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getDetail())
+				.isEqualTo("the campaign notes are too long (128 KB at most)");
+	}
+
+	@Test
+	void shouldReportPacingUnreachableOnANotesSaveTest() {
+		// Given: the connection itself fails
+		HubAssertionSigner signer = mock(HubAssertionSigner.class);
+		HubAssertion assertion = new HubAssertion("me@aidigital.com", HubAssertion.KIND_ALL, List.of(), false);
+		when(signer.sign(assertion)).thenReturn(SIGNED_HEADER);
+		RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		PacingClientImpl client = new PacingClientImpl(builder.build(), signer, new ObjectMapper(), new OrderNumberCollector());
+		server.expect(requestTo(BASE_URL + "/api/dashboards/nike-ss26/settings"))
+				.andRespond(request -> {
+					throw new SocketTimeoutException("Read timed out");
+				});
+
+		// When-Then:
+		assertThatThrownBy(() -> client.saveCampaignNotes(assertion, "nike-ss26", Map.of("type", "doc")))
+				.isInstanceOf(PacingExternalException.class)
+				.extracting(ex -> ((PacingExternalException) ex).getReason())
+				.isEqualTo(PacingFailureReason.UNREACHABLE);
+	}
+
+	@Test
 	void shouldOmitTheSheetKeyWhenNoInstructionWasGivenTest() {
 		// Given: Pacing gates `data.sheet` on hasOwnProperty, so an absent key is "leave the stored
 		// source alone". A save about something else must not mention it at all.

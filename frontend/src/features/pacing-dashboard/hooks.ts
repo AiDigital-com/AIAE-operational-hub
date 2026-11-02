@@ -5,10 +5,12 @@ import {
   getPacingDashboard,
   getPacingRefreshStatus,
   savePacingCampaignLinks,
+  savePacingCampaignNotes,
   savePacingDataSettings,
   savePacingNotifySettings,
 } from "./api";
-import type { PacingCampaignLinkV1, PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
+import { hasMeaningfulNotes, plainTextFromDoc } from "./notes/notes-doc";
+import type { PacingCampaignLinkV1, PacingDashboardV1, PacingDataSettingsUpdateV1, PacingNotifySettingsV1 } from "./types";
 import type { WireContext } from "./wire";
 
 /**
@@ -88,6 +90,39 @@ export function useSavePacingCampaignLinks(slug: string | undefined) {
     mutationFn: (links: PacingCampaignLinkV1[]) => savePacingCampaignLinks(slug as string, links),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pacing", "dashboard", slug] });
+    },
+  });
+}
+
+/**
+ * Saves the campaign notes.
+ *
+ * On success the saved document goes straight into the cached dashboard, the way Pacing stores it:
+ * a document with text in it, its plain text derived by Pacing's own rule; an empty one clears both
+ * (`notesRich` null, `notes` ""). The panel and the button's dot read it at once. The dashboard is
+ * then re-read in the background - not awaited, because the body runs to megabytes and the panel
+ * should not sit on "Saving…" for it - so whatever Pacing's whitelist changed arrives with that read.
+ */
+export function useSavePacingCampaignNotes(slug: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (notesRich: Record<string, unknown>) => savePacingCampaignNotes(slug as string, notesRich),
+    onSuccess: (_saved, notesRich) => {
+      const key = ["pacing", "dashboard", slug];
+      const kept = hasMeaningfulNotes(notesRich);
+      queryClient.setQueryData<PacingDashboardV1>(key, (old) =>
+        old
+          ? {
+              ...old,
+              campaign: {
+                ...old.campaign,
+                notesRich: kept ? notesRich : null,
+                notes: kept ? plainTextFromDoc(notesRich) : "",
+              },
+            }
+          : old
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
