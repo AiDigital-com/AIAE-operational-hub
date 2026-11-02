@@ -95,8 +95,8 @@ kinds of file live there, and they are not interchangeable:
 
 Ours, and ordinary TypeScript: `pacing-dashboard.tsx`, `widgets/report-board.tsx` (the 12-column
 grid, running Pacing's own `resolveLayout`/`compactVertical`/`groupBounds`), `widgets/tile-menu.tsx`
-(this app's kebab, not Pacing's bordered one), `widget-editor.tsx`, `pacing-dashboard-library.tsx`,
-the settings drawer, the journal.
+(this app's kebab, not Pacing's bordered one), `widgets-section.tsx` (hosts the moved Display tab
+and widget builder, `spa/display/` and `spa/builder/`), the settings drawer, the journal, the notes.
 
 ### What bit us, so it does not bite you twice
 

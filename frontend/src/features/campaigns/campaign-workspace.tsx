@@ -102,7 +102,11 @@ export function CampaignWorkspace() {
   const numericId = campaignId ? Number(campaignId) : undefined;
   const { campaign, isPending, isError, error } = useCampaign(numericId, state.campaign);
 
-  const activeTab = TABS.find((tab) => location.pathname.endsWith(`/${tab}`));
+  // The tab is the path segment after the campaign id; Pacing may carry one more, the pacing to open
+  // (`/campaigns/:id/pacing/:pacingId`, the address Slack links to).
+  const activeTab = TABS.find(
+    (tab) => location.pathname.endsWith(`/${tab}`) || location.pathname.includes(`/${tab}/`),
+  );
 
   useEffect(() => {
     if (campaignId && activeTab) {
