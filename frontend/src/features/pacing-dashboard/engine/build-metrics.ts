@@ -314,6 +314,21 @@ function buildContainerReadings(
 }
 
 /**
+ * The payload's daily rows as the board reads them: a line's grouped values under their group's
+ * name (value groups, spec 2026-10-02) - the same rewrite `toEngineRaw` runs before the figures.
+ * The filter bar and the journal list their values from this, the way Pacing's store-fed
+ * spotlight and journal do: offered a group's raw members instead, a filter on one would match
+ * nothing in the grouped rows the engine filters. With no line declaring a group it is
+ * `data.factsDaily` itself.
+ */
+export function shownFactsDaily(data: PacingDashboardV1 | null | undefined): PacingDashboardV1["factsDaily"] | undefined {
+  const rows = data?.factsDaily;
+  if (!rows?.length) return rows;
+  const engine = createPacingEngine();
+  return engine.groupedView({ factsDaily: rows }, engine.groupIndexOf(data?.planByLineItem)).factsDaily;
+}
+
+/**
  * Computes this pacing's `PacingMetricsBag` for the given filters. Returns `null` on any failure -
  * malformed payload, missing plan - same fallback `merge.mjs` uses server-side ("failure is NOT
  * fatal... a null bag means 'no figures'").

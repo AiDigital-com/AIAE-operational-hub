@@ -1,0 +1,45 @@
+/* The filter explanation panel (explain-panel.tsx), the reference's `.fx-panel`. Portaled to the
+   body with `position: fixed`, so it sits on the same layer as the moved SPA's fixed popovers
+   (`pacing-spa.css`, 310) - above the sticky filter bar and its own popups. A plain surfaced
+   panel: no left rail, no stripe. */
+.fb-explain {
+  position: fixed;
+  z-index: 310;
+  pointer-events: none;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fb-explain__title {
+  font-weight: 600;
+}
+
+.fb-explain__sentence {
+  margin-top: 4px;
+  color: var(--muted-strong);
+}
+
+.fb-explain__note {
+  margin-top: 4px;
+  color: var(--attention-text);
+}
+
+/* What a value group stands for: information, not a warning, so the sentence's colour. A long
+   raw value breaks instead of widening the panel. */
+.fb-explain__members {
+  margin-top: 4px;
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+
+@media (hover: none) {
+  .fb-explain {
+    display: none;
+  }
+}

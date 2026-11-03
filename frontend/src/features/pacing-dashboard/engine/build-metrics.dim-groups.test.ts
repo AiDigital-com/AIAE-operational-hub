@@ -16,7 +16,9 @@
  *     same raw value on another line must keep its own name.
  */
 import { describe, expect, it } from "vitest";
-import { toEngineRaw } from "./build-metrics";
+import { buildPacingMetrics, shownFactsDaily, toEngineRaw } from "./build-metrics";
+import { buildFilterSources } from "../filters/spotlight-core";
+import { DEFAULT_FILTERS } from "../filters/types";
 import { toHubShape } from "./__fixtures__/to-hub-shape";
 import type { PacingDashboardV1 } from "../types";
 
@@ -83,5 +85,46 @@ describe("toEngineRaw - value groups", () => {
     const raw = toEngineRaw(data as PacingDashboardV1) as Any;
 
     expect(new Set(audiencesOf(raw, "100"))).toEqual(new Set(["Brand"]));
+  });
+});
+
+/** Line item 100 delivers two keywords that its plan groups as `Brand KW`; line 200 delivers its
+ *  own keyword and declares nothing. The reported case: several Keyword values under one group. */
+function withKeywordGroup(): PacingDashboardV1 {
+  const data = toHubShape() as Any;
+  data.factsDaily = data.factsDaily.map((r: Any, i: number) => ({
+    ...r,
+    keyword: String(r.line_item_id) === "100" ? (i % 2 ? "kw_a" : "kw_b") : "kw_other",
+  }));
+  data.planByLineItem["100"].dimGroups = [
+    { dim_key: "keyword", name: "Brand KW", values: ["kw_a", "kw_b"] },
+  ];
+  return data as PacingDashboardV1;
+}
+
+describe("shownFactsDaily - the rows the filter bar and the journal list values from", () => {
+  it("lists a keyword group by its name, not by its members", () => {
+    const sources = buildFilterSources({ liPlan: {}, factsDaily: shownFactsDaily(withKeywordGroup()) as Any });
+    const keywords = sources.filter((s) => s.type === "keyword").map((s) => s.value);
+
+    expect(keywords).toEqual(["Brand KW", "kw_other"]);
+  });
+
+  it("a filter on the group's name keeps that line's delivery", () => {
+    // The reported failure: offered only the members, a filter could never name the group, and a
+    // filter on a member found nothing - the engine filters the GROUPED rows.
+    const data = withKeywordGroup();
+    const bag = buildPacingMetrics(data, { ...DEFAULT_FILTERS, brk: "keyword", brkf: ["keyword:Brand KW"] });
+    const imprOf = (liId: string) =>
+      (bag!.daily as Any[]).reduce((sum, row: Any) => sum + (row.liId === liId ? row.im || 0 : 0), 0);
+
+    expect(imprOf("100")).toBeGreaterThan(0);
+    expect(imprOf("200")).toBe(0);
+  });
+
+  it("is the payload's own array when no line declares a group", () => {
+    const data = toHubShape();
+
+    expect(shownFactsDaily(data)).toBe(data.factsDaily);
   });
 });

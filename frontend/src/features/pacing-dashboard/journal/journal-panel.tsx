@@ -114,9 +114,14 @@ export interface JournalPanelProps {
   flightEnd?: string;
   /** Tag-source input: LI id → its plan, for the `#LI:`/`#ch:` palette sources. */
   planByLineItem?: Record<string, PacingLineItemPlanV1>;
-  /** Tag-source input: the pacing's raw daily facts, passed through byte-for-byte - see
-   *  `PacingDashboardV1.factsDaily` - for the `#dsp:`/`#tactic:`/`#geo:`/… palette sources. */
+  /** Tag-source input: the pacing's daily facts as the board reads them (value groups applied - see
+   *  `shownFactsDaily` in `pacing-dashboard.tsx`), for the `#dsp:`/`#tactic:`/`#geo:`/… palette
+   *  sources. */
   factsDaily?: FactRow[];
+  /** The same rows as delivered, before value groups: an entry tagged with a value before it joined
+   *  a group still resolves and still reads as a known tag. The same array as `factsDaily` when no
+   *  line has a group. */
+  rawFactsDaily?: FactRow[];
   /** Sets the chart's journal marker date when an entry row is clicked - page-level state in
    *  `pacing-dashboard.tsx`, not a store. */
   onHighlightDate?: (date: string | null) => void;
@@ -144,6 +149,7 @@ export function JournalPanel({
   flightEnd,
   planByLineItem,
   factsDaily,
+  rawFactsDaily,
   onHighlightDate,
   setFilters,
 }: JournalPanelProps) {
@@ -215,9 +221,29 @@ export function JournalPanel({
   const freq = useMemo(() => tagFrequencies(journal || []), [journal]);
   const availableTypes = useMemo(() => new Set(sources.map((s) => s.type)), [sources]);
 
+  // Value groups (spec 2026-10-02), as the reference's `JournalPanel.jsx`: the palette above offers
+  // what the dashboard shows (a group, not its members), but an entry written before a value joined
+  // a group still carries that value's tag, so the resolver and the known-tag check also know the
+  // values as delivered. Nothing extra when no line has a group (the two arrays are the same).
+  const rawSources = useMemo(
+    () =>
+      rawFactsDaily && rawFactsDaily !== factsDaily
+        ? buildTagSources({
+            liPlan: liPlanForTags,
+            breakdowns: FACTS_DIM_TAGS.map(({ type, dim }) => ({ type, values: deriveDimValues(rawFactsDaily, dim) })),
+          })
+        : [],
+    [liPlanForTags, rawFactsDaily, factsDaily]
+  );
+  const knownSources = useMemo(() => (rawSources.length ? [...rawSources, ...sources] : sources), [rawSources, sources]);
+
   // Slug -> raw label, for the same tag types the filters match on raw values (channels, labels,
-  // breakdown dims, audience) - built off the same `sources` the palette already reads.
-  const tagResolver = useMemo(() => buildTagResolver(sources, ["ch", "aud", "label", ...FACTS_DIMS]), [sources]);
+  // breakdown dims, audience). Raw first: the map keeps the LAST spelling written for a slug, so
+  // what the dashboard shows wins.
+  const tagResolver = useMemo(
+    () => buildTagResolver(knownSources, ["ch", "aud", "label", ...FACTS_DIMS]),
+    [knownSources]
+  );
 
   /** A journal row click (§15/STEP 8): sets the chart highlight and routes the entry's tags into
    *  the dashboard filters, with the range set to +/-7 days around the entry's own date. Ported
@@ -526,7 +552,7 @@ export function JournalPanel({
               <JournalEntryRow
                 key={entry.id}
                 entry={entry}
-                sources={sources}
+                sources={knownSources}
                 isEditing={editingId === entry.id}
                 dateMin={minDate}
                 dateMax={maxDate}
