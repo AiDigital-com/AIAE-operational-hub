@@ -67,11 +67,12 @@ import {
   usePacingState,
 } from "./spa/store.js";
 import { resolvePeriodKey } from "./spa/periods.js";
+import { selectScopeFilters } from "./spa/selectors.js";
 import { PeriodScopeBanner, type ScopePeriod } from "./filters/period-scope";
 import { SEED_ID_BY_KEY } from "./spa/std-catalog.js";
 import { WIDGET_CAP, copyWidget, enabledPatch, resolveWidget, setTileEnabled, tileEnabled, tileTitle, withWidgetRemoved } from "./widgets/widget-tiles";
 import { createPacingEngine } from "./engine/engine-loader";
-import { toEngineRaw } from "./engine/build-metrics";
+import { shownFactsDaily, toEngineRaw } from "./engine/build-metrics";
 import { buildPacingMetrics } from "./engine/build-metrics";
 import { buildPacingAlerts } from "./engine/build-alerts";
 import { FilterBar } from "./filters/filter-bar";
@@ -232,6 +233,11 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
       return null;
     }
   }, [data]);
+
+  // The daily rows with value groups applied, for the filter bar and the journal - see
+  // `shownFactsDaily`. The settings drawer keeps `data.factsDaily`: its CM360 mapping wants the
+  // values as delivered, as Pacing's drawer reads the store's ungrouped `rawData`.
+  const factsDailyShown = useMemo(() => shownFactsDaily(data), [data]);
 
   const display = useMemo(() => (data?.display ?? {}) as PacingDisplayShape, [data]);
   // Settings → Display's unsaved draft, previewed on the board behind the open drawer (Pacing's
@@ -485,6 +491,12 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
   const scopePeriods = periodsOf(pacingState.liPlan) as ScopePeriod[];
   const scoped = !!pacingState.splitScopedMode;
   const selectedPeriodKey: string | null = pacingState.selectedPeriodKey ?? null;
+  // Which applied dimension cuts pace the board in the current period - the same answer the
+  // widgets re-pace by, for the filter bar's explanation panel.
+  const scopeFilters = useMemo(
+    () => selectScopeFilters(pacingState, filters) as { brkf: string[] },
+    [pacingState, filters]
+  );
 
   // Computed HERE now, not read off `row.alerts` (owner ask, 2026-09-25, filters follow-up item 3):
   // `row.alerts` is `dash-gate/lib/health.mjs`'s server-computed alert list for the WHOLE pacing -
@@ -621,7 +633,8 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
               flightStart={row.flightStart}
               flightEnd={row.flightEnd}
               planByLineItem={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
-              factsDaily={data.factsDaily}
+              factsDaily={factsDailyShown}
+              rawFactsDaily={data.factsDaily}
               onHighlightDate={setJournalHighlight}
               setFilters={setFilters}
             />
@@ -733,14 +746,17 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           the current `filters` above. */}
       {/* While Layout mode is open the bar stays on screen but inert, and carries neither action: the
           Layout button is the mode we are already in, and the Settings gear lives on Layout mode's
-          own hint bar for the session (Pacing's DashboardView). */}
+          own hint bar for the session (Pacing's DashboardView). `inert` goes on the bar itself, NOT a
+          wrapper: a wrapper becomes the sticky bar's containing block and it stops pinning (see
+          `filter-bar.tsx`'s note on its sentinel). */}
       {dashboardQuery.isSuccess && data && (
-        <div className={layoutMode ? "pdash__fb-inert" : undefined} {...(layoutMode ? { inert: "" } : {})}>
         <FilterBar
+          inert={layoutMode}
           filters={filters}
           setFilters={setFilters}
           liPlan={(data.planByLineItem ?? {}) as Record<string, PacingLineItemPlanV1>}
-          factsDaily={data.factsDaily}
+          factsDaily={factsDailyShown}
+          scopeFilters={scopeFilters}
           // The display the board draws (the drawer's preview included), so a name typed in Settings
           // is searchable before it is saved, as it is in the reference's store-fed spotlight.
           liNames={(shownDisplay?.liNames as Record<string, string> | undefined) ?? null}
@@ -789,7 +805,6 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
             )
           }
         />
-        </div>
       )}
 
       {dashboardQuery.isSuccess && data && !layoutMode && (

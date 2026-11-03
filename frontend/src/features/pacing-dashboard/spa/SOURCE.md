@@ -190,6 +190,15 @@ reference's version needs three more modules that were never taken), `auto-refre
 dash-gate lane that was not ported), and `ChipStrip.jsx` (dead in the reference too once the real
 chip field landed).
 
+The reference's 2026-10-01 filter spotlight (`85d353c`: `filter-spotlight-core.js`,
+`FilterSpotlight.jsx`, `FilterExplainPanel.jsx`, `FilterBar.jsx`'s `TierBox`, with value groups'
+`groupMembersLine` from `a33ba97`) was later RE-TYPED, not moved, into this app's own filter bar
+(2026-11-03): `filters/spotlight-core.ts`, `filters/spotlight.tsx`, `filters/explain-panel.tsx`,
+`filters/filter-bar.tsx`, on the Hub's input shapes (`channel` for `ch`, a flat `factsDaily`). The
+Active section, on/off toggles, counts, "Show n more" / "Show all n", the explanation panel and the
+Scope/Lens chip boxes are all there; the reference's "do not open before facts load" gate is not
+(the Hub mounts the bar only once the payload is in).
+
 ### Two layering numbers were rebased, and they were already wrong
 
 `FormulaEditorDialog.css`'s `.fxd-scrim` (150 → **324**) and `ChipSettingsPanel.jsx`'s `PANEL_Z`

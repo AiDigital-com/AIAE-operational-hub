@@ -1,8 +1,7 @@
 /**
  * Ported from the retired SPA's `tests/filter-spotlight-core-test.mjs` - same assertions, adapted
  * to the Hub's own input shapes (see `spotlight-core.ts`'s docblock for what changed and why).
- * `classifyActive` is NOT ported (never ported to `spotlight-core.ts` either) - `filter-bar.tsx`'s
- * own docblock already documents the chip-tiering it would drive as deliberately deferred.
+ * `classifyActive`, `activeItems` and the panel's helpers are covered in `explain-core.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -162,41 +161,45 @@ describe("buildFilterSources - tier tagging end to end", () => {
 
   describe("browseSources", () => {
     const browse = browseSources(taggedSources);
+    const flat = (groups: typeof browse.scope) => groups.flatMap((g) => g.items);
 
-    it("returns {scope, lens} arrays, each tier-pure", () => {
-      expect(browse.scope.every((s) => s.tier === "scope")).toBe(true);
-      expect(browse.lens.every((s) => s.tier === "lens")).toBe(true);
+    it("returns {scope, lens} groups, each tier-pure and one kind per group", () => {
+      expect(flat(browse.scope).every((s) => s.tier === "scope")).toBe(true);
+      expect(flat(browse.lens).every((s) => s.tier === "lens")).toBe(true);
+      expect([...browse.scope, ...browse.lens].every((g) => g.items.every((s) => s.type === g.kind))).toBe(true);
     });
-    it("split-backed geo:TX lands in SCOPE", () => {
-      expect(browse.scope.some((s) => s.type === "geo" && s.value === "TX")).toBe(true);
-      expect(browse.lens.some((s) => s.type === "geo" && s.value === "TX")).toBe(false);
-    });
-    it("non-split geo:NY lands in LENS", () => {
-      expect(browse.lens.some((s) => s.type === "geo" && s.value === "NY")).toBe(true);
+    it("split-backed geo:TX lands in SCOPE, non-split geo:NY in LENS", () => {
+      expect(flat(browse.scope).some((s) => s.type === "geo" && s.value === "TX")).toBe(true);
+      expect(flat(browse.lens).some((s) => s.type === "geo" && s.value === "TX")).toBe(false);
+      expect(flat(browse.lens).some((s) => s.type === "geo" && s.value === "NY")).toBe(true);
     });
     it("whole-unit sources land in SCOPE, platform in LENS", () => {
-      expect(browse.scope.some((s) => s.type === "li" && s.value === "100")).toBe(true);
-      expect(browse.scope.some((s) => s.type === "channel" && s.value === "Video")).toBe(true);
-      expect(browse.scope.some((s) => s.type === "label" && s.value === "priority")).toBe(true);
-      expect(browse.lens.some((s) => s.type === "platform" && s.value === "TTD")).toBe(true);
+      expect(flat(browse.scope).some((s) => s.type === "li" && s.value === "100")).toBe(true);
+      expect(flat(browse.scope).some((s) => s.type === "channel" && s.value === "Video")).toBe(true);
+      expect(flat(browse.scope).some((s) => s.type === "label" && s.value === "priority")).toBe(true);
+      expect(flat(browse.lens).some((s) => s.type === "platform" && s.value === "TTD")).toBe(true);
     });
-    it("each group is ordered by KIND_LABELS key order", () => {
+    it("groups are ordered by KIND_LABELS key order", () => {
       const kindOrder = Object.keys(KIND_LABELS);
-      const idxOf = (t: string) => kindOrder.indexOf(t);
-      for (let i = 1; i < browse.scope.length; i += 1) {
-        expect(idxOf(browse.scope[i].type)).toBeGreaterThanOrEqual(idxOf(browse.scope[i - 1].type));
-      }
-      for (let i = 1; i < browse.lens.length; i += 1) {
-        expect(idxOf(browse.lens[i].type)).toBeGreaterThanOrEqual(idxOf(browse.lens[i - 1].type));
+      for (const groups of [browse.scope, browse.lens]) {
+        for (let i = 1; i < groups.length; i += 1) {
+          expect(kindOrder.indexOf(groups[i].kind)).toBeGreaterThan(kindOrder.indexOf(groups[i - 1].kind));
+        }
       }
     });
-    it("per-kind cap limits how many of one kind survive", () => {
+    it("the per-kind cap holds the rest back as `hidden`; an expanded kind shows everything", () => {
       const manyCh: Record<string, SpotlightLiPlan> = {};
       for (let i = 0; i < 9; i += 1) manyCh[`c${i}`] = { channel: `Ch${i}`, labels: [] };
       const cappedSources = buildFilterSources({ liPlan: manyCh, factsDaily: [] });
-      const capped = browseSources(cappedSources, 2);
-      expect(capped.scope.filter((s) => s.type === "channel").length).toBe(2);
-      expect(capped.scope.filter((s) => s.type === "li").length).toBe(2);
+      const capped = browseSources(cappedSources, { perKindCap: 2 });
+      const ch = capped.scope.find((g) => g.kind === "channel")!;
+      expect(ch.items).toHaveLength(2);
+      expect(ch.hidden).toBe(7);
+      expect(capped.scope.find((g) => g.kind === "li")!.items).toHaveLength(2);
+      const expanded = browseSources(cappedSources, { perKindCap: 2, expandedKinds: new Set(["scope:channel"]) });
+      expect(expanded.scope.find((g) => g.kind === "channel")).toMatchObject({ hidden: 0 });
+      expect(expanded.scope.find((g) => g.kind === "channel")!.items).toHaveLength(9);
+      expect(expanded.scope.find((g) => g.kind === "li")!.items).toHaveLength(2);
     });
     it("empty sources -> empty groups, no throw", () => {
       expect(browseSources([])).toEqual({ scope: [], lens: [] });

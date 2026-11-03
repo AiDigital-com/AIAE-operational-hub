@@ -17,24 +17,43 @@
  * `date-range-control.tsx`'s own docblock for why a real ported calendar was chosen over a
  * cheaper native-input popover.
  *
- * Still deliberately NOT ported: the Scope/Lens chip TIERING that depended on
- * `filter-spotlight-core.js`'s `classifyActive` (chips render as one flat row here instead of two
- * bordered tiers - a deliberate simplification, not an oversight: the tiering is cosmetic
- * grouping, not a filter behaviour - the spotlight's OWN Scope/Lens tags are a separate thing, see
- * `spotlight-core.ts`).
+ * The Scope/Lens chip tiering IS ported (owner ask, 2026-11-03 - it had been left out as cosmetic):
+ * the applied filters sit in two outlined boxes, SCOPE then LENS, through `classifyActive` with the
+ * period-aware `scopeFilters`, as the reference's `TierBox` does.
  *
  * The Full Flight / Period Scope toggle and its period picker ARE ported (2026-10-14,
  * `period-scope.tsx`): shown when the containers define a period or scope is already on, as the
  * reference's `scopeVisible` is.
+ *
+ * The explanation panel IS ported (`explain-panel.tsx`, reference spec 2026-10-01): a spotlight row
+ * or an applied chip rested on for a moment (or a chip's × focused) shows how many lines the filter
+ * touches, whether it is Scope or Lens, and - for a value group - which values it stands for. The
+ * sources and counts are built once here, the way the reference's `FilterBar` builds them, and
+ * the chip's tier inside the panel is the period-aware one (`scopeFilters`).
+ *
+ * The spotlight is the reference's 2026-10-01 version (`spotlight.tsx`): an Active section, on/off
+ * toggles that keep the pop-up open, counts on every row, "Show n more" / "Show all n matches".
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { derivePlatforms, formatPlatform } from "../journal/fact-dims";
 import type { FactRow } from "../journal/fact-dims";
 import type { PacingLineItemPlanV1 } from "../types";
 import { formatRangeLabel } from "./custom-range-core";
 import { DateRangeControl } from "./date-range-control";
+import { EXPLAIN_HOVER_DELAY_MS, EXPLAIN_PANEL_ID, ExplainPanel, type ExplainTarget } from "./explain-panel";
 import { PeriodScopeControl, type PeriodScopeControlProps } from "./period-scope";
 import { Spotlight } from "./spotlight";
+import {
+  activeItems,
+  buildFilterSources,
+  classifyActive,
+  TIER_SENTENCES,
+  countsFor,
+  panelFor,
+  type ExplainContent,
+  type ScopeFilters,
+  type SpotlightLiPlan,
+} from "./spotlight-core";
 import type { DashboardFilters } from "./types";
 import type { DashboardFiltersPatch } from "./use-url-filters";
 import "./filter-bar.css";
@@ -168,7 +187,125 @@ interface Chip {
   label: string;
   value: string;
   tone?: "range";
-  tip?: string;
+}
+
+/** The key `activeItems` gives the same filter, so a chip finds its explanation. */
+function chipKey(chip: Chip): string {
+  if (chip.type === "selection") return `li:${chip.value}`;
+  if (chip.type === "breakdown") return chip.value;
+  if (chip.type === "range") return "range";
+  return `${chip.type}:${chip.value}`;
+}
+
+interface FilterChipProps {
+  chip: Chip;
+  /** Scope chips are solid (filled, full-weight text) and pace the dashboard; Lens chips are an
+   *  outline, muted, and only narrow delivery. Fill and text only - never a side rail. */
+  variant: "scope" | "lens";
+  explain: ExplainContent | null;
+  onExplain: (target: ExplainTarget | null) => void;
+  onRemove: () => void;
+}
+
+/** One applied filter. Rested on for `EXPLAIN_HOVER_DELAY_MS`, or with its × focused, it shows the
+ *  explanation panel - the reference's `FilterChip`, in place of the old tip text. A chip removed
+ *  while its panel is up takes the panel with it; one whose text changed under it shows the new. */
+function FilterChip({ chip, variant, explain, onExplain, onRemove }: FilterChipProps) {
+  const chipRef = useRef<HTMLSpanElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shownRef = useRef(false);
+  const [shown, setShown] = useState(false);
+  const clearTimer = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const hide = () => {
+    if (shownRef.current) onExplain(null);
+    shownRef.current = false;
+    setShown(false);
+  };
+  const show = () => {
+    if (!explain || !chipRef.current) return;
+    onExplain({ ...explain, rect: chipRef.current.getBoundingClientRect() });
+    shownRef.current = true;
+    setShown(true);
+  };
+  const enter = () => {
+    if (!explain) return;
+    clearTimer();
+    timer.current = setTimeout(show, EXPLAIN_HOVER_DELAY_MS);
+  };
+  const leave = () => {
+    clearTimer();
+    hide();
+  };
+  useEffect(
+    () => () => {
+      clearTimer();
+      if (shownRef.current) onExplain(null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  useEffect(() => {
+    if (shownRef.current) show();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [explain]);
+  return (
+    <span
+      ref={chipRef}
+      className={`fb-chip${chip.tone === "range" ? " fb-chip--range" : variant === "lens" ? " fb-chip--lens" : ""}`}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+    >
+      <span>{chip.label}</span>
+      <button
+        type="button"
+        aria-label={`Remove ${chip.label} filter`}
+        aria-describedby={shown ? EXPLAIN_PANEL_ID : undefined}
+        onClick={onRemove}
+        onFocus={show}
+        onBlur={leave}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+interface TierBoxProps {
+  legend: "scope" | "lens";
+  hint: string;
+  chips: Chip[];
+  variant: "scope" | "lens";
+  explainByKey: Map<string, ExplainContent>;
+  onExplain: (target: ExplainTarget | null) => void;
+  onRemove: (type: ChipType, value: string) => void;
+}
+
+/** One tier's applied-filter chips inside a soft outlined box (reference spec 2026-06-23): a small
+ *  legend names the tier and carries its sentence as a tooltip. A FULL box border, never a left rail
+ *  (project-wide stripe ban). Renders nothing when empty. */
+function TierBox({ legend, hint, chips, variant, explainByKey, onExplain, onRemove }: TierBoxProps) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="fb-tier">
+      {/* `ui-tip` is the moved SPA's tooltip (`spa/pacing-spa.css`), the reference legend's own. */}
+      <span className="fb-tier__legend ui-tip" data-tip={hint}>
+        {legend}
+      </span>
+      {chips.map((chip, index) => (
+        <FilterChip
+          key={`${chip.type}-${chip.value}-${index}`}
+          chip={chip}
+          variant={chip.tone === "range" ? "scope" : variant}
+          explain={explainByKey.get(chipKey(chip)) ?? null}
+          onExplain={onExplain}
+          onRemove={() => onRemove(chip.type, chip.value)}
+        />
+      ))}
+    </div>
+  );
 }
 
 export interface FilterBarProps {
@@ -189,12 +326,58 @@ export interface FilterBarProps {
   periodScope?: PeriodScopeControlProps & { visible: boolean };
   /** Buttons at the right end of the row - the reference keeps the dashboard's settings gear there. */
   actions?: React.ReactNode;
+  /** Layout mode is open: the bar stays on screen but dimmed, unclickable and NOT sticky - Layout
+   *  mode's own hint bar owns the sticky slot. Set on the bar itself, never on a wrapper (a wrapper
+   *  becomes the sticky containing block and the bar stops pinning - see the sentinel note below). */
+  inert?: boolean;
+  /** Which applied dimension cuts pace the dashboard in the current period -
+   *  `spa/selectors.js:selectScopeFilters`, the board's own answer. The explanation panel says a
+   *  chip's tier from it; without it every cut reads as Lens. */
+  scopeFilters?: ScopeFilters | null;
 }
 
-export function FilterBar({ filters, setFilters, liPlan, factsDaily, liNames, minDate, maxDate, periodScope, actions }: FilterBarProps) {
+export function FilterBar({
+  filters,
+  setFilters,
+  liPlan,
+  factsDaily,
+  liNames,
+  minDate,
+  maxDate,
+  periodScope,
+  actions,
+  scopeFilters = null,
+  inert = false,
+}: FilterBarProps) {
   const channels = useMemo(() => deriveChannels(liPlan), [liPlan]);
   const labels = useMemo(() => deriveLabels(liPlan), [liPlan]);
   const platforms = useMemo(() => derivePlatforms(factsDaily), [factsDaily]);
+
+  // The spotlight's sources and every filter's count, built ONCE here: the spotlight rows and the
+  // chips both read them, and the explanation panel is one panel. `PacingLineItemPlanV1.containers`
+  // is opaque on the wire, so the plan is read through `spotlight-core.ts`'s narrower shape.
+  const spotLiPlan = liPlan as unknown as Record<string, SpotlightLiPlan | null | undefined> | null | undefined;
+  const sources = useMemo(
+    () => buildFilterSources({ liPlan: spotLiPlan, factsDaily, liNames }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liPlan, factsDaily, liNames]
+  );
+  const counts = useMemo(
+    () => countsFor(sources, { liPlan: spotLiPlan, factsDaily }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sources, liPlan, factsDaily]
+  );
+  const [explain, setExplain] = useState<ExplainTarget | null>(null);
+  const onExplain = useCallback((target: ExplainTarget | null) => setExplain(target), []);
+  // What each chip explains: the same text its spotlight row shows, keyed the way the rows are.
+  const explainByKey = useMemo(() => {
+    const out = new Map<string, ExplainContent>();
+    for (const row of activeItems(filters, sources, scopeFilters)) {
+      out.set(row.key, panelFor(row, { displayedTier: row.tier, counts, liPlan: spotLiPlan, missing: row.missing }));
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, sources, scopeFilters, counts, liPlan]);
 
   const customActive = filters.range === "custom" && !!filters.customRange.from && !!filters.customRange.to;
 
@@ -243,41 +426,47 @@ export function FilterBar({ filters, setFilters, liPlan, factsDaily, liNames, mi
     else if (type === "breakdown") setFilters({ brkf: filters.brkf.filter((p) => p !== value) });
   }
 
-  const chips: Chip[] = [];
-  for (const id of filters.selection) chips.push({ type: "selection", label: `LI ${id}`, value: id });
-  for (const c of filters.channels) chips.push({ type: "channel", label: c, value: c });
-  for (const l of filters.labels) chips.push({ type: "label", label: l, value: l });
-  for (const p of filters.platforms) {
-    chips.push({
-      type: "platform",
-      label: formatPlatform(p),
-      value: p,
-      tip: "Delivery numbers are platform-filtered. Status and pacing math still reflect the full line item.",
-    });
-  }
-  for (const pair of filters.brkf) {
-    const idx = pair.indexOf(":");
-    chips.push({
-      type: "breakdown",
-      label: idx > 0 ? `${pair.slice(0, idx)}: ${pair.slice(idx + 1)}` : pair,
-      value: pair,
-    });
-  }
+  // Tier the applied filters (reference spec 2026-06-14): Scope (plan-backed, paces the dashboard)
+  // and Lens (delivery-only), with the period-aware answer for the dimension cuts. Each descriptor
+  // maps to the SAME `removePill` type and label as before - only the grouping changes.
+  const tiered = classifyActive(filters, null, scopeFilters);
+  const descriptorToChip = (desc: { kind: string; value: string }): Chip => {
+    switch (desc.kind) {
+      case "li":
+        return { type: "selection", label: `LI ${desc.value}`, value: desc.value };
+      case "channel":
+        return { type: "channel", label: desc.value, value: desc.value };
+      case "label":
+        return { type: "label", label: desc.value, value: desc.value };
+      case "platform":
+        return { type: "platform", label: formatPlatform(desc.value), value: desc.value };
+      default: {
+        const idx = desc.value.indexOf(":");
+        return {
+          type: "breakdown",
+          label: idx > 0 ? `${desc.value.slice(0, idx)}: ${desc.value.slice(idx + 1)}` : desc.value,
+          value: desc.value,
+        };
+      }
+    }
+  };
+  const scopeChips = tiered.scope.map(descriptorToChip);
+  const lensChips = tiered.lens.map(descriptorToChip);
+  // The date range is not a classified source, but a window IS Scope - last among the Scope chips.
   if (filters.range !== "all") {
     if (customActive) {
-      // Same compact label the Custom segment itself reads back (`formatRangeLabel`,
-      // `FilterBar.jsx:612` in the reference) - the raw ISO strings this used to show didn't
-      // match what the segment right above the chip already says.
-      chips.push({
+      // Same compact label the Custom segment itself reads back (`formatRangeLabel`).
+      scopeChips.push({
         type: "range",
         label: formatRangeLabel(filters.customRange.from, filters.customRange.to),
         value: filters.range,
         tone: "range",
       });
     } else if (filters.range !== "custom") {
-      chips.push({ type: "range", label: `${filters.range}d`, value: filters.range, tone: "range" });
+      scopeChips.push({ type: "range", label: `${filters.range}d`, value: filters.range, tone: "range" });
     }
   }
+  const hasChips = scopeChips.length > 0 || lensChips.length > 0;
 
   return (
     <>
@@ -296,10 +485,23 @@ export function FilterBar({ filters, setFilters, liPlan, factsDaily, liNames, mi
           double-gap this produces (`.pdash`'s `gap` lands on both sides of it) is cancelled in
           CSS instead - see `.fb__sentinel`'s `margin-top` below. */}
       <div ref={sentinelRef} className="fb__sentinel" aria-hidden="true" />
-      <div className={`fb${hasFilters ? " fb--active" : ""}${stuck ? " fb--stuck" : ""}`}>
+      <div
+        className={`fb${hasFilters ? " fb--active" : ""}${stuck && !inert ? " fb--stuck" : ""}${inert ? " fb--inert" : ""}`}
+        {...(inert ? { inert: "" } : {})}
+      >
       <div className="fb__row">
         <div className="fb__controls">
-          <Spotlight filters={filters} onApply={setFilters} liPlan={liPlan} factsDaily={factsDaily} liNames={liNames} />
+          <Spotlight
+            sources={sources}
+            counts={counts}
+            filters={filters}
+            scopeFilters={scopeFilters}
+            liPlan={spotLiPlan}
+            onApply={setFilters}
+            onRemove={(type, value) => removePill(type as ChipType, value)}
+            onClear={handleClear}
+            onExplain={onExplain}
+          />
 
           {channels.length > 0 && (
             <MultiSelect
@@ -338,26 +540,35 @@ export function FilterBar({ filters, setFilters, liPlan, factsDaily, liNames, mi
         {actions && <div className="fb__actions">{actions}</div>}
       </div>
 
-      {chips.length > 0 && (
+      {hasChips && (
         <div className="fb__chips">
-          {chips.map((chip, index) => (
-            <span
-              key={`${chip.type}-${chip.value}-${index}`}
-              className={`fb-chip${chip.tone === "range" ? " fb-chip--range" : ""}`}
-              title={chip.tip}
-            >
-              <span>{chip.label}</span>
-              <button type="button" aria-label={`Remove ${chip.label} filter`} onClick={() => removePill(chip.type, chip.value)}>
-                ×
-              </button>
-            </span>
-          ))}
+          <TierBox
+            legend="scope"
+            hint={TIER_SENTENCES.scope}
+            chips={scopeChips}
+            variant="scope"
+            explainByKey={explainByKey}
+            onExplain={onExplain}
+            onRemove={removePill}
+          />
+          <TierBox
+            legend="lens"
+            hint={TIER_SENTENCES.lens}
+            chips={lensChips}
+            variant="lens"
+            explainByKey={explainByKey}
+            onExplain={onExplain}
+            onRemove={removePill}
+          />
+          {/* Clear sits with the chips it clears: every active filter draws a chip, so this row
+              exists exactly when there is something to clear. */}
           <button type="button" className="fb__clear" onClick={handleClear}>
             Clear
           </button>
         </div>
       )}
       </div>
+      <ExplainPanel target={explain} />
     </>
   );
 }

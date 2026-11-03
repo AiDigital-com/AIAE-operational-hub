@@ -283,6 +283,31 @@
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
+/* One tier's chips (filter-bar.tsx's TierBox): a soft outlined box with a small legend naming the
+   tier. A full box border - never a left rail. */
+.fb-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.fb-tier__legend {
+  margin-right: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  color: var(--muted);
+  border-bottom: 1px dotted var(--muted);
+  cursor: help;
+}
+
+/* A Scope chip is solid (it paces the dashboard); a Lens chip is an outline, muted (it narrows
+   delivery only). Fill and text weight only. */
 .fb-chip {
   display: inline-flex;
   align-items: center;
@@ -290,11 +315,17 @@
   padding: 4px 6px 4px 10px;
   border-radius: var(--pill);
   border: 1px solid var(--border-strong);
-  background: var(--n-100);
-  color: var(--muted-strong);
+  background: var(--surface);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
+}
+.fb-chip--lens {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted-strong);
+  font-weight: 600;
 }
 .fb-chip--range {
   color: var(--attention-text);
@@ -350,4 +381,17 @@
   height: 1px;
   margin-top: calc(-1 * var(--pdash-gap, 22px));
   margin-bottom: -1px;
+}
+
+/* Layout mode is open (FilterBar's `inert`): on screen, dimmed, unclickable and NOT sticky - Layout
+   mode's own hint bar owns the sticky slot for the session (Pacing's `.lm-inert`, for this bar). On
+   the bar itself, never a wrapper: a wrapper would become the sticky containing block. */
+.fb--inert {
+  position: static;
+  box-shadow: none;
+  opacity: 0.45;
+  filter: saturate(0.6);
+}
+.fb--inert * {
+  pointer-events: none !important;
 }
