@@ -337,7 +337,7 @@ describe("Overview", () => {
     // Given:
     vi.mocked(listPacingOverview).mockResolvedValue(
       aPacingListResponseV1({
-        pacings: [aPacingRowV1({ id: "p1", name: "Nike", campaigns: [aCampaignRefV1({ id: "310739" })] })],
+        pacings: [aPacingRowV1({ id: "p1", name: "Nike", campaigns: [aCampaignRefV1({ id: "310739", name: "Nike FY26" })] })],
       })
     );
     renderOverview();
@@ -346,8 +346,10 @@ describe("Overview", () => {
     // When:
     await userEvent.click(screen.getByRole("button", { name: "Open pacing" }));
 
-    // Then:
-    expect(mockNavigate).toHaveBeenCalledWith("/campaigns/310739/pacing", { state: { openPacingId: "p1" } });
+    // Then: the campaign's name rides along, so the workspace opens the tab without waiting on the campaign
+    expect(mockNavigate).toHaveBeenCalledWith("/campaigns/310739/pacing", {
+      state: { openPacingId: "p1", campaignName: "Nike FY26" },
+    });
   });
 
   it("should compute the summary stats from the filtered set", async () => {

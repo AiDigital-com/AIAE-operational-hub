@@ -18,6 +18,8 @@ interface WorkspaceState {
   agencyName?: string;
   clientId?: number;
   clientName?: string;
+  /** Set when a pacing is opened from the Overview (see `OpenPacingState.campaignName`). */
+  campaignName?: string;
 }
 
 /** Passed down to each tab route via `<Outlet context>`; read with `useOutletContext<CampaignTabContext>()`. */
@@ -100,7 +102,15 @@ export function CampaignWorkspace() {
   const location = useLocation();
   const state = (location.state as WorkspaceState | null) ?? {};
   const numericId = campaignId ? Number(campaignId) : undefined;
-  const { campaign, isPending, isError, error } = useCampaign(numericId, state.campaign);
+  const { campaign: loaded, isPending, isError, error } = useCampaign(numericId, state.campaign);
+  // Opened with only the campaign's id and name (a pacing opened from the Overview): render the tabs on
+  // those two at once rather than after the campaign fetch, so the tab's own requests start in parallel
+  // with it. The fetch still runs; its status and flight fill the hero in, and an error still wins below.
+  const placeholder: CampaignV1 | undefined =
+    state.campaignName && numericId !== undefined && Number.isFinite(numericId)
+      ? { id: numericId, name: state.campaignName }
+      : undefined;
+  const campaign = loaded ?? placeholder;
 
   // The tab is the path segment after the campaign id; Pacing may carry one more, the pacing to open
   // (`/campaigns/:id/pacing/:pacingId`, the address Slack links to).
@@ -114,7 +124,7 @@ export function CampaignWorkspace() {
     }
   }, [campaignId, activeTab]);
 
-  if (isPending) {
+  if (isPending && !campaign) {
     return <LoadingBlock label="Loading campaign" />;
   }
 
@@ -182,7 +192,9 @@ export function CampaignWorkspace() {
         <div className="campaign-ws__hero-main">
           <h1 className="campaign-ws__title">{name}</h1>
           {eyebrow && <div className="campaign-ws__hero-sub">{eyebrow}</div>}
-          <div className="campaign-ws__pills">
+          {/* Holds the pills' height while only the placeholder is shown, so the tab bar below does not
+              jump down when the fetched status and flight arrive. */}
+          <div className={cn("campaign-ws__pills", !loaded && "campaign-ws__pills--pending")}>
             {campaign.status && (
               <span className="campaign-ws__pill">
                 <span className="campaign-ws__pill-led" style={{ background: statusStyle.color }} />

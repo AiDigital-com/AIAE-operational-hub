@@ -97,6 +97,33 @@ describe("PacingDashboard", () => {
     expect(screen.getByRole("button", { name: /refresh data/i })).toBeEnabled();
   });
 
+  it("should not re-pull the dashboard or the pacing lists when it is re-opened with a known refresh status", async () => {
+    // Given: the pacing was opened before in this session, so its refresh status is already cached
+    vi.mocked(api.getPacingDashboard).mockResolvedValue(aPacingDashboardV1());
+    vi.mocked(api.getPacingRefreshStatus).mockResolvedValue(aPacingRefreshStatusV1());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const row = aPacingRowV1();
+    queryClient.setQueryData(["pacing", "refresh-status", row.dashSlug], aPacingRefreshStatusV1());
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    // When: it opens again
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <PacingDashboard row={row} onBack={vi.fn()} />
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(api.getPacingDashboard).toHaveBeenCalled());
+
+    // Then: one dashboard read, and nothing invalidated - no refresh has landed
+    await waitFor(() => expect(api.getPacingRefreshStatus).toHaveBeenCalled());
+    expect(api.getPacingDashboard).toHaveBeenCalledTimes(1);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
   it("should not watch a pacing that simply has no data, unless it was just created", async () => {
     // Given: an older pacing that has never built (it may never build - e.g. an incomplete plan)
     vi.useFakeTimers({ shouldAdvanceTime: true });

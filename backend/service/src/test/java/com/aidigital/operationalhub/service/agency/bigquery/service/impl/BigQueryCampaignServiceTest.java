@@ -37,9 +37,11 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -709,26 +711,70 @@ class BigQueryCampaignServiceTest {
 	}
 
 	@Test
-	void shouldResolveVisibleCampaignByIdTest() {
-		// Given: getVisibleCampaign is the shared campaign-resolution helper other services (e.g. report
-		// rows, report views) delegate to instead of building their own id-filter search
+	void shouldResolveVisibleCampaignByIdInOneQueryTest() {
+		// Given: the campaign workspace's hero reading one campaign
 		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
+		when(clientResolver.cleanClientName(any())).thenCallRealMethod();
 		when(bigQueryClient.query(contains(DATA_QUERY))).thenReturn(List.of(
-				campaignRow(42L, "Ourisman Ford 2026", "Live", "2026-01-01", "2026-12-31", 1000.0, List.of(), 1L)
+				campaignRow(42L, "Ourisman Ford 2026", "Live", "2026-01-01", "2026-12-31", 1000.0, List.of("Video"), 1L)
 		));
 
 		// When:
 		CampaignModel resolved = service.getVisibleCampaign(null, 42L);
 
-		// Then: the id was passed through as an EQUALS filter on the same visibility-scoped search
+		// Then: every field the search returns, from one IO-lines query with no window total, ordering or
+		// paging, and no adjustments-view client lookup
 		assertThat(resolved.id()).isEqualTo(42L);
-		assertThat(dataQuery()).contains("`campaign_id` = 42");
+		assertThat(resolved.name()).isEqualTo("Ourisman Ford 2026");
+		assertThat(resolved.status()).isEqualTo("Live");
+		assertThat(resolved.startDate()).isEqualTo("2026-01-01");
+		assertThat(resolved.endDate()).isEqualTo("2026-12-31");
+		assertThat(resolved.budget()).isEqualTo(1000.0);
+		assertThat(resolved.channels()).containsExactly("Video");
+		assertThat(resolved.clientName()).isEqualTo("Space Coast");
+		String sql = dataQuery();
+		assertThat(sql).contains("`campaign_id` = 42", "LIMIT 1");
+		assertThat(sql).doesNotContain(" OVER ", "ORDER BY");
+		verify(bigQueryClient, times(1)).query(any());
+		verify(clientResolver, never()).forAdjustmentsMart(anyList());
+	}
+
+	@Test
+	void shouldCleanAPlaceholderClientNameOfAVisibleCampaignTest() {
+		// Given: NetSuite's "no client" placeholder on the campaign's line items
+		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
+		when(clientResolver.cleanClientName(any())).thenCallRealMethod();
+		when(clientResolver.withClientName(any(CampaignModel.class), isNull())).thenCallRealMethod();
+		Map<String, Object> row = campaignRow(42L, "Ourisman Ford 2026", "Live", "2026-01-01", "2026-12-31",
+				1000.0, List.of(), 1L);
+		row.put("client_name", "-");
+		when(bigQueryClient.query(contains(DATA_QUERY))).thenReturn(List.of(row));
+
+		// When:
+		CampaignModel resolved = service.getVisibleCampaign(null, 42L);
+
+		// Then: read as no client, the way the search's own fallback reads it
+		assertThat(resolved.id()).isEqualTo(42L);
+		assertThat(resolved.clientName()).isNull();
+	}
+
+	@Test
+	void shouldRefuseAVisibleCampaignForAUserWhoSeesNothingWithoutQueryingTest() {
+		// Given: a user who sees no agency at all
+		when(agencyVisibilityService.resolveForCurrentUser(null))
+				.thenReturn(AgencyVisibility.restrictedTo(List.of()));
+
+		// When-Then:
+		assertThatThrownBy(() -> service.getVisibleCampaign(null, 42L))
+				.isInstanceOf(BusinessException.class)
+				.hasFieldOrPropertyWithValue("code", "OPH_025");
+		verifyNoInteractions(bigQueryClient);
 	}
 
 	@Test
 	void shouldThrowOph025WhenCampaignNotVisibleTest() {
-		// Given: an inaccessible campaign resolves the same as an unknown one - the underlying
-		// visibility-scoped search simply excludes it from the result
+		// Given: an inaccessible campaign resolves the same as an unknown one - the visibility-scoped
+		// query simply excludes it from the result
 		when(bigQueryProperties.getIoLinesTable()).thenReturn("io_lines");
 		when(bigQueryClient.query(contains(DATA_QUERY))).thenReturn(List.of());
 

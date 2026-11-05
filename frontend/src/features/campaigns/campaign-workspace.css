@@ -67,6 +67,9 @@
   margin-top: 22px;
   flex-wrap: wrap;
 }
+.campaign-ws__pills--pending {
+  min-height: 42px;
+}
 .campaign-ws__pill {
   display: inline-flex;
   align-items: center;
