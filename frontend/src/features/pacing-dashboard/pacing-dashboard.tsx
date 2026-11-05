@@ -660,12 +660,17 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
     }
   }
 
+  // Re-pull the dashboard once a refresh has actually landed: only on watching true -> false. Not on
+  // mount - watching always starts false, and on a re-open the refresh-status cache already has data,
+  // so a mount-time check re-fetched the dashboard (twice under StrictMode) and both pacing lists.
+  const wasWatching = useRef(false);
   useEffect(() => {
-    if (!refreshStatus.watching && refreshStatus.data) {
+    const landed = wasWatching.current && !refreshStatus.watching;
+    wasWatching.current = refreshStatus.watching;
+    if (landed && refreshStatus.data) {
       refreshStatus.invalidateDashboard();
     }
-    // Only fire when watching just turned off, not on every refetch - invalidateDashboard is stable
-    // enough for this effect's purpose (re-pulling the dashboard once a refresh has actually landed).
+    // invalidateDashboard is stable enough for this effect's purpose; refetches must not re-fire it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshStatus.watching]);
 

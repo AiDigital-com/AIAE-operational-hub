@@ -28,6 +28,8 @@ interface WorkspaceState {
   agencyName?: string;
   clientId?: number;
   clientName?: string;
+  openPacingId?: string;
+  campaignName?: string;
 }
 
 function aCampaign(overrides: Partial<CampaignV1> = {}): CampaignV1 {
@@ -238,6 +240,47 @@ describe("CampaignWorkspace", () => {
 
     // Then:
     expect(screen.getByRole("status", { name: "Loading campaign" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
+
+  it("should open the tab at once on the campaign name a pacing carries from the Overview", () => {
+    // Given: the campaign fetch has not answered yet
+    vi.mocked(getCampaign).mockReturnValue(new Promise(() => {}));
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", { openPacingId: "p-1", campaignName: "Ourisman Ford 2026" });
+
+    // Then: the tab is not held behind the fetch, which still runs for the hero's pills
+    expect(screen.queryByRole("status", { name: "Loading campaign" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Ourisman Ford 2026" })).toBeInTheDocument();
+    expect(screen.getByText("Pacing content")).toBeInTheDocument();
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+    expect(getCampaign).toHaveBeenCalledExactlyOnceWith(42);
+  });
+
+  it("should fill the hero's status and flight in once the campaign fetch lands", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockResolvedValue(aCampaign());
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", { openPacingId: "p-1", campaignName: "Ourisman Ford 2026" });
+
+    // Then:
+    expect(await screen.findByText("LIVE")).toBeInTheDocument();
+    expect(screen.getByText(/Jan 12, 2026/)).toBeInTheDocument();
+    expect(screen.getByText("Pacing content")).toBeInTheDocument();
+  });
+
+  it("should still replace the tab with the error when the campaign fetch fails behind a carried name", async () => {
+    // Given:
+    vi.mocked(getCampaign).mockRejectedValue(new Error("Campaign 42 was not found."));
+
+    // When:
+    renderWorkspace("/campaigns/42/pacing", { openPacingId: "p-1", campaignName: "Ourisman Ford 2026" });
+
+    // Then:
+    expect(await screen.findByText(/Campaign 42 was not found\./)).toBeInTheDocument();
+    expect(screen.queryByText("Pacing content")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 

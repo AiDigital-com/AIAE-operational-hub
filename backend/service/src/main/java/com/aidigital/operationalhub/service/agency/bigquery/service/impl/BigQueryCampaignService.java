@@ -88,21 +88,7 @@ public class BigQueryCampaignService implements CampaignService {
 		if (visibility.seesNothing()) {
 			return new PageImpl<>(List.of(), PageRequest.of(criteria.pageNumber() - 1, criteria.pageSize()), 0);
 		}
-		BqRequest.Builder query = new BqRequest.Builder()
-				.from(gateway.table())
-				.select(CAMPAIGN_ID, ALIAS_ID)
-				.selectAnyValue(CAMPAIGN, ALIAS_NAME)
-				.selectAnyValue(ADVERTISER_ID, ALIAS_CLIENT_ID)
-				.selectAnyValue(ADVERTISER, ALIAS_CLIENT_NAME)
-				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
-				.selectAnyValue(AGENCY, ALIAS_AGENCY_NAME)
-				.selectMin(BigQueryIoLinesColumns.ORDER_START_DATE, ALIAS_START_DATE)
-				.selectMax(BigQueryIoLinesColumns.ORDER_END_DATE, ALIAS_END_DATE)
-				.selectSum(BigQueryIoLinesColumns.TACTIC_BUDGET, ALIAS_BUDGET)
-				.selectAnyValue(ORDER_STATUS, ALIAS_STATUS)
-				.selectArrayAggDistinct(BigQueryIoLinesColumns.MEDIA_TACTIC, ALIAS_CHANNELS)
-				.selectAnyValue(BigQueryIoLinesColumns.INDUSTRY_VERTICAL, ALIAS_INDUSTRY_VERTICAL)
-				.selectCountDistinct(BigQueryIoLinesColumns.LINE_ITEM_ID, ALIAS_LINE_ITEM_COUNT)
+		BqRequest.Builder query = selectCampaignColumns(new BqRequest.Builder().from(gateway.table()))
 				.withTotalCount(CAMPAIGN_ID)
 				.countDistinct(CAMPAIGN_ID)
 				.whereNotNull(CAMPAIGN_ID)
@@ -170,13 +156,59 @@ public class BigQueryCampaignService implements CampaignService {
 		return names.size() == 1 ? names.getFirst() : null;
 	}
 
+	/**
+	 * Adds the campaign columns every campaign read returns - the one projection {@link #toCampaign} maps.
+	 *
+	 * @param query the query builder, its table already set
+	 * @return the same builder
+	 */
+	BqRequest.Builder selectCampaignColumns(BqRequest.Builder query) {
+		return query
+				.select(CAMPAIGN_ID, ALIAS_ID)
+				.selectAnyValue(CAMPAIGN, ALIAS_NAME)
+				.selectAnyValue(ADVERTISER_ID, ALIAS_CLIENT_ID)
+				.selectAnyValue(ADVERTISER, ALIAS_CLIENT_NAME)
+				.selectAnyValue(AGENCY_ID, ALIAS_AGENCY_ID)
+				.selectAnyValue(AGENCY, ALIAS_AGENCY_NAME)
+				.selectMin(BigQueryIoLinesColumns.ORDER_START_DATE, ALIAS_START_DATE)
+				.selectMax(BigQueryIoLinesColumns.ORDER_END_DATE, ALIAS_END_DATE)
+				.selectSum(BigQueryIoLinesColumns.TACTIC_BUDGET, ALIAS_BUDGET)
+				.selectAnyValue(ORDER_STATUS, ALIAS_STATUS)
+				.selectArrayAggDistinct(BigQueryIoLinesColumns.MEDIA_TACTIC, ALIAS_CHANNELS)
+				.selectAnyValue(BigQueryIoLinesColumns.INDUSTRY_VERTICAL, ALIAS_INDUSTRY_VERTICAL)
+				.selectCountDistinct(BigQueryIoLinesColumns.LINE_ITEM_ID, ALIAS_LINE_ITEM_COUNT);
+	}
+
+	/**
+	 * One campaign, for the campaign workspace's hero.
+	 *
+	 * <p>Not routed through {@link #searchCampaigns}: a single id needs no total-count window, no ordering
+	 * and no paging, and above all not {@link #resolveClientNames} - a second BigQuery job joining the
+	 * adjustments view (around seven of the ten seconds a cold open took) to rename a client nothing on
+	 * that page shows. {@code client_name} is therefore the IO-lines advertiser, cleaned the way the
+	 * search's own fallback cleans it, not the mart client the Campaigns table lists.
+	 *
+	 * @param user       the caller
+	 * @param campaignId the campaign id
+	 * @return the campaign
+	 */
 	@Override
 	public CampaignModel getVisibleCampaign(CurrentUserModel user, long campaignId) {
+		AgencyVisibility visibility = agencyVisibilityService.resolveForCurrentUser(user);
+		if (visibility.seesNothing()) {
+			throw new BusinessException(OperationalHubErrorReason.OPH_025, campaignId);
+		}
 		FilterCriterion<CampaignField> idFilter =
 				new FilterCriterion<>(CampaignField.ID, String.valueOf(campaignId), FilterOperation.EQUALS, false);
-		SearchCriteria<CampaignField> criteria = new SearchCriteria<>(List.of(idFilter), null, 1, 1);
-		Page<CampaignModel> page = searchCampaigns(user, criteria);
-		return page.getContent().stream().findFirst()
+		BqRequest.Builder query = selectCampaignColumns(new BqRequest.Builder().from(gateway.table()))
+				.whereNotNull(CAMPAIGN_ID)
+				.whereInEither(AGENCY_ID, visibility.agencyIds(), CAMPAIGN_ID, visibility.campaignIds())
+				.groupBy(CAMPAIGN_ID)
+				.limitOffset(1, 0);
+		query.filter(CAMPAIGN_ID, true, idFilter);
+		return gateway.fetchCached(query.build(), this::toCampaign).stream().findFirst()
+				.map(campaign -> clientResolver.withClientName(
+						campaign, clientResolver.cleanClientName(campaign.clientName())))
 				.orElseThrow(() -> new BusinessException(OperationalHubErrorReason.OPH_025, campaignId));
 	}
 

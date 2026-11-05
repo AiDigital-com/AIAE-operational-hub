@@ -269,7 +269,7 @@ function AlsoCoversNotice({ row, currentCampaignId }: { row: PacingRowV1; curren
       This pacing also covers{" "}
       {otherCampaigns.map((campaign, index) => {
         const campaignId = Number(campaign.id);
-        const state: OpenPacingState = { openPacingId: row.id };
+        const state: OpenPacingState = { openPacingId: row.id, campaignName: campaign.name || undefined };
         return (
           <span key={campaign.id}>
             {index > 0 && ", "}

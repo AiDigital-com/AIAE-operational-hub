@@ -15,6 +15,12 @@ export interface OpenPacingState {
    * open-a-pacing navigation.
    */
   justCreated?: boolean;
+  /**
+   * The target campaign's name, as the pacing row already knows it. Lets the campaign workspace
+   * render its tabs at once instead of waiting on the campaign fetch (a cold BigQuery read of several
+   * seconds); the status and flight pills fill in when that fetch lands.
+   */
+  campaignName?: string;
 }
 
 /**
@@ -33,5 +39,8 @@ export function pacingRoute(row: Pick<PacingRowV1, "id" | "campaigns">): { path:
   if (!primary) return null;
   const campaignId = Number(primary.id);
   if (!Number.isFinite(campaignId)) return null;
-  return { path: `/campaigns/${campaignId}/pacing`, state: { openPacingId: row.id } };
+  return {
+    path: `/campaigns/${campaignId}/pacing`,
+    state: { openPacingId: row.id, campaignName: primary.name || undefined },
+  };
 }
