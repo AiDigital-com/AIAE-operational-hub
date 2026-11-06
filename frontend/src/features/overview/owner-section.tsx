@@ -8,7 +8,7 @@ import { fmtBudget, fmtMD } from "../pacing/mock/format";
 import { PACING_STATUS_STYLE } from "../pacing-overview/format";
 import { pacingRoute } from "../pacing-overview/navigation";
 import { NsDiffCell } from "../pacing-overview/ns-diff-cell";
-import type { PacingRowV1 } from "../pacing-overview/types";
+import type { PacingDelegationRefV1, PacingRowV1 } from "../pacing-overview/types";
 import { LineItemRows } from "./line-item-rows";
 import type { OverviewSort, OverviewSortField, OwnerGroup } from "./owner-groups";
 import { OverviewRowMenu } from "./row-menu";
@@ -73,6 +73,16 @@ function PeriodScopePill({ row }: { row: PacingRowV1 }) {
       </span>
     </div>
   );
+}
+
+/**
+ * The pill on a row delegated to the viewer: whose work they are covering, and until when.
+ *
+ * @param from the grantor side of the delegation
+ */
+function coveringLabel(from: PacingDelegationRefV1): string {
+  const firstName = from.name.trim().split(/\s+/)[0] || from.name;
+  return from.expiresAt ? `Covering for ${firstName} · until ${fmtMD(from.expiresAt)}` : `Covering for ${firstName}`;
 }
 
 /**
@@ -141,7 +151,7 @@ const PacingRows = memo(function PacingRows({
             </span>
             {row.delegatedFrom && (
               <span className="overview__pill overview__pill--in" title={`Delegated to you by ${row.delegatedFrom.name}`}>
-                ← {row.delegatedFrom.name}
+                {coveringLabel(row.delegatedFrom)}
               </span>
             )}
             {delegatedTo.length > 0 && (
@@ -261,6 +271,7 @@ export const OwnerSection = memo(function OwnerSection({
     <section className="overview__owner-card" aria-label={`Pacings owned by ${group.owner}`}>
       <header className="overview__owner-head">
         <span className="overview__owner-name">{group.owner}</span>
+        {group.isOwn && <span className="overview__owner-chip">You</span>}
         <span className="overview__owner-meta">
           {group.rows.length} pacing{group.rows.length === 1 ? "" : "s"} · {group.liTotal} LIs
         </span>

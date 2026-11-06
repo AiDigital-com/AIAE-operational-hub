@@ -1,11 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAgencyList, useAgencySearch } from "../agencies/hooks";
 import { ApiError } from "../../shared/api/api-error";
 import { formatError } from "../../shared/format/error";
 import { useDebounce } from "../../shared/hooks/use-debounce";
 import { cn } from "../../shared/style/cn";
-import { SearchIcon } from "../../shared/ui/icons/icons";
+import { ProfileIcon, SearchIcon, TableIcon, TeamIcon } from "../../shared/ui/icons/icons";
 import { LoadingBlock } from "../../shared/ui/loading-spinner/loading-spinner";
 import { MultiSelect, type MultiSelectOption } from "../../shared/ui/multi-select/multi-select";
 import { useToast } from "../../shared/ui/toast/toast";
@@ -46,6 +45,17 @@ import {
   type OverviewSortField,
 } from "./owner-groups";
 import { OwnerSection } from "./owner-section";
+import {
+  DEFAULT_OWNER_SCOPE,
+  inOwnerScope,
+  OWNER_SCOPES,
+  ownerScopeLabel,
+  parseOwnerScope,
+  readSavedOwnerScope,
+  saveOwnerScope,
+  widerOwnerScope,
+  type OwnerScope,
+} from "./owner-scope";
 import "./overview.css";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -120,6 +130,13 @@ function parseStatusKey(raw: string | null): string {
   return OVERVIEW_STATUS_SEGMENTS.some((segment) => segment.key === raw) ? (raw as string) : ALL;
 }
 
+/** The owner filter's icons, by option. */
+const OWNER_SCOPE_ICONS: Record<OwnerScope, typeof ProfileIcon> = {
+  mine: ProfileIcon,
+  team: TeamIcon,
+  all: TableIcon,
+};
+
 /** Where the last filter set is kept, so returning to the Overview by any route restores it. */
 const REMEMBERED_FILTERS_KEY = "overview-filters";
 
@@ -137,7 +154,8 @@ const FILTER_PARAM_KEYS = ["q", "status", "agency", "sort"] as const;
  *
  * Remembered per session and per user, not forever: a filter that outlives the tab greets the next visit
  * with pacings silently missing and no clue why, and one that outlives the *account* does it to whoever
- * signs in next at that desk.
+ * signs in next at that desk. The search is never remembered, and the owner filter has its own,
+ * longer memory (`owner-scope.ts`).
  *
  * @param params  the current query string
  * @param userId  the signed-in Clerk user id, or undefined before the profile is in cache
@@ -202,6 +220,13 @@ export function Overview() {
   const [status, setStatus] = useState<string>(() => parseStatusKey(initialParams.get("status")));
   const [agencyIds, setAgencyIds] = useState<number[]>(() => parseAgencyIds(initialParams.get("agency")));
   const [sort, setSort] = useState<OverviewSort | null>(() => parseSort(initialParams.get("sort")));
+  // The owner filter. A `?scope=` link wins for this visit without touching the saved choice; a click
+  // saves the choice for every later visit (and drops the link's value); otherwise the saved choice,
+  // otherwise All. The saved value is read per user, so it waits for the profile to be in cache.
+  const [linkScope, setLinkScope] = useState<OwnerScope | null>(() => parseOwnerScope(params.get("scope")));
+  const [pickedScope, setPickedScope] = useState<OwnerScope | null>(null);
+  const savedScope = useMemo(() => readSavedOwnerScope(rememberedFor), [rememberedFor]);
+  const ownerScope = linkScope ?? pickedScope ?? savedScope ?? DEFAULT_OWNER_SCOPE;
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
 
   // Row kebab menu state. Deleting and re-validating are admin-only on the Hub
@@ -287,9 +312,22 @@ export function Overview() {
     if (status !== ALL) next.set("status", status);
     if (agencyIds.length > 0) next.set("agency", agencyIds.join(","));
     if (sort) next.set("sort", `${sort.field}:${sort.direction}`);
+    if (linkScope) next.set("scope", linkScope);
     setParams(next, { replace: true });
-    rememberFilters(next, rememberedFor);
-  }, [search, status, agencyIds, sort, setParams, rememberedFor]);
+    const remembered = new URLSearchParams(next);
+    remembered.delete("q");
+    remembered.delete("scope");
+    rememberFilters(remembered, rememberedFor);
+  }, [search, status, agencyIds, sort, linkScope, setParams, rememberedFor]);
+
+  const pickOwnerScope = useCallback(
+    (next: OwnerScope) => {
+      setLinkScope(null);
+      setPickedScope(next);
+      saveOwnerScope(rememberedFor, next);
+    },
+    [rememberedFor]
+  );
 
   // Ascending, then descending, then back to the status-priority order.
   const cycleSort = useCallback((field: OverviewSortField) => {
@@ -299,37 +337,66 @@ export function Overview() {
     });
   }, []);
 
-  // Agency filter options. The unsearched list shares the sidebar's own cache entry, so opening the
-  // dropdown costs no request at all; typing runs the same server-side search the sidebar uses, which
-  // is what makes every agency reachable rather than only a preloaded first slice.
-  const [agencySearchInput, setAgencySearchInput] = useState("");
-  const agencySearch = useDebounce(agencySearchInput, SEARCH_DEBOUNCE_MS).trim();
-  const agencyList = useAgencyList();
-  const agencySearchQuery = useAgencySearch(agencySearch);
-  const agencyQuery = agencySearch ? agencySearchQuery : agencyList;
-  const agencyOptions = useMemo<MultiSelectOption[]>(
-    () =>
-      (agencyQuery.data?.pages.flatMap((page) => page.content) ?? []).map((agency) => ({
-        id: agency.id,
-        label: agency.name,
-      })),
-    [agencyQuery.data]
-  );
-
   const rows = useMemo(() => overview.data?.pacings ?? [], [overview.data]);
   const scope = overview.data?.scope;
 
-  const filtered = useMemo(() => {
-    const statusValue = OVERVIEW_STATUS_SEGMENTS.find((segment) => segment.key === status)?.value ?? "";
-    let next = rows;
-    // §9, US-128: an archived pacing drops out of the default view but stays findable — picking
-    // "Archived" explicitly still shows it; only the unfiltered "All" view hides it.
-    if (!statusValue) next = next.filter((row) => row.status !== "Archive");
-    else next = next.filter((row) => row.status === statusValue);
-    if (agencyIds.length > 0) next = next.filter((row) => matchesAgencyFilter(row, agencyIds));
-    if (search) next = next.filter((row) => matchesOverviewSearch(row, search));
-    return next;
-  }, [rows, status, agencyIds, search]);
+  // The owner filter runs first: it decides which list the agency options, the stats and every other
+  // filter work on.
+  const viewer = useMemo(
+    () => ({ pacingUserId: currentUser?.pacingUserId, teamOwnerIds: overview.data?.teamOwnerIds }),
+    [currentUser?.pacingUserId, overview.data?.teamOwnerIds]
+  );
+  const scoped = useMemo(
+    () => rows.filter((row) => inOwnerScope(row, ownerScope, viewer)),
+    [rows, ownerScope, viewer]
+  );
+
+  // Agency filter options: the agencies of the pacings in the selected owner view, so every option
+  // finds something. A selected agency the view does not carry stops filtering instead of emptying
+  // the list - and comes back when a wider view carries it again.
+  const [agencySearchInput, setAgencySearchInput] = useState("");
+  const agencyChoices = useMemo<MultiSelectOption[]>(() => {
+    const byId = new Map<number, string>();
+    for (const row of scoped) {
+      for (const campaign of row.campaigns ?? []) {
+        if (campaign.agencyId != null && !byId.has(campaign.agencyId)) {
+          byId.set(campaign.agencyId, campaign.agencyName ?? String(campaign.agencyId));
+        }
+      }
+    }
+    return [...byId].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [scoped]);
+  const agencyOptions = useMemo(() => {
+    const term = agencySearchInput.trim().toLowerCase();
+    return term ? agencyChoices.filter((option) => option.label.toLowerCase().includes(term)) : agencyChoices;
+  }, [agencyChoices, agencySearchInput]);
+  const activeAgencyIds = useMemo(
+    () => agencyIds.filter((id) => agencyChoices.some((option) => option.id === id)),
+    [agencyIds, agencyChoices]
+  );
+
+  // Status, agency and search, as one test: the same one the "more matches" notice runs outside the
+  // owner view.
+  const matchesFilters = useCallback(
+    (row: PacingRowV1) => {
+      const statusValue = OVERVIEW_STATUS_SEGMENTS.find((segment) => segment.key === status)?.value ?? "";
+      // §9, US-128: an archived pacing drops out of the default view but stays findable — picking
+      // "Archived" explicitly still shows it; only the unfiltered "All" view hides it.
+      if (!statusValue ? row.status === "Archive" : row.status !== statusValue) return false;
+      if (activeAgencyIds.length > 0 && !matchesAgencyFilter(row, activeAgencyIds)) return false;
+      return !search || matchesOverviewSearch(row, search);
+    },
+    [status, activeAgencyIds, search]
+  );
+
+  const filtered = useMemo(() => scoped.filter(matchesFilters), [scoped, matchesFilters]);
+
+  // A search never silently stops at the owner filter: what it finds outside the selected view is
+  // counted, and offered one click away.
+  const moreMatches = useMemo(() => {
+    if (!search || ownerScope === "all") return 0;
+    return rows.filter((row) => !inOwnerScope(row, ownerScope, viewer) && matchesFilters(row)).length;
+  }, [search, ownerScope, rows, viewer, matchesFilters]);
 
   const summary = useMemo(() => {
     let lineItems = 0;
@@ -346,8 +413,8 @@ export function Overview() {
     [sort]
   );
   const groups = useMemo(
-    () => buildOwnerGroups(filtered, currentUser?.full_name, compare),
-    [filtered, currentUser?.full_name, compare]
+    () => buildOwnerGroups(filtered, currentUser?.full_name, compare, currentUser?.pacingUserId),
+    [filtered, currentUser?.full_name, compare, currentUser?.pacingUserId]
   );
 
   const toggleRow = useCallback((pacingId: string) => {
@@ -394,7 +461,9 @@ export function Overview() {
     setAgencyIds([]);
   }
 
-  const hasActiveFilters = status !== ALL || agencyIds.length > 0 || Boolean(search);
+  const hasActiveFilters = status !== ALL || activeAgencyIds.length > 0 || Boolean(search);
+  const widerScope = widerOwnerScope(ownerScope);
+  const scopeHint = OWNER_SCOPES.find((option) => option.key === ownerScope)?.hint ?? "";
 
   return (
     <section className="overview">
@@ -457,6 +526,8 @@ export function Overview() {
             </div>
           </div>
 
+          {/* Search first, then the filters from broad to narrow (owner → status → agency) kept
+              together as one group that wraps as a whole, then the view action at the right edge. */}
           <div className="overview__filters">
             <label className="overview__search">
               <SearchIcon />
@@ -468,36 +539,80 @@ export function Overview() {
                 onChange={(event) => setSearchInput(event.target.value)}
               />
             </label>
-            <div className="overview__seg" role="group" aria-label="Filter by status">
-              {OVERVIEW_STATUS_SEGMENTS.map((segment) => (
-                <button
-                  key={segment.key}
-                  type="button"
-                  className={cn("overview__seg-btn", status === segment.key && "overview__seg-btn--active")}
-                  onClick={() => setStatus(segment.key)}
-                >
-                  {segment.label}
-                </button>
-              ))}
+            <div className="overview__filter-group">
+              <div className="overview__seg" role="radiogroup" aria-label="Filter by owner">
+                {OWNER_SCOPES.map((option) => {
+                  const Icon = OWNER_SCOPE_ICONS[option.key];
+                  const active = ownerScope === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      title={option.hint}
+                      className={cn(
+                        "overview__seg-btn",
+                        "overview__seg-btn--icon",
+                        active && "overview__seg-btn--active"
+                      )}
+                      onClick={() => pickOwnerScope(option.key)}
+                    >
+                      <Icon />
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="overview__seg" role="group" aria-label="Filter by status">
+                {OVERVIEW_STATUS_SEGMENTS.map((segment) => (
+                  <button
+                    key={segment.key}
+                    type="button"
+                    className={cn("overview__seg-btn", status === segment.key && "overview__seg-btn--active")}
+                    onClick={() => setStatus(segment.key)}
+                  >
+                    {segment.label}
+                  </button>
+                ))}
+              </div>
+              <MultiSelect
+                label="All agencies"
+                options={agencyOptions}
+                selected={activeAgencyIds}
+                onChange={setAgencyIds}
+                search={agencySearchInput}
+                onSearchChange={setAgencySearchInput}
+                searchPlaceholder="Search agencies…"
+              />
             </div>
-            <MultiSelect
-              label="All agencies"
-              options={agencyOptions}
-              selected={agencyIds}
-              onChange={setAgencyIds}
-              search={agencySearchInput}
-              onSearchChange={setAgencySearchInput}
-              searchPlaceholder="Search agencies…"
-              isPending={agencyQuery.isPending}
-              error={agencyQuery.isError ? agencyQuery.error : undefined}
-              hasMore={agencyQuery.hasNextPage}
-              isLoadingMore={agencyQuery.isFetchingNextPage}
-              onLoadMore={agencyQuery.fetchNextPage}
-            />
-            <button type="button" className="button button--ghost button--sm" onClick={toggleExpandAll}>
+            <button
+              type="button"
+              className="button button--ghost button--sm overview__expand-all"
+              onClick={toggleExpandAll}
+            >
               {allExpanded ? "Collapse All" : "Expand All"}
             </button>
+            <p className="overview__scope-hint">
+              {scopeHint}
+              {linkScope && " · opened from a link"}
+            </p>
           </div>
+
+          {moreMatches > 0 && (
+            <div className="overview__notice" role="status">
+              <SearchIcon />
+              <span>
+                <b>
+                  {moreMatches} more match{moreMatches === 1 ? "" : "es"}
+                </b>{" "}
+                for “{searchInput.trim()}” in All pacings
+              </span>
+              <button type="button" className="button button--ghost button--sm" onClick={() => pickOwnerScope("all")}>
+                Show in All pacings
+              </button>
+            </div>
+          )}
 
           {rows.length === 0 && (
             <div className="overview__empty">
@@ -513,12 +628,28 @@ export function Overview() {
             </div>
           )}
 
-          {rows.length > 0 && filtered.length === 0 && (
+          {rows.length > 0 && scoped.length === 0 && (
+            <div className="overview__empty">
+              <p className="overview__empty-title">
+                {ownerScope === "mine" ? "You don't own any pacings yet" : "Your team has no pacings yet"}
+              </p>
+              <p className="overview__empty-body">
+                Pacings you create, or that are delegated to you, will show up here.
+              </p>
+              {widerScope && (
+                <button type="button" className="button button--ghost button--sm" onClick={() => pickOwnerScope(widerScope)}>
+                  Show {ownerScopeLabel(widerScope)}
+                </button>
+              )}
+            </div>
+          )}
+
+          {scoped.length > 0 && filtered.length === 0 && (
             <div className="overview__empty">
               <p className="overview__empty-title">No pacings match your filters</p>
               <p className="overview__empty-body">
-                {rows.length} pacing{rows.length === 1 ? "" : "s"} loaded, but none match{" "}
-                {hasActiveFilters ? "the current search and filters" : "the current view"}.
+                {scoped.length} pacing{scoped.length === 1 ? "" : "s"} in {ownerScopeLabel(ownerScope)}, but none
+                match {hasActiveFilters ? "the current search and filters" : "the current view"}.
               </p>
               {hasActiveFilters && (
                 <button type="button" className="button button--ghost button--sm" onClick={clearFilters}>

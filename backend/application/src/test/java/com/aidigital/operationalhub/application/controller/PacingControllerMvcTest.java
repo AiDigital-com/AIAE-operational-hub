@@ -31,6 +31,7 @@ import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
+import com.aidigital.operationalhub.service.rbac.PacingTeamOwnersResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
 import com.aidigital.operationalhub.service.rbac.model.PacingScope;
@@ -70,6 +71,9 @@ class PacingControllerMvcTest {
 
 	@Mock
 	private PacingScopeResolver pacingScopeResolver;
+
+	@Mock
+	private PacingTeamOwnersResolver pacingTeamOwnersResolver;
 
 	@Mock
 	private PacingClient pacingClient;
@@ -126,12 +130,15 @@ class PacingControllerMvcTest {
 		doReturn(310740L).when(mapper).parseCampaignId("310740");
 		doReturn(identities).when(campaignService).getVisibleCampaignIdentities(user, List.of(310739L, 310740L));
 		doReturn(body).when(mapper).toV1(entitlement, pacings, Map.of(310739L, identities.get(0)));
+		doReturn(List.of("u-1", "u-2")).when(pacingTeamOwnersResolver).resolveTeamOwnerIds(user);
 		MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		// When / Then:
 		mockMvc.perform(get("/api/v1/pacing/pacings"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.scope.kind").value(body.getScope().getKind().getValue()));
+				.andExpect(jsonPath("$.scope.kind").value(body.getScope().getKind().getValue()))
+				.andExpect(jsonPath("$.teamOwnerIds[0]").value("u-1"))
+				.andExpect(jsonPath("$.teamOwnerIds[1]").value("u-2"));
 
 		// Then: one bulk identity lookup for the whole list, distinct ids only.
 		verify(campaignService).getVisibleCampaignIdentities(user, List.of(310739L, 310740L));

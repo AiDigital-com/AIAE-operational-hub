@@ -52,7 +52,10 @@ function LocationProbe() {
   return <div data-testid="location-search">{useLocation().search}</div>;
 }
 
-function renderOverview(url = "/", user: { user_id?: string; full_name?: string; roles?: string[] } = {}) {
+function renderOverview(
+  url = "/",
+  user: { user_id?: string; full_name?: string; roles?: string[]; pacingUserId?: string } = {}
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Seeded rather than fetched: the app shell holds Overview back until the profile is cached, and
   // both the remembered filters and the own-group-first ordering are scoped to whoever it names.
@@ -61,6 +64,7 @@ function renderOverview(url = "/", user: { user_id?: string; full_name?: string;
     email: "one@aidigital.com",
     full_name: user.full_name ?? "Azat Nabiev",
     roles: user.roles ?? [],
+    pacingUserId: user.pacingUserId ?? "pu-me",
   });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -83,6 +87,28 @@ function renderOverview(url = "/", user: { user_id?: string; full_name?: string;
   );
 }
 
+/**
+ * A fresh in-memory `localStorage` per test. Stubbed rather than cleared: on recent Node the global
+ * `localStorage` is Node's own, which is undefined without a backing file, and it hides jsdom's.
+ */
+function memoryStorage(): Storage {
+  const items = new Map<string, string>();
+  return {
+    get length() {
+      return items.size;
+    },
+    clear: () => items.clear(),
+    getItem: (key) => items.get(key) ?? null,
+    key: (index) => [...items.keys()][index] ?? null,
+    removeItem: (key) => {
+      items.delete(key);
+    },
+    setItem: (key, value) => {
+      items.set(key, String(value));
+    },
+  };
+}
+
 /** The owner names in card order, for asserting group ordering. */
 function ownerNames(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll(".overview__owner-name")).map((el) => el.textContent ?? "");
@@ -92,6 +118,7 @@ describe("Overview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    vi.stubGlobal("localStorage", memoryStorage());
     vi.mocked(searchAgencies).mockResolvedValue(anAgencyPageV1({ content: [anAgencyV1({ id: 1, name: "Northstar Media" })] }));
     vi.mocked(listPacingOverview).mockResolvedValue(aPacingListResponseV1({ pacings: [aPacingRowV1()] }));
   });
@@ -184,7 +211,7 @@ describe("Overview", () => {
     await screen.findByRole("table");
 
     // Then:
-    expect(screen.getByText("← Daria Feofanova")).toBeInTheDocument();
+    expect(screen.getByText("Covering for Daria · until 10/01")).toBeInTheDocument();
     expect(screen.getByText("→ Bob Petrov")).toBeInTheDocument();
     expect(screen.getByText("Out of period · Sep 2026")).toBeInTheDocument();
   });
@@ -702,5 +729,201 @@ describe("Overview", () => {
 
     // Then:
     expect(screen.queryByRole("button", { name: "Create pacing" })).not.toBeInTheDocument();
+  });
+  describe("owner filter", () => {
+    /** Three owners: me, a team-mate, and someone outside my team who delegated one pacing to me. */
+    function ownerFilterList() {
+      return aPacingListResponseV1({
+        teamOwnerIds: ["pu-me", "pu-mate"],
+        pacings: [
+          aPacingRowV1({ name: "Mine A", ownerId: "pu-me", ownerName: "Azat Nabiev" }),
+          aPacingRowV1({ name: "Mate B", ownerId: "pu-mate", ownerName: "Team Mate" }),
+          aPacingRowV1({ name: "Other C", ownerId: "pu-other", ownerName: "Other Person" }),
+          aPacingRowV1({
+            name: "Covered D",
+            ownerId: "pu-other",
+            ownerName: "Other Person",
+            delegatedFrom: { name: "Other Person", expiresAt: "2026-11-12" },
+          }),
+        ],
+      });
+    }
+
+    it("should open on All pacings for everyone on a first visit", async () => {
+      // Given:
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+
+      // When:
+      renderOverview();
+      await screen.findByText("Other C");
+
+      // Then:
+      expect(screen.getByRole("radio", { name: "All pacings" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByText("Every pacing you have access to")).toBeInTheDocument();
+    });
+
+    it("should keep only my own and delegated pacings under My pacings", async () => {
+      // Given:
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+      renderOverview();
+      await screen.findByText("Other C");
+
+      // When:
+      await userEvent.click(screen.getByRole("radio", { name: "My pacings" }));
+
+      // Then:
+      expect(screen.getByText("Mine A")).toBeInTheDocument();
+      expect(screen.getByText("Covered D")).toBeInTheDocument();
+      expect(screen.queryByText("Mate B")).not.toBeInTheDocument();
+      expect(screen.queryByText("Other C")).not.toBeInTheDocument();
+      const pacingsStat = screen.getByText("Pacings", { selector: ".overview__stat-label" }).parentElement as HTMLElement;
+      expect(within(pacingsStat).getByText("2")).toBeInTheDocument();
+    });
+
+    it("should keep the team's owners under My team", async () => {
+      // Given:
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+      renderOverview();
+      await screen.findByText("Other C");
+
+      // When:
+      await userEvent.click(screen.getByRole("radio", { name: "My team" }));
+
+      // Then:
+      expect(screen.getByText("Mine A")).toBeInTheDocument();
+      expect(screen.getByText("Mate B")).toBeInTheDocument();
+      expect(screen.getByText("Covered D")).toBeInTheDocument();
+      expect(screen.queryByText("Other C")).not.toBeInTheDocument();
+    });
+
+    it("should remember the choice for this user on the next visit", async () => {
+      // Given: My team picked once
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+      const first = renderOverview();
+      await screen.findByText("Other C");
+      await userEvent.click(screen.getByRole("radio", { name: "My team" }));
+      first.unmount();
+      sessionStorage.clear();
+
+      // When: a later session
+      renderOverview();
+      await screen.findByText("Mate B");
+
+      // Then:
+      expect(screen.getByRole("radio", { name: "My team" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.queryByText("Other C")).not.toBeInTheDocument();
+    });
+
+    it("should not hand one user's saved choice to another", async () => {
+      // Given:
+      localStorage.setItem("overview-owner-scope:someone_else", "mine");
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+
+      // When:
+      renderOverview("/", { user_id: "user_1" });
+
+      // Then:
+      expect(await screen.findByText("Other C")).toBeInTheDocument();
+    });
+
+    it("should let a scope link win for the visit without changing the saved choice", async () => {
+      // Given: My pacings saved
+      localStorage.setItem("overview-owner-scope:user_1", "mine");
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+
+      // When:
+      renderOverview("/?scope=all");
+
+      // Then:
+      expect(await screen.findByText("Other C")).toBeInTheDocument();
+      expect(screen.getByText(/opened from a link/)).toBeInTheDocument();
+      expect(screen.getByTestId("location-search")).toHaveTextContent("scope=all");
+      expect(localStorage.getItem("overview-owner-scope:user_1")).toBe("mine");
+    });
+
+    it("should offer the matches a search finds outside the selected view", async () => {
+      // Given: My pacings selected
+      localStorage.setItem("overview-owner-scope:user_1", "mine");
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+      renderOverview();
+      await screen.findByText("Mine A");
+
+      // When: searching for a pacing that is not mine
+      await userEvent.type(screen.getByRole("searchbox", { name: "Search pacings" }), "other c");
+
+      // Then: never a plain empty list - the notice says where it is
+      expect(await screen.findByText("1 more match")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show in All pacings" }));
+      expect(await screen.findByText("Other C")).toBeInTheDocument();
+      expect(localStorage.getItem("overview-owner-scope:user_1")).toBe("all");
+    });
+
+    it("should explain an empty My pacings and offer the wider view", async () => {
+      // Given: nothing of mine in the list
+      localStorage.setItem("overview-owner-scope:user_1", "mine");
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({
+          teamOwnerIds: ["pu-me", "pu-mate"],
+          pacings: [aPacingRowV1({ name: "Mate B", ownerId: "pu-mate" })],
+        })
+      );
+
+      // When:
+      renderOverview();
+
+      // Then:
+      expect(await screen.findByText("You don't own any pacings yet")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show My team" }));
+      expect(await screen.findByText("Mate B")).toBeInTheDocument();
+    });
+
+    it("should put my own group first with a You chip", async () => {
+      // Given:
+      vi.mocked(listPacingOverview).mockResolvedValue(ownerFilterList());
+
+      // When:
+      const { container } = renderOverview("/", { full_name: "Somebody Else" });
+      await screen.findByText("Other C");
+
+      // Then: matched by Pacing user id, not by display name
+      expect(ownerNames(container)[0]).toBe("Azat Nabiev");
+      expect(screen.getByText("You", { selector: ".overview__owner-chip" })).toBeInTheDocument();
+    });
+
+    it("should offer only the agencies of the pacings in the selected view", async () => {
+      // Given: my pacing on one agency, a team-mate's on another
+      localStorage.setItem("overview-owner-scope:user_1", "mine");
+      vi.mocked(listPacingOverview).mockResolvedValue(
+        aPacingListResponseV1({
+          pacings: [
+            aPacingRowV1({ name: "Mine A", ownerId: "pu-me", campaigns: [aCampaignRefV1({ agencyId: 1, agencyName: "Northstar Media" })] }),
+            aPacingRowV1({ name: "Mate B", ownerId: "pu-mate", campaigns: [aCampaignRefV1({ agencyId: 2, agencyName: "Southwind" })] }),
+          ],
+        })
+      );
+      renderOverview();
+      await screen.findByText("Mine A");
+
+      // When:
+      await userEvent.click(screen.getByRole("button", { name: "All agencies" }));
+
+      // Then:
+      expect(await screen.findByText("Northstar Media")).toBeInTheDocument();
+      expect(screen.queryByText("Southwind")).not.toBeInTheDocument();
+    });
+
+    it("should not remember the search for the session", async () => {
+      // Given:
+      renderOverview();
+      await screen.findByRole("table");
+
+      // When:
+      await userEvent.type(screen.getByRole("searchbox", { name: "Search pacings" }), "nike");
+
+      // Then: the URL carries it, the session memory does not
+      await waitFor(() => expect(screen.getByTestId("location-search")).toHaveTextContent("q=nike"));
+      const stored = JSON.parse(sessionStorage.getItem("overview-filters") ?? "{}") as { filters?: string };
+      expect(stored.filters ?? "").not.toContain("q=");
+    });
   });
 });
