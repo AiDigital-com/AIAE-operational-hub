@@ -27,6 +27,7 @@ import com.aidigital.operationalhub.service.pacinglinks.CampaignLinksValidator;
 import com.aidigital.operationalhub.service.agency.model.CampaignModel;
 import com.aidigital.operationalhub.service.rbac.CurrentUserService;
 import com.aidigital.operationalhub.service.rbac.PacingScopeResolver;
+import com.aidigital.operationalhub.service.rbac.PacingTeamOwnersResolver;
 import com.aidigital.operationalhub.service.rbac.model.CurrentUserModel;
 import com.aidigital.operationalhub.service.rbac.AssignableOwnerService;
 import com.aidigital.operationalhub.service.rbac.model.PacingEntitlement;
@@ -56,6 +57,7 @@ public class PacingController implements PacingApi {
 
 	private final CurrentUserService currentUserService;
 	private final PacingScopeResolver pacingScopeResolver;
+	private final PacingTeamOwnersResolver pacingTeamOwnersResolver;
 	private final PacingClient pacingClient;
 	private final PacingContractMapper mapper;
 	private final PacingCreateContractMapper createMapper;
@@ -75,8 +77,10 @@ public class PacingController implements PacingApi {
 		List<PacingRow> pacings = pacingClient.listPacings(assertion);
 
 		// Do map&response, with each row's campaigns enriched with their Hub-resolved agency/client
-		// (what the Overview's agency filter runs on) - one bulk lookup for the whole list:
-		return ResponseEntity.ok(mapper.toV1(entitlement, pacings, resolveCampaignsById(user, pacings)));
+		// (what the Overview's agency filter runs on) - one bulk lookup for the whole list - and the
+		// owners the Overview's "My team" filter keeps:
+		return ResponseEntity.ok(mapper.toV1(entitlement, pacings, resolveCampaignsById(user, pacings))
+				.teamOwnerIds(pacingTeamOwnersResolver.resolveTeamOwnerIds(user)));
 	}
 
 	/**

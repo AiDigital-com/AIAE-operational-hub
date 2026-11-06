@@ -54,6 +54,20 @@ class HubRoleAssignmentServiceImplTest {
 	}
 
 	@Test
+	void shouldFindActiveAssignmentsByRoleCodeTest() {
+		// Given:
+		HubRoleAssignment assignment = Instancio.create(HubRoleAssignment.class);
+		when(assignmentRepository.findAllByRoleCodeAndStatus("ADMIN", HubStatus.ACTIVE.getCode()))
+				.thenReturn(List.of(assignment));
+
+		// When:
+		List<HubRoleAssignment> result = service.findActiveByRoleCode("ADMIN");
+
+		// Then:
+		assertThat(result).containsExactly(assignment);
+	}
+
+	@Test
 	void shouldFindAssignmentByIdForUpdateTest() {
 		// Given:
 		HubRoleAssignment assignment = Instancio.of(HubRoleAssignment.class)

@@ -51,6 +51,14 @@ public interface HubRoleAssignmentService {
 	List<HubRoleAssignment> findAllActive();
 
 	/**
+	 * Lists every active assignment of one role across all users, e.g. every active {@code ADMIN}.
+	 *
+	 * @param roleCode the role dictionary code to match (e.g. {@code ADMIN})
+	 * @return the active assignments of that role
+	 */
+	List<HubRoleAssignment> findActiveByRoleCode(String roleCode);
+
+	/**
 	 * Lists active role assignments scoped to any of the given scope ids under a scope type, e.g. every
 	 * active assignment scoped to one of a set of teams.
 	 *

@@ -227,6 +227,16 @@ export function SortIcon({ className, active }: SortIconProps) {
   );
 }
 
+/** Table glyph: a whole list, as opposed to one person's or one team's slice of it. */
+export function TableIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 10h18M9 10v10" />
+    </svg>
+  );
+}
+
 /** Folder glyph, marking an insertion-order group row. */
 export function FolderIcon({ className }: IconProps) {
   return (

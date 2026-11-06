@@ -9106,6 +9106,15 @@ components:
             migration plan) - see PacingRowV1.
           items:
             $ref: '#/components/schemas/PacingRowV1'
+        teamOwnerIds:
+          type: array
+          description: >
+            Pacing user_ids (UUIDs as text, the id space of PacingRowV1.ownerId) of the current
+            user's team, for the Overview's "My team" filter: the user and everyone holding a role
+            on one of the user's teams, or every admin for an admin. A view filter over `pacings`,
+            never a permission. Sent by the Overview list only; absent on a campaign's list.
+          items:
+            type: string
       required:
         - scope
         - pacings

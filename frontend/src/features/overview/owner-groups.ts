@@ -17,6 +17,8 @@ export interface OwnerGroup {
   under: number;
   /** How many are over pace. */
   over: number;
+  /** Whether this is the signed-in user's own group - first in the list, with a "You" chip. */
+  isOwn: boolean;
 }
 
 /** The row's line-item count as the Overview shows it: health's own figure, falling back to the
@@ -26,12 +28,18 @@ export function rowLiCount(row: PacingRowV1): number {
 }
 
 /**
- * Whether a group belongs to the signed-in user. Matched by display name (case-insensitive, trimmed)
- * because that is the one identity both sides carry: Pacing's `ownerName` mirrors the same Hub
- * employee record the viewer's own `full_name` comes from. No match simply means no group floats to
- * the top — never a wrong one.
+ * Whether a group belongs to the signed-in user: one of its rows is owned by the viewer's own Pacing
+ * user id, or - before that id is known - its owner's display name matches the viewer's
+ * (case-insensitive, trimmed; Pacing's `ownerName` mirrors the same Hub employee record the viewer's
+ * own `full_name` comes from). No match simply means no group floats to the top — never a wrong one.
  */
-function isOwnGroup(owner: string, currentUserName: string | undefined): boolean {
+function isOwnGroup(
+  owner: string,
+  rows: readonly PacingRowV1[],
+  currentUserName: string | undefined,
+  currentPacingUserId: string | null | undefined,
+): boolean {
+  if (currentPacingUserId) return rows.some((row) => row.ownerId === currentPacingUserId);
   if (!currentUserName) return false;
   return owner.trim().toLowerCase() === currentUserName.trim().toLowerCase();
 }
@@ -51,11 +59,14 @@ function isOwnGroup(owner: string, currentUserName: string | undefined): boolean
  * @param currentUserName the signed-in user's display name, for own-group-first ordering
  * @param compare         optional row comparator from a clicked column header; defaults to status
  *                        priority
+ * @param currentPacingUserId the signed-in user's Pacing user id, the reliable own-group match;
+ *                        the display name is the fallback while it is unknown
  */
 export function buildOwnerGroups(
   rows: readonly PacingRowV1[],
   currentUserName?: string,
   compare?: (a: PacingRowV1, b: PacingRowV1) => number,
+  currentPacingUserId?: string | null,
 ): OwnerGroup[] {
   const byOwner = new Map<string, PacingRowV1[]>();
   for (const row of rows) {
@@ -79,15 +90,14 @@ export function buildOwnerGroups(
       if (row.paceStatus === "under") under++;
       else if (row.paceStatus === "over") over++;
     }
-    groups.push({ owner, rows: groupRows, liTotal, under, over });
+    const isOwn = owner !== UNASSIGNED && isOwnGroup(owner, groupRows, currentUserName, currentPacingUserId);
+    groups.push({ owner, rows: groupRows, liTotal, under, over, isOwn });
   }
 
   groups.sort((a, b) => {
     if (a.owner === UNASSIGNED) return 1;
     if (b.owner === UNASSIGNED) return -1;
-    const aOwn = isOwnGroup(a.owner, currentUserName);
-    const bOwn = isOwnGroup(b.owner, currentUserName);
-    if (aOwn !== bOwn) return aOwn ? -1 : 1;
+    if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
     return a.owner.localeCompare(b.owner);
   });
 

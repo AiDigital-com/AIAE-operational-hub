@@ -74,6 +74,20 @@ public interface HubRoleAssignmentRepository extends JpaRepository<HubRoleAssign
 	List<HubRoleAssignment> findAllByStatus(String status);
 
 	/**
+	 * Lists every role assignment of one role in a given status, e.g. every active {@code ADMIN} - the
+	 * Overview's "My team" for an admin, which is the admins themselves (see
+	 * {@code PacingTeamOwnersResolver}).
+	 *
+	 * @param roleCode the role dictionary code to match (e.g. {@code ADMIN})
+	 * @param status   the assignment status to match (e.g. {@code ACTIVE})
+	 * @return matching role assignments across all users
+	 */
+	@Query("select a from HubRoleAssignment a where a.role.roleCode = :roleCode and a.status = :status")
+	List<HubRoleAssignment> findAllByRoleCodeAndStatus(
+			@Param("roleCode") String roleCode,
+			@Param("status") String status);
+
+	/**
 	 * Finds active assignments scoped to any of the given scope ids under a given scope type, e.g. every
 	 * active assignment scoped to one of a set of teams — used to resolve which Hub users hold an
 	 * active role over those teams (see {@code PacingScopeResolver}, which turns this into the set of

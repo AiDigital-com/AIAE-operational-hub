@@ -131,6 +131,56 @@
   background: var(--primary-fill);
   color: var(--color-accent-contrast);
 }
+/* The owner filter: same segments as status, each with a leading glyph. */
+.overview__seg-btn--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.overview__seg-btn--icon svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+/* Owner, status and agency stay together: on a narrow screen the whole group wraps to its own line
+   rather than breaking apart. */
+.overview__filter-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.overview__expand-all {
+  margin-left: auto;
+}
+/* What the selected owner option keeps - its own full-width line under the bar. */
+.overview__scope-hint {
+  flex-basis: 100%;
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* "N more matches in All pacings": a tinted bar, never a stripe (project ban). */
+.overview__notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -6px 0 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+.overview__notice > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  color: var(--primary);
+}
+.overview__notice .button {
+  margin-left: auto;
+}
 
 /* ── owner group cards ── */
 .overview__groups {
@@ -162,6 +212,14 @@
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--primary);
+}
+.overview__owner-chip {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: var(--pill);
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 .overview__owner-meta {
   font-size: 11.5px;
