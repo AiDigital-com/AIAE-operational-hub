@@ -1,149 +1,232 @@
-/* Alerts block. Severity is carried by a background tint and a top border —
-   never a left-edge stripe, which this product bans outright. */
+/* Alerts block, as the reference draws it (`AlertsBlock.jsx` on `ogan-team`; its inline styles
+   and the `--alert-*` tokens of its `index.css`). Severity is a background tint and a full
+   border - never a left-edge stripe, which this product bans outright. */
 
 .alerts {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  --alert-crit-bg: rgba(207, 77, 89, 0.08);
+  --alert-crit-bg-hover: rgba(207, 77, 89, 0.12);
+  --alert-crit-bg-active: rgba(207, 77, 89, 0.16);
+  --alert-crit-border: rgba(207, 77, 89, 0.22);
+  --alert-crit-border-active: rgba(207, 77, 89, 0.4);
+  --alert-warn-bg: rgba(207, 145, 29, 0.07);
+  --alert-warn-bg-hover: rgba(207, 145, 29, 0.11);
+  --alert-warn-bg-active: rgba(207, 145, 29, 0.14);
+  --alert-warn-border: rgba(207, 145, 29, 0.2);
+  --alert-warn-border-active: rgba(207, 145, 29, 0.36);
+  font-family: var(--font-sans);
 }
 
-.alerts__section-head {
+[data-theme="dark"] .alerts {
+  --alert-crit-bg: rgba(255, 112, 120, 0.07);
+  --alert-crit-bg-hover: rgba(255, 112, 120, 0.11);
+  --alert-crit-bg-active: rgba(255, 112, 120, 0.16);
+  --alert-crit-border: rgba(255, 112, 120, 0.24);
+  --alert-crit-border-active: rgba(255, 112, 120, 0.45);
+  --alert-warn-bg: rgba(255, 190, 59, 0.06);
+  --alert-warn-bg-hover: rgba(255, 190, 59, 0.1);
+  --alert-warn-bg-active: rgba(255, 190, 59, 0.14);
+  --alert-warn-border: rgba(255, 190, 59, 0.22);
+  --alert-warn-border-active: rgba(255, 190, 59, 0.4);
+}
+
+/* The block's title, the reference's AlertsTile heading. */
+.alerts__title {
+  margin-bottom: 10px;
+  font-size: var(--text-12);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Group head: "CRITICAL 3" / "WARNING 4". */
+.alerts__head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 6px;
-}
-
-.alerts__section-title {
-  font-size: 11px;
+  font-size: var(--text-10);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
 }
 
-.alerts__section-count {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
+.alerts__head--critical {
+  color: var(--status-red);
 }
 
-/* Cards: auto-fill so they reflow from one column on a narrow panel to five on a
-   wide one, without a breakpoint per layout. 168px is wide enough for "+152.8pp"
-   plus its label without wrapping mid-number. */
+.alerts__head--warning {
+  color: var(--status-amber);
+}
+
+.alerts__head-count {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+/* Cards */
 .alerts__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 5px;
+}
+
+.alerts__cards--above-line {
+  margin-bottom: 12px;
 }
 
 .alerts__card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-top-width: 3px;
-  border-radius: 8px;
-  background: var(--surface);
+  padding: 9px 12px;
+  border: 1px solid;
+  border-radius: 5px;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .alerts__card--critical {
-  border-top-color: var(--status-red, #d14343);
-  background: color-mix(in srgb, var(--status-red, #d14343) 6%, var(--surface));
+  background: var(--alert-crit-bg);
+  border-color: var(--alert-crit-border);
+  --alert-value: var(--status-red);
 }
 
 .alerts__card--warning {
-  border-top-color: var(--status-amber, #d1900f);
-  background: color-mix(in srgb, var(--status-amber, #d1900f) 7%, var(--surface));
+  background: var(--alert-warn-bg);
+  border-color: var(--alert-warn-border);
+  --alert-value: var(--status-amber);
 }
 
-.alerts__card--info {
-  border-top-color: var(--border);
+.alerts__card--clickable {
+  cursor: pointer;
 }
 
-.alerts__value {
-  font-size: 19px;
-  font-weight: 700;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
+.alerts__card--critical.alerts__card--clickable:hover {
+  background: var(--alert-crit-bg-hover);
 }
 
-/* A detector with no number puts its label here instead. Smaller, because a
-   sentence at 19px wraps to three lines and stops looking like a headline. */
-.alerts__value--none {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.3;
+.alerts__card--warning.alerts__card--clickable:hover {
+  background: var(--alert-warn-bg-hover);
 }
 
-.alerts__label {
-  font-size: 12px;
-  color: var(--ink);
+.alerts__card--critical.alerts__card--active,
+.alerts__card--critical.alerts__card--active:hover {
+  background: var(--alert-crit-bg-active);
+  border-color: var(--alert-crit-border-active);
 }
 
-.alerts__subject {
+.alerts__card--warning.alerts__card--active,
+.alerts__card--warning.alerts__card--active:hover {
+  background: var(--alert-warn-bg-active);
+  border-color: var(--alert-warn-border-active);
+}
+
+.alerts__card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.alerts__scope {
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
-/* Pills: one wrapping row. A warning is to notice, not to read. */
-.alerts__pills {
+.alerts__scope--campaign,
+.alerts__pill-scope.alerts__scope--campaign {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.alerts__card-value {
+  min-width: 64px;
+  font-family: var(--font-mono);
+  font-size: var(--text-14);
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  text-align: right;
+  color: var(--alert-value);
+}
+
+.alerts__card-label {
+  font-size: var(--text-12);
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+/* Warning pill line, shown under the critical cards. */
+.alerts__line {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  padding: 6px 8px;
+  background: var(--alert-warn-bg);
+  border: 1px solid var(--alert-warn-border);
+  border-radius: var(--rxs);
 }
 
 .alerts__pill {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  max-width: 100%;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  padding: 3px 8px;
   background: var(--surface);
-  font-size: 12px;
-  color: var(--ink);
+  border: 1px solid var(--border-softer);
+  border-radius: 3px;
+  font-size: var(--text-11);
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s;
 }
 
-.alerts__pill--warning {
-  background: color-mix(in srgb, var(--status-amber, #d1900f) 9%, var(--surface));
-  border-color: color-mix(in srgb, var(--status-amber, #d1900f) 28%, var(--border));
-}
-
-.alerts__pill-value {
-  font-variant-numeric: tabular-nums;
-}
-
-.alerts__pill-subject {
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.alerts__more {
-  margin-top: 6px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--primary);
+.alerts__pill--clickable {
   cursor: pointer;
 }
 
-.alerts__more:hover {
-  text-decoration: underline;
+.alerts__pill--clickable:hover {
+  background: var(--alert-warn-bg-hover);
+  border-color: var(--alert-warn-border);
+}
+
+.alerts__pill--active,
+.alerts__pill--active:hover {
+  background: var(--alert-warn-bg-active);
+  border-color: var(--alert-warn-border-active);
+}
+
+.alerts__pill-scope {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.alerts__pill-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: -0.15px;
+  color: var(--status-amber);
+}
+
+.alerts__pill-label {
+  font-size: var(--text-10);
+  color: var(--text-secondary);
+}
+
+.alerts__more {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-11);
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
 }

@@ -624,8 +624,19 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           // Was: every alert's full sentence, joined with " · ", one line per severity. On a
           // 180-line-item pacing that is a hundred and thirty sentences in a single unbroken
           // paragraph. AlertsBlock lays them out the way the retired SPA did — numbers first, cards
-          // for what is critical, the tail collapsed. Nothing to say, no tile.
-          alerts: alerts.length ? <AlertsBlock alerts={alerts} /> : null,
+          // for what is critical, the tail collapsed. Nothing to say, no tile. A line item's alert
+          // filters the page to it, and a second click clears it (the reference's toggleSelection).
+          alerts: alerts.length ? (
+            <AlertsBlock
+              alerts={alerts}
+              selection={filters.selection}
+              onSelect={(liId) =>
+                setFilters({
+                  selection: filters.selection.length === 1 && filters.selection[0] === liId ? [] : [liId],
+                })
+              }
+            />
+          ) : null,
           journal: (
             <JournalPanel
               slug={slug ?? ""}
@@ -641,7 +652,7 @@ export function PacingDashboard({ row, onBack, watchFirstData = false }: PacingD
           ),
         }
       : undefined),
-    [data, alerts, slug, row.flightStart, row.flightEnd, setFilters]
+    [data, alerts, filters.selection, slug, row.flightStart, row.flightEnd, setFilters]
   );
   const providedState = useMemo(() => ({ ...pacingState, sections: sections ?? null }), [pacingState, sections]);
 

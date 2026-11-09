@@ -1,131 +1,157 @@
 /**
- * A pacing's alerts, laid out so a hundred of them stay readable.
+ * A pacing's alerts, as the reference draws them: `AlertsBlock.jsx` on `ogan-team`
+ * (`workspace/src/pages/Dashboard/components/AlertsBlock.jsx`), "Critical → cards in a tight
+ * grid, warning → compact pill line. When critical=0, warning rises to cards."
  *
- * This replaces printing `alert.text` in a list. That worked while a pacing had
- * three alerts and fell apart at a hundred and thirty-two: every line a full
- * sentence, ninety of them saying "-100.0pp severely under target" about a
- * different line item, and the one alert that actually needed attention sitting
- * somewhere in the middle of the wall.
+ * Two groups only, Critical and Warning. `info` alerts (today only `data_gap`) go into Warning
+ * with the warnings, exactly as the reference bundles them ("bundle 'warning' + 'info'
+ * together"). This block used to give them a third group, "Notes", which the reference never had.
  *
- * The shape here is the retired SPA's (AlertsBlock.jsx: "Critical → cards in a
- * tight grid, warning → compact pill line. When critical=0, warning rises to
- * cards."), and for its reasons:
- *
- *   - A card leads with the NUMBER, large, and carries the short label under it.
- *     Scanning twenty numbers is possible; scanning twenty sentences is not.
- *   - Warnings are pills, because a warning is something to notice, not read.
- *   - Only the first few are shown. The rest are behind one click, counted, so
- *     the page says "and 118 more" instead of printing them.
- *
- * `value` and `label` come from Pacing (its own `displayParts`), so the
- * per-detector formatting rules are not duplicated here. `text` is kept as the
- * title attribute — the whole sentence is still the right thing for one alert
- * under the cursor.
+ * `value` and `label` come from Pacing (its own `AlertsCore.displayParts`), so the per-detector
+ * formatting rules are not duplicated here. `text` is kept as the title attribute.
  */
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { cn } from "../../shared/style/cn";
 import type { PacingAlertV1 } from "./types";
 import "./alerts-block.css";
 
-/** How many of a severity to show before collapsing the rest. Matches the SPA's
- *  WARNING_VISIBLE; the same cut-off reads well for cards too. */
-const VISIBLE = 5;
+/** How many warnings the pill line shows before "+ N more". The reference's WARNING_VISIBLE. */
+const WARNING_VISIBLE = 5;
+
+type CardSeverity = "critical" | "warning";
 
 function alertKey(alert: PacingAlertV1, index: number): string {
-  return `${alert.type}-${alert.liId ?? "campaign"}-${index}`;
+  return `${alert.type}|${alert.liId ?? "campaign"}|${index}`;
 }
 
-/** The line this alert is about: its id, and its description when there is one.
- *  Both, deliberately — two line items can share a description, and shown without
- *  the id they read as one row alerting twice. */
-function subject(alert: PacingAlertV1): string | null {
-  if (!alert.liId) return null;
-  return alert.name ? `${alert.liId} · ${alert.name}` : `Line item ${alert.liId}`;
-}
-
-function AlertCard({ alert }: { alert: PacingAlertV1 }) {
+function GroupHead({ severity, count }: { severity: CardSeverity; count: number }) {
   return (
-    <li className={cn("alerts__card", `alerts__card--${alert.severity}`)} title={alert.text}>
-      {/* The number is the headline. When a detector has none, the label takes its
-          place at the same size rather than leaving a gap where a figure should be. */}
-      <span className={cn("alerts__value", !alert.value && "alerts__value--none")}>
-        {alert.value ?? alert.label}
-      </span>
-      {alert.value && <span className="alerts__label">{alert.label}</span>}
-      {subject(alert) && <span className="alerts__subject">{subject(alert)}</span>}
-    </li>
-  );
-}
-
-function AlertPill({ alert }: { alert: PacingAlertV1 }) {
-  return (
-    <li className={cn("alerts__pill", `alerts__pill--${alert.severity}`)} title={alert.text}>
-      {alert.value && <b className="alerts__pill-value">{alert.value}</b>}
-      <span>{alert.label}</span>
-      {subject(alert) && <span className="alerts__pill-subject">{subject(alert)}</span>}
-    </li>
-  );
-}
-
-function Section({
-  alerts,
-  asCards,
-  title,
-}: {
-  alerts: PacingAlertV1[];
-  asCards: boolean;
-  title: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  if (!alerts.length) return null;
-
-  const shown = expanded ? alerts : alerts.slice(0, VISIBLE);
-  const hidden = alerts.length - shown.length;
-
-  return (
-    <div className="alerts__section">
-      <div className="alerts__section-head">
-        <span className="alerts__section-title">{title}</span>
-        <span className="alerts__section-count">{alerts.length}</span>
-      </div>
-      <ul className={asCards ? "alerts__cards" : "alerts__pills"}>
-        {shown.map((alert, index) =>
-          asCards ? (
-            <AlertCard key={alertKey(alert, index)} alert={alert} />
-          ) : (
-            <AlertPill key={alertKey(alert, index)} alert={alert} />
-          )
-        )}
-      </ul>
-      {hidden > 0 && (
-        <button type="button" className="alerts__more" onClick={() => setExpanded(true)}>
-          and {hidden} more
-        </button>
-      )}
-      {expanded && alerts.length > VISIBLE && (
-        <button type="button" className="alerts__more" onClick={() => setExpanded(false)}>
-          Show fewer
-        </button>
-      )}
+    <div className={cn("alerts__head", `alerts__head--${severity}`)}>
+      <span>{severity === "critical" ? "Critical" : "Warning"}</span>
+      <span className="alerts__head-count">{count}</span>
     </div>
   );
 }
 
-export function AlertsBlock({ alerts }: { alerts: readonly PacingAlertV1[] }) {
+type SelectProps = {
+  active: boolean;
+  onSelect?: (liId: string) => void;
+};
+
+/** A line item's alert filters the page to that line item on click, as in the reference. */
+function clickProps(alert: PacingAlertV1, onSelect?: (liId: string) => void) {
+  const liId = alert.liId;
+  if (!liId || !onSelect) return {};
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: () => onSelect(liId),
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelect(liId);
+      }
+    },
+  };
+}
+
+function AlertCard({ alert, severity, active, onSelect }: { alert: PacingAlertV1; severity: CardSeverity } & SelectProps) {
+  const isCamp = !alert.liId;
+  const clickable = !isCamp && !!onSelect;
+  return (
+    <div
+      {...clickProps(alert, onSelect)}
+      title={alert.text}
+      className={cn(
+        "alerts__card",
+        `alerts__card--${severity}`,
+        clickable && "alerts__card--clickable",
+        active && "alerts__card--active"
+      )}
+    >
+      <div className="alerts__card-top">
+        <span className={cn("alerts__scope", isCamp && "alerts__scope--campaign")}>
+          {isCamp ? "Campaign" : `LI ${alert.liId}`}
+        </span>
+        {alert.value != null && <span className="alerts__card-value">{alert.value}</span>}
+      </div>
+      <div className="alerts__card-label">{alert.label}</div>
+    </div>
+  );
+}
+
+function WarnPill({ alert, active, onSelect }: { alert: PacingAlertV1 } & SelectProps) {
+  const isCamp = !alert.liId;
+  const clickable = !isCamp && !!onSelect;
+  return (
+    <span
+      {...clickProps(alert, onSelect)}
+      title={alert.text}
+      className={cn("alerts__pill", clickable && "alerts__pill--clickable", active && "alerts__pill--active")}
+    >
+      <span className={cn("alerts__pill-scope", isCamp && "alerts__scope--campaign")}>
+        {isCamp ? "Camp" : `LI ${alert.liId}`}
+      </span>
+      {alert.value != null && <span className="alerts__pill-value">{alert.value}</span>}
+      <span className="alerts__pill-label">{alert.label}</span>
+    </span>
+  );
+}
+
+export function AlertsBlock({
+  alerts,
+  selection = [],
+  onSelect,
+}: {
+  alerts: readonly PacingAlertV1[];
+  /** The page's line-item selection (`filters.selection`), to mark the alert that set it. */
+  selection?: readonly string[];
+  /** Called with a line item's id when its alert is clicked. */
+  onSelect?: (liId: string) => void;
+}) {
+  const [warnExpanded, setWarnExpanded] = useState(false);
   if (!alerts.length) return null;
 
   const critical = alerts.filter((a) => a.severity === "critical");
-  const warning = alerts.filter((a) => a.severity === "warning");
-  const info = alerts.filter((a) => a.severity === "info");
+  const warning = alerts.filter((a) => a.severity !== "critical");
+
+  // Flip: when nothing is critical, the warnings take the cards.
+  const cardSeverity: CardSeverity = critical.length > 0 ? "critical" : "warning";
+  const cardAlerts = critical.length > 0 ? critical : warning;
+  const lineAlerts = critical.length > 0 ? warning : [];
+
+  const isActive = (a: PacingAlertV1) => !!a.liId && selection.length === 1 && selection[0] === a.liId;
+
+  const overflow = lineAlerts.length > WARNING_VISIBLE;
+  const visibleLine = warnExpanded ? lineAlerts : lineAlerts.slice(0, WARNING_VISIBLE);
 
   return (
     <div className="alerts">
-      <Section alerts={critical} asCards title="Critical" />
-      {/* With nothing critical, warnings are the worst news there is and get the
-          cards — the SPA's rule, and it keeps the block from looking empty on a
-          pacing whose only problems are warnings. */}
-      <Section alerts={warning} asCards={critical.length === 0} title="Warnings" />
-      <Section alerts={info} asCards={false} title="Notes" />
+      {/* The reference's AlertsTile titles the block; here the block carries it, so the board and
+          Layout mode's registry both get it. */}
+      <div className="alerts__title">Alerts</div>
+      <GroupHead severity={cardSeverity} count={cardAlerts.length} />
+      <div className={cn("alerts__cards", lineAlerts.length > 0 && "alerts__cards--above-line")}>
+        {cardAlerts.map((a, i) => (
+          <AlertCard key={alertKey(a, i)} alert={a} severity={cardSeverity} active={isActive(a)} onSelect={onSelect} />
+        ))}
+      </div>
+
+      {lineAlerts.length > 0 && (
+        <>
+          <GroupHead severity="warning" count={lineAlerts.length} />
+          <div className="alerts__line">
+            {visibleLine.map((a, i) => (
+              <WarnPill key={alertKey(a, i)} alert={a} active={isActive(a)} onSelect={onSelect} />
+            ))}
+            {overflow && (
+              <button type="button" className="alerts__more" onClick={() => setWarnExpanded((x) => !x)}>
+                {warnExpanded ? "Collapse ↑" : `+ ${lineAlerts.length - WARNING_VISIBLE} more ↓`}
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
