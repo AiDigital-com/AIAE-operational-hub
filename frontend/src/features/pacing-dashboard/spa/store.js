@@ -281,7 +281,12 @@ export function usePacingState({ data, urlFilters, actions, journalHighlight, di
       dimSources: raw?.dimSources ?? null,
       mappingsV3: raw?.mappingsV3 ?? null,
       thirdParty: raw?.thirdParty ?? null,
-      notify: raw?.notify ?? null,
+      // The moved components read the alert thresholds the way Pacing stores them
+      // (`alerts.spend_overspend.bad_pct`), and the Hub's contract hands them over camelCase
+      // (`alerts.spendOverspend.badPct`). Without this bridge every lookup missed and fell back to
+      // the built-in 90/100 - a pacing set to "Critical > 105%" painted a 100.4% spend red where
+      // Pacing paints it amber, and the pace bar and the CTR/VCR target bands ignored theirs too.
+      notify: raw?.notify ? { ...raw.notify, alerts: toEngineAlertsConfig(raw.notify.alerts) } : null,
       display: raw?.display ?? {},
       // Always the SAVED revision: it is what the next save compares against.
       displayRev: Number(raw?.display?.rev ?? 0),
@@ -332,6 +337,7 @@ import { groupIndexOf, groupedView } from './dim-value-groups.js';
 import { extractPeriods, resolvePeriodKey } from './periods.js';
 import { buildScopedPlansForPeriod } from './config.js';
 import { resolveWidgetMap } from './library-refs.js';
+import { toEngineAlertsConfig } from '../engine/build-alerts';
 
 export const useCampaign = () => useDashboardStore(selectCampaign);
 /** The reference's `useLibraryEntries`: the entries this pacing's linked tiles resolve through. */
