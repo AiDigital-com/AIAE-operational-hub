@@ -215,11 +215,20 @@ export function buildPacingAlerts(
     // windows by the selected period ONLY when Period Scope is on (`windowToPeriod`). No
     // `rd < plan.fs || rd > plan.fe` clip: that
     // predicate is `health.mjs`'s (the Overview list's), revoked here 2026-09-26 (docblock above).
-    const scopedLiDaily: LiDaily = scopeObjectByIds(LD0, effLIs, (dd) => (periodKey ? windowToPeriod(dd, periodKey) : dd));
+    //
+    // Both readings below take `periodDaily`, not `LD0` - a deliberate departure from the reference,
+    // whose `AlertsBlock.jsx` hands `liM` the whole `s.facts.liDaily`. Under Period Scope a
+    // container covered by its dim splits plans only its declared values (`buildScopedPlanFor
+    // PeriodKey`), and the line item card already paces that slice (`selectPeriodDaily`). Judging
+    // the same plan against every value's delivery is what "2026 Local Competitive" (2026-11-09)
+    // showed: Container 2 is "NC Folk Festival" alone, $3,375 cost budget, $1,687 delivered - and
+    // the alert divided all thirteen festivals' $35,842 by it, "1062% spend over budget", next to a
+    // card reading -31.7 pp. Outside such a container `periodDaily` IS `LD0` (by reference).
+    const scopedLiDaily: LiDaily = scopeObjectByIds(periodDaily, effLIs, (dd) => (periodKey ? windowToPeriod(dd, periodKey) : dd));
 
     const liMetrics: Record<string, unknown> = {};
     for (const id of effLIs) {
-      const m = engine.liM(id, LD0, LP, asOf, null, period.scoped, scopedPlans);
+      const m = engine.liM(id, periodDaily, LP, asOf, null, period.scoped, scopedPlans);
       if (!m) continue;
       // `mT` is NOT one of `liM`'s own fields - verified by reading it (`engine/vendor/
       // dashboard-metrics.js`'s `function liM`: `{...t, ...pr, mA, pI, au, ctr, vcr, cvr, cpm,

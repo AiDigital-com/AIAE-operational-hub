@@ -276,9 +276,49 @@ describe("buildPacingAlerts - container dim scope and dim-split Scope", () => {
     // Then: TX alone ($20 CPM x the period's 750k) is over the period's $6,000; the blend is not
     expect(forecastOf(covered)?.text).toMatch(/^DSP forecast \$15000\.00 exceeds cost budget \$6000\.00/);
     expect(forecastOf(carvedOut)).toBeUndefined();
-    // and the per-line-item readings take the whole delivery in both, as the reference's liM does
+    // and the per-line-item readings take the same slice the line item card paces: TX alone where
+    // the container is covered, the whole delivery where it is only carved
     const pace = (alerts: typeof covered) => alerts.find((a) => a.type === "pacing_off_pace")?.text;
-    expect(pace(covered)).toBe(pace(carvedOut));
+    expect(pace(covered)).not.toBe(pace(carvedOut));
+  });
+
+  it("judges a period's line item on its container's own slice, not every value the line delivered", () => {
+    // Given: "2026 Local Competitive" (2026-11-09) in small - one line item running many festivals,
+    // its period container planned for one of them, which is under-delivering while the rest spend
+    const festivalRows = days.flatMap((date) => [
+      { line_item_id: "400", date, flight: "NC Folk Festival", impressions: 2_000, clicks: 5, spend: 50, completes: 0, dynamic_cost: 50 },
+      { line_item_id: "400", date, flight: "Texas State Fair", impressions: 400_000, clicks: 5, spend: 2_000, completes: 0, dynamic_cost: 2_000 },
+    ]);
+    const plan = aPacingLineItemPlanV1({
+      lineItemId: "400",
+      flightStart: "2026-08-01",
+      flightEnd: "2026-08-31",
+      marginTargetPct: 50,
+      ctrTargetPct: null,
+      vcrTargetPct: null,
+      containers: [{
+        id: "c2", name: "Container 2", fs: "2026-08-06", fe: "2026-08-20",
+        target_spend: 2_000, native_budget: 2_000, target_impressions: 100_000, date_children: [],
+        dim_children: [{
+          id: "x1", dim_key: "flight", dim_value: "NC Folk Festival", target_mode: "absolute",
+          target_spend: 2_000, native_budget: 2_000, target_value: 100_000, margin_percent: 50,
+        }],
+      }],
+    });
+    const data = aPacingDashboardV1({
+      planByLineItem: { "400": plan },
+      factsDaily: festivalRows,
+      notify: aPacingNotifySettingsV1(),
+    });
+
+    // When:
+    const alerts = buildPacingAlerts(data, DEFAULT_FILTERS, "2026-08-10",
+      { scoped: true, periodKey: "2026-08-06|2026-08-20" });
+
+    // Then: NC's $200 is well inside its cost budget - no overspend from the Texas money - and the
+    // pace is NC's own, under target rather than "+1000 pp over"
+    expect(alerts.find((a) => a.type === "spend_overspend")).toBeUndefined();
+    expect(alerts.find((a) => a.type === "pacing_off_pace")?.text).toMatch(/under target/);
   });
 
   describe("a breakdown chip naming a declared dim split", () => {
