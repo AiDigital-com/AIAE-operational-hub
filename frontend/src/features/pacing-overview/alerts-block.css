@@ -67,10 +67,13 @@
   color: var(--text-muted);
 }
 
-/* Cards */
+/* Cards. The reference's grid is `minmax(220px, 1fr)`; on its full-width page that lands at ~230px
+   a card. The Hub's page is narrower (sidebar), so `1fr` stretched four cards to ~275px and opened
+   a gap between the scope and the number. Capped instead, so a card is the reference's size at any
+   width. */
 .alerts__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
   gap: 5px;
 }
 
