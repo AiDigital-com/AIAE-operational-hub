@@ -431,11 +431,11 @@ describe("PacingSettingsDrawer", () => {
     const field = screen.getByLabelText("Display name for line item 111");
     expect(field).toHaveValue("Search");
 
-    // When: the name is edited. The Display tab, not Pacing, is the one with unsaved work - the
-    // name is `display.liNames`, saved with the widgets where the reference's `buildConfig` puts it.
+    // When: the name is edited. The unsaved dot is on Pacing, where it was typed - even though the
+    // name is `display.liNames` and saves with the widgets, where the reference's `buildConfig` puts it.
     await userEvent.type(field, " Evergreen");
-    expect(screen.getByRole("button", { name: /^Display, unsaved changes/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Pacing, unsaved changes/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pacing, unsaved changes/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Display, unsaved changes/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // Then: one display save carrying the name, no plan save.
@@ -462,5 +462,43 @@ describe("PacingSettingsDrawer", () => {
     // Then: the field reads what the server holds again, and nothing is dirty.
     expect(field).toHaveValue("Search");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /unsaved changes/ })).not.toBeInTheDocument();
+  });
+
+  it("marks Mapping, not Data, when a value's display name is edited there - and still saves it with Data", async () => {
+    // Given: a stored name for a conversion action the current data no longer carries.
+    renderDrawer({
+      data: { source: "platform_mart", value_labels: { conversion_action: [{ raw: "Old Tag", label: "Old Name" }], creative: [] } },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^Mapping/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Display names/ }));
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Remove the display name for Old Tag" }));
+
+    // Then: the dot is where the edit was made.
+    expect(screen.getByRole("button", { name: /^Mapping, unsaved changes/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Data, unsaved changes/ })).not.toBeInTheDocument();
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Then: Data's patch carries it, as before.
+    await waitFor(() => expect(dashApi.savePacingDataSettings).toHaveBeenCalledTimes(1));
+    const [, body] = vi.mocked(dashApi.savePacingDataSettings).mock.calls[0];
+    expect(body).toHaveProperty("valueLabels");
+  });
+
+  it("names Pacing as the tab with edits when only a display name is pending and the drawer is closed", async () => {
+    // Given:
+    renderDrawer({ display: { rev: 3, widgets: [], groups: [], liNames: { "111": "Search" } } });
+    await userEvent.click(screen.getByRole("button", { name: /^Pacing/ }));
+    await userEvent.type(screen.getByLabelText("Display name for line item 111"), " Evergreen");
+
+    // When:
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // Then:
+    expect(screen.getByText(/Pacing has edits that have/)).toBeInTheDocument();
   });
 });

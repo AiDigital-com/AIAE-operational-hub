@@ -285,6 +285,15 @@ export interface PacingDataSectionProps extends SettingsSectionProps {
    *  the switch exists to reveal could be touched. The retired SPA held both halves in one
    *  component and read the draft directly; this is the same answer across the Hub's section seam. */
   onSwitchesChange: (switches: PacingModeSwitches) => void;
+  /** Reports which half of the draft moved: the value display names (edited on the Mapping tab)
+   *  and everything else. `onDirtyChange` still reports the whole - it decides what the Save sends -
+   *  while this decides which tab carries the unsaved dot. */
+  onDirtyPartsChange?: (parts: DataDirtyParts) => void;
+}
+
+export interface DataDirtyParts {
+  valueLabels: boolean;
+  rest: boolean;
 }
 
 /** The pacing-level mode switches the Plan section's controls hang off. */
@@ -371,7 +380,7 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
       onSheetSourcesChange, liDaily, lineItems = [], perfSheet = null, storedPerfSheet = null, perfTouched = false,
       onPerfSheetChange, perfProbe = null, perfProbing = false, perfProbeMessage = null,
       onPerfConnect, onPerfDisconnect, onPerfRetryProbe, onAddLineItem = null, visible,
-      onDirtyChange, onSwitchesChange,
+      onDirtyChange, onSwitchesChange, onDirtyPartsChange,
     },
     ref,
   ) {
@@ -536,6 +545,15 @@ export const PacingDataSection = forwardRef<SettingsSectionHandle, PacingDataSec
     }, [dataKey, dirty]);
 
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+
+    // The same answer split in two: the display names are this section's to save but the Mapping
+    // tab's to edit. Reported as two booleans, so it fires only when one of them flips.
+    const labelsDirty = "valueLabels" in body;
+    const restDirty = tpDirty || Object.keys(body).some((key) => key !== "valueLabels");
+    useEffect(
+      () => { onDirtyPartsChange?.({ valueLabels: labelsDirty, rest: restDirty }); },
+      [labelsDirty, restDirty, onDirtyPartsChange],
+    );
 
     // Reported from the draft, so a flip reaches the Plan section without a Save. Keyed on the two
     // booleans rather than on `draft`, so moving the source radio does not re-render the drawer.

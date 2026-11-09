@@ -86,6 +86,15 @@ export interface PacingWidgetsSectionProps extends SettingsSectionProps {
   /** Reports the draft's custom line item names whenever they change, so the plan section's
    *  «Display name» fields show what this draft holds (and what Reset put back). */
   onLiNamesChange?: (liNames: Record<string, string>) => void;
+  /** Reports which half of the draft moved: the line item names (edited on the Pacing tab) and
+   *  everything else. `onDirtyChange` still reports the whole - it decides what the Save sends -
+   *  while this decides which tab carries the unsaved dot. */
+  onDirtyPartsChange?: (parts: DisplayDirtyParts) => void;
+}
+
+export interface DisplayDirtyParts {
+  names: boolean;
+  rest: boolean;
 }
 
 /** The dimension a widget is cut by, from either of the two slots that can carry one. */
@@ -119,6 +128,7 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
       onPreviewChange,
       draftCm360Configured = false,
       onLiNamesChange,
+      onDirtyPartsChange,
       onDirtyChange,
     },
     ref
@@ -174,6 +184,15 @@ export const PacingWidgetsSection = forwardRef<SettingsSectionHandle, PacingWidg
 
     const dirty = useMemo(() => normDisplay(draft) !== baseNorm, [draft, baseNorm]);
     useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+
+    // The same comparison split in two. The draft with the baseline's names put back differs from
+    // the baseline only by what is NOT a name, and from the draft only by the names. `origRef` moves
+    // together with `baseNorm` everywhere, so the pair is a sound key.
+    const dirtyParts = useMemo(() => {
+      const withBaseNames = normDisplay({ ...draft, liNames: origRef.current.liNames });
+      return { names: normDisplay(draft) !== withBaseNames, rest: withBaseNames !== baseNorm };
+    }, [draft, baseNorm]);
+    useEffect(() => { onDirtyPartsChange?.(dirtyParts); }, [dirtyParts, onDirtyPartsChange]);
 
     // The names as this draft has them, for the plan section's fields. Keyed on the map's identity:
     // every edit, reset and re-seed replaces it, so each is reported once.
