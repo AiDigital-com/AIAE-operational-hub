@@ -12,10 +12,10 @@ import { topNCompositeFor } from "./widgets/top-n-widget.js";
 import { probeErrorText } from "./spa/sheet-source-norm.js";
 import { probePacingSheet } from "./api";
 import { PacingMappingSection } from "./mapping-panel";
-import { PacingDataSection, type PacingModeSwitches } from "./data-panel";
+import { PacingDataSection, type DataDirtyParts, type PacingModeSwitches } from "./data-panel";
 import type { AddLineItemRequest } from "./sheet-source-panel";
 import { PacingDocumentsSection } from "./documents/documents-panel";
-import { PacingWidgetsSection } from "./widgets-section";
+import { PacingWidgetsSection, type DisplayDirtyParts } from "./widgets-section";
 import { SETTINGS_TABS, type SettingsSectionHandle, type SettingsTabId } from "./settings-section";
 import type {
   PacingCampaignLinkV1,
@@ -519,8 +519,36 @@ export function PacingSettingsDrawer({
     []
   );
 
+  // Which half of Display's and Data's drafts moved. Two things are saved by one tab and edited on
+  // another: the line item names (saved by Display, edited on Pacing) and the value display names
+  // (saved by Data, edited on Mapping). Their unsaved dot belongs where they were typed - the person
+  // who typed there looks there.
+  const [displayParts, setDisplayParts] = useState<DisplayDirtyParts>({ names: false, rest: false });
+  const markDisplayParts = useCallback(
+    (p: DisplayDirtyParts) =>
+      setDisplayParts((cur) => (cur.names === p.names && cur.rest === p.rest ? cur : p)),
+    []
+  );
+  const [dataParts, setDataParts] = useState<DataDirtyParts>({ valueLabels: false, rest: false });
+  const markDataParts = useCallback(
+    (p: DataDirtyParts) =>
+      setDataParts((cur) => (cur.valueLabels === p.valueLabels && cur.rest === p.rest ? cur : p)),
+    []
+  );
+
+  // `dirty` says what the Save sends; `shown` says where the unsaved work was made. They differ only
+  // by those two: a rename alone saves through Display and is shown on Pacing, a value name alone
+  // saves through Data and is shown on Mapping.
   const dirtyTabs = SETTINGS_TABS.filter((t) => dirty[t.id]).map((t) => t.id);
   const anyDirty = dirtyTabs.length > 0;
+  const shown: DirtyMap = {
+    ...dirty,
+    widgets: dirty.widgets && displayParts.rest,
+    plan: dirty.plan || (dirty.widgets && displayParts.names),
+    data: dirty.data && dataParts.rest,
+    mapping: dirty.mapping || (dirty.data && dataParts.valueLabels),
+  };
+  const shownTabs = SETTINGS_TABS.filter((t) => shown[t.id]).map((t) => t.id);
   // Display's display-cas actions (the Library's block Add and layout Apply) wait for the WHOLE
   // drawer to be clean, as Pacing's do; Display knows its own draft, this is everyone else's.
   const othersDirty = dirtyTabs.some((id) => id !== "widgets");
@@ -601,12 +629,12 @@ export function PacingSettingsDrawer({
                 // The state is named on the BUTTON, and the dot is decorative. Labelling the dot
                 // instead appends its words straight onto the tab's own with no separator - the
                 // accessible name came out "Dataunsaved changes".
-                aria-label={dirty[t.id] ? `${t.label}, unsaved changes` : undefined}
+                aria-label={shown[t.id] ? `${t.label}, unsaved changes` : undefined}
               >
                 {t.label}
                 {/* A dot, not a count: which tab has unsaved work is the question a single Save
                     raises, and it has to be answerable without visiting all three. */}
-                {dirty[t.id] && <span className="psettings__tab-dot" aria-hidden="true" />}
+                {shown[t.id] && <span className="psettings__tab-dot" aria-hidden="true" />}
               </button>
             ))}
           </>
@@ -703,6 +731,7 @@ export function PacingSettingsDrawer({
             onPerfRetryProbe={() => { probedIdRef.current = null; if (perfSheetId) void runPerfProbe(perfSheetId); }}
             visible={tab === "data"}
             onDirtyChange={markData}
+            onDirtyPartsChange={markDataParts}
             onSwitchesChange={markSwitches}
             onAddLineItem={openAddLiFromMapping}
           />
@@ -730,6 +759,7 @@ export function PacingSettingsDrawer({
             onPreviewChange={onPreviewChange}
             draftCm360Configured={(thirdParty?.length ?? 0) > 0}
             onLiNamesChange={setDraftLiNames}
+            onDirtyPartsChange={markDisplayParts}
             onDirtyChange={markWidgets}
           />
         </div>
@@ -803,7 +833,7 @@ export function PacingSettingsDrawer({
 
       <Modal open={confirmClose} onClose={() => setConfirmClose(false)} title="Discard unsaved changes?">
         <p>
-          {dirtyTabs.map(tabLabel).join(" and ")} {dirtyTabs.length > 1 ? "have" : "has"} edits that have
+          {shownTabs.map(tabLabel).join(" and ")} {shownTabs.length > 1 ? "have" : "has"} edits that have
           not been saved. Closing now loses them.
         </p>
         <div className="psettings__confirm-actions">
