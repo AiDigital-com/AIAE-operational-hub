@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AlertsBlock } from "./alerts-block";
 import type { PacingAlertV1 } from "./types";
 
@@ -17,83 +17,107 @@ function alert(overrides: Partial<PacingAlertV1> = {}): PacingAlertV1 {
   } as PacingAlertV1;
 }
 
-/** What a 180-line-item pacing actually produces. */
 function many(count: number, severity: PacingAlertV1["severity"] = "critical"): PacingAlertV1[] {
   return Array.from({ length: count }, (_, i) =>
     alert({ severity, liId: String(600000 + i), value: `-${i}.0pp` })
   );
 }
 
+const dataGap = (gap: number) =>
+  alert({
+    type: "data_gap",
+    severity: "info",
+    text: `Data gap: ${gap}d between 2026-10-02 and 2026-10-08`,
+    value: `${gap}d`,
+    label: "data gap",
+    liId: undefined,
+    name: undefined,
+  });
+
 describe("AlertsBlock", () => {
-  it("should lead with the number, not the sentence", () => {
-    // Given: a hundred sentences is a wall; a hundred numbers can be scanned.
+  it("should lead with the number and keep the whole sentence as the title", () => {
     render(<AlertsBlock alerts={[alert()]} />);
 
-    // Then:
     expect(screen.getByText("-88.8pp")).toBeInTheDocument();
     expect(screen.getByText("under target")).toBeInTheDocument();
-    // The whole sentence stays reachable for one alert under the cursor.
     expect(screen.getByTitle(/severely under target/)).toBeInTheDocument();
   });
 
-  it("should show the line item id alongside its description", () => {
-    // Given: 599888 and 600433 are both "Southwest | Native Display Nextdoor
-    // TM271064#99". Without the id they read as one row alerting twice.
+  it("should name a line item's alert by its id and a pacing-wide one as Campaign, as the reference does", () => {
+    render(<AlertsBlock alerts={[alert(), alert({ severity: "critical", liId: undefined, label: "data is stale", value: "32d" })]} />);
+
+    expect(screen.getByText("LI 599888")).toBeInTheDocument();
+    expect(screen.getByText("Campaign")).toBeInTheDocument();
+  });
+
+  it("should put info alerts under Warning with the warnings, never in a group of their own", () => {
+    // Given: Andy's Summer + North Carolina - the reference shows WARNING 4, data gaps included.
     render(
       <AlertsBlock
         alerts={[
-          alert({ liId: "599888", name: "Southwest | Native Display Nextdoor" }),
-          alert({ liId: "600433", name: "Southwest | Native Display Nextdoor", value: "-100.0pp" }),
+          alert({ severity: "warning", value: "+0.05pp", label: "CTR above target", liId: "670060" }),
+          alert({ severity: "warning", value: "32d", label: "data is stale", liId: undefined }),
+          dataGap(2),
+          dataGap(5),
         ]}
       />
     );
 
     // Then:
-    expect(screen.getByText(/599888/)).toBeInTheDocument();
-    expect(screen.getByText(/600433/)).toBeInTheDocument();
+    const heading = screen.getByText("Warning").parentElement as HTMLElement;
+    expect(within(heading).getByText("4")).toBeInTheDocument();
+    expect(screen.queryByText(/notes/i)).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Data gap: 2d/)).toHaveClass("alerts__card--warning");
   });
 
-  it("should collapse the tail instead of printing a hundred and thirty alerts", async () => {
-    // Given: the real figure from campaign 40539's 180-line-item pacing.
-    render(<AlertsBlock alerts={many(130)} />);
+  it("should give warnings the cards when nothing is critical, and the pill line otherwise", () => {
+    const { container, rerender } = render(<AlertsBlock alerts={many(2, "warning")} />);
+    expect(container.querySelectorAll(".alerts__card")).toHaveLength(2);
+    expect(container.querySelector(".alerts__line")).not.toBeInTheDocument();
 
-    // Then: a handful shown, the rest counted.
-    expect(screen.getAllByTitle(/severely under target/)).toHaveLength(5);
-    expect(screen.getByRole("button", { name: "and 125 more" })).toBeInTheDocument();
-
-    // When: the user asks for them.
-    await userEvent.click(screen.getByRole("button", { name: "and 125 more" }));
-
-    // Then:
-    expect(screen.getAllByTitle(/severely under target/)).toHaveLength(130);
-    expect(screen.getByRole("button", { name: "Show fewer" })).toBeInTheDocument();
+    rerender(<AlertsBlock alerts={[...many(1, "critical"), ...many(2, "warning"), dataGap(5)]} />);
+    expect(container.querySelectorAll(".alerts__card")).toHaveLength(1);
+    expect(container.querySelectorAll(".alerts__pill")).toHaveLength(3);
   });
 
-  it("should count every alert in the heading, not only the visible ones", () => {
-    // Given: the count is how a reader knows the collapse is hiding something.
+  it("should show every card, as the reference does, and collapse only the warning line past five", async () => {
+    render(<AlertsBlock alerts={[...many(7, "critical"), ...many(8, "warning")]} />);
+
+    expect(document.querySelectorAll(".alerts__card")).toHaveLength(7);
+    expect(document.querySelectorAll(".alerts__pill")).toHaveLength(5);
+
+    await userEvent.click(screen.getByRole("button", { name: "+ 3 more ↓" }));
+    expect(document.querySelectorAll(".alerts__pill")).toHaveLength(8);
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse ↑" }));
+    expect(document.querySelectorAll(".alerts__pill")).toHaveLength(5);
+  });
+
+  it("should count every alert in the heading", () => {
     render(<AlertsBlock alerts={many(130)} />);
 
-    // Then:
     const heading = screen.getByText("Critical").parentElement as HTMLElement;
     expect(within(heading).getByText("130")).toBeInTheDocument();
   });
 
-  it("should give warnings the cards when nothing is critical", () => {
-    // Given: on a pacing whose only problems are warnings, they are the worst news
-    // there is — the retired SPA's rule, and it keeps the block from reading empty.
-    const { container, rerender } = render(<AlertsBlock alerts={many(2, "warning")} />);
-    expect(container.querySelector(".alerts__cards")).toBeInTheDocument();
+  it("should filter to a line item when its alert is clicked, and mark the one selected", async () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(<AlertsBlock alerts={[alert(), dataGap(5)]} onSelect={onSelect} />);
 
-    // When: something critical arrives, warnings step down to pills.
-    rerender(<AlertsBlock alerts={[...many(1, "critical"), ...many(2, "warning")]} />);
-    expect(container.querySelector(".alerts__pills")).toBeInTheDocument();
+    await userEvent.click(screen.getByTitle(/severely under target/));
+    expect(onSelect).toHaveBeenCalledWith("599888");
+
+    // A pacing-wide alert has no line item to filter to.
+    await userEvent.click(screen.getByTitle(/Data gap/));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+
+    rerender(<AlertsBlock alerts={[alert(), dataGap(5)]} onSelect={onSelect} selection={["599888"]} />);
+    expect(screen.getByTitle(/severely under target/)).toHaveClass("alerts__card--active");
   });
 
-  it("should render a detector that has no number without leaving a hole", () => {
-    // Given: `value` is null for the few types with no meaningful figure.
-    render(<AlertsBlock alerts={[alert({ value: null, label: "data is stale", liId: undefined })]} />);
+  it("should render a detector that has no number by its label alone", () => {
+    render(<AlertsBlock alerts={[alert({ value: undefined, label: "data is stale", liId: undefined })]} />);
 
-    // Then: the label takes the headline slot rather than an empty one.
     expect(screen.getByText("data is stale")).toBeInTheDocument();
   });
 
