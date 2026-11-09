@@ -76,7 +76,7 @@ export interface AlertsPeriodScope {
  *  core.js`'s own `run('bid_fact_above_plan', ...)` etc.). `post_flight_delivery`/
  *  `paused_li_delivering` have no entry on either side - both detectors just run at their built-in
  *  defaults, on this codebase's server side too (`health.mjs` passes the same 13-key object). */
-function toEngineAlertsConfig(cfg: PacingAlertsConfigV1 | undefined): Record<string, unknown> {
+export function toEngineAlertsConfig(cfg: PacingAlertsConfigV1 | undefined): Record<string, unknown> {
   if (!cfg) return {};
   return {
     bid_fact_above_plan: {
