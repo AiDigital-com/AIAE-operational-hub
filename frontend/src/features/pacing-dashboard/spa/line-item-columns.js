@@ -42,10 +42,15 @@ export function spendStatusCls(sp, costPr, thresholds) {
   return 'text-[var(--status-red)]';
 }
 
-/** The card's margin colour rule (was LineItemCard's `marginStatusCls`). */
+/** The card's margin colour rule (was LineItemCard's `marginStatusCls`). Ours, not the
+ *  reference's: both sides are rounded to the two decimals the card prints (`fP`) before they are
+ *  compared, so a line reading «90.00% / target 90.00%» is green. Unrounded, a margin exactly on
+ *  target summed to 89.99999999999999 and read amber (Hooky Evergreen SEM, LI 629998; owner and
+ *  Saveliy, 2026-11-10). */
+const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 export function marginStatusCls(mA, mTgt, thresholds) {
   const warnThreshold = thresholds?.marginWarn ?? -5;
-  const st = PacingCore.marginStatus(mA, mTgt, warnThreshold);
+  const st = PacingCore.marginStatus(round2(mA), round2(mTgt), warnThreshold);
   return st === 'g' ? 'text-[var(--status-green)]'
     : st === 'w' ? 'text-[var(--status-amber)]'
       : 'text-[var(--status-red)]';
