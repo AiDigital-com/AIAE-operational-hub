@@ -230,24 +230,17 @@ export function buildPacingAlerts(
     for (const id of effLIs) {
       const m = engine.liM(id, periodDaily, LP, asOf, null, period.scoped, scopedPlans);
       if (!m) continue;
-      // `mT` is NOT one of `liM`'s own fields - verified by reading it (`engine/vendor/
-      // dashboard-metrics.js`'s `function liM`: `{...t, ...pr, mA, pI, au, ctr, vcr, cvr, cpm,
-      // clientPr, eCl}`, no `mT`) and by running this file's own test against the crown fixture
-      // before adding this line: `margin_below_target` never fired, because `detectMarginBelowTarget`
-      // reads `+m.mT` and `NaN - gap_pp` makes every comparison false. The retired SPA's own
-      // `liM` (`workspace/src/lib/dashboard/metrics.js`) has the identical gap - `campM` computes a
-      // budget-weighted `mT` for the WHOLE campaign, but no per-LI `liM` ever did. Server-side,
-      // `health.mjs` sidesteps this by hand-building `liMetricsForAlerts[id]` with `mT: plan.mTgt`
-      // instead of calling `liM` at all - the same fix, applied here so the browser-computed alert
-      // set actually contains what `row.alerts` (the thing this view no longer reads) always did.
+      // `liM` carries no `mT` (`engine/vendor/dashboard-metrics.js`: `{...t, ...pr, mA, pI, au,
+      // ctr, vcr, cvr, cpm, clientPr, eCl}`), so `detectMarginBelowTarget` reads `NaN` and never
+      // fires on the dashboard - exactly as in the reference, whose `AlertsBlock.jsx` hands `liM`'s
+      // result through the same way. The Overview list and the Slack summary still warn about
+      // margin: `health.mjs` builds its own per-line metrics with `mT: plan.mTgt`.
       //
-      // This is therefore the ONE deliberate departure from `AlertsBlock.jsx` in this file, and it
-      // is the owner's call (2026-09-26), not an oversight: every other rule here follows the
-      // reference exactly, but the reference's own `margin_below_target` is dead for the reason
-      // above, and a margin warning that works is worth more than bug-for-bug fidelity. Remove this
-      // line and the dashboard silently stops warning about margin; the Overview list and the Slack
-      // summary would keep doing so, because they go through `health.mjs`, which already patches it.
-      liMetrics[id] = { ...m, mT: LP[id]?.mTgt };
+      // REVOKED (owner, 2026-11-10): the 2026-09-26 departure that added `mT: LP[id]?.mTgt` here.
+      // On "2026_Andy's Frozen Custard_Bentonville AR" it raised "margin below target" for the
+      // Audio line (65.87% vs 70%) beside a Margin widget reading the whole campaign green (63.29%
+      // vs 62.74%), and Pacing showed no such alert. The dashboard follows Pacing.
+      liMetrics[id] = m;
     }
 
     const pausedById: Record<string, boolean> = {};
