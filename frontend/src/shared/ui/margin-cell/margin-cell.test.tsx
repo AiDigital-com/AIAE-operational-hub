@@ -23,6 +23,17 @@ describe("MarginCell", () => {
     expect(cell.textContent).toContain("/ 90%");
   });
 
+  it("should print the target as a whole percent, as Pacing's Overview does", () => {
+    // Given: a blended container target (Hooky Evergreen SEM, LI 629999) and a fractional one
+    const { container, rerender } = render(<MarginCell actual={89.6} target={90.00000000000001} />);
+    const cell = () => container.querySelector(".margin-cell") as HTMLElement;
+
+    // Then:
+    expect(cell().textContent).toContain("/ 90%");
+    rerender(<MarginCell actual={72.5} target={73.1} />);
+    expect(cell().textContent).toContain("/ 73%");
+  });
+
   it("should apply the warn modifier when actual trails target by up to 5 points", () => {
     // Given / When:
     const { container } = render(<MarginCell actual={86} target={90} />);

@@ -456,3 +456,13 @@ reference's `CreatePacing.jsx` select is rebuilt in `../../pacing-create/create-
 `../../pacing-create/layout-options.ts`. dash-gate's `lib/creation-layout.mjs` is the reference's,
 byte for byte.
 
+
+## Updated 2026-11-10 — a margin exactly on target is green on the Line Items card
+
+**Our divergence from the reference.** `line-item-columns.js` `marginStatusCls` rounds the margin
+and its target to the two decimals the card prints before comparing them. The reference compares
+the raw sum, so a margin exactly on target that sums to 89.99999999999999 reads amber under
+«90.00% / target 90.00%» (Hooky Evergreen SEM, LI 629998; also St Edward's University Grad Fall
+2026 Meta, LI 765777). The Overview was already green there: dash-gate's `health.mjs` rounds
+`marginActualPct` to 0.1. Owner and Saveliy, 2026-11-10: on target is green. Covered by
+`line-item-columns.test.ts`.

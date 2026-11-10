@@ -10,7 +10,9 @@ interface MarginCellProps {
 
 /**
  * Renders an actual-vs-target margin (e.g. "77.8% / 90%"), colored good/warn/bad by how far actual
- * trails target. Ported from the mockup's `marginCell()`.
+ * trails target. Ported from the mockup's `marginCell()`. The target reads as a whole percent, as on
+ * Pacing's Overview (`toFixed(0)`): a line with containers carries a blended target such as
+ * 90.00000000000001, which printed raw spilled into the next column.
  */
 export function MarginCell({ actual, target, className }: MarginCellProps) {
   if (actual == null) {
@@ -20,7 +22,7 @@ export function MarginCell({ actual, target, className }: MarginCellProps) {
   const modifier = diff >= 0 ? "good" : diff >= -5 ? "warn" : "bad";
   return (
     <span className={cn("margin-cell", `margin-cell--${modifier}`, className)}>
-      {actual.toFixed(1)}% <span className="margin-cell__target">/ {target}%</span>
+      {actual.toFixed(1)}% <span className="margin-cell__target">/ {target.toFixed(0)}%</span>
     </span>
   );
 }
