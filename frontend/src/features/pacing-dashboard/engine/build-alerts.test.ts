@@ -1,10 +1,10 @@
 /**
  * `buildPacingAlerts` - item 3 of the 2026-09-25 dashboard filters follow-up ("Alerts should be
  * computed here, not taken from the server"). Reuses the crown test's own fixture (`toHubShape()`):
- * two line items, both delivering with `dynamic_cost === spend` (0% actual margin) against 20%/25%
- * margin targets and a 4pp gap threshold (`RAW_PAYLOAD.notify.alerts.margin_below_target.gap_pp`),
- * so `margin_below_target` fires for BOTH line items at every filter default - a clean, unambiguous
- * signal for "does a filter change the alert set."
+ * two line items, both spending past their cost budget to date (105% and 193%), so
+ * `spend_overspend` fires for BOTH line items at every filter default - a clean, unambiguous signal
+ * for "does a filter change the alert set." Both also deliver at 0% actual margin against 20%/25%
+ * targets, which pins that `margin_below_target` stays silent on the dashboard, as in Pacing.
  */
 import { describe, expect, it } from "vitest";
 import { buildPacingAlerts } from "./build-alerts";
@@ -20,16 +20,16 @@ import {
 describe("buildPacingAlerts", () => {
   it("computes a non-trivial alert set with every filter at default", () => {
     const alerts = buildPacingAlerts(toHubShape(), DEFAULT_FILTERS);
-    const marginAlerts = alerts.filter((a) => a.type === "margin_below_target");
-    // Both line items are 0% actual margin against a 20%/25% target - both must alert.
-    expect(marginAlerts.map((a) => a.liId).sort()).toEqual(["100", "200"]);
+    const spendAlerts = alerts.filter((a) => a.type === "spend_overspend");
+    // Both line items spend past their cost budget to date - both must alert.
+    expect(spendAlerts.map((a) => a.liId).sort()).toEqual(["100", "200"]);
     // Shaped the same way `row.alerts` (health.mjs) always was - value/label off displayParts.
-    const li100 = marginAlerts.find((a) => a.liId === "100")!;
+    const li100 = spendAlerts.find((a) => a.liId === "100")!;
     expect(li100.severity).toBe("critical");
-    expect(li100.value).toMatch(/pp$/);
-    expect(li100.label).toBe("margin below target");
+    expect(li100.value).toMatch(/%$/);
+    expect(li100.label).toBe("spend over budget");
     expect(li100.name).toBe("Prospecting display"); // LP["100"].description
-    const li200 = marginAlerts.find((a) => a.liId === "200")!;
+    const li200 = spendAlerts.find((a) => a.liId === "200")!;
     expect(li200.name).toBe("Video"); // LP["200"].description is null - falls back to channel
   });
 
@@ -42,9 +42,19 @@ describe("buildPacingAlerts", () => {
     const alerts = buildPacingAlerts(withName as unknown as Parameters<typeof buildPacingAlerts>[0], DEFAULT_FILTERS);
 
     // Then: the named line item reads by its name; the other keeps the description/channel fallback.
-    const marginAlerts = alerts.filter((a) => a.type === "margin_below_target");
-    expect(marginAlerts.find((a) => a.liId === "100")!.name).toBe("Meta Prospecting");
-    expect(marginAlerts.find((a) => a.liId === "200")!.name).toBe("Video");
+    const spendAlerts = alerts.filter((a) => a.type === "spend_overspend");
+    expect(spendAlerts.find((a) => a.liId === "100")!.name).toBe("Meta Prospecting");
+    expect(spendAlerts.find((a) => a.liId === "200")!.name).toBe("Video");
+  });
+
+  it("raises no line item margin alert, as Pacing's dashboard does not", () => {
+    // Given: both line items at 0% actual margin against 20%/25% targets, past the 4pp gap
+    // When:
+    const alerts = buildPacingAlerts(toHubShape(), DEFAULT_FILTERS);
+
+    // Then: Pacing's `liM` carries no margin target, so its dashboard never raises this alert; the
+    // Overview list and the Slack summary still do, through the server's own per-line metrics
+    expect(alerts.find((a) => a.type === "margin_below_target")).toBeUndefined();
   });
 
   it("returns [] for a null/malformed payload, never throws", () => {
