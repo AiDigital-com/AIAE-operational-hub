@@ -70,6 +70,8 @@ describe("PacingAdmin", () => {
 
     // Then:
     expect(within(row).getByText("nike-ss26-display")).toBeInTheDocument();
+    // The slug may be cut short with an ellipsis; its cell's title carries it whole
+    expect(within(row).getByTitle("nike-ss26-display")).toBeInTheDocument();
     expect(within(row).getByText("Azat Nabiev")).toBeInTheDocument();
     expect(within(row).getByLabelText("Change pacing status")).toHaveValue("Live");
     expect(within(row).getByText(/aug 1, 2026/i)).toBeInTheDocument();
