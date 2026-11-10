@@ -120,12 +120,20 @@
 .pacing-admin__table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* Its own scroll box, as tall as the window leaves room for: with `hidden` the columns past the
+     edge (Status, Flight, Created, Actions) could not be reached, and a page-height box would put
+     the sideways scrollbar after the last of ~1,300 rows. Still clips the rounded corners. */
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+  min-height: 320px;
   background: var(--surface);
 }
 .pacing-admin__table {
   width: 100%;
-  border-collapse: collapse;
+  /* `separate`, not `collapse`: a collapsed border belongs to the table and scrolls away from the
+     sticky header row. */
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .pacing-admin__table th {
   text-align: left;
@@ -137,6 +145,10 @@
   padding: 11px 16px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
 }
 .pacing-admin__table td {
   padding: 10px 16px;
@@ -161,6 +173,9 @@
 .pacing-admin__name {
   font-weight: 700;
   color: var(--ink);
+  /* Names like `Children_s_Miracle_Network…` have no space to wrap at and widened the column */
+  min-width: 180px;
+  overflow-wrap: anywhere;
 }
 .pacing-admin__slug {
   font-family: ui-monospace, "SF Mono", monospace;
@@ -168,8 +183,18 @@
   color: var(--muted);
   white-space: nowrap;
 }
+/* A long slug ends in an ellipsis instead of widening the table; the cell's title shows it whole. */
+.pacing-admin__slug-text {
+  display: block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pacing-admin__flight {
   font-variant-numeric: tabular-nums;
+}
+/* Each date stays whole; the range may break after the dash so the table fits a laptop screen */
+.pacing-admin__date {
   white-space: nowrap;
 }
 .pacing-admin__flight-sep {
@@ -257,4 +282,9 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+/* The shared status picker shrank to «Arch…» in this narrow column; here it keeps room for the
+   longest status (Complete / Archive) */
+.pacing-admin__table .pplan__status-select select {
+  min-width: 104px;
 }

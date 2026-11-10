@@ -294,15 +294,19 @@ export function PacingAdmin() {
                         />
                       </td>
                       <td className="pacing-admin__name">{row.name}</td>
-                      <td className="pacing-admin__slug">{row.dashSlug ?? "—"}</td>
+                      <td className="pacing-admin__slug" title={row.dashSlug ?? undefined}>
+                        <span className="pacing-admin__slug-text">{row.dashSlug ?? "—"}</span>
+                      </td>
                       <td>{row.ownerName ?? "—"}</td>
                       <td>
                         <StatusControl pacingId={row.id} status={row.status} />
                       </td>
                       <td className="pacing-admin__flight">
-                        {row.flightStart ? fmtDate(row.flightStart) : "—"}
-                        <span className="pacing-admin__flight-sep">–</span>
-                        {row.flightEnd ? fmtDate(row.flightEnd) : "—"}
+                        <span className="pacing-admin__date">
+                          {row.flightStart ? fmtDate(row.flightStart) : "—"}
+                          <span className="pacing-admin__flight-sep">–</span>
+                        </span>{" "}
+                        <span className="pacing-admin__date">{row.flightEnd ? fmtDate(row.flightEnd) : "—"}</span>
                       </td>
                       <td className="pacing-admin__created">
                         {row.createdAt ? fmtDate(row.createdAt) : "—"}
