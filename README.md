@@ -239,6 +239,7 @@ npm run typecheck
 
 ```bash
 # From repository root: wrapper scripts
+bash scripts/local-db.sh            # Docker Postgres + local ADMIN seed (LOCAL_ADMIN_* in .env.local)
 bash scripts/local-dev-backend.sh
 bash scripts/local-dev-frontend.sh
 bash scripts/local-verify.sh
